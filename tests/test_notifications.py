@@ -54,6 +54,7 @@ class TestCoordinationUrls:
         assert "trammel" in ctx["coordination_urls"]
 
     def test_status_tool_count_dynamic(self, engine):
-        """status() returns dynamic tool count, not hardcoded number."""
+        """status() returns dynamic tool count from TOOL_DISPATCH."""
+        from coordinationhub.dispatch import TOOL_DISPATCH
         status = engine.status()
-        assert status["tools"] == 20
+        assert status["tools"] == len(TOOL_DISPATCH)

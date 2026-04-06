@@ -13,24 +13,29 @@ Zero third-party dependencies in core. Part of the Stele + Chisel + Trammel + Co
 ```
 coordinationhub/
   __init__.py         — Package init, exports CoordinationEngine, CoordinationHubMCPServer
-  core.py             — CoordinationEngine: all 20 tool methods + helpers
-  schemas.py          — JSON Schema + dispatch table (shared by HTTP + stdio)
+  core.py             — CoordinationEngine: all 27 tool methods + helpers (~524 LOC)
+  schemas.py          — JSON Schema for all 27 tool parameters (~574 LOC)
+  dispatch.py         — Tool dispatch table: name → (method_name, allowed_kwargs) (~48 LOC)
+  graphs.py           — Coordination graph loader + validator + CoordinationGraph (~310 LOC)
+  visibility.py       — File ownership scan, agent status, file map (~233 LOC)
+  assessment.py       — Assessment runner, 4 metric scorers (~397 LOC)
   mcp_server.py       — HTTP MCP server (ThreadedHTTPServer, stdlib only)
-  mcp_stdio.py        — stdio MCP server (optional mcp package required)
-  cli.py              — argparse CLI (22 subcommands)
+  mcp_stdio.py        — Stdio MCP server (optional mcp package required)
+  cli.py              — argparse CLI parser + lazy dispatch (~229 LOC)
+  cli_commands.py     — All 26 command handlers (~671 LOC)
   db.py               — SQLite schema + thread-local ConnectionPool
   agent_registry.py   — Agent lifecycle: register, heartbeat, deregister, lineage
   lock_ops.py         — Shared lock primitives
   conflict_log.py     — Conflict recording and querying
   notifications.py    — Change notification storage and retrieval
-  tests/              — pytest suite (56 tests, 5 test files)
+  tests/              — pytest suite (106 tests, 9 test files)
 ```
 
 ## Module Design
 
-- **Zero internal deps in sub-modules**: `agent_registry.py`, `lock_ops.py`, `conflict_log.py`, `notifications.py` all receive `connect: ConnectFn` from the caller. They have no internal imports from each other.
+- **Zero internal deps in sub-modules**: `agent_registry.py`, `lock_ops.py`, `conflict_log.py`, `notifications.py`, `visibility.py` all receive `connect: ConnectFn` from the caller. They have no internal imports from each other.
 - **Thread-local connection pool**: `db.py` provides a `ConnectionPool` that gives each thread its own reused SQLite connection. WAL mode enabled, 30s busy timeout.
-- **Dispatch separation**: `schemas.py` defines tool schemas and `TOOL_DISPATCH` table. `mcp_server.py`'s `dispatch_tool()` uses this to call engine methods. Both HTTP and stdio servers share the same dispatch.
+- **Dispatch separation**: `schemas.py` (schemas only) and `dispatch.py` (dispatch table) are separate modules shared by both HTTP and stdio servers.
 - **Project root detection**: `_detect_project_root()` walks up from CWD looking for `.git`. Used by `CoordinationEngine.__init__`.
 
 ## Key Design Decisions
@@ -44,15 +49,16 @@ coordinationhub/
 - **SQLite WAL mode**: `PRAGMA wal_checkpoint(TRUNCATE)` on engine close ensures no unbounded WAL growth.
 - **`broadcast` message/action params removed**: These were previously accepted but never stored. Removed from both schema and implementation to avoid misleading LLMs.
 
-## 20 MCP Tools
+## 27 MCP Tools
 
 Identity: `register_agent`, `heartbeat`, `deregister_agent`, `list_agents`, `get_lineage`, `get_siblings`
 Locking: `acquire_lock`, `release_lock`, `refresh_lock`, `get_lock_status`, `release_agent_locks`, `reap_expired_locks`, `reap_stale_agents`
 Coordination: `broadcast`, `wait_for_locks`
 Change: `notify_change`, `get_notifications`, `prune_notifications`
 Audit: `get_conflicts`, `status`
+Graph & Visibility (0.3.0): `load_coordination_spec`, `validate_graph`, `scan_project`, `get_agent_status`, `get_file_agent_map`, `update_agent_status`, `run_assessment`
 
-**Tool count is dynamic** — `status()` returns `len(TOOL_DISPATCH)` (currently 20), not a hardcoded number.
+**Tool count is dynamic** — `status()` returns `len(TOOL_DISPATCH)` (currently 27), not a hardcoded number.
 
 ## Dev Commands
 
@@ -83,19 +89,21 @@ coordinationhub get-conflicts
 ## Known Issues
 
 - **Existing DBs**: The `lineage` table uses a composite primary key `(parent_id, child_id)`. Existing `.coordinationhub/coordination.db` files created before this change may have incorrect lineage data for multi-child parents. A manual migration or fresh start is recommended.
-- **No `broadcast` message storage**: The `message` and `action` parameters existed previously but were never stored. They are removed — `broadcast` only checks lock state, it does not forward messages.
 - **`_normalize_path`**: Has no explicit test coverage for edge cases (Windows paths, non-UTF8, symlinks).
 
 ## Test Suite
 
 ```bash
 python -m pytest tests/ -v
-# 56 tests across 5 files:
+# 106 tests across 9 test files:
 #   test_agent_lifecycle.py  — 16 tests
-#   test_locking.py         — 16 tests
-#   test_notifications.py  — 7 tests
-#   test_conflicts.py      — 6 tests
-#   test_coordination.py    — 7 tests
+#   test_locking.py           — 16 tests
+#   test_notifications.py    — 7 tests
+#   test_conflicts.py         — 6 tests
+#   test_coordination.py      — 7 tests
+#   test_visibility.py       — 14 tests
+#   test_graphs.py           — 14 tests
+#   test_assessment.py        — 9 tests
 ```
 
 Always run the test suite before and after changes. Record results with `chisel record_result`.

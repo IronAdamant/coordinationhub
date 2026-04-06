@@ -1,13 +1,10 @@
-"""Tool schemas and dispatch table for CoordinationHub.
+"""Tool schemas for CoordinationHub.
 
+All 27 tool parameter schemas (JSON Schema per tool).
 Shared by both HTTP and stdio transports. Zero internal dependencies.
 """
 
 from __future__ import annotations
-
-# ------------------------------------------------------------------ #
-# Tool schemas (JSON Schema per tool)
-# ------------------------------------------------------------------ #
 
 TOOL_SCHEMAS: dict[str, dict] = {
     # ------------------------------------------------------------------ #
@@ -16,8 +13,8 @@ TOOL_SCHEMAS: dict[str, dict] = {
     "register_agent": {
         "description": (
             "Register an agent with the coordination hub and receive a context bundle "
-            "containing sibling agents, active locks, and coordination URLs. "
-            "Use this as the first call when spawning a new agent."
+            "containing sibling agents, active locks, coordination URLs, and (if a "
+            "coordination graph is loaded) the agent's responsibilities and owned files."
         ),
         "parameters": {
             "type": "object",
@@ -29,6 +26,11 @@ TOOL_SCHEMAS: dict[str, dict] = {
                 "parent_id": {
                     "type": "string",
                     "description": "Parent agent ID if this is a spawned sub-agent",
+                    "default": None,
+                },
+                "graph_agent_id": {
+                    "type": "string",
+                    "description": "ID in the coordination graph this agent implements (e.g. 'planner')",
                     "default": None,
                 },
                 "worktree_root": {
@@ -43,7 +45,6 @@ TOOL_SCHEMAS: dict[str, dict] = {
     "heartbeat": {
         "description": (
             "Send a heartbeat to keep the agent registered and alive. "
-            "Also reaps any expired locks in the same call. "
             "Call at least every 30 seconds."
         ),
         "parameters": {
@@ -245,8 +246,7 @@ TOOL_SCHEMAS: dict[str, dict] = {
     },
     "reap_expired_locks": {
         "description": (
-            "Clear all expired locks from the lock table. "
-            "Called automatically by heartbeat; can also be called manually."
+            "Clear all expired locks from the lock table."
         ),
         "parameters": {
             "type": "object",
@@ -276,7 +276,7 @@ TOOL_SCHEMAS: dict[str, dict] = {
         "description": (
             "Announce an intention to all live sibling agents before taking "
             "an action. Returns which siblings are live and any lock conflicts. "
-            "Does not wait for responses — just checks current state."
+            "Does not store or forward messages — only checks current lock state."
         ),
         "parameters": {
             "type": "object",
@@ -296,7 +296,7 @@ TOOL_SCHEMAS: dict[str, dict] = {
                     "default": 30.0,
                 },
             },
-            "required": ["agent_id", "message"],
+            "required": ["agent_id"],
         },
     },
     "wait_for_locks": {
@@ -434,45 +434,141 @@ TOOL_SCHEMAS: dict[str, dict] = {
     "status": {
         "description": (
             "Get a summary of the coordination system state: "
-            "registered agents, active locks, pending notifications, conflicts."
+            "registered agents, active locks, pending notifications, conflicts, "
+            "and whether a coordination graph is loaded."
         ),
         "parameters": {
             "type": "object",
             "properties": {},
         },
     },
-}
-
-
-# ------------------------------------------------------------------ #
-# Dispatch table: tool_name -> (engine_method_name, allowed_kwargs)
-# ------------------------------------------------------------------ #
-
-TOOL_DISPATCH: dict[str, tuple[str, list[str]]] = {
-    # Identity
-    "register_agent": ("register_agent", ["agent_id", "parent_id", "worktree_root"]),
-    "heartbeat": ("heartbeat", ["agent_id"]),
-    "deregister_agent": ("deregister_agent", ["agent_id"]),
-    "list_agents": ("list_agents", ["active_only", "stale_timeout"]),
-    "get_lineage": ("get_lineage", ["agent_id"]),
-    "get_siblings": ("get_siblings", ["agent_id"]),
-    # Locking
-    "acquire_lock": ("acquire_lock", ["document_path", "agent_id", "lock_type", "ttl", "force"]),
-    "release_lock": ("release_lock", ["document_path", "agent_id"]),
-    "refresh_lock": ("refresh_lock", ["document_path", "agent_id", "ttl"]),
-    "get_lock_status": ("get_lock_status", ["document_path"]),
-    "release_agent_locks": ("release_agent_locks", ["agent_id"]),
-    "reap_expired_locks": ("reap_expired_locks", []),
-    "reap_stale_agents": ("reap_stale_agents", ["timeout"]),
-    # Coordination
-    "broadcast": ("broadcast", ["agent_id", "document_path", "ttl"]),
-    "wait_for_locks": ("wait_for_locks", ["document_paths", "agent_id", "timeout_s"]),
-    # Change awareness
-    "notify_change": ("notify_change", ["document_path", "change_type", "agent_id"]),
-    "get_notifications": ("get_notifications", ["since", "exclude_agent", "limit"]),
-    "prune_notifications": ("prune_notifications", ["max_age_seconds", "max_entries"]),
-    # Audit
-    "get_conflicts": ("get_conflicts", ["document_path", "agent_id", "limit"]),
-    # Status
-    "status": ("status", []),
+    # ------------------------------------------------------------------ #
+    # Graph & Visibility (NEW)
+    # ------------------------------------------------------------------ #
+    "load_coordination_spec": {
+        "description": (
+            "Reload the coordination spec from disk. Returns whether a graph "
+            "was found and loaded, plus the graph's agent list."
+        ),
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "path": {
+                    "type": "string",
+                    "description": "Path to coordination_spec.yaml or .json (default: project root)",
+                    "default": None,
+                },
+            },
+        },
+    },
+    "validate_graph": {
+        "description": (
+            "Validate the currently loaded coordination graph schema. "
+            "Returns validation errors if invalid, or an empty error list if valid."
+        ),
+        "parameters": {
+            "type": "object",
+            "properties": {},
+        },
+    },
+    "scan_project": {
+        "description": (
+            "Perform a file ownership scan of the worktree_root. "
+            "For every tracked file (.py, .md, .json, .yaml, .txt, .toml), "
+            "upserts an entry into the file_ownership table. "
+            "Returns the count of files scanned and owned."
+        ),
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "worktree_root": {
+                    "type": "string",
+                    "description": "Root directory to scan (default: engine's project root)",
+                    "default": None,
+                },
+                "extensions": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                    "description": "File extensions to scan (default: py, md, json, yaml, txt, toml)",
+                    "default": None,
+                },
+            },
+        },
+    },
+    "get_agent_status": {
+        "description": (
+            "Get full status for a specific agent: current task, responsibilities "
+            "(from the coordination graph), owned files, lineage, and lock state."
+        ),
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "agent_id": {
+                    "type": "string",
+                    "description": "Agent to query",
+                },
+            },
+            "required": ["agent_id"],
+        },
+    },
+    "get_file_agent_map": {
+        "description": (
+            "Get a map of all tracked files to their assigned Agent ID "
+            "and responsibility summary. Returns the full file_ownership table "
+            "joined with agent responsibilities."
+        ),
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "agent_id": {
+                    "type": "string",
+                    "description": "Filter to files owned by a specific agent",
+                    "default": None,
+                },
+            },
+        },
+    },
+    "update_agent_status": {
+        "description": (
+            "Update the current task description for an agent. "
+            "Stored in agent_responsibilities.current_task for visibility. "
+            "Use this so other agents and human developers can see what is in flight."
+        ),
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "agent_id": {
+                    "type": "string",
+                    "description": "Agent updating its status",
+                },
+                "current_task": {
+                    "type": "string",
+                    "description": "Human-readable description of what this agent is doing",
+                },
+            },
+            "required": ["agent_id", "current_task"],
+        },
+    },
+    "run_assessment": {
+        "description": (
+            "Run an assessment suite against the loaded coordination graph. "
+            "Loads the suite JSON file, scores all traces on the defined metrics, "
+            "outputs a report, and stores results in SQLite for historical comparison."
+        ),
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "suite_path": {
+                    "type": "string",
+                    "description": "Path to the JSON test suite file",
+                },
+                "format": {
+                    "type": "string",
+                    "description": "Output format: 'markdown' (default) or 'json'",
+                    "default": "markdown",
+                },
+            },
+            "required": ["suite_path"],
+        },
+    },
 }

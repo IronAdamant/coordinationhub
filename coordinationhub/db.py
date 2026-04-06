@@ -82,6 +82,36 @@ _SCHEMAS = {
             updated_at  REAL NOT NULL
         )
     """,
+    "agent_responsibilities": """
+        CREATE TABLE IF NOT EXISTS agent_responsibilities (
+            agent_id        TEXT PRIMARY KEY,
+            graph_agent_id  TEXT,
+            role            TEXT,
+            model           TEXT,
+            responsibilities TEXT,
+            current_task    TEXT,
+            updated_at      REAL NOT NULL
+        )
+    """,
+    "file_ownership": """
+        CREATE TABLE IF NOT EXISTS file_ownership (
+            document_path     TEXT PRIMARY KEY,
+            assigned_agent_id TEXT NOT NULL,
+            assigned_at      REAL NOT NULL,
+            last_claimed_by  TEXT,
+            task_description TEXT
+        )
+    """,
+    "assessment_results": """
+        CREATE TABLE IF NOT EXISTS assessment_results (
+            id              INTEGER PRIMARY KEY AUTOINCREMENT,
+            suite_name      TEXT NOT NULL,
+            metric          TEXT NOT NULL,
+            score           REAL NOT NULL,
+            details_json    TEXT,
+            run_at          REAL NOT NULL
+        )
+    """,
 }
 
 _INDEXES = [
@@ -94,6 +124,7 @@ _INDEXES = [
     "CREATE INDEX IF NOT EXISTS idx_conflicts_time ON lock_conflicts(created_at)",
     "CREATE INDEX IF NOT EXISTS idx_notif_time ON change_notifications(created_at)",
     "CREATE INDEX IF NOT EXISTS idx_notif_agent ON change_notifications(agent_id)",
+    "CREATE INDEX IF NOT EXISTS idx_file_owner_agent ON file_ownership(assigned_agent_id)",
 ]
 
 

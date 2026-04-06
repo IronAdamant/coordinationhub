@@ -18,7 +18,8 @@ from socketserver import ThreadingMixIn
 from typing import Any
 
 from .core import CoordinationEngine
-from .schemas import TOOL_DISPATCH, TOOL_SCHEMAS
+from .dispatch import TOOL_DISPATCH
+from .schemas import TOOL_SCHEMAS
 
 logger = logging.getLogger(__name__)
 
