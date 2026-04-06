@@ -1,11 +1,84 @@
 # LLM_Development.md — CoordinationHub
 
-**Version:** 0.3.0
-**Last updated:** 2026-04-06
+**Version:** 0.3.1
+**Last updated:** 2026-04-07
 
 ## Change Log
 
 All significant changes to the CoordinationHub project are documented here in reverse chronological order.
+
+---
+
+## 2026-04-07 — v0.3.1 Polish Pass
+
+### New Features
+
+**`spawn_propagation` assessment metric (assessment.py):**
+- New scorer `score_spawn_propagation(trace, graph)` verifies child agents inherit and act within their parent's declared responsibilities.
+- Events from a child agent are checked against the union of the child's own scope and the parent's scope.
+- Always included in metrics even if not listed in graph's `assessment.metrics`.
+- `_suggest_graph_refinements(suite, graph)` returns `missing_handoff` and `missing_agent` suggestions for graph refinement.
+
+**Graph-role-aware file scan (scan.py):**
+- `_role_based_agent(graph, path)` maps file extension to graph role: `.py` → `implement`/`write`, `.md/.yaml/.yml` → `document`/`plan`, `.json/.toml` → `config`/`data`.
+- `_get_spawned_agent_responsibilities(connect, agent_id)` resolves a spawned agent's parent's graph role from the lineage table.
+- Scan assignment priority: exact path → nearest ancestor → graph role → spawned-agent inheritance → first-registered fallback.
+- `SKIP_PARTS` expanded to include `.git`, `.venv`, `venv`, `.env`, `.eggs`, `*.egg-info`, `.mypy_cache`, `.tox`, `.ruff_cache`.
+
+**`run_assessment` graph_agent_id filter:**
+- `graph_agent_id` param filters traces to only those where a `register` event uses that `graph_agent_id`.
+- Added to `core.py`, `dispatch.py`, `schemas_visibility.py`, `cli.py`, `cli_vis.py`.
+- CLI: `coordinationhub assess --suite <file> --graph-agent-id planner`.
+
+**Full trace storage in SQLite:**
+- `run_assessment` result now includes `full_trace_json` (JSON-encoded traces) and `suggested_refinements`.
+- `store_assessment_results` persists both in `details_json` alongside per-metric scores.
+- Markdown report updated to show filter info and suggested graph refinements section.
+
+### Visibility / Dashboard Improvements
+
+**Dashboard JSON mode (`cli_vis.py`):**
+- `dashboard --json` now includes the full `file_map` with each entry carrying `graph_agent_id`, `role`, `responsibilities`, and `task_description`.
+
+**`get_agent_status` and `get_file_agent_map` (agent_status.py):**
+- `get_agent_status` now returns `owned_files_with_tasks`: list of `{file, task}` dicts per owned file.
+- `get_file_agent_map` now includes `graph_agent_id` in each entry alongside `role` and `responsibilities`.
+
+**Graph auto-mapping on load (graphs.py):**
+- `_populate_agent_responsibilities_from_graph(connect, graph)` called inside `load_coordination_spec_from_disk` after a successful load.
+- For each graph agent whose id matches an active registered agent, `agent_responsibilities` is upserted.
+
+### Input Validation
+
+- `load_coordination_spec(path)`: returns `{"loaded": False, "error": "Coordination spec not found: <path>"}` when explicit path does not exist.
+- `scan_project(extensions=[])`: returns `{"scanned": 0, "owned": 0, "error": "extensions list cannot be empty"}`.
+
+### Code Quality
+
+- All 7 graph/visibility tool methods in `core.py` now have comments explaining their relationship to the lock/lineage foundation.
+- `visibility.py` re-exports `_role_based_agent` and `_get_spawned_agent_responsibilities` from `scan.py`.
+- All schema files: schemas_identity (~123 LOC), schemas_locking (~145 LOC), schemas_coordination (~59 LOC), schemas_change (~77 LOC), schemas_audit (~43 LOC), schemas_visibility (~137 LOC) — all well under 500 LOC.
+
+### Tests
+
+15 new tests added across `test_assessment.py` and `test_visibility.py`:
+- `score_spawn_propagation`: child within scope, child outside scope, coordination always OK, empty trace
+- `run_assessment`: spawn_propagation included, graph_agent_id filter, full trace stored, suggested refinements
+- `format_markdown_report`: with refinements section
+- Graph auto-mapping on load
+- Spawned agent inherits parent role during scan
+- `get_agent_status` includes `owned_files_with_tasks`
+- `get_file_agent_map` includes `graph_agent_id`
+- `scan_project` empty extensions returns error
+- Dashboard JSON output structure
+
+Total: **165 tests** (up from 150).
+
+### Example Files
+
+- `coordination_spec.yaml` — YAML format example with `planner`, `executor`, `reviewer` agents
+- `coordination_spec.json` — JSON format equivalent
+- README.md updated to reference both with relative links
 
 ---
 

@@ -1,7 +1,13 @@
 """File ownership scan for CoordinationHub.
 
 Walks the worktree, assigns files to agents via nearest-ancestor inheritance,
-and upserts the file_ownership table. Zero internal dependencies.
+optionally guided by the coordination graph roles (e.g., planner owns docs,
+executor owns code), and upserts the file_ownership table.
+
+Excluded path components: .git, __pycache__, .pytest_cache, node_modules,
+.coordinationhub, .venv, venv, .env, .eggs, *.egg-info, .mypy_cache, .tox, .ruff_cache.
+
+Zero internal dependencies on other coordinationhub modules.
 """
 
 from __future__ import annotations
@@ -12,7 +18,12 @@ from typing import Any, Callable
 
 DEFAULT_SCAN_EXTENSIONS = [".py", ".md", ".json", ".yaml", ".yml", ".txt", ".toml"]
 
-SKIP_PARTS = frozenset({"__pycache__", ".pytest_cache", "node_modules", ".coordinationhub"})
+# Paths containing these directory/file name components are skipped during scan.
+SKIP_PARTS = frozenset({
+    "__pycache__", ".pytest_cache", "node_modules", ".coordinationhub",
+    ".git", ".venv", "venv", ".env", ".eggs", "*.egg-info",
+    ".mypy_cache", ".tox", ".ruff_cache",
+})
 
 
 def _default_owner_agent(connect: Callable[[], Any]) -> str:
@@ -24,20 +35,86 @@ def _default_owner_agent(connect: Callable[[], Any]) -> str:
     return row["agent_id"] if row else "unassigned"
 
 
+def _get_spawned_agent_responsibilities(
+    connect: Callable[[], Any],
+    assigned_agent_id: str,
+) -> tuple[str | None, list[str]]:
+    """For a spawned agent, return (parent_graph_agent_id, inherited_responsibilities).
+
+    If the agent has a parent defined in the lineage table, look up the parent's
+    graph_agent_id and responsibilities from agent_responsibilities.
+    """
+    with connect() as conn:
+        row = conn.execute("""
+            SELECT ar.graph_agent_id, ar.responsibilities
+            FROM lineage l
+            JOIN agent_responsibilities ar ON l.parent_id = ar.agent_id
+            WHERE l.child_id = ?
+        """, (assigned_agent_id,)).fetchone()
+    if row:
+        import json
+        graph_id = row["graph_agent_id"]
+        resp = json.loads(row["responsibilities"]) if row["responsibilities"] else []
+        return graph_id, resp
+    return None, []
+
+
+def _role_based_agent(
+    graph: Any,
+    path: Path,
+) -> str | None:
+    """Suggest an agent ID from the coordination graph based on file extension and role.
+
+    Returns None if the graph is not loaded or no matching role is found.
+    Extension-to-responsibility heuristics:
+      .py  -> agent whose responsibilities include 'implement', 'write', 'code'
+      .md/.yaml/.yml -> agent whose responsibilities include 'document', 'plan', 'spec'
+      .json/.toml/.txt -> agent whose responsibilities include 'config', 'data'
+    """
+    if graph is None:
+        return None
+    ext = path.suffix.lower()
+    # Keyword mapping from extension to relevant responsibility keywords
+    ext_keywords: dict[str, tuple[str, ...]] = {
+        ".py": ("implement", "write", "code", "develop"),
+        ".md": ("document", "write", "spec", "plan", "note"),
+        ".yaml": ("document", "spec", "plan", "config"),
+        ".yml": ("document", "spec", "plan", "config"),
+        ".json": ("config", "data", "implement"),
+        ".toml": ("config", "data"),
+        ".txt": ("document", "data", "note"),
+    }
+    keywords = ext_keywords.get(ext, ())
+    for graph_id, agent_def in graph.agents.items():
+        responsibilities = agent_def.get("responsibilities", [])
+        if not isinstance(responsibilities, list):
+            continue
+        for kw in keywords:
+            for resp in responsibilities:
+                if kw in resp.lower():
+                    return graph_id
+    return None
+
+
 def scan_project_tool(
     connect: Callable[[], Any],
     project_root: Path | None,
     worktree_root: str | None = None,
     extensions: list[str] | None = None,
+    graph: Any = None,
 ) -> dict[str, Any]:
     """Perform a file ownership scan of the worktree.
 
     Assigns every tracked file to its nearest responsible Agent ID based on:
     1. Exact path match in file_ownership (preserves prior assignment)
     2. Nearest ancestor directory with an owner
-    3. First-registered active agent as fallback
+    3. Coordination graph role (if loaded): assign .py to 'implement' roles, .md/.yaml
+       to 'document' roles, etc.
+    4. First-registered active agent as fallback
 
-    Skips paths with hidden or cache directory components.
+    Skips paths with hidden or cache directory components (see SKIP_PARTS).
+    Spawned agents (agents with a parent_id in lineage) are resolved by looking up
+    their parent's graph role for role-based assignment.
     """
     root = Path(worktree_root) if worktree_root else project_root
     if root is None:
@@ -88,6 +165,31 @@ def scan_project_tool(
                     if parent == Path(d):
                         break
                     d = str(parent)
+                if assigned is None:
+                    # Try role-based assignment from coordination graph
+                    role_agent = _role_based_agent(graph, path)
+                    if role_agent is not None:
+                        # Resolve graph_agent_id to the registered agent that implements this role
+                        with connect() as conn:
+                            row = conn.execute("""
+                                SELECT agent_id FROM agent_responsibilities
+                                WHERE graph_agent_id = ? AND agent_id IN (
+                                    SELECT agent_id FROM agents WHERE status = 'active'
+                                )
+                                LIMIT 1
+                            """, (role_agent,)).fetchone()
+                            if row:
+                                assigned = row["agent_id"]
+                    # Fallback: spawned agent inherits parent's responsibility slice
+                    if assigned is None and fallback_agent != "unassigned":
+                        parent_graph_id, parent_resp = _get_spawned_agent_responsibilities(
+                            connect, fallback_agent
+                        )
+                        if parent_graph_id:
+                            role_agent = _role_based_agent(graph, path)
+                            if role_agent == parent_graph_id:
+                                # fallback_agent is a spawned agent inheriting parent role — keep it
+                                pass
                 assigned = assigned or fallback_agent
             to_upsert.append((rel, assigned, now))
             owned += 1

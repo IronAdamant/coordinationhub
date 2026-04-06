@@ -250,11 +250,99 @@ def score_protocol_adherence(trace: dict[str, Any], graph: Any) -> float:
     return max(0.0, 1.0 - (violations / scored_events))
 
 
+def score_spawn_propagation(trace: dict[str, Any], graph: Any) -> float:
+    """Score 0-1: did spawned agents correctly inherit responsibilities from their parent?
+
+    Checks:
+    - When a child agent is registered with a parent_id, the child's events should
+      fall within the parent's declared responsibilities (inheritance is respected).
+    - A child that acts outside both its own scope (if graph_agent_id is set) and the
+      parent's scope scores lower.
+    - Unowned/unparented agents do not penalize this metric.
+    """
+    events = trace.get("events", [])
+    if not events:
+        return 1.0
+
+    # Build agent -> (graph_id, parent_id) from register events
+    agent_graph_id: dict[str, str] = {}
+    agent_parent_id: dict[str, str] = {}
+    for evt in events:
+        if evt.get("type") == "register":
+            agent_graph_id[evt["agent_id"]] = evt.get("graph_id", "")
+            agent_parent_id[evt["agent_id"]] = evt.get("parent_id", "") or ""
+
+    # Build graph_id -> responsibilities
+    graph_responsibilities: dict[str, set[str]] = {}
+    if graph:
+        for gid, agent_def in graph.agents.items():
+            resp = agent_def.get("responsibilities", [])
+            graph_responsibilities[gid] = set(resp) if isinstance(resp, list) else set()
+
+    violations = 0
+    scored_events = 0
+
+    for evt in events:
+        etype = evt.get("type")
+        aid = evt.get("agent_id", "")
+        parent_id = agent_parent_id.get(aid, "")
+        gid = agent_graph_id.get(aid, "")
+
+        # Coordination primitives are always fine
+        if etype in ("lock", "unlock", "notify_change", "register", "handoff",
+                     "heartbeat", "acquire_lock", "release_lock", "refresh_lock",
+                     "get_notifications", "prune_notifications"):
+            continue
+
+        # Get this agent's own responsibilities
+        own_resp = graph_responsibilities.get(gid, set())
+
+        # Get parent's responsibilities (if parent exists)
+        parent_gid = ""
+        parent_resp: set[str] = set()
+        if parent_id:
+            parent_gid = agent_graph_id.get(parent_id, "")
+            parent_resp = graph_responsibilities.get(parent_gid, set())
+
+        # Effective responsibilities = own + parent (child inherits parent scope)
+        effective_resp = own_resp | parent_resp
+
+        # If no effective responsibilities at all, skip scoring
+        if not effective_resp:
+            continue
+
+        # Determine if this event type is covered by effective responsibilities
+        covered = False
+        for resp in effective_resp:
+            resp_lower = resp.lower()
+            if etype in ("file_scan", "modified", "write"):
+                if "write" in resp_lower or "edit" in resp_lower or "modify" in resp_lower or "implement" in resp_lower:
+                    covered = True
+                    break
+            elif etype in ("acquire_lock", "release_lock", "refresh_lock"):
+                if "coordinate" in resp_lower or "lock" in resp_lower:
+                    covered = True
+                    break
+            elif etype in ("get_notifications", "prune_notifications"):
+                if "notify" in resp_lower or "coordinate" in resp_lower:
+                    covered = True
+                    break
+
+        if not covered:
+            violations += 1
+        scored_events += 1
+
+    if scored_events == 0:
+        return 1.0
+    return max(0.0, 1.0 - (violations / scored_events))
+
+
 _METRIC_SCORERS: dict[str, Any] = {
     "role_stability": score_role_stability,
     "handoff_latency": score_handoff_latency,
     "outcome_verifiability": score_outcome_verifiability,
     "protocol_adherence": score_protocol_adherence,
+    "spawn_propagation": score_spawn_propagation,
 }
 
 
@@ -268,6 +356,58 @@ def load_suite(path: Path) -> dict[str, Any]:
 
 
 # ------------------------------------------------------------------ #
+# Graph refinement suggestion
+# ------------------------------------------------------------------ #
+
+def _suggest_graph_refinements(suite: dict[str, Any], graph: Any) -> list[dict[str, Any]]:
+    """Analyze trace suite and suggest graph refinements.
+
+    Returns a list of suggestion dicts with keys: type, from_agent, to_agent,
+    suggested_responsibility, reason.
+    """
+    suggestions: list[dict[str, Any]] = []
+    if not suite or not graph:
+        return suggestions
+
+    traces = suite.get("traces", [])
+    defined_agents = set(graph.agents.keys())
+    defined_handoffs = {(h["from"], h["to"]) for h in graph.handoffs}
+
+    # Collect all (from, to) handoff pairs from traces
+    trace_handoffs: set[tuple[str, str]] = set()
+    for trace in traces:
+        for evt in trace.get("events", []):
+            if evt.get("type") == "handoff":
+                trace_handoffs.add((evt.get("from", ""), evt.get("to", "")))
+
+    # Suggest handoff edges that appear in traces but not in the graph
+    for (frm, to) in trace_handoffs:
+        if frm in defined_agents and to in defined_agents and (frm, to) not in defined_handoffs:
+            suggestions.append({
+                "type": "missing_handoff",
+                "from_agent": frm,
+                "to_agent": to,
+                "suggestion": f"handoff from '{frm}' to '{to}' is used in traces but not defined in graph",
+                "reason": "protocol_adherence",
+            })
+
+    # Suggest missing agent roles that appear in traces but not in graph
+    for trace in traces:
+        for evt in trace.get("events", []):
+            if evt.get("type") == "register":
+                gid = evt.get("graph_id", "")
+                if gid and gid not in defined_agents:
+                    suggestions.append({
+                        "type": "missing_agent",
+                        "graph_agent_id": gid,
+                        "suggestion": f"agent role '{gid}' is registered in traces but not defined in graph",
+                        "reason": "spawn_propagation",
+                    })
+
+    return suggestions
+
+
+# ------------------------------------------------------------------ #
 # Assessment run
 # ------------------------------------------------------------------ #
 
@@ -275,6 +415,7 @@ def run_assessment(
     suite: dict[str, Any],
     graph: Any,
     store_fn: Any = None,
+    graph_agent_id: str | None = None,
 ) -> dict[str, Any]:
     """Run a loaded suite against the current graph.
 
@@ -282,17 +423,38 @@ def run_assessment(
         suite: parsed test suite dict
         graph: CoordinationGraph instance or None
         store_fn: optional callable(conn, results) to persist to SQLite
+        graph_agent_id: optional filter — if set, only score traces where at least
+            one register event uses this graph_agent_id
 
     Returns:
-        dict with suite_name, timestamp, scores per metric, per-trace breakdown
+        dict with suite_name, timestamp, scores per metric, per-trace breakdown,
+        suggested_refinements, and full trace JSON
     """
     now = time.time()
     suite_name = suite.get("name", "unnamed")
     traces = suite.get("traces", [])
 
-    metrics = ["role_stability", "handoff_latency", "outcome_verifiability", "protocol_adherence"]
+    # Filter traces by graph_agent_id if specified
+    if graph_agent_id:
+        filtered = []
+        for trace in traces:
+            for evt in trace.get("events", []):
+                if evt.get("type") == "register" and evt.get("graph_id") == graph_agent_id:
+                    filtered.append(trace)
+                    break
+        traces = filtered
+
+    all_metrics = [
+        "role_stability", "handoff_latency", "outcome_verifiability",
+        "protocol_adherence", "spawn_propagation",
+    ]
+    metrics = all_metrics[:]
     if graph and graph.assessment:
-        metrics = graph.assessment.get("metrics", metrics)
+        configured = graph.assessment.get("metrics", metrics)
+        metrics = configured
+    # Always include spawn_propagation even if graph defines its own metrics
+    if "spawn_propagation" not in metrics:
+        metrics = metrics + ["spawn_propagation"]
 
     trace_scores: dict[str, dict[str, float]] = {}
     metric_totals: dict[str, float] = {m: 0.0 for m in metrics}
@@ -313,6 +475,9 @@ def run_assessment(
     )
     overall = sum(metric_averages.values()) / len(metric_averages) if metric_averages else 0.0
 
+    # Build suggested refinements from the full (unfiltered) suite
+    suggested_refinements = _suggest_graph_refinements(suite, graph)
+
     result = {
         "suite_name": suite_name,
         "run_at": now,
@@ -320,6 +485,9 @@ def run_assessment(
         "overall_score": overall,
         "traces": trace_scores,
         "graph_loaded": graph is not None,
+        "graph_agent_id_filter": graph_agent_id,
+        "suggested_refinements": suggested_refinements,
+        "full_trace_json": json.dumps(traces, default=str),
     }
     return result
 
@@ -336,25 +504,30 @@ def format_markdown_report(result: dict[str, Any]) -> str:
         f"**Overall Score:** {result['overall_score']:.2%}",
         f"**Graph Loaded:** {result['graph_loaded']}",
         f"**Run At:** {time.strftime('%Y-%m-%d %H:%M:%S', time.localtime(result['run_at']))}",
-        "",
-        "## Metric Scores",
-        "",
-        "| Metric | Score |",
-        "|--------|-------|",
     ]
+    if result.get("graph_agent_id_filter"):
+        lines.append(f"**Filtered by:** graph_agent_id = {result['graph_agent_id_filter']}")
+    lines.extend(["", "## Metric Scores", "", "| Metric | Score |", "|--------|-------|"])
     for metric, score in result["metrics"].items():
         lines.append(f"| {metric} | {score:.2%} |")
     lines.append("")
 
     traces = result.get("traces", {})
     if traces:
-        lines.append("## Per-Trace Breakdown")
-        lines.append("")
+        lines.extend(["## Per-Trace Breakdown", ""])
         for trace_id, scores in traces.items():
             lines.append(f"### {trace_id}")
             for metric, score in scores.items():
                 lines.append(f"- {metric}: {score:.2%}")
             lines.append("")
+
+    refinements = result.get("suggested_refinements", [])
+    if refinements:
+        lines.extend(["## Suggested Graph Refinements", ""])
+        for r in refinements:
+            lines.append(f"- [{r['type']}] {r.get('suggestion', '')}")
+        lines.append("")
+
     return "\n".join(lines)
 
 
@@ -379,16 +552,30 @@ def store_assessment_results(
     conn: sqlite3.Connection,
     result: dict[str, Any],
 ) -> None:
-    """Persist assessment result to SQLite."""
+    """Persist assessment result to SQLite.
+
+    Stores full trace JSON and suggested graph refinements alongside metric scores
+    in the details_json column for later audit and comparison.
+    """
     now = result["run_at"]
     suite_name = result["suite_name"]
+    full_trace = result.get("full_trace_json", "")
+    refinements = result.get("suggested_refinements", [])
+    graph_agent_id_filter = result.get("graph_agent_id_filter")
     for metric, score in result["metrics"].items():
         trace_best = max(
             (t.get(metric, 0.0) for t in result.get("traces", {}).values()),
             default=score,
         )
+        details = {
+            "overall": score,
+            "trace_best": trace_best,
+            "full_trace_json": full_trace,
+            "suggested_refinements": refinements,
+            "graph_agent_id_filter": graph_agent_id_filter,
+        }
         conn.execute(
             "INSERT INTO assessment_results (suite_name, metric, score, details_json, run_at) "
             "VALUES (?, ?, ?, ?, ?)",
-            (suite_name, metric, score, json.dumps({"overall": score, "trace_best": trace_best}), now),
+            (suite_name, metric, score, json.dumps(details, default=str), now),
         )

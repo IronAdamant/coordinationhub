@@ -111,7 +111,8 @@ TOOL_SCHEMAS_VISIBILITY: dict[str, dict] = {
         "description": (
             "Run an assessment suite against the loaded coordination graph. "
             "Loads the suite JSON file, scores all traces on the defined metrics, "
-            "outputs a report, and stores results in SQLite for historical comparison."
+            "outputs a report, and stores results in SQLite for historical comparison. "
+            "Use graph_agent_id to filter traces to a specific agent role."
         ),
         "parameters": {
             "type": "object",
@@ -124,6 +125,11 @@ TOOL_SCHEMAS_VISIBILITY: dict[str, dict] = {
                     "type": "string",
                     "description": "Output format: 'markdown' (default) or 'json'",
                     "default": "markdown",
+                },
+                "graph_agent_id": {
+                    "type": "string",
+                    "description": "Optional: filter traces to those involving this graph agent role",
+                    "default": None,
                 },
             },
             "required": ["suite_path"],

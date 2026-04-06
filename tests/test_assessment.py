@@ -15,14 +15,16 @@ from coordinationhub.assessment import (
     score_handoff_latency,
     score_outcome_verifiability,
     score_protocol_adherence,
+    score_spawn_propagation,
+    _suggest_graph_refinements,
 )
 from coordinationhub.graphs import CoordinationGraph, set_graph, clear_graph
 
 
 MINIMAL_GRAPH = CoordinationGraph({
     "agents": [
-        {"id": "planner", "role": "decompose", "responsibilities": ["plan"]},
-        {"id": "executor", "role": "implement", "responsibilities": ["exec"]},
+        {"id": "planner", "role": "decompose", "responsibilities": ["plan", "document"]},
+        {"id": "executor", "role": "implement", "responsibilities": ["implement", "write code"]},
     ],
     "handoffs": [{"from": "planner", "to": "executor", "condition": "always"}],
     "assessment": {"metrics": ["role_stability", "handoff_latency", "outcome_verifiability", "protocol_adherence"]},
@@ -115,6 +117,54 @@ class TestMetricScorers:
         score = score_protocol_adherence(trace, MINIMAL_GRAPH)
         assert 0.0 <= score <= 1.0
 
+    def test_score_spawn_propagation_child_within_parent_scope(self):
+        """Child agent acting within parent's responsibilities should score high."""
+        trace = {
+            "trace_id": "t1",
+            "events": [
+                {"type": "register", "agent_id": "hub.1.0", "graph_id": "planner", "parent_id": ""},
+                {"type": "register", "agent_id": "hub.1.0.0", "graph_id": "", "parent_id": "hub.1.0"},
+                # Child registers a lock — coordination primitives always score 1.0
+                {"type": "lock", "path": "a.py", "agent_id": "hub.1.0.0"},
+            ],
+        }
+        score = score_spawn_propagation(trace, MINIMAL_GRAPH)
+        assert score == 1.0  # lock is always permitted
+
+    def test_score_spawn_propagation_child_outside_parent_scope(self):
+        """Child agent acting outside parent's responsibilities should score low."""
+        trace = {
+            "trace_id": "t1",
+            "events": [
+                {"type": "register", "agent_id": "hub.1.0", "graph_id": "planner", "parent_id": ""},
+                {"type": "register", "agent_id": "hub.1.0.0", "graph_id": "", "parent_id": "hub.1.0"},
+                # Child writes code but parent is "plan/document" only — violation
+                {"type": "modified", "path": "app.py", "agent_id": "hub.1.0.0"},
+            ],
+        }
+        score = score_spawn_propagation(trace, MINIMAL_GRAPH)
+        assert score < 1.0  # outside parent scope
+
+    def test_score_spawn_propagation_coordination_always_ok(self):
+        """Lock/unlock/notify are always permitted regardless of scope."""
+        trace = {
+            "trace_id": "t1",
+            "events": [
+                {"type": "register", "agent_id": "hub.1.0", "graph_id": "planner", "parent_id": ""},
+                {"type": "register", "agent_id": "hub.1.0.0", "graph_id": "", "parent_id": "hub.1.0"},
+                {"type": "lock", "path": "a.py", "agent_id": "hub.1.0.0"},
+                {"type": "unlock", "path": "a.py", "agent_id": "hub.1.0.0"},
+            ],
+        }
+        score = score_spawn_propagation(trace, MINIMAL_GRAPH)
+        assert score == 1.0  # coordination primitives always ok
+
+    def test_score_spawn_propagation_empty_trace(self):
+        """Empty trace should score 1.0."""
+        trace = {"trace_id": "t1", "events": []}
+        score = score_spawn_propagation(trace, MINIMAL_GRAPH)
+        assert score == 1.0
+
 
 class TestRunAssessment:
     """Tests for run_assessment()."""
@@ -156,8 +206,63 @@ class TestRunAssessment:
     def test_run_assessment_all_metrics_present(self):
         suite = {"name": "s", "traces": [{"trace_id": "t", "events": []}]}
         result = run_assessment(suite, MINIMAL_GRAPH)
-        expected_metrics = {"role_stability", "handoff_latency", "outcome_verifiability", "protocol_adherence"}
+        expected_metrics = {"role_stability", "handoff_latency", "outcome_verifiability", "protocol_adherence", "spawn_propagation"}
         assert set(result["metrics"].keys()) == expected_metrics
+
+    def test_run_assessment_spawn_propagation_included(self):
+        suite = {"name": "s", "traces": [{"trace_id": "t", "events": []}]}
+        result = run_assessment(suite, MINIMAL_GRAPH)
+        assert "spawn_propagation" in result["metrics"]
+
+    def test_run_assessment_graph_agent_id_filter(self):
+        suite = {
+            "name": "filtered",
+            "traces": [
+                {"trace_id": "t1", "events": [
+                    {"type": "register", "agent_id": "hub.1.0", "graph_id": "planner"},
+                    {"type": "handoff", "from": "planner", "to": "executor"},
+                ]},
+                {"trace_id": "t2", "events": [
+                    {"type": "register", "agent_id": "hub.2.0", "graph_id": "executor"},
+                    {"type": "modified", "path": "a.py", "agent_id": "hub.2.0"},
+                ]},
+            ],
+        }
+        result = run_assessment(suite, MINIMAL_GRAPH, graph_agent_id="planner")
+        assert result["graph_agent_id_filter"] == "planner"
+        # Only t1 should be scored (it has the planner register event)
+        assert len(result["traces"]) == 1
+        assert "t1" in result["traces"]
+
+    def test_run_assessment_stores_full_trace(self):
+        suite = {
+            "name": "trace_test",
+            "traces": [
+                {"trace_id": "t1", "events": [
+                    {"type": "register", "agent_id": "hub.1.0", "graph_id": "planner"},
+                ]},
+            ],
+        }
+        result = run_assessment(suite, MINIMAL_GRAPH)
+        assert result.get("full_trace_json") is not None
+        parsed = json.loads(result["full_trace_json"])
+        assert len(parsed) == 1
+        assert parsed[0]["trace_id"] == "t1"
+
+    def test_run_assessment_suggested_refinements(self):
+        suite = {
+            "name": "refinement_test",
+            "traces": [
+                {"trace_id": "t1", "events": [
+                    {"type": "register", "agent_id": "hub.99.0", "graph_id": "reviewer"},  # reviewer not in graph
+                ]},
+            ],
+        }
+        result = run_assessment(suite, MINIMAL_GRAPH)
+        refinements = result.get("suggested_refinements", [])
+        # Should suggest missing_agent for 'reviewer' (registered in trace but not in graph)
+        assert any(r["type"] == "missing_agent" and r["graph_agent_id"] == "reviewer"
+                   for r in refinements)
 
 
 class TestFormatMarkdownReport:
@@ -188,6 +293,27 @@ class TestFormatMarkdownReport:
         assert "Assessment Report: my_tests" in report
         assert "**Overall Score:** 85.00%" in report
         assert "role_stability" in report
+
+    def test_format_markdown_report_with_refinements(self):
+        result = {
+            "suite_name": "refine_test",
+            "run_at": 1700000000.0,
+            "graph_loaded": True,
+            "overall_score": 0.75,
+            "metrics": {"role_stability": 0.75, "handoff_latency": 0.75, "outcome_verifiability": 0.75, "protocol_adherence": 0.75, "spawn_propagation": 0.75},
+            "traces": {},
+            "graph_agent_id_filter": "planner",
+            "suggested_refinements": [
+                {"type": "missing_handoff", "from_agent": "planner", "to_agent": "reviewer",
+                 "suggestion": "handoff from 'planner' to 'reviewer' is used in traces but not defined in graph",
+                 "reason": "protocol_adherence"},
+            ],
+        }
+        report = format_markdown_report(result)
+        assert "refine_test" in report
+        assert "**Filtered by:** graph_agent_id = planner" in report
+        assert "Suggested Graph Refinements" in report
+        assert "missing_handoff" in report
 
 
 class TestLoadSuite:

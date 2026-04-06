@@ -187,6 +187,7 @@ def cmd_dashboard(args):
         agents = agents_result.get("agents", [])
 
         if args.json_output:
+            # Compact single-line JSON for LLMs: includes full file->agent->task mapping
             all_status = []
             for a in agents:
                 aid = a["agent_id"]
@@ -196,7 +197,12 @@ def cmd_dashboard(args):
                         all_status.append(s)
                 except Exception:
                     pass
-            _print_json({"status": status, "agents": all_status})
+            file_map = engine.get_file_agent_map(agent_id=args.agent_id if hasattr(args, "agent_id") else None)
+            _print_json({
+                "status": status,
+                "agents": all_status,
+                "file_map": file_map.get("files", []),
+            })
             return
 
         graph = __import__("coordinationhub.graphs", fromlist=["get_graph"]).get_graph()
@@ -236,7 +242,7 @@ def cmd_dashboard(args):
             except Exception as e:
                 print(f"  (error loading status: {e})")
 
-        file_map = engine.get_file_agent_map(agent_id=args.agent_id)
+        file_map = engine.get_file_agent_map(agent_id=args.agent_id if hasattr(args, "agent_id") else None)
         if file_map.get("files"):
             print("\n" + "-" * 70)
             print(f"FILE OWNERSHIP ({file_map['total']} tracked files)")
@@ -291,7 +297,11 @@ def cmd_agent_status(args):
 def cmd_assess(args):
     engine = _engine_from_args(args)
     try:
-        result = engine.run_assessment(args.suite_path, format=args.format)
+        result = engine.run_assessment(
+            args.suite_path,
+            format=args.format,
+            graph_agent_id=getattr(args, "graph_agent_id", None),
+        )
         if "error" in result:
             print(f"Error: {result['error']}", file=sys.stderr)
             return

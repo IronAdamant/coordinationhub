@@ -19,7 +19,7 @@ Part of the **Stele + Chisel + Trammel + CoordinationHub** quartet.
 - **Visibility layer** — MCP tools + `coordinationhub dashboard` CLI command for live
   human/LLM-readable status.
 - **Assessment runner** — `coordinationhub assess --suite <file>` scores graph fidelity
-  against MiniMax coordination test traces. 4 real metric scorers.
+  against MiniMax coordination test traces. 5 real metric scorers.
 - **Agent identity & lineage** — Hierarchical agent IDs with parent-child relationships.
 - **Document locking** — TTL-based exclusive/shared locks with force-steal and conflict recording.
 - **Cascade orphaning** — Children re-parented to grandparent when parent dies.
@@ -45,11 +45,16 @@ coordinationhub dashboard --json
 
 # Run assessment suite
 coordinationhub assess --suite my_minimax_tests.json
+coordinationhub assess --suite my_minimax_tests.json --graph-agent-id planner
 ```
 
 ## Coordination Graph
 
-Place `coordination_spec.yaml` (or `.json`) at your project root:
+Place `coordination_spec.yaml` (or `.json`) at your project root.
+Example files are provided in the repo root:
+
+- [`coordination_spec.yaml`](coordination_spec.yaml) — YAML format
+- [`coordination_spec.json`](coordination_spec.json) — JSON format
 
 ```yaml
 agents:
@@ -81,6 +86,7 @@ assessment:
     - handoff_latency
     - outcome_verifiability
     - protocol_adherence
+    - spawn_propagation
 ```
 
 ## 27 MCP Tools
@@ -183,7 +189,7 @@ When a coordination graph is loaded, agents may also have a `graph_agent_id`
 ```
 coordinationhub/
   __init__.py         — Package init, exports CoordinationEngine, CoordinationHubMCPServer
-  core.py             — CoordinationEngine: all 27 tool methods (~453 LOC)
+  core.py             — CoordinationEngine: all 27 tool methods + helpers (~465 LOC)
   paths.py            — Project-root detection and path normalization (~47 LOC)
   context.py          — Context bundle builder for register_agent responses (~98 LOC)
   schemas.py           — Schema aggregator, re-exports TOOL_SCHEMAS (~31 LOC)
@@ -192,32 +198,32 @@ coordinationhub/
   schemas_coordination.py — Coordination Action schemas (~59 LOC)
   schemas_change.py     — Change Awareness schemas (~77 LOC)
   schemas_audit.py     — Audit & Status schemas (~43 LOC)
-  schemas_visibility.py — Graph & Visibility schemas (~132 LOC)
+  schemas_visibility.py — Graph & Visibility schemas (~137 LOC)
   dispatch.py          — Tool dispatch table (~48 LOC)
-  graphs.py           — Thin aggregator re-exporting from sub-modules (~105 LOC)
+  graphs.py           — Thin aggregator + graph auto-mapping (~145 LOC)
   graph_validate.py   — Pure validation functions (~131 LOC)
   graph_loader.py     — File loading (YAML/JSON) and spec auto-detection (~49 LOC)
   graph.py            — CoordinationGraph in-memory object (~66 LOC)
-  visibility.py       — Thin re-export aggregator (~15 LOC)
-  scan.py             — File ownership scan (~105 LOC)
-  agent_status.py     — Agent status query and file map helpers (~111 LOC)
+  visibility.py       — Thin re-export aggregator (~20 LOC)
+  scan.py             — File ownership scan, graph-role-aware (~165 LOC)
+  agent_status.py     — Agent status query and file map helpers (~125 LOC)
   responsibilities.py — Agent role/responsibilities storage (~35 LOC)
   agent_registry.py   — Thin re-export aggregator (~23 LOC)
   registry_ops.py     — Agent lifecycle ops (~107 LOC)
   registry_query.py   — Agent registry queries (~142 LOC)
-  assessment.py       — Assessment runner (~394 LOC)
+  assessment.py       — Assessment runner, 5 metric scorers (~510 LOC)
   mcp_server.py       — HTTP MCP server (ThreadedHTTPServer, stdlib only)
   mcp_stdio.py        — Stdio MCP server (requires optional mcp package)
-  cli.py              — argparse CLI parser + lazy dispatch (~229 LOC)
+  cli.py              — argparse CLI parser + lazy dispatch (~235 LOC)
   cli_commands.py     — Re-exports all CLI handlers (~43 LOC)
   cli_agents.py       — Agent identity & lifecycle CLI commands (~205 LOC)
   cli_locks.py        — Document locking & coordination CLI commands (~214 LOC)
-  cli_vis.py          — Change awareness, audit, graph & assessment CLI commands (~307 LOC)
+  cli_vis.py          — Change awareness, audit, graph & assessment CLI (~320 LOC)
   db.py               — SQLite schema + thread-local ConnectionPool (~215 LOC)
   lock_ops.py         — Shared lock primitives (~119 LOC)
   conflict_log.py     — Conflict recording and querying (~53 LOC)
   notifications.py    — Change notification storage and retrieval (~115 LOC)
-  tests/              — pytest suite (150 tests, 11 test files)
+  tests/              — pytest suite (165 tests, 11 test files)
 ```
 
 ## Zero-Dependency Guarantee
