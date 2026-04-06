@@ -265,6 +265,10 @@ class CoordinationHubMCPServer:
         """Return the base URL the server is listening on."""
         return f"http://{self._host}:{self._port}"
 
+    def get_port(self) -> int:
+        """Return the port the server is listening on."""
+        return self._port
+
     @property
     def engine(self) -> CoordinationEngine:
         """Expose the underlying CoordinationEngine instance."""

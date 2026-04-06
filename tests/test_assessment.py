@@ -69,6 +69,42 @@ class TestMetricScorers:
         score = score_outcome_verifiability(trace, None)
         assert 0.0 <= score <= 1.0
 
+    def test_score_outcome_verifiability_lock_without_modify(self):
+        """Lock then unlock without modification should score 0.0."""
+        trace = {
+            "trace_id": "t1",
+            "events": [
+                {"type": "lock", "path": "a.py", "agent_id": "hub.1.0"},
+                {"type": "unlock", "path": "a.py", "agent_id": "hub.1.0"},
+            ],
+        }
+        score = score_outcome_verifiability(trace, None)
+        assert score == 0.0
+
+    def test_score_outcome_verifiability_lock_modify_unlock(self):
+        """Lock → modify → unlock with no intervening issues scores 1.0."""
+        trace = {
+            "trace_id": "t1",
+            "events": [
+                {"type": "lock", "path": "a.py", "agent_id": "hub.1.0"},
+                {"type": "modified", "path": "a.py", "agent_id": "hub.1.0"},
+                {"type": "unlock", "path": "a.py", "agent_id": "hub.1.0"},
+            ],
+        }
+        score = score_outcome_verifiability(trace, None)
+        assert score == 1.0
+
+    def test_score_outcome_verifiability_modify_without_lock(self):
+        """Modification without ever locking scores 0.0."""
+        trace = {
+            "trace_id": "t1",
+            "events": [
+                {"type": "modified", "path": "a.py", "agent_id": "hub.1.0"},
+            ],
+        }
+        score = score_outcome_verifiability(trace, None)
+        assert score == 0.0
+
     def test_score_protocol_adherence(self):
         trace = {
             "trace_id": "t1",

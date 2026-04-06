@@ -150,31 +150,28 @@ def score_outcome_verifiability(trace: dict[str, Any], _graph: Any) -> float:
     if not events:
         return 1.0
 
-    # Track lock state per path: {path: {agent_id, locked_at}}
-    locked: dict[str, dict[str, Any]] = {}
+    # Track per-path state: was modified between lock and unlock?
+    locked: dict[str, dict[str, Any]] = {}  # path -> {agent_id, modified: bool}
     verifications: list[bool] = []
 
     for evt in events:
         etype = evt.get("type")
         path = evt.get("path", "")
-        aid = evt.get("agent_id", "")
 
         if etype == "lock":
-            locked[path] = {"agent_id": aid, "evt": evt}
+            locked[path] = {"agent_id": evt.get("agent_id", ""), "modified": False}
         elif etype in ("write", "modified"):
             if path in locked:
-                verifications.append(True)
+                locked[path]["modified"] = True
             elif path:
-                # Modification without a prior lock
-                verifications.append(False)
+                verifications.append(False)  # modification without a lock
         elif etype == "unlock":
             if path in locked:
-                # Check if there was a modification between lock and unlock
-                verifications.append(True)
+                # Only scores True if there was a modification between lock and unlock
+                verifications.append(locked[path]["modified"])
                 del locked[path]
-            else:
-                # Unlock without a lock — wasted action
-                verifications.append(False)
+            elif path:
+                verifications.append(False)  # unlock without ever having locked
 
     if not verifications:
         return 1.0
