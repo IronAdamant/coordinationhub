@@ -9,7 +9,13 @@
 |------|---------|--------------|
 | `coordinationhub/__init__.py` | Package init, exports `CoordinationEngine`, `CoordinationHubMCPServer` | core, mcp_server |
 | `coordinationhub/core.py` | `CoordinationEngine` — all 27 MCP tool methods + helpers (~524 LOC) | db, agent_registry, lock_ops, conflict_log, notifications, graphs, visibility, assessment |
-| `coordinationhub/schemas.py` | JSON Schema for all 27 tool parameters (~574 LOC) | (no internal deps) |
+| `coordinationhub/schemas.py` | Schema aggregator — imports all groups, re-exports `TOOL_SCHEMAS` (~31 LOC) | (no internal deps) |
+| `coordinationhub/schemas_identity.py` | Identity & Registration schemas (6 tools, ~123 LOC) | (no internal deps) |
+| `coordinationhub/schemas_locking.py` | Document Locking schemas (7 tools, ~145 LOC) | (no internal deps) |
+| `coordinationhub/schemas_coordination.py` | Coordination Action schemas (2 tools, ~59 LOC) | (no internal deps) |
+| `coordinationhub/schemas_change.py` | Change Awareness schemas (3 tools, ~77 LOC) | (no internal deps) |
+| `coordinationhub/schemas_audit.py` | Audit & Status schemas (2 tools, ~43 LOC) | (no internal deps) |
+| `coordinationhub/schemas_visibility.py` | Graph & Visibility schemas (7 tools, ~132 LOC) | (no internal deps) |
 | `coordinationhub/dispatch.py` | Tool dispatch table: name → (method_name, allowed_kwargs) (~48 LOC) | (no internal deps) |
 | `coordinationhub/graphs.py` | Coordination graph loader + validator + in-memory `CoordinationGraph` | (no internal deps; optional ruamel.yaml) |
 | `coordinationhub/visibility.py` | File ownership scan, agent status, file map helpers | graphs |
@@ -44,8 +50,14 @@
 coordinationhub/
   __init__.py         — Package init, exports CoordinationEngine, CoordinationHubMCPServer
   core.py             — CoordinationEngine: all 27 tool methods + helpers (~524 LOC)
-  schemas.py          — JSON Schema for all 27 tool parameters (~574 LOC)
-  dispatch.py        — Tool dispatch table: name → (method_name, allowed_kwargs) (~48 LOC)
+  schemas.py          — Schema aggregator, re-exports TOOL_SCHEMAS (~31 LOC)
+  schemas_identity.py — Identity & Registration schemas (~123 LOC)
+  schemas_locking.py   — Document Locking schemas (~145 LOC)
+  schemas_coordination.py — Coordination Action schemas (~59 LOC)
+  schemas_change.py    — Change Awareness schemas (~77 LOC)
+  schemas_audit.py    — Audit & Status schemas (~43 LOC)
+  schemas_visibility.py — Graph & Visibility schemas (~132 LOC)
+  dispatch.py        — Tool dispatch table (~48 LOC)
   graphs.py          — Coordination graph loader + CoordinationGraph (~310 LOC)
   visibility.py       — File ownership scan, agent status, file map (~233 LOC)
   assessment.py       — Assessment runner (~397 LOC)
