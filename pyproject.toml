@@ -1,0 +1,51 @@
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "coordinationhub"
+version = "0.2.0"
+description = "Multi-agent swarm coordination MCP server"
+readme = "README.md"
+license = {text = "MIT"}
+requires-python = ">=3.10"
+authors = [
+    {name = "IronAdamant", email = "18153828+IronAdamant@users.noreply.github.com"},
+]
+keywords = ["mcp", "multi-agent", "coordination", "swarm", "claude-code"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Software Development :: Libraries :: Python Modules",
+]
+
+dependencies = []
+
+[project.optional-dependencies]
+mcp = ["mcp>=1.0.0"]
+dev = [
+    "pytest>=7.0",
+    "pytest-asyncio>=0.21",
+]
+
+[project.scripts]
+coordinationhub = "coordinationhub.cli:main"
+
+[project.urls]
+Homepage = "https://github.com/IronAdamant/coordinationhub"
+Repository = "https://github.com/IronAdamant/coordinationhub"
+
+[tool.setuptools.packages.find]
+include = ["coordinationhub*"]
+
+[tool.setuptools.package-data]
+coordinationhub = ["py.typed"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+asyncio_mode = "auto"
