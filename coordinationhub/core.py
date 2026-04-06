@@ -8,7 +8,6 @@ Zero third-party dependencies.
 
 from __future__ import annotations
 
-import json
 import os
 import sqlite3
 import time
@@ -23,39 +22,14 @@ from . import lock_ops as _lo
 from . import graphs as _g
 from . import visibility as _v
 from . import assessment as _assess
+from .context import build_context_bundle
 from .dispatch import TOOL_DISPATCH
+from .paths import detect_project_root, normalize_path
 
 
 # ------------------------------------------------------------------ #
-# Project root detection
+# Project root detection — delegates to paths.py
 # ------------------------------------------------------------------ #
-
-def _detect_project_root(cwd: str | Path | None = None) -> Path | None:
-    if cwd is None:
-        cwd = Path.cwd()
-    else:
-        cwd = Path(cwd).resolve()
-    path = cwd
-    for _ in range(256):
-        if (path / ".git").exists():
-            return path
-        parent = path.parent
-        if parent == path:
-            break
-        path = parent
-    return None
-
-
-def _normalize_path(path: str, project_root: Path | None) -> str:
-    p = Path(path).resolve()
-    norm = p.as_posix().replace("\\", "/")
-    if project_root is not None:
-        try:
-            rel = p.relative_to(project_root.resolve())
-            return rel.as_posix().replace("\\", "/")
-        except ValueError:
-            pass
-    return norm
 
 
 # ------------------------------------------------------------------ #
@@ -78,7 +52,7 @@ class CoordinationEngine:
         namespace: str = "hub",
     ) -> None:
         self._namespace = namespace
-        self._project_root = project_root or _detect_project_root()
+        self._project_root = project_root or detect_project_root()
         self._storage_dir = self._resolve_storage_dir(storage_dir)
         self._pool: _db.ConnectionPool | None = None
 
@@ -215,7 +189,7 @@ class CoordinationEngine:
         lock_type: str = "exclusive", ttl: float = DEFAULT_TTL, force: bool = False,
     ) -> dict[str, Any]:
         now = time.time()
-        norm_path = _normalize_path(document_path, self._project_root)
+        norm_path = normalize_path(document_path, self._project_root)
         with self._connect() as conn:
             row = conn.execute(
                 "SELECT * FROM document_locks WHERE document_path = ?", (norm_path,)
@@ -251,7 +225,7 @@ class CoordinationEngine:
             return {"acquired": True, "document_path": norm_path, "locked_by": agent_id, "expires_at": now + ttl}
 
     def release_lock(self, document_path: str, agent_id: str) -> dict[str, Any]:
-        norm_path = _normalize_path(document_path, self._project_root)
+        norm_path = normalize_path(document_path, self._project_root)
         with self._connect() as conn:
             row = conn.execute(
                 "SELECT locked_by FROM document_locks WHERE document_path = ?", (norm_path,)
@@ -264,13 +238,13 @@ class CoordinationEngine:
             return {"released": True}
 
     def refresh_lock(self, document_path: str, agent_id: str, ttl: float = DEFAULT_TTL) -> dict[str, Any]:
-        norm_path = _normalize_path(document_path, self._project_root)
+        norm_path = normalize_path(document_path, self._project_root)
         with self._connect() as conn:
             result = _lo.refresh_lock(conn, "document_locks", norm_path, agent_id, ttl, "not_locked")
         return result
 
     def get_lock_status(self, document_path: str) -> dict[str, Any]:
-        norm_path = _normalize_path(document_path, self._project_root)
+        norm_path = normalize_path(document_path, self._project_root)
         now = time.time()
         with self._connect() as conn:
             row = conn.execute(
@@ -327,7 +301,7 @@ class CoordinationEngine:
             if now - sib.get("last_heartbeat", 0) <= 60.0:
                 acknowledged_by.append(sib["agent_id"])
         if document_path and acknowledged_by:
-            norm_path = _normalize_path(document_path, self._project_root)
+            norm_path = normalize_path(document_path, self._project_root)
             placeholders = ",".join("?" * len(acknowledged_by))
             with self._connect() as conn:
                 lock_rows = conn.execute(
@@ -346,7 +320,7 @@ class CoordinationEngine:
         released: list[str] = []
         timed_out: list[str] = []
         for path in document_paths:
-            norm_path = _normalize_path(path, self._project_root)
+            norm_path = normalize_path(path, self._project_root)
             remaining = timeout_s - (time.time() - start)
             if remaining <= 0:
                 timed_out.append(norm_path)
@@ -370,7 +344,7 @@ class CoordinationEngine:
     def notify_change(
         self, document_path: str, change_type: str, agent_id: str,
     ) -> dict[str, Any]:
-        norm_path = _normalize_path(document_path, self._project_root)
+        norm_path = normalize_path(document_path, self._project_root)
         return _cn.notify_change(self._connect, norm_path, change_type, agent_id, str(self._project_root))
 
     def get_notifications(
@@ -390,7 +364,7 @@ class CoordinationEngine:
     def get_conflicts(
         self, document_path: str | None = None, agent_id: str | None = None, limit: int = 20,
     ) -> dict[str, Any]:
-        norm_path = _normalize_path(document_path, self._project_root) if document_path else None
+        norm_path = normalize_path(document_path, self._project_root) if document_path else None
         conflicts = _cl.query_conflicts(self._connect, norm_path, agent_id, limit)
         return {"conflicts": conflicts}
 
@@ -468,57 +442,12 @@ class CoordinationEngine:
     # ------------------------------------------------------------------ #
 
     def _context_bundle(self, agent_id: str, parent_id: str | None = None) -> dict[str, Any]:
-        agents = _ar.list_agents(self._connect, active_only=True, stale_timeout=600.0)
-        with self._connect() as conn:
-            locks = conn.execute(
-                "SELECT document_path, locked_by, locked_at, lock_ttl FROM document_locks"
-            ).fetchall()
-            active_locks = []
-            now = time.time()
-            for row in locks:
-                if now <= row["locked_at"] + row["lock_ttl"]:
-                    active_locks.append({
-                        "document_path": row["document_path"],
-                        "locked_by": row["locked_by"],
-                        "expires_at": row["locked_at"] + row["lock_ttl"],
-                    })
-            notifs = conn.execute(
-                "SELECT document_path, change_type, agent_id, created_at "
-                "FROM change_notifications WHERE created_at > ? ORDER BY created_at DESC LIMIT 20",
-                (now - 300,),
-            ).fetchall()
-            resp_row = conn.execute(
-                "SELECT graph_agent_id, role, responsibilities, current_task "
-                "FROM agent_responsibilities WHERE agent_id = ?", (agent_id,)
-            ).fetchone()
-            owned_files = conn.execute(
-                "SELECT document_path FROM file_ownership WHERE assigned_agent_id = ?", (agent_id,)
-            ).fetchall()
-        resp = dict(resp_row) if resp_row else {}
-        responsibilities = json.loads(resp.get("responsibilities", "[]")) if resp else []
-        bundle: dict[str, Any] = {
-            "agent_id": agent_id,
-            "parent_id": parent_id,
-            "worktree_root": str(self._project_root) if self._project_root else os.getcwd(),
-            "registered_agents": [
-                {"agent_id": a["agent_id"], "status": a["status"], "last_heartbeat": a["last_heartbeat"]}
-                for a in agents
-            ],
-            "active_locks": active_locks,
-            "pending_notifications": [dict(n) for n in notifs],
-            "coordination_urls": {
-                "coordinationhub": os.environ.get("COORDINATIONHUB_COORDINATION_URL", f"http://localhost:{self.DEFAULT_PORT}"),
-                "stele": os.environ.get("COORDINATIONHUB_STELE_URL", "http://localhost:9876"),
-                "chisel": os.environ.get("COORDINATIONHUB_CHISEL_URL", "http://localhost:8377"),
-                "trammel": os.environ.get("COORDINATIONHUB_TRAMMEL_URL", "http://localhost:8737"),
-            },
-            "graph_loaded": _g.get_graph() is not None,
-        }
-        if resp:
-            bundle["responsibilities"] = responsibilities
-            bundle["role"] = resp.get("role")
-            bundle["graph_agent_id"] = resp.get("graph_agent_id")
-            bundle["current_task"] = resp.get("current_task")
-        if owned_files:
-            bundle["owned_files"] = [f["document_path"] for f in owned_files]
-        return bundle
+        return build_context_bundle(
+            connect_fn=self._connect,
+            agent_id=agent_id,
+            parent_id=parent_id,
+            project_root=str(self._project_root) if self._project_root else os.getcwd(),
+            graph_getter=_g.get_graph,
+            list_agents_fn=_ar.list_agents,
+            default_port=self.DEFAULT_PORT,
+        )
