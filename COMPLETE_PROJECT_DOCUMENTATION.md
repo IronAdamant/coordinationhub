@@ -25,7 +25,10 @@
 | `coordinationhub/mcp_server.py` | HTTP MCP server (`ThreadedHTTPServer`, stdlib only) | core, dispatch, schemas |
 | `coordinationhub/mcp_stdio.py` | Stdio MCP server (requires optional `mcp` package) | core, mcp_server, schemas |
 | `coordinationhub/cli.py` | argparse CLI argument parser + lazy dispatch (~229 LOC) | core |
-| `coordinationhub/cli_commands.py` | All 26 CLI command handlers, imported on-demand (~671 LOC) | core |
+| `coordinationhub/cli_commands.py` | Re-exports all CLI handlers from domain sub-modules (~34 LOC) | cli_agents, cli_locks, cli_vis |
+| `coordinationhub/cli_agents.py` | Agent identity & lifecycle CLI commands (~205 LOC) | core |
+| `coordinationhub/cli_locks.py` | Document locking & coordination CLI commands (~214 LOC) | core |
+| `coordinationhub/cli_vis.py` | Change awareness, audit, graph & assessment CLI commands (~307 LOC) | core |
 | `coordinationhub/db.py` | SQLite schema + thread-local `ConnectionPool` | (no internal deps) |
 | `coordinationhub/agent_registry.py` | Agent lifecycle: register, heartbeat, deregister, lineage | db |
 | `coordinationhub/lock_ops.py` | Shared lock primitives (refresh, reap, record conflict, query) | db |
