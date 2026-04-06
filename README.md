@@ -183,7 +183,9 @@ When a coordination graph is loaded, agents may also have a `graph_agent_id`
 ```
 coordinationhub/
   __init__.py         — Package init, exports CoordinationEngine, CoordinationHubMCPServer
-  core.py             — CoordinationEngine: all 27 tool methods (~524 LOC)
+  core.py             — CoordinationEngine: all 27 tool methods (~453 LOC)
+  paths.py            — Project-root detection and path normalization (~47 LOC)
+  context.py          — Context bundle builder for register_agent responses (~98 LOC)
   schemas.py           — Schema aggregator, re-exports TOOL_SCHEMAS (~31 LOC)
   schemas_identity.py   — Identity & Registration schemas (~123 LOC)
   schemas_locking.py    — Document Locking schemas (~145 LOC)
@@ -192,30 +194,37 @@ coordinationhub/
   schemas_audit.py     — Audit & Status schemas (~43 LOC)
   schemas_visibility.py — Graph & Visibility schemas (~132 LOC)
   dispatch.py          — Tool dispatch table (~48 LOC)
-  graphs.py           — Coordination graph loader + validator (~310 LOC)
-  visibility.py       — File ownership scan, agent status, file map (~233 LOC)
-  assessment.py       — Assessment runner (~397 LOC)
+  graphs.py           — Thin aggregator re-exporting from sub-modules (~105 LOC)
+  graph_validate.py   — Pure validation functions (~131 LOC)
+  graph_loader.py     — File loading (YAML/JSON) and spec auto-detection (~49 LOC)
+  graph.py            — CoordinationGraph in-memory object (~66 LOC)
+  visibility.py       — Thin re-export aggregator (~15 LOC)
+  scan.py             — File ownership scan (~105 LOC)
+  agent_status.py     — Agent status query and file map helpers (~111 LOC)
+  responsibilities.py — Agent role/responsibilities storage (~35 LOC)
+  agent_registry.py   — Thin re-export aggregator (~23 LOC)
+  registry_ops.py     — Agent lifecycle ops (~107 LOC)
+  registry_query.py   — Agent registry queries (~142 LOC)
+  assessment.py       — Assessment runner (~394 LOC)
   mcp_server.py       — HTTP MCP server (ThreadedHTTPServer, stdlib only)
   mcp_stdio.py        — Stdio MCP server (requires optional mcp package)
   cli.py              — argparse CLI parser + lazy dispatch (~229 LOC)
-  cli_commands.py     — All 26 command handlers (~671 LOC)
-  db.py               — SQLite schema + thread-local ConnectionPool
-  agent_registry.py   — Agent lifecycle: register, heartbeat, deregister, lineage
-  lock_ops.py         — Shared lock primitives
-  conflict_log.py     — Conflict recording and querying
-  notifications.py    — Change notification storage and retrieval
-  tests/              — pytest suite (106 tests, 9 test files)
+  cli_commands.py     — Re-exports all CLI handlers (~43 LOC)
+  cli_agents.py       — Agent identity & lifecycle CLI commands (~205 LOC)
+  cli_locks.py        — Document locking & coordination CLI commands (~214 LOC)
+  cli_vis.py          — Change awareness, audit, graph & assessment CLI commands (~307 LOC)
+  db.py               — SQLite schema + thread-local ConnectionPool (~215 LOC)
+  lock_ops.py         — Shared lock primitives (~119 LOC)
+  conflict_log.py     — Conflict recording and querying (~53 LOC)
+  notifications.py    — Change notification storage and retrieval (~115 LOC)
+  tests/              — pytest suite (150 tests, 11 test files)
 ```
 
 ## Zero-Dependency Guarantee
 
-Core modules (`core.py`, `schemas.py`, `dispatch.py`, `graphs.py`, `visibility.py`,
-`assessment.py`, `mcp_server.py`, `cli.py`, `cli_commands.py`, `db.py`,
-`agent_registry.py`, `lock_ops.py`, `conflict_log.py`, `notifications.py`)
-use **only the Python standard library**.
-
-The `mcp` package is **optional** — only needed for the stdio transport shim
-(`mcp_stdio.py`). Air-gapped install: `pip install coordinationhub[mcp]`.
+Core modules use **only the Python standard library**. The `mcp` package is
+**optional** — only needed for `mcp_stdio.py`. Air-gapped install:
+`pip install coordinationhub --no-deps`.
 
 ## Port Allocation
 
