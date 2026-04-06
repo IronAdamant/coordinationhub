@@ -30,7 +30,10 @@ coordinationhub/
   mcp_server.py       — HTTP MCP server (ThreadedHTTPServer, stdlib only)
   mcp_stdio.py        — Stdio MCP server (optional mcp package required)
   cli.py              — argparse CLI parser + lazy dispatch (~229 LOC)
-  cli_commands.py     — All 26 command handlers (~671 LOC)
+  cli_commands.py     — Re-exports all CLI handlers from domain sub-modules (~34 LOC)
+  cli_agents.py       — Agent identity & lifecycle CLI commands (~205 LOC)
+  cli_locks.py        — Document locking & coordination CLI commands (~214 LOC)
+  cli_vis.py          — Change awareness, audit, graph & assessment CLI commands (~307 LOC)
   db.py               — SQLite schema + thread-local ConnectionPool
   agent_registry.py   — Agent lifecycle: register, heartbeat, deregister, lineage
   lock_ops.py         — Shared lock primitives

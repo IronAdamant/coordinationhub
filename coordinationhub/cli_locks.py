@@ -1,0 +1,214 @@
+"""Document locking and coordination CLI commands."""
+
+from __future__ import annotations
+
+import argparse
+import json
+import sys
+from pathlib import Path
+from typing import Any
+
+from .core import CoordinationEngine
+
+
+def _print_json(data: Any) -> None:
+    print(json.dumps(data, indent=2, default=str))
+
+
+def _engine_from_args(args: argparse.Namespace) -> CoordinationEngine:
+    from pathlib import Path
+    storage_dir = Path(args.storage_dir) if args.storage_dir else None
+    project_root = Path(args.project_root) if args.project_root else None
+    namespace = getattr(args, "namespace", "hub")
+    engine = CoordinationEngine(storage_dir=storage_dir, project_root=project_root, namespace=namespace)
+    engine.start()
+    return engine
+
+
+def _close(engine: CoordinationEngine) -> None:
+    try:
+        engine.close()
+    except Exception:
+        pass
+
+
+def _fmt_lock_result(result: dict[str, Any], document_path: str) -> None:
+    if result.get("acquired"):
+        print(f"LOCKED: {document_path}")
+        print(f"  Agent: {result.get('locked_by')}")
+        print(f"  Expires: {result.get('expires_at')}")
+    elif result.get("released"):
+        print(f"RELEASED: {document_path}")
+    elif result.get("refreshed"):
+        print(f"REFRESHED: {document_path}")
+        print(f"  Expires: {result.get('expires_at')}")
+    else:
+        locked_by = result.get("locked_by", "unknown")
+        expires = result.get("expires_at", "unknown")
+        print(f"FAILED: {document_path} is locked by {locked_by}")
+        print(f"  Expires: {expires}")
+
+
+# ------------------------------------------------------------------ #
+# acquire-lock
+# ------------------------------------------------------------------ #
+
+def cmd_acquire_lock(args):
+    engine = _engine_from_args(args)
+    try:
+        result = engine.acquire_lock(args.document_path, args.agent_id, args.lock_type, args.ttl, args.force)
+        if args.json_output:
+            _print_json(result)
+        else:
+            _fmt_lock_result(result, args.document_path)
+    finally:
+        _close(engine)
+
+
+# ------------------------------------------------------------------ #
+# release-lock
+# ------------------------------------------------------------------ #
+
+def cmd_release_lock(args):
+    engine = _engine_from_args(args)
+    try:
+        result = engine.release_lock(args.document_path, args.agent_id)
+        if args.json_output:
+            _print_json(result)
+        else:
+            if result.get("released"):
+                print(f"RELEASED: {args.document_path}")
+            else:
+                print(f"FAILED: {result.get('reason')}")
+    finally:
+        _close(engine)
+
+
+# ------------------------------------------------------------------ #
+# refresh-lock
+# ------------------------------------------------------------------ #
+
+def cmd_refresh_lock(args):
+    engine = _engine_from_args(args)
+    try:
+        result = engine.refresh_lock(args.document_path, args.agent_id, ttl=args.ttl)
+        if args.json_output:
+            _print_json(result)
+        else:
+            if result.get("refreshed"):
+                print(f"REFRESHED: {args.document_path}")
+                print(f"  Expires: {result.get('expires_at')}")
+            else:
+                print(f"FAILED: {result.get('reason')}")
+    finally:
+        _close(engine)
+
+
+# ------------------------------------------------------------------ #
+# lock-status
+# ------------------------------------------------------------------ #
+
+def cmd_lock_status(args):
+    engine = _engine_from_args(args)
+    try:
+        result = engine.get_lock_status(args.document_path)
+        if args.json_output:
+            _print_json(result)
+        else:
+            if result.get("locked"):
+                print(f"LOCKED: {args.document_path}")
+                print(f"  By: {result.get('locked_by')}")
+                print(f"  Expires: {result.get('expires_at')}")
+            else:
+                print(f"UNLOCKED: {args.document_path}")
+    finally:
+        _close(engine)
+
+
+# ------------------------------------------------------------------ #
+# release-agent-locks
+# ------------------------------------------------------------------ #
+
+def cmd_release_agent_locks(args):
+    engine = _engine_from_args(args)
+    try:
+        result = engine.release_agent_locks(args.agent_id)
+        if args.json_output:
+            _print_json(result)
+        else:
+            print(f"Released {result.get('released', 0)} lock(s) for {args.agent_id}")
+    finally:
+        _close(engine)
+
+
+# ------------------------------------------------------------------ #
+# reap-expired-locks
+# ------------------------------------------------------------------ #
+
+def cmd_reap_expired_locks(args):
+    engine = _engine_from_args(args)
+    try:
+        result = engine.reap_expired_locks()
+        if args.json_output:
+            _print_json(result)
+        else:
+            print(f"Reaped {result.get('reaped', 0)} expired lock(s)")
+    finally:
+        _close(engine)
+
+
+# ------------------------------------------------------------------ #
+# reap-stale-agents
+# ------------------------------------------------------------------ #
+
+def cmd_reap_stale_agents(args):
+    engine = _engine_from_args(args)
+    try:
+        result = engine.reap_stale_agents(timeout=args.timeout)
+        if args.json_output:
+            _print_json(result)
+        else:
+            print(f"Reaped {result.get('reaped', 0)} stale agent(s)")
+            print(f"  Orphaned children: {result.get('orphaned_children', 0)}")
+    finally:
+        _close(engine)
+
+
+# ------------------------------------------------------------------ #
+# broadcast
+# ------------------------------------------------------------------ #
+
+def cmd_broadcast(args):
+    engine = _engine_from_args(args)
+    try:
+        result = engine.broadcast(args.agent_id, document_path=getattr(args, "document_path", None))
+        if args.json_output:
+            _print_json(result)
+        else:
+            ack = result.get("acknowledged_by", [])
+            conflicts = result.get("conflicts", [])
+            print(f"Broadcast from {args.agent_id}")
+            print(f"  Acknowledged by: {ack or '(none)'}")
+            if conflicts:
+                print(f"  Conflicts:")
+                for c in conflicts:
+                    print(f"    {c['document_path']} locked by {c['locked_by']}")
+    finally:
+        _close(engine)
+
+
+# ------------------------------------------------------------------ #
+# wait-for-locks
+# ------------------------------------------------------------------ #
+
+def cmd_wait_for_locks(args):
+    engine = _engine_from_args(args)
+    try:
+        result = engine.wait_for_locks(args.document_paths, args.agent_id, timeout_s=args.timeout)
+        if args.json_output:
+            _print_json(result)
+        else:
+            print(f"Released: {result.get('released') or '(none)'}")
+            print(f"Timed out: {result.get('timed_out') or '(none)'}")
+    finally:
+        _close(engine)
