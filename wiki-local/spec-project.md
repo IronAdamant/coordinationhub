@@ -1,7 +1,7 @@
 # CoordinationHub — Multi-Agent Swarm Coordination MCP
 
-**Version:** 0.1.0  
-**Language:** Python 3.10+ (stdlib-only core — **zero third-party dependencies**, `mcp` optional for stdio only)  
+**Version:** 0.3.0
+**Language:** Python 3.10+ (stdlib-only core — **zero third-party dependencies**, `mcp` optional for stdio only)
 **Transports:** stdio + HTTP (both, like Stele/Chisel/Trammel)
 
 ## Purpose
@@ -40,8 +40,14 @@ The **core** module (all `.py` files except `mcp_stdio.py`) uses **only the Pyth
 | `conflict_log.py` | `sqlite3`, `time`, `json` |
 | `notifications.py` | `sqlite3`, `time` |
 | `core.py` | `sqlite3`, `pathlib`, `os`, `time`, `json`, `threading` |
-| `mcp_server.py` | `http.server`, `socketserver`, `json`, `threading`, `subprocess` |
+| `graphs.py` | `pathlib`, `json` (optional `ruamel.yaml`) |
+| `visibility.py` | `pathlib`, `time`, `json` |
+| `assessment.py` | `pathlib`, `time`, `json`, `sqlite3` |
+| `schemas.py` | `pathlib`, `json` |
+| `dispatch.py` | (no deps) |
+| `mcp_server.py` | `http.server`, `socketserver`, `json`, `threading` |
 | `cli.py` | `argparse`, `pathlib` |
+| `cli_commands.py` | `argparse`, `pathlib`, `json` |
 
 **No third-party packages in core.** No `requests`, no `httpx`, no `aiohttp`, no external HTTP libraries. The HTTP server is built entirely on `http.server` + `socketserver.ThreadingMixIn`.
 
@@ -49,7 +55,7 @@ The `mcp` package (from the official MCP SDK) is **optional** — only needed fo
 
 **Air-gapped install:** `pip install -e . --no-deps` installs everything needed for HTTP transport. Stdin/stdout transport requires `pip install -e '.[mcp]'` only if stdio is needed.
 
-All four MCPs in this suite are designed so a complete air-gapped install works with just `pip install -e .`.
+---
 
 ## Core Concepts
 
@@ -67,8 +73,6 @@ ${PREFIX}.${WORKTREE_PID}.${AGENT_SEQ}
 
 Example: `hub.12345.0`, `hub.12345.1`, `hub.12345.1.0` (child of `hub.12345.1`)
 
-The hierarchy is flat at the storage level (sequence numbers only) but the ID encodes lineage via dot-separated segments.
-
 ### Agent Lineage
 
 When agent A spawns agent B:
@@ -76,12 +80,6 @@ When agent A spawns agent B:
 2. B receives a sequence number under A's namespace branch
 3. The lineage is recorded in the DB as `(parent_id, child_id, spawned_at)`
 4. B's ID encodes the full path: `hub.PID.parent_seq.child_seq`
-
-This allows any agent to:
-- Derive its **lineage** from its own ID
-- Find all **descendants** by prefix-matching
-- Find all **siblings** (same parent) via lineage lookup
-- Find the **parent** by stripping the last segment
 
 ### Coordination Context Bundle
 
@@ -104,8 +102,6 @@ When an agent registers (or when a parent spawns a child), the bundle returned i
 }
 ```
 
-This bundle is the **single source of truth** an agent uses to understand its environment. Passed explicitly to spawned sub-agents.
-
 ### Document Locking
 
 Files are locked before modification, released after. Locks have:
@@ -114,22 +110,49 @@ Files are locked before modification, released after. Locks have:
 - **Force-steal**: override with conflict recording
 - **Shared locks**: for reads; **exclusive locks**: for writes
 
-### Conflict Detection
+### Declarative Coordination Graph
 
-When lock acquisition fails because another agent holds the lock:
-- Return `{acquired: false, locked_by: "...", locked_at: ..., expires_at: ...}`
-- Agent chooses: wait, retry, or abort
-- The **coordinator** (parent agent) mediates if needed
+Agents, handoffs, escalation rules, and assessment criteria defined in
+`coordination_spec.yaml` (or `.json`) at project root. The graph is loaded
+automatically on engine startup.
 
-### Heartbeat Protocol
+```yaml
+agents:
+  - id: planner
+    role: decompose tasks
+    responsibilities: [break down user stories, assign subtasks]
+  - id: executor
+    role: implement
+    responsibilities: [write code, run tests]
 
-Agents send heartbeats every 30s. Missing 2+ heartbeats = stale:
-- Stale agents' locks are released
-- Stale agents' children become orphaned (inherit grandparent lineage)
+handoffs:
+  - from: planner
+    to: executor
+    condition: task_size < 500
+
+assessment:
+  metrics: [role_stability, handoff_latency, outcome_verifiability, protocol_adherence]
+```
+
+### File Ownership
+
+`scan_project(worktree_root?, extensions?)` recursively scans the worktree
+and upserts every tracked file into `file_ownership`. Ownership is assigned
+by nearest-ancestor directory rule, with fallback to the first-registered
+active agent.
+
+### Assessment Runner
+
+`run_assessment(suite_path, format?)` loads a JSON trace suite, scores each
+trace against 4 metric scorers, and outputs a Markdown report. Metric scorers:
+- **role_stability**: events mapped to declared responsibilities in graph
+- **handoff_latency**: handoff from/to pairs validated against graph
+- **outcome_verifiability**: lock-write-unlock patterns per file
+- **protocol_adherence**: agents act within declared responsibilities
 
 ---
 
-## SQLite Schema
+## SQLite Schema (v0.3.0)
 
 ### Tables
 
@@ -149,8 +172,8 @@ Agents send heartbeats every 30s. Missing 2+ heartbeats = stale:
 
 | Column | Type | Description |
 |--------|------|-------------|
-| `parent_id` | TEXT PK | Parent agent ID |
-| `child_id` | TEXT PK | Child agent ID |
+| `parent_id` | TEXT PK (composite) | Parent agent ID |
+| `child_id` | TEXT PK (composite) | Child agent ID |
 | `spawned_at` | REAL NOT NULL | Unix timestamp |
 
 #### `document_locks`
@@ -188,541 +211,102 @@ Agents send heartbeats every 30s. Missing 2+ heartbeats = stale:
 | `worktree_root` | TEXT | Worktree |
 | `created_at` | REAL NOT NULL | Unix timestamp |
 
-#### `coordination_context`
+#### `agent_responsibilities` (NEW in 0.3.0)
 
 | Column | Type | Description |
 |--------|------|-------------|
-| `key` | TEXT PK | Context key |
-| `value` | TEXT | JSON-encoded value |
+| `agent_id` | TEXT PK | Agent ID |
+| `graph_agent_id` | TEXT | ID in the coordination graph |
+| `role` | TEXT | Role string |
+| `model` | TEXT | Model name |
+| `responsibilities` | TEXT | JSON-encoded list |
+| `current_task` | TEXT | Human-readable current task |
 | `updated_at` | REAL NOT NULL | Unix timestamp |
+
+#### `file_ownership` (NEW in 0.3.0)
+
+| Column | Type | Description |
+|--------|------|-------------|
+| `document_path` | TEXT PK | Project-relative path |
+| `assigned_agent_id` | TEXT NOT NULL | Agent who owns this file |
+| `assigned_at` | REAL NOT NULL | Unix timestamp |
+| `last_claimed_by` | TEXT | Agent who last claimed ownership |
+| `task_description` | TEXT | Description of work on this file |
+
+#### `assessment_results` (NEW in 0.3.0)
+
+| Column | Type | Description |
+|--------|------|-------------|
+| `id` | INTEGER PK | Auto-increment |
+| `suite_name` | TEXT NOT NULL | Test suite name |
+| `metric` | TEXT NOT NULL | Metric name |
+| `score` | REAL NOT NULL | Score (0–1) |
+| `details_json` | TEXT | Additional details |
+| `run_at` | REAL NOT NULL | Unix timestamp |
 
 ---
 
-## MCP Tools (17)
+## MCP Tools (27 total — v0.3.0)
 
 ### Identity & Registration
 
-#### `register_agent`
-
-Register this agent and receive coordination context bundle.
-
-**Arguments:**
-```json
-{
-  "agent_id": "hub.12345.1.0",
-  "parent_id": "hub.12345.1",
-  "worktree_root": "/absolute/path/to/project"
-}
-```
-
-**Response:**
-```json
-{
-  "agent_id": "hub.12345.1.0",
-  "parent_id": "hub.12345.1",
-  "worktree_root": "/absolute/path/to/project",
-  "registered_agents": [
-    {"agent_id": "hub.12345.0", "status": "active", "last_heartbeat": 1234567890.123}
-  ],
-  "active_locks": [
-    {"document_path": "src/auth.py", "locked_by": "hub.12345.0", "expires_at": 1234568190.123}
-  ],
-  "pending_notifications": [],
-  "coordination_urls": {
-    "coordinationhub": "http://localhost:9877",
-    "stele": "http://localhost:9876",
-    "chisel": "http://localhost:8377",
-    "trammel": "http://localhost:8737"
-  }
-}
-```
-
-**Behavior:**
-- If `agent_id` already registered and heartbeat is fresh: return context (no-op)
-- If `agent_id` already registered but stale: update heartbeat, return context
-- If new: insert, set parent-child lineage, return full context
-
-#### `heartbeat`
-
-Update last-seen timestamp and reap stale locks if eligible.
-
-**Arguments:** `{}` (agent_id inferred from context)
-
-**Response:**
-```json
-{
-  "updated": true,
-  "stale_released": 2,
-  "next_heartbeat_in": 30
-}
-```
-
-#### `deregister_agent`
-
-Mark agent as stopped and release all its locks.
-
-**Arguments:** `{}`
-
-**Response:**
-```json
-{
-  "deregistered": true,
-  "locks_released": 3,
-  "children_orphaned": 2
-}
-```
-
-**Behavior:**
-- Children are **orphaned** — their `parent_id` is set to their **grandparent** (or NULL if root)
-- This prevents cascade failures from killing an entire subtree
-
-#### `list_agents`
-
-List all registered agents.
-
-**Arguments:**
-```json
-{
-  "active_only": true,
-  "stale_timeout": 600.0
-}
-```
-
-**Response:**
-```json
-{
-  "agents": [
-    {
-      "agent_id": "hub.12345.0",
-      "parent_id": null,
-      "worktree_root": "/home/aron/project",
-      "status": "active",
-      "last_heartbeat": 1234567890.123,
-      "stale": false
-    }
-  ]
-}
-```
-
-#### `get_lineage`
-
-Get agent's full ancestry and descendants.
-
-**Arguments:**
-```json
-{
-  "agent_id": "hub.12345.1.0"
-}
-```
-
-**Response:**
-```json
-{
-  "ancestors": [
-    {"agent_id": "hub.12345.0", "parent_id": null},
-    {"agent_id": "hub.12345.1", "parent_id": "hub.12345.0"}
-  ],
-  "descendants": [
-    {"agent_id": "hub.12345.1.0", "parent_id": "hub.12345.1"}
-  ]
-}
-```
-
-#### `get_siblings`
-
-Get agents with the same parent.
-
-**Arguments:** `{}`
-
-**Response:**
-```json
-{
-  "siblings": [
-    {"agent_id": "hub.12345.1.1", "status": "active", "last_heartbeat": 1234567890.123}
-  ]
-}
-```
-
----
+`register_agent`, `heartbeat`, `deregister_agent`, `list_agents`, `get_lineage`, `get_siblings`
 
 ### Document Locking
 
-#### `acquire_lock`
-
-Acquire a lock on a document path.
-
-**Arguments:**
-```json
-{
-  "document_path": "src/auth.py",
-  "lock_type": "exclusive",
-  "ttl": 300.0,
-  "force": false
-}
-```
-
-**Response (success):**
-```json
-{
-  "acquired": true,
-  "document_path": "src/auth.py",
-  "locked_by": "hub.12345.1.0",
-  "expires_at": 1234568190.123
-}
-```
-
-**Response (failure — contested):**
-```json
-{
-  "acquired": false,
-  "locked_by": "hub.12345.1.1",
-  "locked_at": 1234567890.123,
-  "expires_at": 1234568190.123,
-  "worktree": "/home/aron/project"
-}
-```
-
-**Behavior:**
-- Shared locks (`lock_type: "shared"`): allow concurrent shared locks, block exclusive
-- Exclusive locks: block all other locks
-- `force: true`: steal lock, record conflict in `lock_conflicts`
-- Paths are **project-relative** (normalized internally)
-
-#### `release_lock`
-
-Release a held lock.
-
-**Arguments:**
-```json
-{
-  "document_path": "src/auth.py"
-}
-```
-
-**Response:**
-```json
-{
-  "released": true
-}
-```
-
-**Behavior:**
-- Only the lock owner can release
-- Returns `{released: false, reason: "not_locked"}` if not locked
-- Returns `{released: false, reason: "not_owner"}` if wrong agent
-
-#### `refresh_lock`
-
-Extend a lock's TTL without releasing it.
-
-**Arguments:**
-```json
-{
-  "document_path": "src/auth.py",
-  "ttl": 300.0
-}
-```
-
-**Response:**
-```json
-{
-  "refreshed": true,
-  "expires_at": 1234568490.123
-}
-```
-
-#### `get_lock_status`
-
-Check if a document is currently locked.
-
-**Arguments:**
-```json
-{
-  "document_path": "src/auth.py"
-}
-```
-
-**Response:**
-```json
-{
-  "locked": true,
-  "locked_by": "hub.12345.1.0",
-  "locked_at": 1234567890.123,
-  "expires_at": 1234568190.123,
-  "worktree": "/home/aron/project"
-}
-```
-
-#### `release_agent_locks`
-
-Release all locks held by a given agent (for cleanup after agent dies).
-
-**Arguments:**
-```json
-{
-  "agent_id": "hub.12345.1.0"
-}
-```
-
-**Response:**
-```json
-{
-  "released": 5
-}
-```
-
----
+`acquire_lock`, `release_lock`, `refresh_lock`, `get_lock_status`,
+`release_agent_locks`, `reap_expired_locks`, `reap_stale_agents`
 
 ### Coordination Actions
 
-#### `broadcast`
-
-Announce an intention to siblings before taking an action.
-
-**Arguments:**
-```json
-{
-  "message": "about_to_modify",
-  "document_path": "src/auth.py",
-  "action": "refactor",
-  "ttl": 30
-}
-```
-
-**Response:**
-```json
-{
-  "acknowledged_by": ["hub.12345.1.1"],
-  "conflicts": []
-}
-```
-
-**Behavior:**
-- Sends to all siblings (same parent)
-- Agents that are busy doing other work may not ack
-- Returns list of agents that acknowledged and any lock conflicts detected
-
-#### `wait_for_locks`
-
-Block until specified locks are released or timeout.
-
-**Arguments:**
-```json
-{
-  "document_paths": ["src/auth.py", "src/config.py"],
-  "timeout_s": 60
-}
-```
-
-**Response:**
-```json
-{
-  "released": ["src/auth.py"],
-  "timed_out": ["src/config.py"]
-}
-```
-
-#### `reap_expired_locks`
-
-Clear all expired locks (called automatically by heartbeat, can be called manually).
-
-**Arguments:** `{}`
-
-**Response:**
-```json
-{
-  "reaped": 2
-}
-```
-
-#### `reap_stale_agents`
-
-Mark stale agents as stopped and release their locks.
-
-**Arguments:**
-```json
-{
-  "timeout": 600.0
-}
-```
-
-**Response:**
-```json
-{
-  "reaped": 3,
-  "orphaned_children": 5
-}
-```
-
-**Behavior:**
-- Reaps agents with no heartbeat for `timeout` seconds
-- For each reaped agent, orphans its children (grandparent becomes parent)
-- Cascade: recursively reap orphaned children's children if they have no heartbeat
-
----
+`broadcast` — checks lock state only, no message forwarding
+`wait_for_locks`
 
 ### Change Awareness
 
-#### `notify_change`
+`notify_change`, `get_notifications`, `prune_notifications`
 
-Record a change event for other agents to poll.
+### Audit
 
-**Arguments:**
-```json
-{
-  "document_path": "src/auth.py",
-  "change_type": "modified",
-  "agent_id": "hub.12345.1.0"
-}
-```
+`get_conflicts`, `status`
 
-**Response:** `{"recorded": true}`
+### Graph & Visibility (7 NEW in 0.3.0)
 
-#### `get_notifications`
-
-Poll for changes since a timestamp.
-
-**Arguments:**
-```json
-{
-  "since": 1234567890.123,
-  "exclude_agent": "hub.12345.1.0",
-  "limit": 100
-}
-```
-
-**Response:**
-```json
-{
-  "notifications": [
-    {
-      "document_path": "src/auth.py",
-      "change_type": "modified",
-      "agent_id": "hub.12345.1.1",
-      "created_at": 1234567891.234
-    }
-  ]
-}
-```
-
-#### `prune_notifications`
-
-Clean up old notifications.
-
-**Arguments:**
-```json
-{
-  "max_age_seconds": 3600,
-  "max_entries": 1000
-}
-```
-
-**Response:**
-```json
-{
-  "pruned": 42
-}
-```
+`load_coordination_spec`, `validate_graph`, `scan_project`,
+`get_agent_status`, `get_file_agent_map`, `update_agent_status`, `run_assessment`
 
 ---
 
-### Conflict Audit
-
-#### `get_conflicts`
-
-Query the conflict log.
-
-**Arguments:**
-```json
-{
-  "document_path": "src/auth.py",
-  "agent_id": null,
-  "limit": 20
-}
-```
-
-**Response:**
-```json
-{
-  "conflicts": [
-    {
-      "document_path": "src/auth.py",
-      "agent_a": "hub.12345.1.0",
-      "agent_b": "hub.12345.1.1",
-      "conflict_type": "lock_stolen",
-      "resolution": "force_overwritten",
-      "created_at": 1234567891.234
-    }
-  ]
-}
-```
-
----
-
-### Status
-
-#### `status`
-
-Get a summary of the coordination system state.
-
-**Arguments:** `{}`
-
-**Response:**
-```json
-{
-  "registered_agents": 5,
-  "active_agents": 4,
-  "active_locks": 3,
-  "pending_notifications": 12,
-  "recent_conflicts": 1,
-  "tools": 17
-}
-```
-
----
-
-## Transport Layer
-
-Two transports, like Stele/Chisel/Trammel:
-
-### stdio (`mcp_stdio.py`)
-
-Entry point: `coordinationhub-mcp`
-```bash
-coordinationhub-mcp  # starts stdio MCP server
-```
-
-### HTTP (`mcp_server.py`)
-
-Entry point: `coordinationhub serve --port 9877`
-```bash
-coordinationhub serve --port 9877  # starts HTTP MCP server
-```
-
-Default port: `9877`
-
----
-
-## Project Layout
+## Project Layout (v0.3.0)
 
 ```
 coordinationhub/
   __init__.py          -- __version__, public API
-  core.py              -- CoordinationEngine: all business logic
-  db.py                -- SQLite schema, migrations, connection pool
-  agent_registry.py    -- Agent lifecycle: register, heartbeat, deregister, lineage
-  lock_ops.py          -- Lock primitives: acquire, release, refresh, reap
-  conflict_log.py     -- Conflict recording and querying
-  notifications.py    -- Change notification storage and retrieval
-  transport_agnostic.py -- Shared dispatch and schema (used by both transports)
+  core.py              -- CoordinationEngine: all business logic (~524 LOC)
+  schemas.py           -- JSON Schema for all 27 tools (~574 LOC)
+  dispatch.py          -- Tool dispatch table (~48 LOC)
+  graphs.py            -- Graph loader + CoordinationGraph (~310 LOC)
+  visibility.py        -- File ownership scan, agent status (~233 LOC)
+  assessment.py        -- Assessment runner (~397 LOC)
   mcp_server.py        -- HTTP MCP server + request handler
   mcp_stdio.py         -- stdio MCP server entry point
-  cli.py               -- argparse CLI entry point
+  cli.py               -- argparse CLI parser + lazy dispatch (~229 LOC)
+  cli_commands.py      -- All 26 command handlers (~671 LOC)
+  db.py                -- SQLite schema, connection pool
+  agent_registry.py    -- Agent lifecycle
+  lock_ops.py          -- Lock primitives
+  conflict_log.py      -- Conflict recording
+  notifications.py    -- Change notifications
 tests/
-  test_agent_registry.py
+  conftest.py
+  test_agent_lifecycle.py
   test_lock_ops.py
   test_notifications.py
+  test_conflicts.py
   test_coordination.py
+  test_visibility.py
+  test_graphs.py
+  test_assessment.py
 pyproject.toml
 README.md
 CLAUDE.md
@@ -736,22 +320,21 @@ wiki-local/
 
 ---
 
-## Concurrency Model
+## Transport Layer
 
-- **Single SQLite DB**: `<worktree_root>/.coordinationhub/coordination.db`
-- **WAL mode + busy timeout**: 30s, exponential backoff retry
-- **Thread-local connections**: connection pool (max 1 per thread, reused)
-- **Process-level file lock**: `fcntl.flock` on `.lock` sidecar (Unix; Windows: `msvcrt`)
-- **No cross-process shared memory**: all coordination via SQLite + file locks
+### stdio (`mcp_stdio.py`)
 
----
+```bash
+coordinationhub serve-mcp
+```
 
-## Path Normalization
+### HTTP (`mcp_server.py`)
 
-- All `document_path` values are **project-relative**
-- Project root is determined by `_detect_project_root()` (same logic as Stele/Chisel — walks up from CWD looking for `.git`)
-- Paths outside the project root are stored as absolute paths
-- Path separator normalization: `\` → `/` on all platforms
+```bash
+coordinationhub serve --port 9877
+```
+
+Default port: `9877`
 
 ---
 
@@ -766,61 +349,6 @@ wiki-local/
 
 ---
 
-## Integration with Stele/Chisel/Trammel
-
-When all four MCP servers are running, a coordinator agent can:
-
-1. Call `coordinationhub.register_agent` → receives context bundle
-2. Call `coordinationhub.acquire_lock("src/auth.py")` → locks before writing
-3. Call `stele.index_documents(["src/auth.py"])` → re-index after changes
-4. Call `coordinationhub.notify_change("src/auth.py", "modified")` → notify peers
-5. Call `coordinationhub.release_lock("src/auth.py")` → release lock
-
-Siblings can poll `coordinationhub.get_notifications(since=...)` to see what changed.
-
----
-
-## LLM Orchestration Guide
-
-### Spawning Contract
-
-When an LLM spawns a sub-agent, the sub-agent **must** receive this coordination context in its system prompt:
-
-```
-You are part of a multi-agent swarm coordinated via CoordinationHub.
-Your agent ID: {agent_id}
-Coordination server: http://localhost:9877
-Your parent: {parent_id}
-Your siblings: {siblings}
-
-RULES:
-1. On startup: call register_agent() with your agent_id and parent_id
-2. Before writing any file: call acquire_lock(document_path="path/to/file")
-3. After writing: call release_lock(document_path="path/to/file")
-4. Every 30s: call heartbeat()
-5. Before major actions: call broadcast(message="about_to_modify", document_path=...)
-6. On completion: call deregister_agent()
-
-If you spawn a sub-agent, pass this full coordination context bundle in its system prompt.
-```
-
-### Multi-Agent Workflow Example
-
-```
-1. Coordinator (root agent) receives task: "refactor auth module"
-2. Coordinator calls decompose(trammel) → gets strategy steps
-3. Coordinator calls coordinationhub.register_agent() → gets agent_id "hub.12345.0"
-4. For parallel branch A (src/auth.py): 
-   - Coordinator spawns sub-agent with agent_id="hub.12345.1", parent_id="hub.12345.0"
-   - Sub-agent calls register_agent(), acquires locks, does work, releases, deregisters
-5. For parallel branch B (src/users.py):
-   - Coordinator spawns sub-agent with agent_id="hub.12345.2", parent_id="hub.12345.0"
-   - Sub-agent calls register_agent(), acquires locks, does work, releases, deregisters
-6. Coordinator calls trammel.complete_plan() → saves recipe
-```
-
----
-
 ## Version History
 
 ### 0.1.0 — Initial design
@@ -832,3 +360,21 @@ If you spawn a sub-agent, pass this full coordination context bundle in its syst
 - Heartbeat with stale detection and cascade orphaning
 - stdio and HTTP transports
 - 17 MCP tools
+
+### 0.2.0 — Audit fixes
+- `lineage` table composite PK fix
+- `generate_agent_id` double-dot collision fix
+- `record_conflict` bind count fix
+- `refresh_lock` expiry arithmetic fix
+- `broadcast` message/action params removed
+- 20 MCP tools
+
+### 0.3.0 — Strategic redesign
+- Declarative coordination graphs (YAML/JSON)
+- File ownership tracking via worktree scan
+- Visibility layer: `get_agent_status`, `get_file_agent_map`, `dashboard`
+- Assessment runner with 4 real metric scorers
+- 27 MCP tools
+- `schemas.py` split into `schemas.py` + `dispatch.py`
+- `cli.py` split into `cli.py` + `cli_commands.py`
+- New modules: `visibility.py`, `dispatch.py`, `cli_commands.py`

@@ -1,11 +1,77 @@
 # LLM_Development.md — CoordinationHub
 
-**Version:** 0.2.0
+**Version:** 0.3.0
 **Last updated:** 2026-04-06
 
 ## Change Log
 
 All significant changes to the CoordinationHub project are documented here in reverse chronological order.
+
+---
+
+## 2026-04-06 — v0.3.0 Strategic Redesign
+
+### New Modules
+
+**`visibility.py` (NEW):**
+- File ownership scan, agent status, and file map helpers extracted from `graphs.py`
+- Functions: `store_responsibilities`, `update_agent_status_tool`, `get_agent_status_tool`, `get_file_agent_map_tool`, `scan_project_tool`, `_default_owner_agent`
+- All functions receive `connect` callable — zero internal deps
+
+**`dispatch.py` (NEW):**
+- `TOOL_DISPATCH` table extracted from `schemas.py`
+- Maps `tool_name → (engine_method_name, allowed_kwargs)`
+- `schemas.py` retains only `TOOL_SCHEMAS`
+
+**`cli_commands.py` (NEW):**
+- All 26 CLI command handlers extracted from `cli.py`
+- Imported lazily on-demand to keep startup time minimal
+
+### Architecture Changes
+
+**`schemas.py` split:**
+- `schemas.py` (~574 LOC): JSON Schema for all 27 tool parameters only
+- `dispatch.py` (~48 LOC): `TOOL_DISPATCH` table only
+- Updated imports in `core.py`, `mcp_server.py`, `test_notifications.py`
+
+**`core.py` refactoring:**
+- `update_agent_status` delegation fixed: now routes to `_v.update_agent_status_tool` (was `_g.update_agent_status_tool`)
+- `store_responsibilities` call fixed: now calls `_v.store_responsibilities` (was `_g.store_responsibilities`)
+- `core.py` now imports `dispatch.py` instead of `schemas.py` for `TOOL_DISPATCH`
+
+**`cli.py` split (776 → 229 LOC):**
+- `cli.py`: argument parser + lazy dispatch only
+- `cli_commands.py`: all 26 command handlers, imported on-demand
+
+### Assessment Runner — Real Metric Implementations
+
+All four metric scorers replaced with real implementations:
+
+**`score_role_stability`:** Maps event types to declared responsibilities from the graph. Penalizes events outside the agent's declared scope. Lock/unlock/notify_change always permitted.
+
+**`score_handoff_latency`:** Validates handoff from/to pairs against graph definitions. Partial credit (0.5) for correct pair without condition, full credit (1.0) when condition is present and non-trivial.
+
+**`score_outcome_verifiability`:** Evaluates lock-write-unlock patterns per file. Tracks locked paths, scores modification events as verified only if path was previously locked. Unlocked paths contribute to verification score.
+
+**`score_protocol_adherence`:** Checks agents act within declared responsibilities. Violations reduce score proportionally. Events outside scope are penalized.
+
+### Bug Fixes (from v0.2.0 audit)
+
+- **Visibility schema duplication eliminated:** `_init_visibility_schema()` removed from `core.py`; visibility tables now defined only in `db.py._SCHEMAS`
+- **json.loads(None) TypeError:** `resp.get("responsibilities") or "[]"` guard added — was failing when key exists with null value
+- **SQL tuple placeholder bug:** `(agent_id,)` added trailing comma — was unpacking string chars as individual bindings
+- **YAML test failures:** Tests now skip when `ruamel.yaml` unavailable; JSON used as fallback
+- **Graph validation missing agents check:** Added `if "agents" not in data: errors.append("agents: required field is missing")`
+- **test_validate_missing_agents_field:** Now correctly fails invalid graphs
+
+### CLI Changes
+
+**`broadcast` positional `message` arg removed:** CLI no longer accepts positional message argument. `broadcast` only checks lock state, it does not store or forward messages.
+
+### Version Bump
+
+- `coordinationhub/__init__.py`: `__version__ = "0.3.0"`
+- `pyproject.toml`: `version = "0.3.0"`
 
 ---
 
