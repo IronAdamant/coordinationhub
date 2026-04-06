@@ -1,0 +1,1 @@
+"""CoordinationHub test suite."""
