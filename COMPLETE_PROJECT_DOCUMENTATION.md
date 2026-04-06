@@ -8,7 +8,9 @@
 | Path | Purpose | Dependencies |
 |------|---------|--------------|
 | `coordinationhub/__init__.py` | Package init, exports `CoordinationEngine`, `CoordinationHubMCPServer` | core, mcp_server |
-| `coordinationhub/core.py` | `CoordinationEngine` — all 27 MCP tool methods + helpers (~524 LOC) | db, agent_registry, lock_ops, conflict_log, notifications, graphs, visibility, assessment |
+| `coordinationhub/core.py` | `CoordinationEngine` — all 27 MCP tool methods + helpers (~454 LOC) | db, agent_registry, lock_ops, conflict_log, notifications, graphs, visibility, assessment, paths, context |
+| `coordinationhub/paths.py` | Project-root detection and path normalization (~47 LOC) | (no internal deps) |
+| `coordinationhub/context.py` | Context bundle builder for `register_agent` responses (~98 LOC) | (no internal deps) |
 | `coordinationhub/schemas.py` | Schema aggregator — imports all groups, re-exports `TOOL_SCHEMAS` (~31 LOC) | (no internal deps) |
 | `coordinationhub/schemas_identity.py` | Identity & Registration schemas (6 tools, ~123 LOC) | (no internal deps) |
 | `coordinationhub/schemas_locking.py` | Document Locking schemas (7 tools, ~145 LOC) | (no internal deps) |
@@ -19,7 +21,7 @@
 | `coordinationhub/dispatch.py` | Tool dispatch table: name → (method_name, allowed_kwargs) (~48 LOC) | (no internal deps) |
 | `coordinationhub/graphs.py` | Coordination graph loader + validator + in-memory `CoordinationGraph` | (no internal deps; optional ruamel.yaml) |
 | `coordinationhub/visibility.py` | File ownership scan, agent status, file map helpers | graphs |
-| `coordinationhub/assessment.py` | Assessment runner, 4 metric scorers, Markdown report generator (~397 LOC) | graphs |
+| `coordinationhub/assessment.py` | Assessment runner, 4 metric scorers, Markdown report generator (~394 LOC) | graphs |
 | `coordinationhub/mcp_server.py` | HTTP MCP server (`ThreadedHTTPServer`, stdlib only) | core, dispatch, schemas |
 | `coordinationhub/mcp_stdio.py` | Stdio MCP server (requires optional `mcp` package) | core, mcp_server, schemas |
 | `coordinationhub/cli.py` | argparse CLI argument parser + lazy dispatch (~229 LOC) | core |
@@ -38,9 +40,10 @@
 | `tests/test_visibility.py` | Visibility tools, file scan, graph loading tests (14 tests) | conftest, graphs |
 | `tests/test_graphs.py` | Graph validation and CoordinationGraph tests (14 tests) | graphs |
 | `tests/test_assessment.py` | Assessment runner tests (9 tests) | assessment, graphs |
+| `tests/test_integration.py` | HTTP transport integration tests (15 tests) | conftest, core |
 | `pyproject.toml` | Package config, dependencies, entry points | — |
 
-**Total: 106 tests across 9 test files.**
+**Total: 124 tests across 10 test files.**
 
 ---
 
