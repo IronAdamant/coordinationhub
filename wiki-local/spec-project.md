@@ -283,7 +283,13 @@ trace against 4 metric scorers, and outputs a Markdown report. Metric scorers:
 coordinationhub/
   __init__.py          -- __version__, public API
   core.py              -- CoordinationEngine: all business logic (~524 LOC)
-  schemas.py           -- JSON Schema for all 27 tools (~574 LOC)
+  schemas.py           -- Schema aggregator, re-exports TOOL_SCHEMAS (~31 LOC)
+  schemas_identity.py   -- Identity & Registration schemas (~123 LOC)
+  schemas_locking.py    -- Document Locking schemas (~145 LOC)
+  schemas_coordination.py -- Coordination Action schemas (~59 LOC)
+  schemas_change.py     -- Change Awareness schemas (~77 LOC)
+  schemas_audit.py     -- Audit & Status schemas (~43 LOC)
+  schemas_visibility.py -- Graph & Visibility schemas (~132 LOC)
   dispatch.py          -- Tool dispatch table (~48 LOC)
   graphs.py            -- Graph loader + CoordinationGraph (~310 LOC)
   visibility.py        -- File ownership scan, agent status (~233 LOC)

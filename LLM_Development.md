@@ -29,8 +29,14 @@ All significant changes to the CoordinationHub project are documented here in re
 
 ### Architecture Changes
 
-**`schemas.py` split:**
-- `schemas.py` (~574 LOC): JSON Schema for all 27 tool parameters only
+**`schemas.py` split into group files:**
+- `schemas.py` (~31 LOC): Schema aggregator — imports all groups, re-exports `TOOL_SCHEMAS`
+- `schemas_identity.py` (~123 LOC): Identity & Registration (6 tools)
+- `schemas_locking.py` (~145 LOC): Document Locking (7 tools)
+- `schemas_coordination.py` (~59 LOC): Coordination Actions (2 tools)
+- `schemas_change.py` (~77 LOC): Change Awareness (3 tools)
+- `schemas_audit.py` (~43 LOC): Audit & Status (2 tools)
+- `schemas_visibility.py` (~132 LOC): Graph & Visibility (7 tools)
 - `dispatch.py` (~48 LOC): `TOOL_DISPATCH` table only
 - Updated imports in `core.py`, `mcp_server.py`, `test_notifications.py`
 

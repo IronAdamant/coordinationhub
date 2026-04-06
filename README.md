@@ -184,8 +184,14 @@ When a coordination graph is loaded, agents may also have a `graph_agent_id`
 coordinationhub/
   __init__.py         — Package init, exports CoordinationEngine, CoordinationHubMCPServer
   core.py             — CoordinationEngine: all 27 tool methods (~524 LOC)
-  schemas.py          — JSON Schema for all 27 tool parameters (~574 LOC)
-  dispatch.py         — Tool dispatch table (~48 LOC)
+  schemas.py           — Schema aggregator, re-exports TOOL_SCHEMAS (~31 LOC)
+  schemas_identity.py   — Identity & Registration schemas (~123 LOC)
+  schemas_locking.py    — Document Locking schemas (~145 LOC)
+  schemas_coordination.py — Coordination Action schemas (~59 LOC)
+  schemas_change.py     — Change Awareness schemas (~77 LOC)
+  schemas_audit.py     — Audit & Status schemas (~43 LOC)
+  schemas_visibility.py — Graph & Visibility schemas (~132 LOC)
+  dispatch.py          — Tool dispatch table (~48 LOC)
   graphs.py           — Coordination graph loader + validator (~310 LOC)
   visibility.py       — File ownership scan, agent status, file map (~233 LOC)
   assessment.py       — Assessment runner (~397 LOC)
