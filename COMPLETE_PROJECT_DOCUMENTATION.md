@@ -19,7 +19,10 @@
 | `coordinationhub/schemas_audit.py` | Audit & Status schemas (2 tools, ~43 LOC) | (no internal deps) |
 | `coordinationhub/schemas_visibility.py` | Graph & Visibility schemas (7 tools, ~132 LOC) | (no internal deps) |
 | `coordinationhub/dispatch.py` | Tool dispatch table: name → (method_name, allowed_kwargs) (~48 LOC) | (no internal deps) |
-| `coordinationhub/graphs.py` | Coordination graph loader + validator + in-memory `CoordinationGraph` | (no internal deps; optional ruamel.yaml) |
+| `coordinationhub/graphs.py` | Coordination graph — thin aggregator re-exporting from sub-modules (~105 LOC) | graph_validate, graph_loader, graph |
+| `coordinationhub/graph_validate.py` | Pure validation functions: agents, handoffs, escalation, assessment (~131 LOC) | (no internal deps) |
+| `coordinationhub/graph_loader.py` | File loading (YAML/JSON) and spec auto-detection (~49 LOC) | (no internal deps; optional ruamel.yaml) |
+| `coordinationhub/graph.py` | CoordinationGraph in-memory object with lookup helpers (~66 LOC) | graph_validate |
 | `coordinationhub/visibility.py` | File ownership scan, agent status, file map helpers | graphs |
 | `coordinationhub/assessment.py` | Assessment runner, 4 metric scorers, Markdown report generator (~394 LOC) | graphs |
 | `coordinationhub/mcp_server.py` | HTTP MCP server (`ThreadedHTTPServer`, stdlib only) | core, dispatch, schemas |
