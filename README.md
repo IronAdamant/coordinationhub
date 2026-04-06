@@ -158,7 +158,7 @@ coordinationhub reap-expired-locks
 coordinationhub reap-stale-agents
 
 # Coordination
-coordinationhub broadcast <agent_id>
+coordinationhub broadcast <agent_id> [--document-path <path>]
 coordinationhub wait-for-locks <agent_id> <paths...>
 coordinationhub notify-change <path> <type> <agent_id>
 coordinationhub get-notifications
