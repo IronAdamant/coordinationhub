@@ -88,7 +88,7 @@ assessment:
 | Tool | Purpose |
 |------|---------|
 | `register_agent` | Register and get coordination context + responsibilities from graph |
-| `heartbeat` | Keep agent alive + reap expired locks |
+| `heartbeat` | Keep agent alive (updates timestamp only) |
 | `deregister_agent` | Remove agent, orphan children, release locks |
 | `list_agents` | List registered agents with staleness |
 | `get_lineage` | Get ancestors and descendants of an agent |
