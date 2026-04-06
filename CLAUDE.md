@@ -13,7 +13,7 @@ Zero third-party dependencies in core. Part of the Stele + Chisel + Trammel + Co
 ```
 coordinationhub/
   __init__.py         — Package init, exports CoordinationEngine, CoordinationHubMCPServer
-  core.py             — CoordinationEngine: all 27 tool methods + helpers (~454 LOC)
+  core.py             — CoordinationEngine: all 27 tool methods + helpers (~453 LOC)
   paths.py            — Project-root detection and path normalization (~47 LOC)
   context.py          — Context bundle builder for register_agent responses (~98 LOC)
   schemas.py          — Schema aggregator, re-exports TOOL_SCHEMAS (~31 LOC)
@@ -28,7 +28,7 @@ coordinationhub/
   graph_validate.py   — Pure validation functions (~131 LOC)
   graph_loader.py     — File loading (YAML/JSON) and spec auto-detection (~49 LOC)
   graph.py            — CoordinationGraph in-memory object (~66 LOC)
-  visibility.py     — Thin re-export aggregator for scan/agent_status/responsibilities (~15 LOC)
+  visibility.py       — Thin re-export aggregator for scan/agent_status/responsibilities (~15 LOC)
   scan.py           — File ownership scan, nearest-ancestor assignment (~105 LOC)
   agent_status.py   — Agent status query and file map helpers (~111 LOC)
   responsibilities.py — Agent role/responsibilities storage from graph (~35 LOC)
@@ -36,18 +36,18 @@ coordinationhub/
   mcp_server.py       — HTTP MCP server (ThreadedHTTPServer, stdlib only)
   mcp_stdio.py        — Stdio MCP server (optional mcp package required)
   cli.py              — argparse CLI parser + lazy dispatch (~229 LOC)
-  cli_commands.py     — Re-exports all CLI handlers from domain sub-modules (~34 LOC)
+  cli_commands.py     — Re-exports all CLI handlers from domain sub-modules (~43 LOC)
   cli_agents.py       — Agent identity & lifecycle CLI commands (~205 LOC)
   cli_locks.py        — Document locking & coordination CLI commands (~214 LOC)
   cli_vis.py          — Change awareness, audit, graph & assessment CLI commands (~307 LOC)
-  db.py               — SQLite schema + thread-local ConnectionPool
-  agent_registry.py — Thin re-export aggregator for registry_ops/registry_query (~23 LOC)
-  registry_ops.py   — Agent lifecycle ops: register, heartbeat, deregister (~107 LOC)
-  registry_query.py — Agent registry queries: list, lineage, siblings, reaping (~142 LOC)
-  lock_ops.py         — Shared lock primitives
-  conflict_log.py     — Conflict recording and querying
-  notifications.py    — Change notification storage and retrieval
-  tests/              — pytest suite (124 tests, 10 test files)
+  db.py               — SQLite schema + thread-local ConnectionPool (~215 LOC)
+  agent_registry.py   — Thin re-export aggregator for registry_ops/registry_query (~23 LOC)
+  registry_ops.py     — Agent lifecycle ops: register, heartbeat, deregister (~107 LOC)
+  registry_query.py   — Agent registry queries: list, lineage, siblings, reaping (~142 LOC)
+  lock_ops.py         — Shared lock primitives (~119 LOC)
+  conflict_log.py     — Conflict recording and querying (~53 LOC)
+  notifications.py     — Change notification storage and retrieval (~115 LOC)
+  tests/              — pytest suite (150 tests, 11 test files)
 ```
 
 ## Module Design
@@ -114,17 +114,17 @@ coordinationhub get-conflicts
 
 ```bash
 python -m pytest tests/ -v
-# 149 tests across 11 test files:
-#   test_agent_lifecycle.py  — 16 tests
-#   test_locking.py           — 16 tests
-#   test_notifications.py    — 7 tests
+# 150 tests across 11 test files:
+#   test_agent_lifecycle.py  — 19 tests
+#   test_locking.py          — 16 tests
+#   test_notifications.py    — 8 tests
 #   test_conflicts.py         — 6 tests
-#   test_coordination.py      — 7 tests
-#   test_visibility.py       — 14 tests
-#   test_graphs.py           — 14 tests
-#   test_assessment.py        — 9 tests
+#   test_coordination.py     — 7 tests
+#   test_visibility.py      — 17 tests
+#   test_graphs.py           — 22 tests
+#   test_assessment.py       — 15 tests
 #   test_integration.py      — 15 tests (HTTP transport)
-#   test_core.py            — 25 tests (graph delegation, path utils, agent ID)
+#   test_core.py             — 25 tests (graph delegation, path utils, agent ID)
 ```
 
 Always run the test suite before and after changes. Record results with `chisel record_result`.
