@@ -1,6 +1,6 @@
 # CoordinationHub wiki
 
-**Version:** 0.1.0  
+**Version:** 0.3.0
 **Last updated:** 2026-04-06
 
 ## Pages
@@ -29,3 +29,10 @@ CoordinationHub, Stele, Chisel, and Trammel form the complete multi-agent cognit
 | **Chisel** | Code analysis, churn, coupling, risk mapping |
 | **Trammel** | Planning discipline, verification, failure learning, recipe memory |
 | **CoordinationHub** | Multi-agent identity, lineage, locking, conflict prevention |
+
+## Test Suite
+
+106 tests across 9 test files. Run with:
+```bash
+python -m pytest tests/ -v
+```
