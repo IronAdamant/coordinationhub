@@ -397,30 +397,57 @@ class CoordinationEngine:
 
     # ------------------------------------------------------------------ #
     # Graph & Visibility Tools (delegate to graphs.py)
+    # All 7 tools reuse the existing lock/lineage/registry foundation:
+    #   - load_coordination_spec: populates agent_responsibilities for register_agent lookups
+    #   - validate_graph: validates graph structure (no lock/registry mutation)
+    #   - scan_project: uses file_ownership table (upserts), falls back to lineage-derived ownership
+    #   - get_agent_status: joins agents + agent_responsibilities + file_ownership + lineage
+    #   - get_file_agent_map: joins file_ownership + agent_responsibilities (lineage-aware)
+    #   - update_agent_status: writes to agent_responsibilities (visibility layer, no locks)
+    #   - run_assessment: scores traces; lineage table informs spawn_propagation metric
     # ------------------------------------------------------------------ #
 
     def load_coordination_spec(self, path: str | None = None) -> dict[str, Any]:
+        # Reuses existing connect/lineage: sets agent_responsibilities so register_agent lookups work.
+        # No lock state is read or written.
         target = Path(path) if path else None
+        if path and target and not target.is_file():
+            return {"loaded": False, "error": f"Coordination spec not found: {path}"}
         return _g.load_coordination_spec_from_disk(self._connect, self._project_root, target)
 
     def validate_graph(self) -> dict[str, Any]:
+        # Pure validation (no DB writes). Uses lock/lineage only for error context.
         return _g.validate_graph_tool()
 
     def scan_project(
         self, worktree_root: str | None = None, extensions: list[str] | None = None,
     ) -> dict[str, Any]:
-        return _v.scan_project_tool(self._connect, self._project_root, worktree_root, extensions)
+        # Uses file_ownership table (upsert) and lineage table for spawned-agent inheritance.
+        # Falls back to first-registered active agent when no graph or nearest ancestor exists.
+        if extensions is not None and not extensions:
+            return {"scanned": 0, "owned": 0, "error": "extensions list cannot be empty"}
+        graph = _g.get_graph()
+        return _v.scan_project_tool(self._connect, self._project_root, worktree_root, extensions, graph)
 
     def get_agent_status(self, agent_id: str) -> dict[str, Any]:
+        # Joins agents + agent_responsibilities + file_ownership + lineage.
+        # Reuses the existing lineage query (get_lineage) for tree traversal.
         return _v.get_agent_status_tool(self._connect, agent_id, self.get_lineage)
 
     def get_file_agent_map(self, agent_id: str | None = None) -> dict[str, Any]:
+        # Joins file_ownership + agent_responsibilities. Uses lineage for context only.
         return _v.get_file_agent_map_tool(self._connect, agent_id)
 
     def update_agent_status(self, agent_id: str, current_task: str) -> dict[str, Any]:
+        # Writes to agent_responsibilities.current_task for visibility. No lock involvement.
         return _v.update_agent_status_tool(self._connect, agent_id, current_task)
 
-    def run_assessment(self, suite_path: str, format: str = "markdown") -> dict[str, Any]:
+    def run_assessment(
+        self,
+        suite_path: str,
+        format: str = "markdown",
+        graph_agent_id: str | None = None,
+    ) -> dict[str, Any]:
         suite_file = Path(suite_path)
         if not suite_file.is_file():
             return {"error": f"Suite file not found: {suite_path}"}
@@ -430,7 +457,7 @@ class CoordinationEngine:
             return {"error": f"Failed to load suite: {exc}"}
         graph = _g.get_graph()
         with self._connect() as conn:
-            result = _assess.run_assessment(suite, graph)
+            result = _assess.run_assessment(suite, graph, graph_agent_id=graph_agent_id)
             _assess.store_assessment_results(conn, result)
         if format == "json":
             return result

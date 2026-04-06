@@ -1,0 +1,64 @@
+{
+  "agents": [
+    {
+      "id": "planner",
+      "role": "decompose tasks",
+      "model": "minimax-m2.7",
+      "responsibilities": [
+        "break down user stories",
+        "assign subtasks",
+        "review test coverage"
+      ]
+    },
+    {
+      "id": "executor",
+      "role": "implement",
+      "model": "minimax-m2.7",
+      "responsibilities": [
+        "write code",
+        "run tests",
+        "refactor for clarity"
+      ]
+    },
+    {
+      "id": "reviewer",
+      "role": "review",
+      "model": "minimax-m2.7",
+      "responsibilities": [
+        "review changes",
+        "verify test coverage",
+        "approve or request changes"
+      ]
+    }
+  ],
+  "handoffs": [
+    {
+      "from": "planner",
+      "to": "executor",
+      "condition": "task_size < 500 && no_blockers"
+    },
+    {
+      "from": "executor",
+      "to": "reviewer",
+      "condition": "changes_pending_review"
+    },
+    {
+      "from": "reviewer",
+      "to": "planner",
+      "condition": "changes_requested"
+    }
+  ],
+  "escalation": {
+    "max_retries": 3,
+    "fallback": "human_review"
+  },
+  "assessment": {
+    "metrics": [
+      "role_stability",
+      "handoff_latency",
+      "outcome_verifiability",
+      "protocol_adherence",
+      "spawn_propagation"
+    ]
+  }
+}

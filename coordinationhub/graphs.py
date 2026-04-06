@@ -73,6 +73,9 @@ def load_coordination_spec_from_disk(
 
     Returns dict with loaded/path/agent_count/agents on success,
     or loaded=False with error info.
+
+    After a successful load, pre-populates agent_responsibilities for any
+    registered agents whose agent_id matches a graph agent id.
     """
     target = path or find_graph_spec(project_root)
     if target is None or not target.is_file():
@@ -85,6 +88,11 @@ def load_coordination_spec_from_disk(
             clear_graph()
             return {"loaded": False, "errors": validation["errors"]}
         graph = set_graph(data)
+
+        # Enforce graph_agent_id mapping: for each graph agent, if a registered
+        # agent with that exact agent_id exists, populate agent_responsibilities.
+        _populate_agent_responsibilities_from_graph(connect, graph)
+
         return {
             "loaded": True,
             "path": str(target),
@@ -94,6 +102,37 @@ def load_coordination_spec_from_disk(
     except Exception as exc:
         clear_graph()
         return {"loaded": False, "error": str(exc)}
+
+
+def _populate_agent_responsibilities_from_graph(
+    connect,
+    graph: CoordinationGraph,
+) -> None:
+    """For each graph agent whose id matches a registered agent, upsert agent_responsibilities."""
+    import json, time as _time
+    now = _time.time()
+    for graph_id, agent_def in graph.agents.items():
+        with connect() as conn:
+            row = conn.execute(
+                "SELECT agent_id FROM agents WHERE agent_id = ? AND status = 'active'",
+                (graph_id,),
+            ).fetchone()
+        if row:
+            role = agent_def.get("role", "")
+            model = agent_def.get("model", "")
+            responsibilities = agent_def.get("responsibilities", [])
+            with connect() as conn:
+                conn.execute("""
+                    INSERT INTO agent_responsibilities
+                    (agent_id, graph_agent_id, role, model, responsibilities, updated_at)
+                    VALUES (?, ?, ?, ?, ?, ?)
+                    ON CONFLICT(agent_id) DO UPDATE SET
+                        graph_agent_id = excluded.graph_agent_id,
+                        role = excluded.role,
+                        model = excluded.model,
+                        responsibilities = excluded.responsibilities,
+                        updated_at = excluded.updated_at
+                """, (graph_id, graph_id, role, model, json.dumps(responsibilities), now))
 
 
 def validate_graph_tool() -> dict[str, Any]:

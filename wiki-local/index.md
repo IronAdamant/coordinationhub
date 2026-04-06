@@ -1,7 +1,7 @@
 # CoordinationHub wiki
 
-**Version:** 0.3.0
-**Last updated:** 2026-04-06
+**Version:** 0.3.1
+**Last updated:** 2026-04-07
 
 ## Pages
 
@@ -32,7 +32,7 @@ CoordinationHub, Stele, Chisel, and Trammel form the complete multi-agent cognit
 
 ## Test Suite
 
-106 tests across 9 test files. Run with:
+165 tests across 11 test files. Run with:
 ```bash
 python -m pytest tests/ -v
 ```

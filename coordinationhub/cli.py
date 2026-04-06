@@ -167,6 +167,8 @@ def create_parser() -> argparse.ArgumentParser:
                    help="Output format (default: markdown)")
     p.add_argument("--output", default=None, dest="output_path",
                    help="Write report to file instead of stdout")
+    p.add_argument("--graph-agent-id", dest="graph_agent_id", default=None,
+                   help="Filter traces to this graph agent role (e.g. planner, executor)")
 
     return parser
 

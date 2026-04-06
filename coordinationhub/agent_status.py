@@ -59,6 +59,11 @@ def get_agent_status_tool(
         ).fetchall()
     resp = dict(resp_row) if resp_row else {}
     responsibilities = json.loads(resp.get("responsibilities") or "[]") if resp else []
+    # owned_files_with_tasks: Agent ID -> file -> task description
+    owned_files_with_tasks = [
+        {"file": f["document_path"], "task": f["task_description"] or ""}
+        for f in owned_files
+    ]
     return {
         "agent_id": agent_id,
         "status": agent_row["status"],
@@ -69,6 +74,7 @@ def get_agent_status_tool(
         "responsibilities": responsibilities,
         "current_task": resp.get("current_task"),
         "owned_files": [f["document_path"] for f in owned_files],
+        "owned_files_with_tasks": owned_files_with_tasks,
         "active_locks": [l["document_path"] for l in locks],
         "lineage": lineage,
     }
@@ -83,7 +89,7 @@ def get_file_agent_map_tool(
         if agent_id:
             rows = conn.execute("""
                 SELECT fo.document_path, fo.assigned_agent_id, fo.task_description,
-                       ar.role, ar.responsibilities
+                       ar.graph_agent_id, ar.role, ar.responsibilities
                 FROM file_ownership fo
                 LEFT JOIN agent_responsibilities ar ON fo.assigned_agent_id = ar.agent_id
                 WHERE fo.assigned_agent_id = ?
@@ -92,7 +98,7 @@ def get_file_agent_map_tool(
         else:
             rows = conn.execute("""
                 SELECT fo.document_path, fo.assigned_agent_id, fo.task_description,
-                       ar.role, ar.responsibilities
+                       ar.graph_agent_id, ar.role, ar.responsibilities
                 FROM file_ownership fo
                 LEFT JOIN agent_responsibilities ar ON fo.assigned_agent_id = ar.agent_id
                 ORDER BY fo.assigned_agent_id, fo.document_path
@@ -104,6 +110,7 @@ def get_file_agent_map_tool(
         entries.append({
             "document_path": row["document_path"],
             "assigned_agent_id": row["assigned_agent_id"],
+            "graph_agent_id": row["graph_agent_id"] or "unknown",
             "role": row["role"] or "unknown",
             "responsibilities": responsibilities,
             "task_description": row["task_description"],

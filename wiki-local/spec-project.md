@@ -1,6 +1,6 @@
 # CoordinationHub — Multi-Agent Swarm Coordination MCP
 
-**Version:** 0.3.0
+**Version:** 0.3.1
 **Language:** Python 3.10+ (stdlib-only core — **zero third-party dependencies**, `mcp` optional for stdio only)
 **Transports:** stdio + HTTP (both, like Stele/Chisel/Trammel)
 
@@ -131,7 +131,7 @@ handoffs:
     condition: task_size < 500
 
 assessment:
-  metrics: [role_stability, handoff_latency, outcome_verifiability, protocol_adherence]
+  metrics: [role_stability, handoff_latency, outcome_verifiability, protocol_adherence, spawn_propagation]
 ```
 
 ### File Ownership
@@ -143,16 +143,17 @@ active agent.
 
 ### Assessment Runner
 
-`run_assessment(suite_path, format?)` loads a JSON trace suite, scores each
-trace against 4 metric scorers, and outputs a Markdown report. Metric scorers:
+`run_assessment(suite_path, format?, graph_agent_id?)` loads a JSON trace suite, scores each
+trace against 5 metric scorers, and outputs a Markdown report. Metric scorers:
 - **role_stability**: events mapped to declared responsibilities in graph
 - **handoff_latency**: handoff from/to pairs validated against graph
 - **outcome_verifiability**: lock-write-unlock patterns per file
 - **protocol_adherence**: agents act within declared responsibilities
+- **spawn_propagation**: child agents inherit and act within parent's declared scope
 
 ---
 
-## SQLite Schema (v0.3.0)
+## SQLite Schema (v0.3.1)
 
 ### Tables
 
@@ -246,7 +247,7 @@ trace against 4 metric scorers, and outputs a Markdown report. Metric scorers:
 
 ---
 
-## MCP Tools (27 total — v0.3.0)
+## MCP Tools (27 total — v0.3.1)
 
 ### Identity & Registration
 
@@ -277,43 +278,60 @@ trace against 4 metric scorers, and outputs a Markdown report. Metric scorers:
 
 ---
 
-## Project Layout (v0.3.0)
+## Project Layout (v0.3.1)
 
 ```
 coordinationhub/
   __init__.py          -- __version__, public API
-  core.py              -- CoordinationEngine: all business logic (~524 LOC)
+  core.py              -- CoordinationEngine: all 27 tool methods (~465 LOC)
+  paths.py             -- Project-root detection and path normalization (~47 LOC)
+  context.py           -- Context bundle builder for register_agent responses (~98 LOC)
   schemas.py           -- Schema aggregator, re-exports TOOL_SCHEMAS (~31 LOC)
-  schemas_identity.py   -- Identity & Registration schemas (~123 LOC)
-  schemas_locking.py    -- Document Locking schemas (~145 LOC)
+  schemas_identity.py  -- Identity & Registration schemas (~123 LOC)
+  schemas_locking.py   -- Document Locking schemas (~145 LOC)
   schemas_coordination.py -- Coordination Action schemas (~59 LOC)
-  schemas_change.py     -- Change Awareness schemas (~77 LOC)
+  schemas_change.py    -- Change Awareness schemas (~77 LOC)
   schemas_audit.py     -- Audit & Status schemas (~43 LOC)
-  schemas_visibility.py -- Graph & Visibility schemas (~132 LOC)
+  schemas_visibility.py -- Graph & Visibility schemas (~137 LOC)
   dispatch.py          -- Tool dispatch table (~48 LOC)
-  graphs.py            -- Graph loader + CoordinationGraph (~310 LOC)
-  visibility.py        -- File ownership scan, agent status (~233 LOC)
-  assessment.py        -- Assessment runner (~397 LOC)
-  mcp_server.py        -- HTTP MCP server + request handler
-  mcp_stdio.py         -- stdio MCP server entry point
-  cli.py               -- argparse CLI parser + lazy dispatch (~229 LOC)
-  cli_commands.py      -- All 26 command handlers (~671 LOC)
-  db.py                -- SQLite schema, connection pool
-  agent_registry.py    -- Agent lifecycle
-  lock_ops.py          -- Lock primitives
-  conflict_log.py      -- Conflict recording
-  notifications.py    -- Change notifications
+  graphs.py            -- Thin aggregator + graph auto-mapping (~145 LOC)
+  graph_validate.py    -- Pure validation functions (~131 LOC)
+  graph_loader.py      -- File loading (YAML/JSON) and spec auto-detection (~49 LOC)
+  graph.py             -- CoordinationGraph in-memory object (~66 LOC)
+  visibility.py        -- Thin re-export aggregator (~20 LOC)
+  scan.py              -- File ownership scan, graph-role-aware (~165 LOC)
+  agent_status.py      -- Agent status query and file map helpers (~125 LOC)
+  responsibilities.py   -- Agent role/responsibilities storage (~35 LOC)
+  agent_registry.py    -- Agent lifecycle (registry_ops + registry_query)
+  registry_ops.py      -- Agent lifecycle ops (~107 LOC)
+  registry_query.py    -- Agent registry queries (~142 LOC)
+  assessment.py        -- Assessment runner, 5 metric scorers (~510 LOC)
+  mcp_server.py        -- HTTP MCP server (ThreadedHTTPServer, stdlib only)
+  mcp_stdio.py         -- Stdio MCP server (requires optional mcp package)
+  cli.py               -- argparse CLI parser + lazy dispatch (~235 LOC)
+  cli_commands.py      -- Re-exports all CLI handlers (~43 LOC)
+  cli_agents.py        -- Agent identity & lifecycle CLI commands (~205 LOC)
+  cli_locks.py         -- Document locking & coordination CLI (~214 LOC)
+  cli_vis.py           -- Change awareness, audit, graph & assessment CLI (~320 LOC)
+  db.py                -- SQLite schema, thread-local ConnectionPool (~215 LOC)
+  lock_ops.py          -- Shared lock primitives (~119 LOC)
+  conflict_log.py      -- Conflict recording (~53 LOC)
+  notifications.py     -- Change notification storage (~115 LOC)
 tests/
   conftest.py
   test_agent_lifecycle.py
-  test_lock_ops.py
+  test_locking.py
   test_notifications.py
   test_conflicts.py
   test_coordination.py
   test_visibility.py
   test_graphs.py
   test_assessment.py
+  test_integration.py
+  test_core.py
 pyproject.toml
+coordination_spec.yaml   -- Example spec (YAML)
+coordination_spec.json    -- Example spec (JSON)
 README.md
 CLAUDE.md
 COMPLETE_PROJECT_DOCUMENTATION.md
@@ -357,6 +375,19 @@ Default port: `9877`
 
 ## Version History
 
+### 0.3.1 — Polish pass (2026-04-07)
+- `spawn_propagation` metric: child agents scored against inherited parent responsibilities
+- Graph-role-aware file scan: `.py` → implement, `.md/.yaml` → document, `.json/.toml` → config
+- `run_assessment --graph-agent-id` filter for trace-level scoring
+- Full trace JSON and suggested graph refinements stored in `assessment_results.details_json`
+- Dashboard JSON output includes full `file_map` with `graph_agent_id`, `role`, `task_description`
+- `get_agent_status` returns `owned_files_with_tasks` with file→task mapping
+- `get_file_agent_map` includes `graph_agent_id` per entry
+- Graph auto-mapping: `load_coordination_spec` populates `agent_responsibilities` for matching registered agents
+- Input validation: clear errors for missing spec path and empty extensions list
+- 165 tests (up from 150)
+- Example files `coordination_spec.yaml` and `coordination_spec.json` added to repo root
+
 ### 0.1.0 — Initial design
 - Agent identity and lineage tracking
 - Document locking with TTL and force-steal
@@ -379,7 +410,7 @@ Default port: `9877`
 - Declarative coordination graphs (YAML/JSON)
 - File ownership tracking via worktree scan
 - Visibility layer: `get_agent_status`, `get_file_agent_map`, `dashboard`
-- Assessment runner with 4 real metric scorers
+- Assessment runner with 5 real metric scorers
 - 27 MCP tools
 - `schemas.py` split into `schemas.py` + `dispatch.py`
 - `cli.py` split into `cli.py` + `cli_commands.py`
