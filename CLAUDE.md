@@ -28,7 +28,10 @@ coordinationhub/
   graph_validate.py   — Pure validation functions (~131 LOC)
   graph_loader.py     — File loading (YAML/JSON) and spec auto-detection (~49 LOC)
   graph.py            — CoordinationGraph in-memory object (~66 LOC)
-  visibility.py       — File ownership scan, agent status, file map (~233 LOC)
+  visibility.py     — Thin re-export aggregator for scan/agent_status/responsibilities (~15 LOC)
+  scan.py           — File ownership scan, nearest-ancestor assignment (~105 LOC)
+  agent_status.py   — Agent status query and file map helpers (~111 LOC)
+  responsibilities.py — Agent role/responsibilities storage from graph (~35 LOC)
   assessment.py       — Assessment runner, 4 metric scorers (~394 LOC)
   mcp_server.py       — HTTP MCP server (ThreadedHTTPServer, stdlib only)
   mcp_stdio.py        — Stdio MCP server (optional mcp package required)
@@ -38,7 +41,9 @@ coordinationhub/
   cli_locks.py        — Document locking & coordination CLI commands (~214 LOC)
   cli_vis.py          — Change awareness, audit, graph & assessment CLI commands (~307 LOC)
   db.py               — SQLite schema + thread-local ConnectionPool
-  agent_registry.py   — Agent lifecycle: register, heartbeat, deregister, lineage
+  agent_registry.py — Thin re-export aggregator for registry_ops/registry_query (~23 LOC)
+  registry_ops.py   — Agent lifecycle ops: register, heartbeat, deregister (~107 LOC)
+  registry_query.py — Agent registry queries: list, lineage, siblings, reaping (~142 LOC)
   lock_ops.py         — Shared lock primitives
   conflict_log.py     — Conflict recording and querying
   notifications.py    — Change notification storage and retrieval
