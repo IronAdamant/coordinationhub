@@ -44,9 +44,10 @@
 | `tests/test_graphs.py` | Graph validation and CoordinationGraph tests (14 tests) | graphs |
 | `tests/test_assessment.py` | Assessment runner tests (9 tests) | assessment, graphs |
 | `tests/test_integration.py` | HTTP transport integration tests (15 tests) | conftest, core |
+| `tests/test_core.py` | Core engine tests: graph delegation, path utils, agent ID generation (25 tests) | conftest |
 | `pyproject.toml` | Package config, dependencies, entry points | — |
 
-**Total: 124 tests across 10 test files.**
+**Total: 149 tests across 11 test files.**
 
 ---
 
