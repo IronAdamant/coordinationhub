@@ -23,7 +23,13 @@
 | `coordinationhub/graph_validate.py` | Pure validation functions: agents, handoffs, escalation, assessment (~131 LOC) | (no internal deps) |
 | `coordinationhub/graph_loader.py` | File loading (YAML/JSON) and spec auto-detection (~49 LOC) | (no internal deps; optional ruamel.yaml) |
 | `coordinationhub/graph.py` | CoordinationGraph in-memory object with lookup helpers (~66 LOC) | graph_validate |
-| `coordinationhub/visibility.py` | File ownership scan, agent status, file map helpers | graphs |
+| `coordinationhub/visibility.py` | Thin re-export aggregator for scan/agent_status/responsibilities (~15 LOC) | scan, agent_status, responsibilities |
+| `coordinationhub/scan.py` | File ownership scan, nearest-ancestor assignment (~105 LOC) | (no internal deps) |
+| `coordinationhub/agent_status.py` | Agent status query and file map helpers (~111 LOC) | (no internal deps) |
+| `coordinationhub/responsibilities.py` | Agent role/responsibilities storage from graph (~35 LOC) | (no internal deps) |
+| `coordinationhub/agent_registry.py` | Thin re-export aggregator for registry_ops/registry_query (~23 LOC) | registry_ops, registry_query |
+| `coordinationhub/registry_ops.py` | Agent lifecycle ops: register, heartbeat, deregister (~107 LOC) | db |
+| `coordinationhub/registry_query.py` | Agent registry queries: list, lineage, siblings, reaping (~142 LOC) | db |
 | `coordinationhub/assessment.py` | Assessment runner, 4 metric scorers, Markdown report generator (~394 LOC) | graphs |
 | `coordinationhub/mcp_server.py` | HTTP MCP server (`ThreadedHTTPServer`, stdlib only) | core, dispatch, schemas |
 | `coordinationhub/mcp_stdio.py` | Stdio MCP server (requires optional `mcp` package) | core, mcp_server, schemas |
