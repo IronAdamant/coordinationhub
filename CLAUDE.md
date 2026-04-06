@@ -13,7 +13,9 @@ Zero third-party dependencies in core. Part of the Stele + Chisel + Trammel + Co
 ```
 coordinationhub/
   __init__.py         — Package init, exports CoordinationEngine, CoordinationHubMCPServer
-  core.py             — CoordinationEngine: all 27 tool methods + helpers (~524 LOC)
+  core.py             — CoordinationEngine: all 27 tool methods + helpers (~454 LOC)
+  paths.py            — Project-root detection and path normalization (~47 LOC)
+  context.py          — Context bundle builder for register_agent responses (~98 LOC)
   schemas.py          — Schema aggregator, re-exports TOOL_SCHEMAS (~31 LOC)
   schemas_identity.py  — Identity & Registration schemas (~123 LOC)
   schemas_locking.py    — Document Locking schemas (~145 LOC)
@@ -24,7 +26,7 @@ coordinationhub/
   dispatch.py         — Tool dispatch table (~48 LOC)
   graphs.py           — Coordination graph loader + validator + CoordinationGraph (~310 LOC)
   visibility.py       — File ownership scan, agent status, file map (~233 LOC)
-  assessment.py       — Assessment runner, 4 metric scorers (~397 LOC)
+  assessment.py       — Assessment runner, 4 metric scorers (~394 LOC)
   mcp_server.py       — HTTP MCP server (ThreadedHTTPServer, stdlib only)
   mcp_stdio.py        — Stdio MCP server (optional mcp package required)
   cli.py              — argparse CLI parser + lazy dispatch (~229 LOC)
@@ -34,7 +36,7 @@ coordinationhub/
   lock_ops.py         — Shared lock primitives
   conflict_log.py     — Conflict recording and querying
   notifications.py    — Change notification storage and retrieval
-  tests/              — pytest suite (106 tests, 9 test files)
+  tests/              — pytest suite (124 tests, 10 test files)
 ```
 
 ## Module Design
@@ -42,7 +44,7 @@ coordinationhub/
 - **Zero internal deps in sub-modules**: `agent_registry.py`, `lock_ops.py`, `conflict_log.py`, `notifications.py`, `visibility.py` all receive `connect: ConnectFn` from the caller. They have no internal imports from each other.
 - **Thread-local connection pool**: `db.py` provides a `ConnectionPool` that gives each thread its own reused SQLite connection. WAL mode enabled, 30s busy timeout.
 - **Dispatch separation**: `schemas.py` (schemas only) and `dispatch.py` (dispatch table) are separate modules shared by both HTTP and stdio servers.
-- **Project root detection**: `_detect_project_root()` walks up from CWD looking for `.git`. Used by `CoordinationEngine.__init__`.
+- **Project root detection**: `detect_project_root()` in `paths.py` walks up from CWD looking for `.git`. Used by `CoordinationEngine.__init__`.
 
 ## Key Design Decisions
 
@@ -101,7 +103,7 @@ coordinationhub get-conflicts
 
 ```bash
 python -m pytest tests/ -v
-# 106 tests across 9 test files:
+# 124 tests across 10 test files:
 #   test_agent_lifecycle.py  — 16 tests
 #   test_locking.py           — 16 tests
 #   test_notifications.py    — 7 tests
@@ -110,6 +112,7 @@ python -m pytest tests/ -v
 #   test_visibility.py       — 14 tests
 #   test_graphs.py           — 14 tests
 #   test_assessment.py        — 9 tests
+#   test_integration.py      — 15 tests (HTTP transport)
 ```
 
 Always run the test suite before and after changes. Record results with `chisel record_result`.
