@@ -45,13 +45,12 @@ class TestNotifications:
 
 
 class TestCoordinationUrls:
-    def test_context_bundle_has_urls(self, engine, registered_agent):
+    def test_context_bundle_has_url(self, engine, registered_agent):
+        """Context bundle includes a single coordination_url string, not a dict."""
         ctx = engine._context_bundle(registered_agent)
-        assert "coordination_urls" in ctx
-        assert "coordinationhub" in ctx["coordination_urls"]
-        assert "stele" in ctx["coordination_urls"]
-        assert "chisel" in ctx["coordination_urls"]
-        assert "trammel" in ctx["coordination_urls"]
+        assert "coordination_url" in ctx
+        assert isinstance(ctx["coordination_url"], str)
+        assert ctx["coordination_url"].startswith("http://")
 
     def test_status_tool_count_dynamic(self, engine):
         """status() returns dynamic tool count from TOOL_DISPATCH."""

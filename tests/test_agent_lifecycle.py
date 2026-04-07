@@ -49,6 +49,31 @@ class TestAgentRegistration:
         # Child's parent_id should now be None (grandparent doesn't exist)
         assert lineage["ancestors"] == []  # reparented to None
 
+    def test_deregister_deletes_stale_lineage_rows(self, engine):
+        """Orphaned children have their lineage row with dead parent deleted."""
+        parent = engine.generate_agent_id()
+        engine.register_agent(parent)
+        child = engine.generate_agent_id(parent)
+        engine.register_agent(child, parent_id=parent)
+
+        # Verify lineage row exists
+        with engine._connect() as conn:
+            row = conn.execute(
+                "SELECT * FROM lineage WHERE parent_id = ? AND child_id = ?",
+                (parent, child),
+            ).fetchone()
+            assert row is not None
+
+        engine.deregister_agent(parent)
+
+        # Lineage row for (parent, child) should be gone
+        with engine._connect() as conn:
+            row = conn.execute(
+                "SELECT * FROM lineage WHERE parent_id = ? AND child_id = ?",
+                (parent, child),
+            ).fetchone()
+            assert row is None
+
     def test_list_agents(self, engine, two_agents):
         result = engine.list_agents()
         assert len(result["agents"]) == 3
@@ -133,3 +158,25 @@ class TestReaping:
             )
         result = engine.reap_stale_agents(timeout=600.0)
         assert result["orphaned_children"] == 1
+
+    def test_reap_cleans_lineage_rows(self, engine):
+        """Reaping a stale agent removes its lineage entries for orphaned children."""
+        parent = engine.generate_agent_id()
+        engine.register_agent(parent)
+        child = engine.generate_agent_id(parent)
+        engine.register_agent(child, parent_id=parent)
+
+        with engine._connect() as conn:
+            conn.execute(
+                "UPDATE agents SET last_heartbeat = 0 WHERE agent_id = ?",
+                (parent,),
+            )
+        engine.reap_stale_agents(timeout=600.0)
+
+        # The lineage row (parent, child) should be deleted
+        with engine._connect() as conn:
+            row = conn.execute(
+                "SELECT * FROM lineage WHERE parent_id = ? AND child_id = ?",
+                (parent, child),
+            ).fetchone()
+            assert row is None

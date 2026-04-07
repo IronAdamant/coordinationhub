@@ -266,6 +266,16 @@ def cmd_dashboard(args):
 def cmd_agent_status(args):
     engine = _engine_from_args(args)
     try:
+        if getattr(args, "tree", False):
+            result = engine.get_agent_tree(args.agent_id)
+            if args.json_output:
+                _print_json(result)
+            else:
+                if "error" in result:
+                    print(f"Error: {result['error']}")
+                    return
+                print(result["text_tree"])
+                return
         result = engine.get_agent_status(args.agent_id)
         if args.json_output:
             _print_json(result)
@@ -286,6 +296,25 @@ def cmd_agent_status(args):
                 print(f"  Current task: {result['current_task']}")
             print(f"  Owned files: {len(result.get('owned_files', []))}")
             print(f"  Active locks: {len(result.get('active_locks', []))}")
+    finally:
+        _close(engine)
+
+
+# ------------------------------------------------------------------ #
+# agent-tree
+# ------------------------------------------------------------------ #
+
+def cmd_agent_tree(args):
+    engine = _engine_from_args(args)
+    try:
+        result = engine.get_agent_tree(getattr(args, "agent_id", None))
+        if args.json_output:
+            _print_json(result)
+        else:
+            if "error" in result:
+                print(f"Error: {result['error']}")
+                return
+            print(result["text_tree"])
     finally:
         _close(engine)
 

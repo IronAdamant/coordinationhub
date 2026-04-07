@@ -41,7 +41,13 @@ def reap_stale_agents(
     connect: ConnectFn,
     timeout: float = 600.0,
 ) -> dict[str, Any]:
-    """Mark stale agents as stopped and orphan their children."""
+    """Mark stale agents as stopped and orphan their children.
+
+    Children are re-parented to the stale agent's parent (or root if the stale
+    agent had no parent).  Stale ``lineage`` rows are deleted so that the
+    responsibility-inheritance scan query always joins on the live spawning
+    parent, never on a dead agent.
+    """
     now = time.time()
     cutoff = now - timeout
     with connect() as conn:
@@ -50,7 +56,6 @@ def reap_stale_agents(
             "WHERE status = 'active' AND last_heartbeat < ?",
             (cutoff,),
         ).fetchall()
-        stale_ids = [r["agent_id"] for r in stale]
 
         orphaned_children = 0
         reaped = 0
@@ -66,6 +71,11 @@ def reap_stale_agents(
                 conn.execute(
                     "UPDATE agents SET parent_id = ? WHERE agent_id = ?",
                     (parent_id, child_id),
+                )
+                # Delete stale lineage rows so scan sees the live parent.
+                conn.execute(
+                    "DELETE FROM lineage WHERE parent_id = ? AND child_id = ?",
+                    (agent_id, child_id),
                 )
                 orphaned_children += 1
 

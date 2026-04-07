@@ -40,4 +40,5 @@ from .cli_vis import (
     cmd_dashboard,
     cmd_agent_status,
     cmd_assess,
+    cmd_agent_tree,
 )

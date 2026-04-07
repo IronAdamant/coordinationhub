@@ -80,6 +80,113 @@ def get_agent_status_tool(
     }
 
 
+def get_agent_tree_tool(
+    connect: Callable[[], Any],
+    agent_id: str | None = None,
+) -> dict[str, Any]:
+    """Tool implementation: hierarchical agent tree for human/LLM review.
+
+    If ``agent_id`` is None, returns the tree rooted at the oldest active root agent.
+    """
+    import time as _time
+
+    def _find_oldest_root(conn):
+        """Find the active root agent with the earliest last_heartbeat."""
+        row = conn.execute(
+            "SELECT agent_id FROM agents WHERE parent_id IS NULL AND status = 'active' "
+            "ORDER BY last_heartbeat ASC LIMIT 1"
+        ).fetchone()
+        return row["agent_id"] if row else None
+
+    def _build_node(conn, aid):
+        """Build a single tree node for agent aid (no children filled yet)."""
+        agent_row = conn.execute(
+            "SELECT * FROM agents WHERE agent_id = ?", (aid,)
+        ).fetchone()
+        if agent_row is None:
+            return None
+        resp_row = conn.execute(
+            "SELECT * FROM agent_responsibilities WHERE agent_id = ?", (aid,)
+        ).fetchone()
+        resp = dict(resp_row) if resp_row else {}
+        responsibilities = json.loads(resp.get("responsibilities") or "[]") if resp else []
+        return {
+            "agent_id": aid,
+            "status": agent_row["status"],
+            "graph_agent_id": resp.get("graph_agent_id"),
+            "role": resp.get("role"),
+            "current_task": resp.get("current_task"),
+            "responsibilities": responsibilities,
+            "children": [],
+        }
+
+    def _build_tree(conn, aid):
+        """Recursively build tree rooted at aid, filling in children."""
+        node = _build_node(conn, aid)
+        if node is None:
+            return None
+        child_rows = conn.execute(
+            "SELECT agent_id FROM agents WHERE parent_id = ? AND status = 'active'",
+            (aid,)
+        ).fetchall()
+        for child_row in child_rows:
+            child_node = _build_tree(conn, child_row["agent_id"])
+            if child_node is not None:
+                node["children"].append(child_node)
+        return node
+
+    with connect() as conn:
+        if agent_id is None:
+            agent_id = _find_oldest_root(conn)
+            if agent_id is None:
+                return {"error": "No active root agent found"}
+        else:
+            # Verify the requested agent exists
+            row = conn.execute(
+                "SELECT agent_id FROM agents WHERE agent_id = ?", (agent_id,)
+            ).fetchone()
+            if row is None:
+                return {"error": f"Agent not found: {agent_id}"}
+
+        root = _build_tree(conn, agent_id)
+        if root is None:
+            return {"error": f"Agent not found: {agent_id}"}
+
+        # Collect ancestors chain
+        ancestors = []
+        current = agent_id
+        while True:
+            row = conn.execute(
+                "SELECT parent_id FROM agents WHERE agent_id = ?", (current,)
+            ).fetchone()
+            if row is None or row["parent_id"] is None:
+                break
+            ancestors.append({"agent_id": row["parent_id"]})
+            current = row["parent_id"]
+
+        # Render text tree
+        def _render_text(node, prefix="", is_last=True):
+            lines = []
+            connector = "└── " if is_last else "├── "
+            label = node["agent_id"]
+            if node.get("graph_agent_id"):
+                label += f" [{node['graph_agent_id']}]"
+            label += f" {node['status']}"
+            if node.get("current_task"):
+                label += f" — {node['current_task']}"
+            lines.append(prefix + connector + label)
+            child_prefix = prefix + ("    " if is_last else "│   ")
+            for i, child in enumerate(node["children"]):
+                is_last_child = (i == len(node["children"]) - 1)
+                lines.extend(_render_text(child, child_prefix, is_last_child))
+            return lines
+
+        text_lines = _render_text(root, is_last=True)
+        text_tree = "\n".join(text_lines)
+
+    return {"root": root, "ancestors": ancestors, "text_tree": text_tree}
+
+
 def get_file_agent_map_tool(
     connect: Callable[[], Any],
     agent_id: str | None = None,

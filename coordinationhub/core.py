@@ -1,8 +1,8 @@
-"""CoordinationEngine — core business logic for CoordinationHub v0.3.0.
+"""CoordinationEngine — core business logic for CoordinationHub v0.3.1.
 
-Wires together db, agent_registry, lock_ops, conflict_log, notifications.
-Graph loading and visibility helpers live in graphs.py.
-Project-root detection, path normalization, and all 27 MCP tools.
+Wires together the storage backend, agent_registry, lock_ops, conflict_log,
+notifications, graph loading, and visibility helpers.
+Project-root detection and path normalization live in paths.py.
 Zero third-party dependencies.
 """
 
@@ -16,29 +16,24 @@ from typing import Any
 
 from . import agent_registry as _ar
 from . import conflict_log as _cl
-from . import db as _db
 from . import notifications as _cn
 from . import lock_ops as _lo
 from . import graphs as _g
 from . import visibility as _v
 from . import assessment as _assess
+from ._storage import CoordinationStorage
 from .context import build_context_bundle
 from .dispatch import TOOL_DISPATCH
 from .paths import detect_project_root, normalize_path
 
 
-# ------------------------------------------------------------------ #
-# Project root detection — delegates to paths.py
-# ------------------------------------------------------------------ #
-
-
-# ------------------------------------------------------------------ #
-# CoordinationEngine
-# ------------------------------------------------------------------ #
-
 class CoordinationEngine:
     """Main coordinator. Manages agent identity, document locking, graph loading,
     file ownership tracking, and change notifications. Thread-safe via SQLite WAL.
+
+    The storage layer (``CoordinationStorage``) is created on ``start()`` and
+    owns the SQLite connection pool. Call ``start()`` before any tool calls and
+    ``close()`` on shutdown.
     """
 
     DEFAULT_PORT = 9877
@@ -51,76 +46,32 @@ class CoordinationEngine:
         project_root: Path | None = None,
         namespace: str = "hub",
     ) -> None:
-        self._namespace = namespace
-        self._project_root = project_root or detect_project_root()
-        self._storage_dir = self._resolve_storage_dir(storage_dir)
-        self._pool: _db.ConnectionPool | None = None
-
-    def _resolve_storage_dir(self, storage_dir: Path | str | None) -> Path:
-        if storage_dir is not None:
-            return Path(storage_dir).resolve()
-        if self._project_root is not None:
-            base = self._project_root / ".coordinationhub"
-            base.mkdir(parents=True, exist_ok=True)
-            return base
-        return Path.home() / ".coordinationhub"
+        self._storage = CoordinationStorage(
+            storage_dir=storage_dir,
+            project_root=project_root or detect_project_root(),
+            namespace=namespace,
+        )
 
     # ------------------------------------------------------------------ #
-    # Lifecycle
+    # Lifecycle — delegate to storage
     # ------------------------------------------------------------------ #
 
     def start(self) -> None:
-        self._storage_dir.mkdir(parents=True, exist_ok=True)
-        db_path = self._storage_dir / "coordination.db"
-        self._pool = _db.ConnectionPool(db_path)
-        _db.set_pool(self._pool)
-        with self._pool.connect() as conn:
-            _db.init_schema(conn)
-            _ar.init_agents_table(self._pool.connect)
-            _cn.init_notifications_table(self._pool.connect)
-            _assess.init_assessment_table(conn)
-        _g.load_coordination_spec_from_disk(self._connect, self._project_root)
+        self._storage.start()
+        _g.load_coordination_spec_from_disk(self._connect, self._storage.project_root)
 
     def close(self) -> None:
-        if self._pool is not None:
-            with self._pool.connect() as conn:
-                conn.execute("PRAGMA wal_checkpoint(TRUNCATE)")
-            _db.clear_pool()
-            self._pool = None
+        self._storage.close()
 
-    def _connect(self):
-        if self._pool is None:
-            raise RuntimeError("Engine not started. Call start() first.")
-        return self._pool.connect()
+    def _connect(self) -> sqlite3.Connection:
+        return self._storage._connect()
 
     # ------------------------------------------------------------------ #
-    # Agent ID generation
+    # Agent ID generation — delegate to storage
     # ------------------------------------------------------------------ #
-
-    def _next_seq(self, prefix: str, conn: sqlite3.Connection) -> int:
-        base = prefix.rstrip(".")
-        row = conn.execute(
-            f"SELECT agent_id FROM agents WHERE agent_id LIKE ? || '.%' ORDER BY agent_id DESC LIMIT 1",
-            (base,),
-        ).fetchone()
-        if row:
-            return int(row["agent_id"].rsplit(".", 1)[-1]) + 1
-        return 0
 
     def generate_agent_id(self, parent_id: str | None = None) -> str:
-        pid = os.getpid()
-        prefix = f"{self._namespace}.{pid}"
-        with self._connect() as conn:
-            if parent_id is None:
-                seq = self._next_seq(prefix, conn)
-                return f"{prefix}.{seq}"
-            row = conn.execute(
-                "SELECT agent_id FROM agents WHERE agent_id = ?", (parent_id,)
-            ).fetchone()
-            if not row:
-                raise ValueError(f"Parent agent not found: {parent_id}")
-            seq = self._next_seq(f"{parent_id}.", conn)
-            return f"{parent_id}.{seq}"
+        return self._storage.generate_agent_id(parent_id)
 
     # ------------------------------------------------------------------ #
     # Identity & Registration
@@ -133,7 +84,9 @@ class CoordinationEngine:
         graph_agent_id: str | None = None,
         worktree_root: str | None = None,
     ) -> dict[str, Any]:
-        worktree = worktree_root or (str(self._project_root) if self._project_root else os.getcwd())
+        worktree = worktree_root or (
+            str(self._storage.project_root) if self._storage.project_root else os.getcwd()
+        )
         _ar.register_agent(self._connect, agent_id, worktree, parent_id)
         if parent_id is not None:
             with self._connect() as conn:
@@ -189,7 +142,7 @@ class CoordinationEngine:
         lock_type: str = "exclusive", ttl: float = DEFAULT_TTL, force: bool = False,
     ) -> dict[str, Any]:
         now = time.time()
-        norm_path = normalize_path(document_path, self._project_root)
+        norm_path = normalize_path(document_path, self._storage.project_root)
         with self._connect() as conn:
             row = conn.execute(
                 "SELECT * FROM document_locks WHERE document_path = ?", (norm_path,)
@@ -214,18 +167,18 @@ class CoordinationEngine:
                 conn.execute(
                     "UPDATE document_locks SET locked_by = ?, locked_at = ?, lock_ttl = ?, "
                     "lock_type = ?, worktree_root = ? WHERE document_path = ?",
-                    (agent_id, now, ttl, lock_type, str(self._project_root), norm_path),
+                    (agent_id, now, ttl, lock_type, str(self._storage.project_root), norm_path),
                 )
                 return {"acquired": True, "document_path": norm_path, "locked_by": agent_id, "expires_at": now + ttl}
             conn.execute(
                 "INSERT INTO document_locks (document_path, locked_by, locked_at, lock_ttl, lock_type, worktree_root) "
                 "VALUES (?, ?, ?, ?, ?, ?)",
-                (norm_path, agent_id, now, ttl, lock_type, str(self._project_root)),
+                (norm_path, agent_id, now, ttl, lock_type, str(self._storage.project_root)),
             )
             return {"acquired": True, "document_path": norm_path, "locked_by": agent_id, "expires_at": now + ttl}
 
     def release_lock(self, document_path: str, agent_id: str) -> dict[str, Any]:
-        norm_path = normalize_path(document_path, self._project_root)
+        norm_path = normalize_path(document_path, self._storage.project_root)
         with self._connect() as conn:
             row = conn.execute(
                 "SELECT locked_by FROM document_locks WHERE document_path = ?", (norm_path,)
@@ -238,13 +191,13 @@ class CoordinationEngine:
             return {"released": True}
 
     def refresh_lock(self, document_path: str, agent_id: str, ttl: float = DEFAULT_TTL) -> dict[str, Any]:
-        norm_path = normalize_path(document_path, self._project_root)
+        norm_path = normalize_path(document_path, self._storage.project_root)
         with self._connect() as conn:
             result = _lo.refresh_lock(conn, "document_locks", norm_path, agent_id, ttl, "not_locked")
         return result
 
     def get_lock_status(self, document_path: str) -> dict[str, Any]:
-        norm_path = normalize_path(document_path, self._project_root)
+        norm_path = normalize_path(document_path, self._storage.project_root)
         now = time.time()
         with self._connect() as conn:
             row = conn.execute(
@@ -293,6 +246,16 @@ class CoordinationEngine:
     def broadcast(
         self, agent_id: str, document_path: str | None = None, ttl: float = 30.0,
     ) -> dict[str, Any]:
+        """Announce an intention to siblings and check for lock conflicts.
+
+        ``broadcast`` does not store or forward messages — it only:
+        1. Identifies live sibling agents (active within 60s).
+        2. If ``document_path`` is provided, checks whether any live sibling holds
+           a conflicting lock on that path.
+
+        Returns which siblings are live and any lock conflicts. The calling agent is
+        responsible for deciding what to do with that information.
+        """
         siblings = _ar.get_siblings(self._connect, agent_id)
         acknowledged_by: list[str] = []
         conflicts: list[dict[str, Any]] = []
@@ -301,7 +264,7 @@ class CoordinationEngine:
             if now - sib.get("last_heartbeat", 0) <= 60.0:
                 acknowledged_by.append(sib["agent_id"])
         if document_path and acknowledged_by:
-            norm_path = normalize_path(document_path, self._project_root)
+            norm_path = normalize_path(document_path, self._storage.project_root)
             placeholders = ",".join("?" * len(acknowledged_by))
             with self._connect() as conn:
                 lock_rows = conn.execute(
@@ -320,7 +283,7 @@ class CoordinationEngine:
         released: list[str] = []
         timed_out: list[str] = []
         for path in document_paths:
-            norm_path = normalize_path(path, self._project_root)
+            norm_path = normalize_path(path, self._storage.project_root)
             remaining = timeout_s - (time.time() - start)
             if remaining <= 0:
                 timed_out.append(norm_path)
@@ -344,8 +307,10 @@ class CoordinationEngine:
     def notify_change(
         self, document_path: str, change_type: str, agent_id: str,
     ) -> dict[str, Any]:
-        norm_path = normalize_path(document_path, self._project_root)
-        return _cn.notify_change(self._connect, norm_path, change_type, agent_id, str(self._project_root))
+        norm_path = normalize_path(document_path, self._storage.project_root)
+        return _cn.notify_change(
+            self._connect, norm_path, change_type, agent_id, str(self._storage.project_root),
+        )
 
     def get_notifications(
         self, since: float | None = None, exclude_agent: str | None = None, limit: int = 100,
@@ -364,7 +329,7 @@ class CoordinationEngine:
     def get_conflicts(
         self, document_path: str | None = None, agent_id: str | None = None, limit: int = 20,
     ) -> dict[str, Any]:
-        norm_path = normalize_path(document_path, self._project_root) if document_path else None
+        norm_path = normalize_path(document_path, self._storage.project_root) if document_path else None
         conflicts = _cl.query_conflicts(self._connect, norm_path, agent_id, limit)
         return {"conflicts": conflicts}
 
@@ -396,50 +361,36 @@ class CoordinationEngine:
         }
 
     # ------------------------------------------------------------------ #
-    # Graph & Visibility Tools (delegate to graphs.py)
-    # All 7 tools reuse the existing lock/lineage/registry foundation:
-    #   - load_coordination_spec: populates agent_responsibilities for register_agent lookups
-    #   - validate_graph: validates graph structure (no lock/registry mutation)
-    #   - scan_project: uses file_ownership table (upserts), falls back to lineage-derived ownership
-    #   - get_agent_status: joins agents + agent_responsibilities + file_ownership + lineage
-    #   - get_file_agent_map: joins file_ownership + agent_responsibilities (lineage-aware)
-    #   - update_agent_status: writes to agent_responsibilities (visibility layer, no locks)
-    #   - run_assessment: scores traces; lineage table informs spawn_propagation metric
+    # Graph & Visibility Tools
     # ------------------------------------------------------------------ #
 
     def load_coordination_spec(self, path: str | None = None) -> dict[str, Any]:
-        # Reuses existing connect/lineage: sets agent_responsibilities so register_agent lookups work.
-        # No lock state is read or written.
         target = Path(path) if path else None
         if path and target and not target.is_file():
             return {"loaded": False, "error": f"Coordination spec not found: {path}"}
-        return _g.load_coordination_spec_from_disk(self._connect, self._project_root, target)
+        return _g.load_coordination_spec_from_disk(self._connect, self._storage.project_root, target)
 
     def validate_graph(self) -> dict[str, Any]:
-        # Pure validation (no DB writes). Uses lock/lineage only for error context.
         return _g.validate_graph_tool()
 
     def scan_project(
         self, worktree_root: str | None = None, extensions: list[str] | None = None,
     ) -> dict[str, Any]:
-        # Uses file_ownership table (upsert) and lineage table for spawned-agent inheritance.
-        # Falls back to first-registered active agent when no graph or nearest ancestor exists.
         if extensions is not None and not extensions:
             return {"scanned": 0, "owned": 0, "error": "extensions list cannot be empty"}
         graph = _g.get_graph()
-        return _v.scan_project_tool(self._connect, self._project_root, worktree_root, extensions, graph)
+        return _v.scan_project_tool(self._connect, self._storage.project_root, worktree_root, extensions, graph)
 
     def get_agent_status(self, agent_id: str) -> dict[str, Any]:
-        # Joins agents + agent_responsibilities + file_ownership + lineage.
-        # Reuses the existing lineage query (get_lineage) for tree traversal.
         return _v.get_agent_status_tool(self._connect, agent_id, self.get_lineage)
 
+    def get_agent_tree(self, agent_id: str | None = None) -> dict[str, Any]:
+        return _v.get_agent_tree_tool(self._connect, agent_id)
+
     def get_file_agent_map(self, agent_id: str | None = None) -> dict[str, Any]:
-        # Joins file_ownership + agent_responsibilities. Uses lineage for context only.
         return _v.get_file_agent_map_tool(self._connect, agent_id)
 
     def update_agent_status(self, agent_id: str, current_task: str) -> dict[str, Any]:
-        # Writes to agent_responsibilities.current_task for visibility. No lock involvement.
         return _v.update_agent_status_tool(self._connect, agent_id, current_task)
 
     def run_assessment(
@@ -473,7 +424,7 @@ class CoordinationEngine:
             connect_fn=self._connect,
             agent_id=agent_id,
             parent_id=parent_id,
-            project_root=str(self._project_root) if self._project_root else os.getcwd(),
+            project_root=str(self._storage.project_root) if self._storage.project_root else os.getcwd(),
             graph_getter=_g.get_graph,
             list_agents_fn=_ar.list_agents,
             default_port=self.DEFAULT_PORT,
