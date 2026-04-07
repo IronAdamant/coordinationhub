@@ -36,8 +36,12 @@ def build_context_bundle(
         project_root: resolved project root path string
         graph_getter: callable returning the current CoordinationGraph or None
         list_agents_fn: callable(connect_fn, active_only, stale_timeout) -> agent list
-        get_graph_fn: alias for graph_getter (deprecated, unused)
         default_port: default HTTP port for the coordination URL
+
+    Returns a dict containing the agent's identity, parent/child lineage, active
+    locks held by other agents, recent change notifications, and coordination
+    URL. Other MCP servers (Stele, Chisel, Trammel) are not included — configure
+    those via their own environment variables if they are running.
     """
     agents = list_agents_fn(connect_fn, active_only=True, stale_timeout=600.0)
     with connect_fn() as conn:
@@ -77,15 +81,10 @@ def build_context_bundle(
         ],
         "active_locks": active_locks,
         "pending_notifications": [dict(n) for n in notifs],
-        "coordination_urls": {
-            "coordinationhub": os.environ.get(
-                "COORDINATIONHUB_COORDINATION_URL",
-                f"http://localhost:{default_port}",
-            ),
-            "stele": os.environ.get("COORDINATIONHUB_STELE_URL", "http://localhost:9876"),
-            "chisel": os.environ.get("COORDINATIONHUB_CHISEL_URL", "http://localhost:8377"),
-            "trammel": os.environ.get("COORDINATIONHUB_TRAMMEL_URL", "http://localhost:8737"),
-        },
+        "coordination_url": os.environ.get(
+            "COORDINATIONHUB_COORDINATION_URL",
+            f"http://localhost:{default_port}",
+        ),
         "graph_loaded": graph_getter() is not None,
     }
     if resp:

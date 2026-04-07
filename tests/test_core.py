@@ -188,6 +188,43 @@ class TestNormalizePath:
         result = normalize_path("src\\app\\main.py", tmp_path)
         assert "\\" not in result
 
+    def test_normalize_path_symlink_resolved_inside_project(self, engine, tmp_path):
+        """Symlinks are resolved to their real path; if inside project root, returned relative."""
+        from coordinationhub.paths import normalize_path
+        engine._project_root = tmp_path
+        real_file = tmp_path / "real.py"
+        real_file.write_text("# real")
+        link_file = tmp_path / "link.py"
+        link_file.symlink_to(real_file)
+        # Symlink resolves to the real path inside project root -> relative
+        result = normalize_path(str(link_file), tmp_path)
+        assert result == "real.py"
+
+    def test_normalize_path_symlink_resolved_outside_project(self, engine, tmp_path):
+        """Symlinks pointing outside project root return the resolved absolute path."""
+        import os
+        from coordinationhub.paths import normalize_path
+        engine._project_root = tmp_path
+        # Create a symlink inside project root pointing to a path outside the project root.
+        # normalize_path resolves the symlink, sees it's outside project_root, returns absolute.
+        link = tmp_path / "link.txt"
+        os.symlink("/tmp/external_file.txt", str(link))
+        result = normalize_path(str(link), tmp_path)
+        # Resolved path is /tmp/external_file.txt which is outside project root
+        assert result == "/tmp/external_file.txt"
+
+    def test_normalize_path_dotdot_components_collapsed(self, engine, tmp_path):
+        """Paths with .. components are resolved and collapsed."""
+        from coordinationhub.paths import normalize_path
+        engine._project_root = tmp_path
+        sub = tmp_path / "sub"
+        sub.mkdir()
+        (sub / "nested.py").write_text("# nested")
+        # Path going up and back down resolves to the real relative path
+        result = normalize_path(str(sub / ".." / "sub" / "nested.py"), tmp_path)
+        assert result == "sub/nested.py"
+        assert ".." not in result
+
 
 class TestDetectProjectRoot:
     """Tests for detect_project_root edge cases."""

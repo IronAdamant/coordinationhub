@@ -34,7 +34,7 @@ A JSON payload returned by `register_agent` containing:
 - List of all registered agents
 - All currently active locks
 - Recent change notifications
-- URLs of all four MCP servers (stele, chisel, trammel, coordinationhub)
+- CoordinationHub HTTP URL (settable via `COORDINATIONHUB_COORDINATION_URL`)
 
 Parent agents pass this bundle to spawned sub-agents.
 

@@ -1,6 +1,8 @@
 """Agent lifecycle operations: register, heartbeat, deregister.
 
 Zero internal dependencies on other coordinationhub modules.
+The ``agents`` table is created by ``db.init_schema`` — no per-module init
+function is needed here.
 """
 
 from __future__ import annotations
@@ -10,22 +12,6 @@ import time
 from typing import Any
 
 from .db import ConnectFn
-
-
-def init_agents_table(connect: ConnectFn) -> None:
-    """Create the agents table if it does not exist."""
-    with connect() as conn:
-        conn.execute("""
-            CREATE TABLE IF NOT EXISTS agents (
-                agent_id      TEXT PRIMARY KEY,
-                parent_id     TEXT,
-                worktree_root TEXT NOT NULL,
-                pid           INTEGER,
-                started_at    REAL NOT NULL,
-                last_heartbeat REAL NOT NULL,
-                status        TEXT DEFAULT 'active'
-            )
-        """)
 
 
 def register_agent(
@@ -73,7 +59,14 @@ def deregister_agent(
     connect: ConnectFn,
     agent_id: str,
 ) -> dict[str, Any]:
-    """Mark agent as stopped and orphan its children."""
+    """Mark agent as stopped and orphan its children.
+
+    When children are re-parented to the grandparent (or root if no grandparent),
+    the stale ``lineage`` rows that reference the dead agent as parent are
+    deleted — the spawning record is preserved in ``agents.parent_id`` and the
+    lineage table tracks only the active spawning parent for responsibility
+    inheritance (see ``scan._get_spawned_agent_responsibilities``).
+    """
     with connect() as conn:
         row = conn.execute(
             "SELECT parent_id FROM agents WHERE agent_id = ?",
@@ -97,6 +90,12 @@ def deregister_agent(
             conn.execute(
                 "UPDATE agents SET parent_id = ? WHERE agent_id = ?",
                 (parent_id, child_id),
+            )
+            # Delete stale lineage rows: the dead agent was the spawning parent
+            # but is no longer in the active parent chain.
+            conn.execute(
+                "DELETE FROM lineage WHERE parent_id = ? AND child_id = ?",
+                (agent_id, child_id),
             )
             orphaned += 1
 

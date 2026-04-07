@@ -21,7 +21,7 @@
 
 ## Integration
 
-CoordinationHub, Stele, Chisel, and Trammel form the complete multi-agent cognitive scaffolding quartet. All four MCP servers cooperate through each LLM's MCP tool layer.
+CoordinationHub is self-contained and works standalone. When co-installed with Stele, Chisel, or Trammel, it cooperates through each LLM's MCP tool layer.
 
 | Tool | Role |
 |------|------|
@@ -32,7 +32,7 @@ CoordinationHub, Stele, Chisel, and Trammel form the complete multi-agent cognit
 
 ## Test Suite
 
-165 tests across 11 test files. Run with:
+187 tests across 12 test files. Run with:
 ```bash
 python -m pytest tests/ -v
 ```

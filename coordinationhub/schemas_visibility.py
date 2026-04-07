@@ -1,4 +1,4 @@
-"""Graph & Visibility tool schemas (7 tools — new in v0.3.0)."""
+"""Graph & Visibility tool schemas (8 tools — new in v0.3.1)."""
 
 from __future__ import annotations
 
@@ -133,6 +133,24 @@ TOOL_SCHEMAS_VISIBILITY: dict[str, dict] = {
                 },
             },
             "required": ["suite_path"],
+        },
+    },
+    "get_agent_tree": {
+        "description": (
+            "Get the hierarchical agent tree rooted at a specific agent, "
+            "including all descendants rendered as a nested structure and plain-text tree. "
+            "Use this for human or LLM review of the full agent hierarchy. "
+            "If agent_id is omitted, returns the tree rooted at the oldest active root agent."
+        ),
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "agent_id": {
+                    "type": "string",
+                    "description": "Root of the tree to query (default: oldest active root agent)",
+                    "default": None,
+                },
+            },
         },
     },
 }

@@ -1,4 +1,4 @@
-"""CoordinationHub CLI — command-line interface for all 28 coordination tool methods.
+"""CoordinationHub CLI — command-line interface for all 29 coordination tool methods.
 
 Delegates to cli_commands.py for all command handlers.
 """
@@ -159,6 +159,11 @@ def create_parser() -> argparse.ArgumentParser:
     # agent-status
     p = sub.add_parser("agent-status", parents=[shared], help="Get full status for an agent")
     p.add_argument("agent_id", help="Agent to query")
+    p.add_argument("--tree", action="store_true", help="Print agent tree instead of flat status")
+
+    # agent-tree
+    p = sub.add_parser("agent-tree", parents=[shared], help="Print agent hierarchy as a tree")
+    p.add_argument("agent_id", nargs="?", default=None, help="Root agent (default: oldest root)")
 
     # assess
     p = sub.add_parser("assess", parents=[shared], help="Run an assessment suite")
@@ -191,6 +196,7 @@ _COMMANDS = {
     "load-spec": "cmd_load_spec", "validate-spec": "cmd_validate_spec",
     "scan-project": "cmd_scan_project", "dashboard": "cmd_dashboard",
     "agent-status": "cmd_agent_status", "assess": "cmd_assess",
+    "agent-tree": "cmd_agent_tree",
 }
 
 

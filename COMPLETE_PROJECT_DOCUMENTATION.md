@@ -34,55 +34,56 @@
 | Path | Purpose | Dependencies |
 |------|---------|--------------|
 | `coordinationhub/__init__.py` | Package init, exports `CoordinationEngine`, `CoordinationHubMCPServer` | core, mcp_server |
-| `coordinationhub/core.py` | `CoordinationEngine` — all 27 MCP tool methods + helpers (~465 LOC) | db, agent_registry, lock_ops, conflict_log, notifications, graphs, visibility, assessment, paths, context |
-| `coordinationhub/paths.py` | Project-root detection and path normalization (~47 LOC) | (no internal deps) |
-| `coordinationhub/context.py` | Context bundle builder for `register_agent` responses (~98 LOC) | (no internal deps) |
+| `coordinationhub/core.py` | `CoordinationEngine` — all 28 MCP tool methods (~431 LOC) | _storage, agent_registry, lock_ops, conflict_log, notifications, graphs, visibility, assessment, paths, context |
+| `coordinationhub/_storage.py` | `CoordinationStorage` — SQLite pool, path resolution, lifecycle (~121 LOC) | db, notifications, assessment |
+| `coordinationhub/paths.py` | Project-root detection and path normalization (~48 LOC) | (no internal deps) |
+| `coordinationhub/context.py` | Context bundle builder for `register_agent` responses (~100 LOC) | (no internal deps) |
 | `coordinationhub/schemas.py` | Schema aggregator — imports all groups, re-exports `TOOL_SCHEMAS` (~31 LOC) | (no internal deps) |
 | `coordinationhub/schemas_identity.py` | Identity & Registration schemas (6 tools, ~123 LOC) | (no internal deps) |
 | `coordinationhub/schemas_locking.py` | Document Locking schemas (7 tools, ~145 LOC) | (no internal deps) |
 | `coordinationhub/schemas_coordination.py` | Coordination Action schemas (2 tools, ~59 LOC) | (no internal deps) |
 | `coordinationhub/schemas_change.py` | Change Awareness schemas (3 tools, ~77 LOC) | (no internal deps) |
 | `coordinationhub/schemas_audit.py` | Audit & Status schemas (2 tools, ~43 LOC) | (no internal deps) |
-| `coordinationhub/schemas_visibility.py` | Graph & Visibility schemas (7 tools, ~137 LOC) | (no internal deps) |
+| `coordinationhub/schemas_visibility.py` | Graph & Visibility schemas (8 tools, ~156 LOC) | (no internal deps) |
 | `coordinationhub/dispatch.py` | Tool dispatch table: name → (method_name, allowed_kwargs) (~48 LOC) | (no internal deps) |
-| `coordinationhub/graphs.py` | Coordination graph — thin aggregator + auto-mapping on load (~145 LOC) | graph_validate, graph_loader, graph |
+| `coordinationhub/graphs.py` | Coordination graph — thin aggregator + auto-mapping on load (~105 LOC) | graph_validate, graph_loader, graph |
 | `coordinationhub/graph_validate.py` | Pure validation functions: agents, handoffs, escalation, assessment (~131 LOC) | (no internal deps) |
 | `coordinationhub/graph_loader.py` | File loading (YAML/JSON) and spec auto-detection (~49 LOC) | (no internal deps; optional ruamel.yaml) |
 | `coordinationhub/graph.py` | CoordinationGraph in-memory object with lookup helpers (~66 LOC) | graph_validate |
-| `coordinationhub/visibility.py` | Thin re-export aggregator for scan/agent_status/responsibilities (~20 LOC) | scan, agent_status, responsibilities |
-| `coordinationhub/scan.py` | File ownership scan, graph-role-aware assignment, spawned-agent inheritance (~165 LOC) | (no internal deps) |
-| `coordinationhub/agent_status.py` | Agent status query, file map, owned_files_with_tasks (~125 LOC) | (no internal deps) |
+| `coordinationhub/visibility.py` | Thin re-export aggregator for scan/agent_status/responsibilities (~15 LOC) | scan, agent_status, responsibilities |
+| `coordinationhub/scan.py` | File ownership scan, graph-role-aware assignment, spawned-agent inheritance (~105 LOC) | (no internal deps) |
+| `coordinationhub/agent_status.py` | Agent status query, file map, agent tree helpers (~225 LOC) | (no internal deps) |
 | `coordinationhub/responsibilities.py` | Agent role/responsibilities storage from graph (~35 LOC) | (no internal deps) |
 | `coordinationhub/agent_registry.py` | Thin re-export aggregator for registry_ops/registry_query (~23 LOC) | registry_ops, registry_query |
-| `coordinationhub/registry_ops.py` | Agent lifecycle ops: register, heartbeat, deregister (~107 LOC) | db |
+| `coordinationhub/registry_ops.py` | Agent lifecycle ops: register, heartbeat, deregister (~120 LOC) | db |
 | `coordinationhub/registry_query.py` | Agent registry queries: list, lineage, siblings, reaping (~142 LOC) | db |
-| `coordinationhub/assessment.py` | Assessment runner, 5 metric scorers (incl. spawn_propagation), Markdown report (~510 LOC) | graphs |
+| `coordinationhub/assessment.py` | Assessment runner, 5 metric scorers, Markdown report (~394 LOC). **Keyword-matching limitation**: `role_stability`, `protocol_adherence`, and `spawn_propagation` scorers use keyword heuristics against declared responsibilities — non-standard vocabulary reduces scores. | graphs |
 | `coordinationhub/mcp_server.py` | HTTP MCP server (`ThreadedHTTPServer`, stdlib only) | core, dispatch, schemas |
 | `coordinationhub/mcp_stdio.py` | Stdio MCP server (requires optional `mcp` package) | core, mcp_server, schemas |
-| `coordinationhub/cli.py` | argparse CLI argument parser + lazy dispatch (~235 LOC) | core |
-| `coordinationhub/cli_commands.py` | Re-exports all CLI handlers from domain sub-modules (~43 LOC) | cli_agents, cli_locks, cli_vis |
+| `coordinationhub/cli.py` | argparse CLI argument parser + lazy dispatch (~237 LOC) | core |
+| `coordinationhub/cli_commands.py` | Re-exports all CLI handlers from domain sub-modules (~44 LOC) | cli_agents, cli_locks, cli_vis |
 | `coordinationhub/cli_agents.py` | Agent identity & lifecycle CLI commands (~205 LOC) | core |
 | `coordinationhub/cli_locks.py` | Document locking & coordination CLI commands (~214 LOC) | core |
-| `coordinationhub/cli_vis.py` | Change awareness, audit, graph, assessment, dashboard CLI (~320 LOC) | core |
+| `coordinationhub/cli_vis.py` | Change awareness, audit, graph, assessment, dashboard CLI + agent-tree (~346 LOC) | core |
 | `coordinationhub/db.py` | SQLite schema + thread-local `ConnectionPool` (~215 LOC) | (no internal deps) |
 | `coordinationhub/lock_ops.py` | Shared lock primitives: acquire, release, refresh, reap (~119 LOC) | db |
 | `coordinationhub/conflict_log.py` | Conflict recording and querying (~53 LOC) | lock_ops |
 | `coordinationhub/notifications.py` | Change notification storage and retrieval (~115 LOC) | db |
-| `coordinationhub/paths.py` | Project-root detection (~47 LOC) | (no internal deps) |
 | `tests/conftest.py` | pytest fixtures: `engine`, `registered_agent`, `two_agents` | core |
-| `tests/test_agent_lifecycle.py` | Agent lifecycle tests (19 tests) | conftest |
+| `tests/test_agent_lifecycle.py` | Agent lifecycle tests (21 tests) | conftest |
 | `tests/test_locking.py` | Lock acquisition, release, refresh, status, reap (16 tests) | conftest |
 | `tests/test_notifications.py` | Change notification tests (8 tests) | conftest |
 | `tests/test_conflicts.py` | Conflict logging and lineage table tests (6 tests) | conftest |
 | `tests/test_coordination.py` | Broadcast and wait_for_locks tests (7 tests) | conftest |
-| `tests/test_visibility.py` | Visibility tools, file scan, graph loading tests (17 tests) | conftest, graphs |
+| `tests/test_visibility.py` | Visibility tools, file scan, graph loading, agent tree tests (23 tests) | conftest, graphs |
 | `tests/test_graphs.py` | Graph validation and CoordinationGraph tests (22 tests) | graphs |
 | `tests/test_assessment.py` | Assessment runner tests (15 tests) | assessment, graphs |
 | `tests/test_integration.py` | HTTP transport integration tests (15 tests) | conftest, core |
-| `tests/test_core.py` | Core engine tests: graph delegation, path utils, agent ID generation (25 tests) | conftest |
+| `tests/test_core.py` | Core engine tests: graph delegation, path utils, agent ID generation (33 tests) | conftest |
+| `tests/test_cli.py` | CLI argument parser and subcommand dispatch (11 tests) | conftest, core |
 | `pyproject.toml` | Package config, dependencies, entry points | — |
 
-**Total: 150 tests across 11 test files.**
+**Total: 187 tests across 12 test files.**
 
 ---
 
@@ -91,45 +92,47 @@
 ```
 coordinationhub/
   __init__.py         — Package init, exports CoordinationEngine, CoordinationHubMCPServer
-  core.py             — CoordinationEngine: all 27 tool methods + helpers (~465 LOC)
-  paths.py            — Project-root detection and path normalization (~47 LOC)
-  context.py          — Context bundle builder for register_agent responses (~98 LOC)
+  core.py             — CoordinationEngine: all 28 tool methods (~431 LOC)
+  _storage.py         — CoordinationStorage: SQLite pool, path resolution, lifecycle (~121 LOC)
+  paths.py            — Project-root detection and path normalization (~48 LOC)
+  context.py          — Context bundle builder for register_agent responses (~100 LOC)
   schemas.py          — Schema aggregator, re-exports TOOL_SCHEMAS (~31 LOC)
   schemas_identity.py — Identity & Registration schemas (~123 LOC)
   schemas_locking.py   — Document Locking schemas (~145 LOC)
   schemas_coordination.py — Coordination Action schemas (~59 LOC)
   schemas_change.py    — Change Awareness schemas (~77 LOC)
   schemas_audit.py    — Audit & Status schemas (~43 LOC)
-  schemas_visibility.py — Graph & Visibility schemas (~137 LOC)
+  schemas_visibility.py — Graph & Visibility schemas (8 tools, ~156 LOC)
   dispatch.py         — Tool dispatch table (~48 LOC)
-  graphs.py           — Thin aggregator re-exporting + auto-mapping on load (~145 LOC)
+  graphs.py           — Thin aggregator re-exporting + auto-mapping on load (~105 LOC)
   graph_validate.py   — Pure validation functions (~131 LOC)
   graph_loader.py     — File loading (YAML/JSON) and spec auto-detection (~49 LOC)
   graph.py            — CoordinationGraph in-memory object (~66 LOC)
-  visibility.py       — Thin re-export aggregator (~20 LOC)
-  scan.py             — File ownership scan, graph-role-aware (~165 LOC)
-  agent_status.py     — Agent status query and file map helpers (~125 LOC)
+  visibility.py       — Thin re-export aggregator (~15 LOC)
+  scan.py             — File ownership scan, graph-role-aware (~105 LOC)
+  agent_status.py     — Agent status query, file map, and agent tree helpers (~225 LOC)
   responsibilities.py — Agent role/responsibilities storage (~35 LOC)
   agent_registry.py   — Thin re-export aggregator (~23 LOC)
-  registry_ops.py     — Agent lifecycle ops (~107 LOC)
+  registry_ops.py     — Agent lifecycle ops (~120 LOC)
   registry_query.py   — Agent registry queries (~142 LOC)
-  assessment.py       — Assessment runner, 5 metric scorers (~510 LOC)
+  assessment.py       — Assessment runner, 5 metric scorers (~394 LOC)
   mcp_server.py       — HTTP MCP server (ThreadedHTTPServer, stdlib only)
   mcp_stdio.py        — Stdio MCP server (requires optional mcp package)
-  cli.py              — argparse CLI parser + lazy dispatch (~235 LOC)
-  cli_commands.py     — Re-exports all CLI handlers (~43 LOC)
+  cli.py              — argparse CLI parser + lazy dispatch (~237 LOC)
+  cli_commands.py     — Re-exports all CLI handlers (~44 LOC)
   cli_agents.py       — Agent identity & lifecycle CLI commands (~205 LOC)
   cli_locks.py        — Document locking & coordination CLI commands (~214 LOC)
-  cli_vis.py          — Change awareness, audit, graph & assessment CLI (~320 LOC)
+  cli_vis.py          — Change awareness, audit, graph & assessment CLI + agent-tree (~346 LOC)
   db.py               — SQLite schema + thread-local ConnectionPool (~215 LOC)
   lock_ops.py         — Shared lock primitives (~119 LOC)
   conflict_log.py     — Conflict recording and querying (~53 LOC)
   notifications.py    — Change notification storage and retrieval (~115 LOC)
-  tests/              — 150 tests across 11 test files
+  tests/              — 187 tests across 12 test files
 ```
 
 **Module design principles:**
 - Zero internal deps in sub-modules: each receives `connect: ConnectFn` from the caller.
+- Storage layer isolated in `_storage.py`: both `core.py` and CLI entry points depend on it; sub-modules have no path to `core`.
 - Thread-local connection pool: `db.py` gives each thread its own SQLite connection (WAL mode, 30s busy timeout).
 - Dispatch separation: `schemas.py` (schemas) and `dispatch.py` (dispatch table) shared by HTTP + stdio servers.
 - `connect` callable pattern: `agent_registry.py`, `lock_ops.py`, `conflict_log.py`, `notifications.py`, `visibility.py` all receive `connect` rather than importing `_db.connect`.
@@ -352,7 +355,7 @@ CREATE TABLE assessment_results (
 
 ---
 
-## MCP Tools (27 total)
+## MCP Tools (28 total)
 
 ### Identity & Registration
 
@@ -388,7 +391,7 @@ CREATE TABLE assessment_results (
 
 `status` — returns `graph_loaded: bool` and `owned_files: int`.
 
-### Graph & Visibility (7 tools)
+### Graph & Visibility (8 tools)
 
 | Tool | Description |
 |------|-------------|
@@ -399,6 +402,7 @@ CREATE TABLE assessment_results (
 | `get_file_agent_map` | Full file→agent→role→responsibilities→task map |
 | `update_agent_status` | Set `current_task` for an agent |
 | `run_assessment` | Run suite, output report, store results incl. full traces + refinements |
+| `get_agent_tree` | Hierarchical agent tree: nested children + plain-text rendering |
 
 ---
 
@@ -454,7 +458,7 @@ After running an assessment, `suggested_refinements` lists:
 
 ---
 
-## CLI Subcommands (27 total)
+## CLI Subcommands (29 total)
 
 ### Server
 `serve`, `serve-mcp`
@@ -520,7 +524,7 @@ Air-gapped install: `pip install coordinationhub --no-deps`.
 
 ```bash
 python -m pytest tests/ -v
-# 150 tests across 11 test files
+# 187 tests across 12 test files
 ```
 
 ---
@@ -529,7 +533,7 @@ python -m pytest tests/ -v
 
 - All existing tables (`agents`, `lineage`, `document_locks`, `lock_conflicts`,
   `change_notifications`) are preserved unchanged.
-- Existing `.coordinationhub/coordination.db` files work without migration.
+- Existing `.coordinationhub/coordination.db` files work without migration. Orphaned agents created before the lineage cleanup fix retain stale `lineage` rows — these are cleaned up automatically when a new orphan event occurs, or can be left as historical record (they do not affect `get_lineage` which walks `agents.parent_id`).
 - `broadcast` no longer accepts `message` or `action` params (removed from schema and CLI).
 - `status()` now returns `graph_loaded: bool` and `owned_files: int` as additional fields.
 - `register_agent()` now accepts an optional `graph_agent_id` parameter.

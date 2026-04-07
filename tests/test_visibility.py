@@ -353,3 +353,65 @@ class TestDashboardJsonOutput:
         # But the data is available via the engine methods
         assert file_map["total"] >= 1
         assert any(f["document_path"] == "a.py" for f in file_map["files"])
+
+
+class TestGetAgentTree:
+    """Tests for get_agent_tree tool."""
+
+    def test_returns_nested_children(self, engine, registered_agent):
+        """Register parent + 2 children, verify tree is nested correctly."""
+        child1 = engine.generate_agent_id(parent_id=registered_agent)
+        child2 = engine.generate_agent_id(parent_id=registered_agent)
+        engine.register_agent(child1, parent_id=registered_agent)
+        engine.register_agent(child2, parent_id=registered_agent)
+
+        result = engine.get_agent_tree(registered_agent)
+        assert "error" not in result
+        assert result["root"]["agent_id"] == registered_agent
+        child_ids = {c["agent_id"] for c in result["root"]["children"]}
+        assert child1 in child_ids
+        assert child2 in child_ids
+
+    def test_returns_ancestors(self, engine, tmp_path):
+        """Register a grandchild, verify ancestors chain is returned."""
+        root = engine.generate_agent_id()
+        engine.register_agent(root)
+        child = engine.generate_agent_id(parent_id=root)
+        engine.register_agent(child, parent_id=root)
+        grandchild = engine.generate_agent_id(parent_id=child)
+        engine.register_agent(grandchild, parent_id=child)
+
+        result = engine.get_agent_tree(grandchild)
+        assert "error" not in result
+        assert len(result["ancestors"]) == 2
+        ancestor_ids = {a["agent_id"] for a in result["ancestors"]}
+        assert root in ancestor_ids
+        assert child in ancestor_ids
+
+    def test_text_tree_rendered(self, engine, registered_agent):
+        """Verify text_tree field is present and contains agent IDs."""
+        child = engine.generate_agent_id(parent_id=registered_agent)
+        engine.register_agent(child, parent_id=registered_agent)
+
+        result = engine.get_agent_tree(registered_agent)
+        assert "text_tree" in result
+        assert registered_agent in result["text_tree"]
+        assert child in result["text_tree"]
+
+    def test_none_agent_id_uses_root(self, engine, registered_agent):
+        """Call without agent_id — returns tree rooted at oldest active root agent."""
+        result = engine.get_agent_tree(agent_id=None)
+        assert "error" not in result
+        assert result["root"]["agent_id"] == registered_agent
+
+    def test_empty_for_leaf_agent(self, engine, registered_agent):
+        """Leaf agent with no children returns children: []."""
+        result = engine.get_agent_tree(registered_agent)
+        assert "error" not in result
+        assert result["root"]["children"] == []
+
+    def test_unknown_agent_returns_error(self, engine):
+        """Unknown agent ID returns an error."""
+        result = engine.get_agent_tree("nonexistent.agent.0")
+        assert "error" in result
+

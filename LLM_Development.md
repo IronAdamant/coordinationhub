@@ -57,7 +57,7 @@ All significant changes to the CoordinationHub project are documented here in re
 
 - All 7 graph/visibility tool methods in `core.py` now have comments explaining their relationship to the lock/lineage foundation.
 - `visibility.py` re-exports `_role_based_agent` and `_get_spawned_agent_responsibilities` from `scan.py`.
-- All schema files: schemas_identity (~123 LOC), schemas_locking (~145 LOC), schemas_coordination (~59 LOC), schemas_change (~77 LOC), schemas_audit (~43 LOC), schemas_visibility (~137 LOC) — all well under 500 LOC.
+- All schema files: schemas_identity (~123 LOC), schemas_locking (~145 LOC), schemas_coordination (~59 LOC), schemas_change (~77 LOC), schemas_audit (~43 LOC), schemas_visibility (~156 LOC) — all well under 500 LOC.
 
 ### Tests
 
@@ -109,7 +109,7 @@ Total: **165 tests** (up from 150).
 - `schemas_coordination.py` (~59 LOC): Coordination Actions (2 tools)
 - `schemas_change.py` (~77 LOC): Change Awareness (3 tools)
 - `schemas_audit.py` (~43 LOC): Audit & Status (2 tools)
-- `schemas_visibility.py` (~132 LOC): Graph & Visibility (7 tools)
+- `schemas_visibility.py` (~156 LOC): Graph & Visibility (8 tools)
 - `dispatch.py` (~48 LOC): `TOOL_DISPATCH` table only
 - Updated imports in `core.py`, `mcp_server.py`, `test_notifications.py`
 
@@ -254,7 +254,7 @@ All four metric scorers replaced with real implementations:
 - **Separate MCP server**: CoordinationHub is built as a separate MCP server (not extending Stele) because coordination is a different problem domain than code intelligence
 - **Zero third-party deps in core**: HTTP server built on `http.server` + `socketserver.ThreadingMixIn`. No `requests`, `httpx`, `aiohttp`
 - **Stdio optional**: The `mcp` package is only required for stdio transport. Air-gapped install works with `pip install -e . --no-deps`
-- **Coordination context bundle**: Agent registration returns a JSON bundle with `agent_id`, `registered_agents`, `active_locks`, `pending_notifications`, and `coordination_urls` — parent agents pass this to spawned sub-agents
+- **Coordination context bundle**: Agent registration returns a JSON bundle with `agent_id`, `registered_agents`, `active_locks`, `pending_notifications`, and `coordination_url` — parent agents pass this to spawned sub-agents
 - **17 tools**: All tool methods on `CoordinationEngine` are directly MCP-callable
 
 ### SQLite Tables

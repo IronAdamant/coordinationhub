@@ -1,16 +1,42 @@
 # CoordinationHub
 
-**Declarative multi-agent coordination hub for coding swarms — zero third-party deps in core.**
+**Coordination hub for multi-agent coding swarms — root agent as project manager, spawned agents as team members, zero third-party deps in core.**
 
-Tracks agent identity and lineage, enforces document locking, loads declarative coordination
-graphs (YAML/JSON), auto-assigns Agent ID ownership to files via worktree scans,
-exposes live status for both LLMs (MCP tools) and humans (CLI dashboard), and ships
-with an assessment runner for scoring protocol fidelity against MiniMax coordination
-test suites.
+CoordinationHub tracks who is doing what across a swarm. The root agent acts as project manager (top-level coordinator), spawning child agents that act as team leaders or team members. Files are locked and owned by Agent ID — every agent and human can see the full assignment tree at any time.
 
-Part of the **Stele + Chisel + Trammel + CoordinationHub** quartet.
+Works standalone or alongside **Stele + Chisel + Trammel + CoordinationHub**.
 
-## Features
+## How It Works
+
+```
+Root Agent (project manager)
+├── Child Agent A (team leader)
+│   ├── Grandchild A.0 (team member — does the work)
+│   └── Grandchild A.1 (team member)
+├── Child Agent B (team leader)
+│   └── Grandchild B.0 (team member)
+└── Child Agent C (team member)
+```
+
+Every node in the tree is a registered agent with an Agent ID. Files are locked by Agent ID so the project manager can see who holds what. Children are re-parented to the grandparent if their parent dies (cascade orphaning) — no agent is permanently stranded.
+
+## Coordination Model
+
+| Role | Description |
+|------|-------------|
+| **Root agent** | Project manager — top-level coordinator. Spawns team leaders. Does not do the work itself. |
+| **Team leader** | Child of root (or grandchild). Spawns team members, assigns tasks, reviews work. |
+| **Team member** | Leaf node. Does the work: writes code, runs tests, calls `notify_change` when done. |
+
+**Agents communicate via change notifications, not messages.** A team member calls `notify_change(path, 'modified', agent_id)` after writing a shared file. Teammates poll `get_notifications` to discover what changed. `broadcast` checks sibling lock state before a significant action — it does not send or store messages; the calling agent decides what to do with the conflict data.
+
+`acquire_lock` enforces exclusive access: a team member locks a file before writing, releases it when done. Review the full agent tree at any time:
+
+```bash
+coordinationhub agent-tree                    # oldest root agent as root
+coordinationhub agent-tree hub.12345.0        # specific agent as root
+coordinationhub agent-status <agent_id> --tree
+```
 
 - **Declarative coordination graphs** — agents, handoffs, escalation rules, and assessment
   criteria defined in `coordination_spec.yaml` or `coordination_spec.json` at project root.
@@ -89,7 +115,7 @@ assessment:
     - spawn_propagation
 ```
 
-## 27 MCP Tools
+## 28 MCP Tools
 
 | Tool | Purpose |
 |------|---------|
@@ -120,6 +146,7 @@ assessment:
 | `get_file_agent_map` | Map of all tracked files → agent + responsibility |
 | `update_agent_status` | Broadcast what an agent is currently working on |
 | `run_assessment` | Run an assessment suite against the loaded graph |
+| `get_agent_tree` | Hierarchical agent tree for human/LLM review (nested + plain-text) |
 
 ## CLI Commands
 
@@ -135,6 +162,9 @@ coordinationhub dashboard
 coordinationhub dashboard --json
 coordinationhub agent-status <agent_id>
 coordinationhub agent-status <agent_id> --json
+coordinationhub agent-status <agent_id> --tree
+coordinationhub agent-tree <agent_id>
+coordinationhub agent-tree
 
 # Graph
 coordinationhub load-spec
@@ -189,41 +219,42 @@ When a coordination graph is loaded, agents may also have a `graph_agent_id`
 ```
 coordinationhub/
   __init__.py         — Package init, exports CoordinationEngine, CoordinationHubMCPServer
-  core.py             — CoordinationEngine: all 27 tool methods + helpers (~465 LOC)
-  paths.py            — Project-root detection and path normalization (~47 LOC)
-  context.py          — Context bundle builder for register_agent responses (~98 LOC)
+  core.py             — CoordinationEngine: all 28 tool methods (~431 LOC)
+  _storage.py         — CoordinationStorage: SQLite pool, path resolution, lifecycle (~121 LOC)
+  paths.py            — Project-root detection and path normalization (~48 LOC)
+  context.py          — Context bundle builder for register_agent responses (~100 LOC)
   schemas.py           — Schema aggregator, re-exports TOOL_SCHEMAS (~31 LOC)
   schemas_identity.py   — Identity & Registration schemas (~123 LOC)
   schemas_locking.py    — Document Locking schemas (~145 LOC)
   schemas_coordination.py — Coordination Action schemas (~59 LOC)
   schemas_change.py     — Change Awareness schemas (~77 LOC)
   schemas_audit.py     — Audit & Status schemas (~43 LOC)
-  schemas_visibility.py — Graph & Visibility schemas (~137 LOC)
+  schemas_visibility.py — Graph & Visibility schemas (8 tools, ~156 LOC)
   dispatch.py          — Tool dispatch table (~48 LOC)
-  graphs.py           — Thin aggregator + graph auto-mapping (~145 LOC)
+  graphs.py           — Thin aggregator + graph auto-mapping (~105 LOC)
   graph_validate.py   — Pure validation functions (~131 LOC)
   graph_loader.py     — File loading (YAML/JSON) and spec auto-detection (~49 LOC)
   graph.py            — CoordinationGraph in-memory object (~66 LOC)
-  visibility.py       — Thin re-export aggregator (~20 LOC)
-  scan.py             — File ownership scan, graph-role-aware (~165 LOC)
-  agent_status.py     — Agent status query and file map helpers (~125 LOC)
+  visibility.py       — Thin re-export aggregator (~15 LOC)
+  scan.py             — File ownership scan, graph-role-aware (~105 LOC)
+  agent_status.py     — Agent status query, file map, and agent tree helpers (~225 LOC)
   responsibilities.py — Agent role/responsibilities storage (~35 LOC)
   agent_registry.py   — Thin re-export aggregator (~23 LOC)
-  registry_ops.py     — Agent lifecycle ops (~107 LOC)
+  registry_ops.py     — Agent lifecycle ops (~120 LOC)
   registry_query.py   — Agent registry queries (~142 LOC)
-  assessment.py       — Assessment runner, 5 metric scorers (~510 LOC)
+  assessment.py       — Assessment runner, 5 metric scorers (~394 LOC)
   mcp_server.py       — HTTP MCP server (ThreadedHTTPServer, stdlib only)
   mcp_stdio.py        — Stdio MCP server (requires optional mcp package)
-  cli.py              — argparse CLI parser + lazy dispatch (~235 LOC)
-  cli_commands.py     — Re-exports all CLI handlers (~43 LOC)
+  cli.py              — argparse CLI parser + lazy dispatch (~237 LOC)
+  cli_commands.py     — Re-exports all CLI handlers (~44 LOC)
   cli_agents.py       — Agent identity & lifecycle CLI commands (~205 LOC)
   cli_locks.py        — Document locking & coordination CLI commands (~214 LOC)
-  cli_vis.py          — Change awareness, audit, graph & assessment CLI (~320 LOC)
+  cli_vis.py          — Change awareness, audit, graph & assessment CLI + agent-tree (~346 LOC)
   db.py               — SQLite schema + thread-local ConnectionPool (~215 LOC)
   lock_ops.py         — Shared lock primitives (~119 LOC)
   conflict_log.py     — Conflict recording and querying (~53 LOC)
   notifications.py    — Change notification storage and retrieval (~115 LOC)
-  tests/              — pytest suite (165 tests, 11 test files)
+  tests/              — pytest suite (187 tests, 12 test files)
 ```
 
 ## Zero-Dependency Guarantee

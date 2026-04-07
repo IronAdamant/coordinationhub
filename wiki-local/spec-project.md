@@ -8,11 +8,7 @@
 
 CoordinationHub externalizes the coordination bottleneck for multi-agent coding swarms. It tracks agent identity and lineage, enforces document locking, detects lock conflicts, propagates coordination context to spawned sub-agents, and provides a shared ground truth for "who is doing what" across all LLMs and IDEs.
 
-Part of the **Stele + Chisel + Trammel + CoordinationHub** quartet:
-- **Stele**: Persistent context retrieval and semantic indexing
-- **Chisel**: Code analysis, churn, coupling, risk mapping
-- **Trammel**: Planning discipline, verification, failure learning, recipe memory
-- **CoordinationHub**: Multi-agent identity, lineage, locking, and conflict prevention
+Works standalone or alongside Stele, Chisel, and Trammel. Configure other MCP server URLs via their own environment variables.
 
 Each works standalone. When co-installed, they cooperate through each LLM's MCP tool layer.
 
@@ -93,12 +89,7 @@ When an agent registers (or when a parent spawns a child), the bundle returned i
   "registered_agents": [...],
   "active_locks": [...],
   "pending_notifications": [...],
-  "coordination_urls": {
-    "coordinationhub": "http://localhost:9877",
-    "stele": "http://localhost:9876",
-    "chisel": "http://localhost:8377",
-    "trammel": "http://localhost:8737"
-  }
+  "coordination_url": "http://localhost:9877"
 }
 ```
 
@@ -247,7 +238,7 @@ trace against 5 metric scorers, and outputs a Markdown report. Metric scorers:
 
 ---
 
-## MCP Tools (27 total — v0.3.1)
+## MCP Tools (28 total — v0.3.1)
 
 ### Identity & Registration
 
@@ -271,10 +262,10 @@ trace against 5 metric scorers, and outputs a Markdown report. Metric scorers:
 
 `get_conflicts`, `status`
 
-### Graph & Visibility (7 NEW in 0.3.0)
+### Graph & Visibility (8 tools in 0.3.1)
 
 `load_coordination_spec`, `validate_graph`, `scan_project`,
-`get_agent_status`, `get_file_agent_map`, `update_agent_status`, `run_assessment`
+`get_agent_status`, `get_file_agent_map`, `update_agent_status`, `run_assessment`, `get_agent_tree`
 
 ---
 
@@ -283,7 +274,7 @@ trace against 5 metric scorers, and outputs a Markdown report. Metric scorers:
 ```
 coordinationhub/
   __init__.py          -- __version__, public API
-  core.py              -- CoordinationEngine: all 27 tool methods (~465 LOC)
+  core.py              -- CoordinationEngine: all 28 tool methods (~431 LOC)
   paths.py             -- Project-root detection and path normalization (~47 LOC)
   context.py           -- Context bundle builder for register_agent responses (~98 LOC)
   schemas.py           -- Schema aggregator, re-exports TOOL_SCHEMAS (~31 LOC)
@@ -292,7 +283,7 @@ coordinationhub/
   schemas_coordination.py -- Coordination Action schemas (~59 LOC)
   schemas_change.py    -- Change Awareness schemas (~77 LOC)
   schemas_audit.py     -- Audit & Status schemas (~43 LOC)
-  schemas_visibility.py -- Graph & Visibility schemas (~137 LOC)
+  schemas_visibility.py -- Graph & Visibility schemas (8 tools, ~156 LOC)
   dispatch.py          -- Tool dispatch table (~48 LOC)
   graphs.py            -- Thin aggregator + graph auto-mapping (~145 LOC)
   graph_validate.py    -- Pure validation functions (~131 LOC)
@@ -300,7 +291,7 @@ coordinationhub/
   graph.py             -- CoordinationGraph in-memory object (~66 LOC)
   visibility.py        -- Thin re-export aggregator (~20 LOC)
   scan.py              -- File ownership scan, graph-role-aware (~165 LOC)
-  agent_status.py      -- Agent status query and file map helpers (~125 LOC)
+  agent_status.py      -- Agent status query, file map, and agent tree helpers (~225 LOC)
   responsibilities.py   -- Agent role/responsibilities storage (~35 LOC)
   agent_registry.py    -- Agent lifecycle (registry_ops + registry_query)
   registry_ops.py      -- Agent lifecycle ops (~107 LOC)
@@ -309,10 +300,10 @@ coordinationhub/
   mcp_server.py        -- HTTP MCP server (ThreadedHTTPServer, stdlib only)
   mcp_stdio.py         -- Stdio MCP server (requires optional mcp package)
   cli.py               -- argparse CLI parser + lazy dispatch (~235 LOC)
-  cli_commands.py      -- Re-exports all CLI handlers (~43 LOC)
+  cli_commands.py      -- Re-exports all CLI handlers (~44 LOC)
   cli_agents.py        -- Agent identity & lifecycle CLI commands (~205 LOC)
   cli_locks.py         -- Document locking & coordination CLI (~214 LOC)
-  cli_vis.py           -- Change awareness, audit, graph & assessment CLI (~320 LOC)
+  cli_vis.py           -- Change awareness, audit, graph & assessment CLI + agent-tree (~346 LOC)
   db.py                -- SQLite schema, thread-local ConnectionPool (~215 LOC)
   lock_ops.py          -- Shared lock primitives (~119 LOC)
   conflict_log.py      -- Conflict recording (~53 LOC)
@@ -411,7 +402,7 @@ Default port: `9877`
 - File ownership tracking via worktree scan
 - Visibility layer: `get_agent_status`, `get_file_agent_map`, `dashboard`
 - Assessment runner with 5 real metric scorers
-- 27 MCP tools
+- 28 MCP tools
 - `schemas.py` split into `schemas.py` + `dispatch.py`
 - `cli.py` split into `cli.py` + `cli_commands.py`
 - New modules: `visibility.py`, `dispatch.py`, `cli_commands.py`
