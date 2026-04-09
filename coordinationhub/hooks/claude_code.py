@@ -43,12 +43,45 @@ def _session_agent_id(session_id: str) -> str:
     return f"hub.cc.{short}"
 
 
-def _subagent_id(parent_id: str, event: dict) -> str:
-    """Deterministic child agent ID for a spawned subagent."""
+def _subagent_id(parent_id: str, event: dict, engine=None) -> str:
+    """Deterministic child agent ID for a spawned subagent.
+
+    Uses tool_use_id when provided by Claude Code.  Falls back to a
+    sequence number derived from existing children of *parent_id* so
+    that concurrent SubagentStart events still produce unique IDs.
+    """
     tool_input = event.get("tool_input", {})
     agent_type = tool_input.get("subagent_type", "agent")
-    tool_use_id = event.get("tool_use_id", "0")[:6]
-    return f"{parent_id}.{agent_type}.{tool_use_id}"
+    tool_use_id = event.get("tool_use_id", "")
+    if tool_use_id:
+        return f"{parent_id}.{agent_type}.{tool_use_id[:6]}"
+
+    # Fallback: derive next sequence number from existing children
+    seq = 0
+    if engine is not None:
+        try:
+            agents = engine.list_agents(active_only=False)
+            prefix = f"{parent_id}.{agent_type}."
+            existing = [
+                a["agent_id"] for a in agents.get("agents", [])
+                if a["agent_id"].startswith(prefix)
+            ]
+            seq = len(existing)
+        except Exception:
+            pass
+    return f"{parent_id}.{agent_type}.{seq}"
+
+
+def _resolve_agent_id(event: dict) -> str:
+    """Return the most specific agent ID available in the event.
+
+    Prefers ``subagent_id`` (if Claude Code populates it for subagent
+    tool calls) over the session root ID.
+    """
+    subagent_id = event.get("subagent_id") or event.get("agent_id")
+    if subagent_id:
+        return subagent_id
+    return _session_agent_id(event.get("session_id", ""))
 
 
 def _ensure_registered(engine, agent_id: str, parent_id: str | None = None) -> None:
@@ -84,7 +117,7 @@ def handle_pre_write(event: dict) -> dict | None:
 
     engine = _get_engine(event.get("cwd", "."))
     try:
-        agent_id = _session_agent_id(event.get("session_id", ""))
+        agent_id = _resolve_agent_id(event)
         _ensure_registered(engine, agent_id)
 
         result = engine.acquire_lock(file_path, agent_id, ttl=600.0)
@@ -124,7 +157,7 @@ def handle_post_write(event: dict) -> dict | None:
 
     engine = _get_engine(event.get("cwd", "."))
     try:
-        agent_id = _session_agent_id(event.get("session_id", ""))
+        agent_id = _resolve_agent_id(event)
         engine.notify_change(file_path, "modified", agent_id)
     finally:
         engine.close()
@@ -132,16 +165,26 @@ def handle_post_write(event: dict) -> dict | None:
 
 
 def handle_post_stele_index(event: dict) -> dict | None:
-    """Bridge: Stele index → CoordinationHub notify_change."""
+    """Bridge: Stele index → CoordinationHub notify_change.
+
+    Stele's ``index`` tool accepts ``paths`` (plural, array).  Also
+    handles the singular ``document_path`` / ``path`` forms for
+    forward-compatibility.
+    """
     tool_input = event.get("tool_input", {})
     doc_path = tool_input.get("document_path") or tool_input.get("path")
-    if not doc_path:
+    paths = tool_input.get("paths", [])
+
+    if not doc_path and not paths:
         return None
 
     engine = _get_engine(event.get("cwd", "."))
     try:
-        agent_id = _session_agent_id(event.get("session_id", ""))
-        engine.notify_change(str(doc_path), "indexed", agent_id)
+        agent_id = _resolve_agent_id(event)
+        if doc_path:
+            engine.notify_change(str(doc_path), "indexed", agent_id)
+        for p in paths:
+            engine.notify_change(str(p), "indexed", agent_id)
     finally:
         engine.close()
     return None
@@ -155,7 +198,7 @@ def handle_post_trammel_claim(event: dict) -> dict | None:
 
     engine = _get_engine(event.get("cwd", "."))
     try:
-        agent_id = _session_agent_id(event.get("session_id", ""))
+        agent_id = _resolve_agent_id(event)
         _ensure_registered(engine, agent_id)
         task = f"trammel:{plan_id}/{step_id}" if plan_id else str(step_id)
         engine.update_agent_status(agent_id, current_task=task)
@@ -170,7 +213,7 @@ def handle_subagent_start(event: dict) -> dict | None:
     try:
         parent_id = _session_agent_id(event.get("session_id", ""))
         _ensure_registered(engine, parent_id)
-        child_id = _subagent_id(parent_id, event)
+        child_id = _subagent_id(parent_id, event, engine=engine)
         _ensure_registered(engine, child_id, parent_id=parent_id)
 
         tool_input = event.get("tool_input", {})
@@ -187,7 +230,7 @@ def handle_subagent_stop(event: dict) -> dict | None:
     engine = _get_engine(event.get("cwd", "."))
     try:
         parent_id = _session_agent_id(event.get("session_id", ""))
-        child_id = _subagent_id(parent_id, event)
+        child_id = _subagent_id(parent_id, event, engine=engine)
         try:
             engine.deregister_agent(child_id)
         except Exception:
