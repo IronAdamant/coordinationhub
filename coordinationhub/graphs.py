@@ -16,6 +16,9 @@ Falls back gracefully if the YAML library is unavailable.
 
 from __future__ import annotations
 
+import json
+import time as _time
+
 from .graph_validate import validate_graph as _validate_graph
 from .graph_validate import (
     REQUIRED_AGENT_FIELDS,
@@ -109,7 +112,6 @@ def _populate_agent_responsibilities_from_graph(
     graph: CoordinationGraph,
 ) -> None:
     """For each graph agent whose id matches a registered agent, upsert agent_responsibilities."""
-    import json, time as _time
     now = _time.time()
     for graph_id, agent_def in graph.agents.items():
         with connect() as conn:

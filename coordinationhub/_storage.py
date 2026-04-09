@@ -10,15 +10,10 @@ from __future__ import annotations
 
 import os
 import sqlite3
+import threading
 from pathlib import Path
-from typing import TYPE_CHECKING
 
 from . import db as _db
-from . import notifications as _cn
-from . import assessment as _assess
-
-if TYPE_CHECKING:
-    import graphs as _g
 
 
 class CoordinationStorage:
@@ -39,6 +34,8 @@ class CoordinationStorage:
         self._project_root = project_root
         self._storage_dir = self._resolve_storage_dir(storage_dir)
         self._pool: _db.ConnectionPool | None = None
+        self._seq_lock = threading.Lock()
+        self._seq_counters: dict[str, int] = {}
 
     # ------------------------------------------------------------------ #
     # Storage path
@@ -69,8 +66,6 @@ class CoordinationStorage:
         _db.set_pool(self._pool)
         with self._pool.connect() as conn:
             _db.init_schema(conn)
-            _cn.init_notifications_table(self._pool.connect)
-            _assess.init_assessment_table(conn)
 
     def close(self) -> None:
         """Checkpoint the WAL and close the connection pool."""
@@ -100,22 +95,37 @@ class CoordinationStorage:
             return int(row["agent_id"].rsplit(".", 1)[-1]) + 1
         return 0
 
+    def _next_seq_atomic(self, prefix: str, conn: sqlite3.Connection) -> int:
+        """Return the next sequence number for *prefix*, using an in-memory
+        counter seeded from the DB on first access. Must be called under
+        ``_seq_lock``.
+        """
+        if prefix not in self._seq_counters:
+            self._seq_counters[prefix] = self._next_seq(prefix, conn)
+        else:
+            self._seq_counters[prefix] += 1
+        return self._seq_counters[prefix]
+
     def generate_agent_id(self, parent_id: str | None = None) -> str:
         """Generate a unique agent ID.
 
         Root agents: ``{namespace}.{PID}.{sequence}``.
         Child agents: ``{parent_id}.{sequence}``.
+
+        Thread-safe: serialized via ``_seq_lock`` with in-memory counters
+        so IDs are unique even before the agent is registered.
         """
-        pid = os.getpid()
-        prefix = f"{self._namespace}.{pid}"
-        with self._connect() as conn:
-            if parent_id is None:
-                seq = self._next_seq(prefix, conn)
-                return f"{prefix}.{seq}"
-            row = conn.execute(
-                "SELECT agent_id FROM agents WHERE agent_id = ?", (parent_id,)
-            ).fetchone()
-            if not row:
-                raise ValueError(f"Parent agent not found: {parent_id}")
-            seq = self._next_seq(f"{parent_id}.", conn)
-            return f"{parent_id}.{seq}"
+        with self._seq_lock:
+            pid = os.getpid()
+            prefix = f"{self._namespace}.{pid}"
+            with self._connect() as conn:
+                if parent_id is None:
+                    seq = self._next_seq_atomic(prefix, conn)
+                    return f"{prefix}.{seq}"
+                row = conn.execute(
+                    "SELECT agent_id FROM agents WHERE agent_id = ?", (parent_id,)
+                ).fetchone()
+                if not row:
+                    raise ValueError(f"Parent agent not found: {parent_id}")
+                seq = self._next_seq_atomic(f"{parent_id}.", conn)
+                return f"{parent_id}.{seq}"

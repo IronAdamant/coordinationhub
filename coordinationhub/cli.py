@@ -6,6 +6,7 @@ Delegates to cli_commands.py for all command handlers.
 from __future__ import annotations
 
 import argparse
+import json
 import sys
 from typing import Any
 
@@ -226,7 +227,6 @@ def main(argv: list[str] | None = None) -> int:
         return 0
     except Exception as exc:
         if getattr(args, "json_output", False):
-            import json
             print(json.dumps({"error": str(exc)}, indent=2))
         else:
             print(f"Error: {exc}", file=sys.stderr)

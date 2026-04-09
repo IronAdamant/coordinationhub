@@ -5,6 +5,7 @@ Zero internal dependencies — receives connect() from caller.
 
 from __future__ import annotations
 
+import json
 import sqlite3
 import time
 from typing import Any
@@ -65,7 +66,6 @@ def record_conflict(
     details: dict[str, Any] | None = None,
 ) -> int | None:
     """Log a conflict event. Returns the inserted row ID."""
-    import json
     now = time.time()
     details_json = json.dumps(details) if details else None
     cursor = conn.execute(

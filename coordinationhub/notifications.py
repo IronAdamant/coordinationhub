@@ -12,27 +12,6 @@ from typing import Any
 from .db import ConnectFn
 
 
-def init_notifications_table(connect: ConnectFn) -> None:
-    """Create the change_notifications table if it does not exist."""
-    with connect() as conn:
-        conn.execute("""
-            CREATE TABLE IF NOT EXISTS change_notifications (
-                id            INTEGER PRIMARY KEY AUTOINCREMENT,
-                document_path TEXT NOT NULL,
-                change_type   TEXT NOT NULL,
-                agent_id      TEXT NOT NULL,
-                worktree_root TEXT,
-                created_at    REAL NOT NULL
-            )
-        """)
-        conn.execute(
-            "CREATE INDEX IF NOT EXISTS idx_notif_time ON change_notifications(created_at)"
-        )
-        conn.execute(
-            "CREATE INDEX IF NOT EXISTS idx_notif_agent ON change_notifications(agent_id)"
-        )
-
-
 def notify_change(
     connect: ConnectFn,
     document_path: str,

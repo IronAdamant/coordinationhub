@@ -535,19 +535,6 @@ def format_markdown_report(result: dict[str, Any]) -> str:
 # SQLite storage
 # ------------------------------------------------------------------ #
 
-def init_assessment_table(conn: sqlite3.Connection) -> None:
-    conn.execute("""
-        CREATE TABLE IF NOT EXISTS assessment_results (
-            id          INTEGER PRIMARY KEY AUTOINCREMENT,
-            suite_name  TEXT NOT NULL,
-            metric      TEXT NOT NULL,
-            score       REAL NOT NULL,
-            details_json TEXT,
-            run_at      REAL NOT NULL
-        )
-    """)
-
-
 def store_assessment_results(
     conn: sqlite3.Connection,
     result: dict[str, Any],
