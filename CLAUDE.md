@@ -52,7 +52,7 @@ coordinationhub/
   notifications.py     — Change notification storage and retrieval (~94 LOC)
   hooks/
     __init__.py
-    claude_code.py    — Claude Code hook: auto-locking, notifications, Stele/Trammel bridge (~267 LOC)
+    claude_code.py    — Claude Code hook: auto-locking, notifications, Stele/Trammel bridge (~310 LOC)
   tests/              — pytest suite (202 tests, 14 test files)
 ```
 
