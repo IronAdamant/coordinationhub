@@ -101,6 +101,31 @@ def cmd_lock_status(args):
 
 
 # ------------------------------------------------------------------ #
+# list-locks
+# ------------------------------------------------------------------ #
+
+def cmd_list_locks(args):
+    engine = _engine_from_args(args)
+    try:
+        result = engine.list_locks(agent_id=getattr(args, "agent_id", None))
+        if args.json_output:
+            _print_json(result)
+        else:
+            locks = result.get("locks", [])
+            if not locks:
+                print("No active locks")
+                return
+            print(f"Active locks ({len(locks)}):")
+            for lock in locks:
+                print(f"  {lock['document_path']}")
+                print(f"    Held by: {lock['locked_by']}")
+                print(f"    Type: {lock['lock_type']}")
+                print(f"    Expires: {lock['expires_at']:.0f}")
+    finally:
+        _close(engine)
+
+
+# ------------------------------------------------------------------ #
 # release-agent-locks
 # ------------------------------------------------------------------ #
 

@@ -115,7 +115,7 @@ assessment:
     - spawn_propagation
 ```
 
-## 28 MCP Tools
+## 29 MCP Tools
 
 | Tool | Purpose |
 |------|---------|
@@ -129,6 +129,7 @@ assessment:
 | `release_lock` | Release a held lock |
 | `refresh_lock` | Extend lock TTL without releasing |
 | `get_lock_status` | Check if a document is locked |
+| `list_locks` | List all active locks (optionally filtered by agent) |
 | `release_agent_locks` | Release all locks held by an agent |
 | `reap_expired_locks` | Clear all expired locks |
 | `reap_stale_agents` | Mark stale agents as stopped |
@@ -189,6 +190,8 @@ coordinationhub acquire-lock <path> <agent_id>
 coordinationhub release-lock <path> <agent_id>
 coordinationhub refresh-lock <path> <agent_id>
 coordinationhub lock-status <path>
+coordinationhub list-locks
+coordinationhub list-locks --agent-id <agent_id>
 coordinationhub release-agent-locks <agent_id>
 coordinationhub reap-expired-locks
 coordinationhub reap-stale-agents

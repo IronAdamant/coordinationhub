@@ -1,11 +1,38 @@
 # LLM_Development.md — CoordinationHub
 
-**Version:** 0.3.1
-**Last updated:** 2026-04-07
+**Version:** 0.3.2
+**Last updated:** 2026-04-10
 
 ## Change Log
 
 All significant changes to the CoordinationHub project are documented here in reverse chronological order.
+
+---
+
+## 2026-04-10 — v0.3.2 Review Ten Fixes
+
+Addresses findings from RecipeLab Review Ten (6-feature parallel build + refactoring phase).
+
+### Bug Fix
+
+**Stale locks from completed agents (Review Ten bug #1):**
+- Hook TTL reduced from 600s to 120s — prevents completed-agent locks from blocking work for 10 minutes.
+- `handle_pre_write` now calls `reap_expired_locks()` before `acquire_lock()` — cleans up stale locks from crashed agents as a safety net.
+- `acquire_lock` already handled expired locks via TTL check, but the combination of shorter TTL + pre-acquire reaping ensures faster cleanup.
+
+### New Feature
+
+**`list_locks` tool + `list-locks` CLI:**
+- `list_locks(agent_id?)` — lists all active (non-expired) locks with document path, holder, expiry time, lock type, worktree.
+- `list-locks` CLI: `coordinationhub list-locks [--agent-id <id>]`.
+- Added to dispatch table, schemas (schemas_locking.py), CLI parser.
+- 5 new tests in `test_locking.py`.
+
+### Counts
+
+- MCP tools: 28 → 29
+- CLI commands: 29 → 30
+- Tests: 202 → 206
 
 ---
 

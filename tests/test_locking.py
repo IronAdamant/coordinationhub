@@ -95,6 +95,48 @@ class TestLockStatus:
         assert status["locked"] is False
 
 
+class TestListLocks:
+    def test_list_locks_empty(self, engine, registered_agent):
+        result = engine.list_locks()
+        assert result["count"] == 0
+        assert result["locks"] == []
+
+    def test_list_locks_shows_active(self, engine, registered_agent):
+        engine.acquire_lock("/a.txt", registered_agent)
+        engine.acquire_lock("/b.txt", registered_agent)
+        result = engine.list_locks()
+        assert result["count"] == 2
+        paths = {lock["document_path"] for lock in result["locks"]}
+        assert any("a.txt" in p for p in paths)
+        assert any("b.txt" in p for p in paths)
+
+    def test_list_locks_excludes_expired(self, engine, registered_agent):
+        engine.acquire_lock("/expired.txt", registered_agent, ttl=0.01)
+        engine.acquire_lock("/active.txt", registered_agent, ttl=300.0)
+        time.sleep(0.02)
+        result = engine.list_locks()
+        assert result["count"] == 1
+        assert "active.txt" in result["locks"][0]["document_path"]
+
+    def test_list_locks_filter_by_agent(self, engine, two_agents):
+        engine.acquire_lock("/a.txt", two_agents["child"])
+        engine.acquire_lock("/b.txt", two_agents["other"])
+        result = engine.list_locks(agent_id=two_agents["child"])
+        assert result["count"] == 1
+        assert result["locks"][0]["locked_by"] == two_agents["child"]
+
+    def test_list_locks_includes_details(self, engine, registered_agent):
+        engine.acquire_lock("/test.txt", registered_agent, ttl=120.0)
+        result = engine.list_locks()
+        lock = result["locks"][0]
+        assert "document_path" in lock
+        assert "locked_by" in lock
+        assert "locked_at" in lock
+        assert "expires_at" in lock
+        assert "lock_type" in lock
+        assert lock["locked_by"] == registered_agent
+
+
 class TestLockReaping:
     def test_reap_expired_locks(self, engine, registered_agent):
         engine.acquire_lock("/test.txt", registered_agent, ttl=0.01)

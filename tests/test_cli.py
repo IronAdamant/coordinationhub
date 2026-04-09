@@ -9,9 +9,9 @@ from coordinationhub.cli import create_parser, _COMMANDS
 EXPECTED_COMMANDS = {
     "serve", "serve-mcp", "status", "register", "heartbeat", "deregister",
     "list-agents", "lineage", "siblings", "acquire-lock", "release-lock",
-    "refresh-lock", "lock-status", "release-agent-locks", "reap-expired-locks",
-    "reap-stale-agents", "broadcast", "wait-for-locks", "notify-change",
-    "get-notifications", "prune-notifications", "get-conflicts",
+    "refresh-lock", "lock-status", "list-locks", "release-agent-locks",
+    "reap-expired-locks", "reap-stale-agents", "broadcast", "wait-for-locks",
+    "notify-change", "get-notifications", "prune-notifications", "get-conflicts",
     "load-spec", "validate-spec", "scan-project", "dashboard",
     "agent-status", "assess", "agent-tree",
 }

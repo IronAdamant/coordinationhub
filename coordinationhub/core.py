@@ -229,6 +229,32 @@ class CoordinationEngine:
                 "worktree": row["worktree_root"],
             }
 
+    def list_locks(self, agent_id: str | None = None) -> dict[str, Any]:
+        """List all active (non-expired) locks, optionally filtered by agent."""
+        now = time.time()
+        with self._connect() as conn:
+            if agent_id:
+                rows = conn.execute(
+                    "SELECT * FROM document_locks WHERE locked_by = ? AND locked_at + lock_ttl > ?",
+                    (agent_id, now),
+                ).fetchall()
+            else:
+                rows = conn.execute(
+                    "SELECT * FROM document_locks WHERE locked_at + lock_ttl > ?",
+                    (now,),
+                ).fetchall()
+        locks = []
+        for row in rows:
+            locks.append({
+                "document_path": row["document_path"],
+                "locked_by": row["locked_by"],
+                "locked_at": row["locked_at"],
+                "expires_at": row["locked_at"] + row["lock_ttl"],
+                "lock_type": row["lock_type"],
+                "worktree": row["worktree_root"],
+            })
+        return {"locks": locks, "count": len(locks)}
+
     def release_agent_locks(self, agent_id: str) -> dict[str, Any]:
         with self._connect() as conn:
             result = _lo.release_agent_locks(conn, "document_locks", agent_id, delete=True)

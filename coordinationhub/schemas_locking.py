@@ -1,4 +1,4 @@
-"""Document Locking tool schemas (7 tools)."""
+"""Document Locking tool schemas (8 tools)."""
 
 from __future__ import annotations
 
@@ -99,6 +99,21 @@ TOOL_SCHEMAS_LOCKING: dict[str, dict] = {
                 },
             },
             "required": ["document_path"],
+        },
+    },
+    "list_locks": {
+        "description": (
+            "List all active (non-expired) locks. Optionally filter by agent_id. "
+            "Returns lock details including document path, holder, expiry time, and lock type."
+        ),
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "agent_id": {
+                    "type": "string",
+                    "description": "Optional agent ID to filter locks by holder",
+                },
+            },
         },
     },
     "release_agent_locks": {

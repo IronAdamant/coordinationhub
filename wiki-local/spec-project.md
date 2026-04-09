@@ -238,7 +238,7 @@ trace against 5 metric scorers, and outputs a Markdown report. Metric scorers:
 
 ---
 
-## MCP Tools (28 total — v0.3.1)
+## MCP Tools (29 total — v0.3.2)
 
 ### Identity & Registration
 
@@ -246,7 +246,7 @@ trace against 5 metric scorers, and outputs a Markdown report. Metric scorers:
 
 ### Document Locking
 
-`acquire_lock`, `release_lock`, `refresh_lock`, `get_lock_status`,
+`acquire_lock`, `release_lock`, `refresh_lock`, `get_lock_status`, `list_locks`,
 `release_agent_locks`, `reap_expired_locks`, `reap_stale_agents`
 
 ### Coordination Actions
@@ -274,7 +274,7 @@ trace against 5 metric scorers, and outputs a Markdown report. Metric scorers:
 ```
 coordinationhub/
   __init__.py          -- __version__, public API
-  core.py              -- CoordinationEngine: all 28 tool methods (~431 LOC)
+  core.py              -- CoordinationEngine: all 29 tool methods (~470 LOC)
   paths.py             -- Project-root detection and path normalization (~47 LOC)
   context.py           -- Context bundle builder for register_agent responses (~98 LOC)
   schemas.py           -- Schema aggregator, re-exports TOOL_SCHEMAS (~31 LOC)
@@ -402,7 +402,7 @@ Default port: `9877`
 - File ownership tracking via worktree scan
 - Visibility layer: `get_agent_status`, `get_file_agent_map`, `dashboard`
 - Assessment runner with 5 real metric scorers
-- 28 MCP tools
+- 29 MCP tools
 - `schemas.py` split into `schemas.py` + `dispatch.py`
 - `cli.py` split into `cli.py` + `cli_commands.py`
 - New modules: `visibility.py`, `dispatch.py`, `cli_commands.py`

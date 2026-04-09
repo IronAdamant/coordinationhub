@@ -91,6 +91,10 @@ def create_parser() -> argparse.ArgumentParser:
     p = sub.add_parser("lock-status", parents=[shared], help="Check if a document is locked")
     p.add_argument("document_path", help="Path to the document")
 
+    # list-locks
+    p = sub.add_parser("list-locks", parents=[shared], help="List all active locks")
+    p.add_argument("--agent-id", default=None, help="Filter to locks held by this agent")
+
     # release-agent-locks
     p = sub.add_parser("release-agent-locks", parents=[shared], help="Release all locks held by an agent")
     p.add_argument("agent_id", help="Agent whose locks to release")
@@ -189,6 +193,7 @@ _COMMANDS = {
     "list-agents": "cmd_list_agents", "lineage": "cmd_lineage", "siblings": "cmd_siblings",
     "acquire-lock": "cmd_acquire_lock", "release-lock": "cmd_release_lock",
     "refresh-lock": "cmd_refresh_lock", "lock-status": "cmd_lock_status",
+    "list-locks": "cmd_list_locks",
     "release-agent-locks": "cmd_release_agent_locks", "reap-expired-locks": "cmd_reap_expired_locks",
     "reap-stale-agents": "cmd_reap_stale_agents", "broadcast": "cmd_broadcast",
     "wait-for-locks": "cmd_wait_for_locks", "notify-change": "cmd_notify_change",
