@@ -72,7 +72,7 @@
 | `coordinationhub/conflict_log.py` | Conflict recording and querying (~52 LOC) | lock_ops |
 | `coordinationhub/notifications.py` | Change notification storage and retrieval (~94 LOC) | db |
 | `coordinationhub/hooks/__init__.py` | Hooks package init | — |
-| `coordinationhub/hooks/claude_code.py` | Claude Code hook: auto-locking, notifications, Stele/Trammel bridge (~267 LOC) | core |
+| `coordinationhub/hooks/claude_code.py` | Claude Code hook: auto-locking, notifications, Stele/Trammel bridge (~310 LOC) | core |
 | `tests/conftest.py` | pytest fixtures: `engine`, `registered_agent`, `two_agents` | core |
 | `tests/test_agent_lifecycle.py` | Agent lifecycle tests (21 tests) | conftest |
 | `tests/test_locking.py` | Lock acquisition, release, refresh, status, reap (16 tests) | conftest |
@@ -137,7 +137,7 @@ coordinationhub/
   conflict_log.py     — Conflict recording and querying (~52 LOC)
   notifications.py    — Change notification storage and retrieval (~94 LOC)
   hooks/
-    claude_code.py    — Claude Code hook: auto-locking, notifications, Stele/Trammel bridge (~267 LOC)
+    claude_code.py    — Claude Code hook: auto-locking, notifications, Stele/Trammel bridge (~310 LOC)
   tests/              — 202 tests across 14 test files
 ```
 
