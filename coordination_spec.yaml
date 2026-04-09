@@ -1,45 +1,66 @@
-# CoordinationHub Example — coordination_spec.yaml
+# CoordinationHub — coordination_spec.yaml
 #
-# Place this file in your project root as `coordination_spec.yaml`
-# (or `coordination_spec.json` — both formats are supported).
-#
-# Copy and customize for your multi-agent workflow.
+# Defines agent roles, handoffs, and assessment metrics for development
+# work on CoordinationHub itself. Loaded automatically on engine.start().
 
 agents:
-  - id: planner
-    role: decompose tasks
-    model: minimax-m2.7
+  - id: architect
+    role: plan and design
+    model: claude-opus-4
     responsibilities:
-      - break down user stories
-      - assign subtasks
-      - review test coverage
+      - design architecture
+      - plan implementation
+      - coordinate agents
+      - decompose tasks
+      - review code
 
-  - id: executor
-    role: implement
+  - id: builder
+    role: implement features
     model: minimax-m2.7
     responsibilities:
       - write code
+      - implement features
+      - modify files
       - run tests
-      - refactor for clarity
 
-  - id: reviewer
-    role: review
-    model: minimax-m2.7
+  - id: finisher
+    role: polish, fix, and harden
+    model: claude-opus-4
     responsibilities:
-      - review changes
-      - verify test coverage
-      - approve or request changes
+      - review code
+      - fix bugs
+      - write tests
+      - edit documentation
+      - modify files
+
+  - id: explorer
+    role: research and investigate
+    model: claude-haiku-4
+    responsibilities:
+      - read code
+      - search codebase
+      - explore architecture
+      - research patterns
 
 handoffs:
-  - from: planner
-    to: executor
-    condition: task_size < 500 && no_blockers
-  - from: executor
-    to: reviewer
-    condition: changes_pending_review
-  - from: reviewer
-    to: planner
-    condition: changes_requested
+  - from: architect
+    to: builder
+    condition: implementation plan approved
+  - from: builder
+    to: finisher
+    condition: feature implementation complete
+  - from: finisher
+    to: architect
+    condition: review reveals design issues
+  - from: finisher
+    to: builder
+    condition: review feedback requires changes
+  - from: architect
+    to: explorer
+    condition: investigation needed before planning
+  - from: explorer
+    to: architect
+    condition: research complete
 
 escalation:
   max_retries: 3

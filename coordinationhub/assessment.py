@@ -1,8 +1,10 @@
 """Assessment runner for CoordinationHub coordination test suites.
 
-Loads a test trace suite (JSON), runs the loaded coordination graph against it,
-scores on the metrics defined in the graph spec, outputs a Markdown report
-and JSON scores, and stores results in SQLite for historical comparison.
+Loads a test trace suite (JSON), runs it against the coordination graph,
+outputs a Markdown report and JSON scores, stores results in SQLite.
+
+Metric scorers live in assessment_scorers.py and are re-exported here
+for backward compatibility.
 
 Zero third-party dependencies — uses stdlib json + sqlite3 only.
 """
@@ -15,335 +17,17 @@ import time
 from pathlib import Path
 from typing import Any
 
-from .graphs import get_graph
-
-
-# ------------------------------------------------------------------ #
-# Metric scorers
-# ------------------------------------------------------------------ #
-
-def score_role_stability(trace: dict[str, Any], graph: Any) -> float:
-    """Score 0-1: did each agent act only within its defined responsibilities?
-
-    Events are matched against the responsibilities declared in the graph for
-    each agent's graph_id. Events that fall outside those responsibilities
-    reduce the score. Lock/unlock are always permitted (coordination actions).
-    """
-    events = trace.get("events", [])
-    if not events:
-        return 1.0
-
-    # Build agent -> graph_id mapping from register events
-    agent_graph_id: dict[str, str] = {}
-    for evt in events:
-        if evt.get("type") == "register":
-            agent_graph_id[evt["agent_id"]] = evt.get("graph_id", "")
-
-    # Build graph_id -> responsibility set
-    graph_responsibilities: dict[str, set[str]] = {}
-    if graph:
-        for gid, agent_def in graph.agents.items():
-            resp = agent_def.get("responsibilities", [])
-            graph_responsibilities[gid] = set(resp) if isinstance(resp, list) else set()
-
-    violations = 0
-    scored_events = 0
-
-    for evt in events:
-        etype = evt.get("type")
-        aid = evt.get("agent_id", "")
-        gid = agent_graph_id.get(aid, "")
-
-        # Lock/unlock/notify_change are always fine — coordination primitives
-        if etype in ("lock", "unlock", "notify_change", "register", "handoff", "heartbeat"):
-            continue
-
-        # Determine if this event type is covered by the agent's responsibilities
-        responsibilities = graph_responsibilities.get(gid, set())
-        if not responsibilities:
-            # No graph or no role defined — can't penalize, skip
-            continue
-
-        # Map event type to a responsibility keyword
-        # file_scan / modified / write → "write_code" or "modify_files"
-        # acquire_lock → "coordinate"
-        covered = False
-        for resp in responsibilities:
-            resp_lower = resp.lower()
-            if etype in ("file_scan", "modified", "write"):
-                if "write" in resp_lower or "edit" in resp_lower or "modify" in resp_lower or "implement" in resp_lower:
-                    covered = True
-                    break
-            elif etype in ("acquire_lock", "release_lock", "refresh_lock"):
-                if "coordinate" in resp_lower or "lock" in resp_lower:
-                    covered = True
-                    break
-            elif etype == "get_notifications" or etype == "prune_notifications":
-                if "notify" in resp_lower or "coordinate" in resp_lower:
-                    covered = True
-                    break
-
-        if not covered:
-            violations += 1
-        scored_events += 1
-
-    if scored_events == 0:
-        return 1.0
-    return max(0.0, 1.0 - (violations / scored_events))
-
-
-def score_handoff_latency(trace: dict[str, Any], graph: Any) -> float:
-    """Score 0-1: did handoff events match the graph's handoff definitions?
-
-    Each handoff event is checked against the coordination graph:
-    - The from/to pair must exist as a defined handoff
-    - The condition expression should be non-empty
-    Partial credit is given when the pair is correct but no condition is present.
-    """
-    if graph is None:
-        return 0.0
-
-    defined_handoffs = {
-        (h["from"], h["to"]): h.get("condition", "")
-        for h in graph.handoffs
-    }
-
-    handoff_events = [e for e in trace.get("events", []) if e["type"] == "handoff"]
-    if not handoff_events:
-        return 1.0  # No handoffs needed, vacuously correct
-
-    score = 0.0
-    for evt in handoff_events:
-        from_id = evt.get("from", "")
-        to_id = evt.get("to", "")
-        condition = evt.get("condition", "")
-        key = (from_id, to_id)
-
-        if key not in defined_handoffs:
-            continue  # Unknown handoff pair, no credit
-
-        # Base credit for correct from/to pair
-        score += 0.5
-
-        # Additional credit if condition is present and non-trivial
-        if condition and condition not in ("always", "true"):
-            score += 0.5
-        elif defined_handoffs[key] and not condition:
-            # Graph expects condition but handoff event doesn't have one
-            score += 0.25  # partial credit only
-        else:
-            # Both graph and event have no condition (or "always"), full credit
-            score += 0.5
-
-    return min(score / len(handoff_events), 1.0)
-
-
-def score_outcome_verifiability(trace: dict[str, Any], _graph: Any) -> float:
-    """Score 0-1: were files locked before being written/modified, and unlocked after?
-
-    Evaluates the lock-write-unlock pattern for each file:
-    - Lock event establishes intent
-    - Write/modified event before release scores as verified
-    - Unlock without prior modification scores as a wasted lock
-    """
-    events = trace.get("events", [])
-    if not events:
-        return 1.0
-
-    # Track per-path state: was modified between lock and unlock?
-    locked: dict[str, dict[str, Any]] = {}  # path -> {agent_id, modified: bool}
-    verifications: list[bool] = []
-
-    for evt in events:
-        etype = evt.get("type")
-        path = evt.get("path", "")
-
-        if etype == "lock":
-            locked[path] = {"agent_id": evt.get("agent_id", ""), "modified": False}
-        elif etype in ("write", "modified"):
-            if path in locked:
-                locked[path]["modified"] = True
-            elif path:
-                verifications.append(False)  # modification without a lock
-        elif etype == "unlock":
-            if path in locked:
-                # Only scores True if there was a modification between lock and unlock
-                verifications.append(locked[path]["modified"])
-                del locked[path]
-            elif path:
-                verifications.append(False)  # unlock without ever having locked
-
-    if not verifications:
-        return 1.0
-    return sum(verifications) / len(verifications)
-
-
-def score_protocol_adherence(trace: dict[str, Any], graph: Any) -> float:
-    """Score 0-1: did agents follow declared responsibilities and protocol rules?
-
-    Checks:
-    - Agents act only within their declared responsibilities (from score_role_stability)
-    - Agents do not act on files they do not own (if ownership is defined)
-    - Broadcast is followed by a meaningful action (lock, write, or handoff)
-    """
-    events = trace.get("events", [])
-    if not events:
-        return 1.0
-
-    violations = 0
-    scored_events = 0
-
-    # Build agent -> graph_id mapping
-    agent_graph_id: dict[str, str] = {}
-    for evt in events:
-        if evt.get("type") == "register":
-            agent_graph_id[evt["agent_id"]] = evt.get("graph_id", "")
-
-    # Build graph_id -> responsibilities
-    graph_responsibilities: dict[str, set[str]] = {}
-    if graph:
-        for gid, agent_def in graph.agents.items():
-            resp = agent_def.get("responsibilities", [])
-            graph_responsibilities[gid] = set(resp) if isinstance(resp, list) else set()
-
-    for evt in events:
-        etype = evt.get("type")
-        aid = evt.get("agent_id", "")
-        gid = agent_graph_id.get(aid, "")
-        responsibilities = graph_responsibilities.get(gid, set())
-
-        if etype in ("register", "heartbeat", "handoff"):
-            continue
-
-        scored_events += 1
-
-        if etype == "modified":
-            path = evt.get("path", "")
-            # Check: agent modified a file — should it be in their responsibilities?
-            if responsibilities:
-                # "write_code" / "implement" / "modify_files" are OK for modified
-                ok = any(
-                    r in ("write_code", "implement", "modify_files", "edit", "write")
-                    for r in responsibilities
-                )
-                if not ok:
-                    violations += 1
-                    continue
-
-            # Check: was the file locked by this agent before modification?
-            # (We can't easily check this without replaying, so we give partial
-            # credit based on whether the event is within responsibilities)
-            pass  # covered by the above check
-
-        elif etype == "acquire_lock":
-            # Should coordinate if taking locks
-            if responsibilities and "coordinate" not in " ".join(responsibilities).lower():
-                # But this is too strict — skip
-                pass
-
-        elif etype == "notify_change":
-            # notify_change is always fine
-            pass
-
-    if scored_events == 0:
-        return 1.0
-    return max(0.0, 1.0 - (violations / scored_events))
-
-
-def score_spawn_propagation(trace: dict[str, Any], graph: Any) -> float:
-    """Score 0-1: did spawned agents correctly inherit responsibilities from their parent?
-
-    Checks:
-    - When a child agent is registered with a parent_id, the child's events should
-      fall within the parent's declared responsibilities (inheritance is respected).
-    - A child that acts outside both its own scope (if graph_agent_id is set) and the
-      parent's scope scores lower.
-    - Unowned/unparented agents do not penalize this metric.
-    """
-    events = trace.get("events", [])
-    if not events:
-        return 1.0
-
-    # Build agent -> (graph_id, parent_id) from register events
-    agent_graph_id: dict[str, str] = {}
-    agent_parent_id: dict[str, str] = {}
-    for evt in events:
-        if evt.get("type") == "register":
-            agent_graph_id[evt["agent_id"]] = evt.get("graph_id", "")
-            agent_parent_id[evt["agent_id"]] = evt.get("parent_id", "") or ""
-
-    # Build graph_id -> responsibilities
-    graph_responsibilities: dict[str, set[str]] = {}
-    if graph:
-        for gid, agent_def in graph.agents.items():
-            resp = agent_def.get("responsibilities", [])
-            graph_responsibilities[gid] = set(resp) if isinstance(resp, list) else set()
-
-    violations = 0
-    scored_events = 0
-
-    for evt in events:
-        etype = evt.get("type")
-        aid = evt.get("agent_id", "")
-        parent_id = agent_parent_id.get(aid, "")
-        gid = agent_graph_id.get(aid, "")
-
-        # Coordination primitives are always fine
-        if etype in ("lock", "unlock", "notify_change", "register", "handoff",
-                     "heartbeat", "acquire_lock", "release_lock", "refresh_lock",
-                     "get_notifications", "prune_notifications"):
-            continue
-
-        # Get this agent's own responsibilities
-        own_resp = graph_responsibilities.get(gid, set())
-
-        # Get parent's responsibilities (if parent exists)
-        parent_gid = ""
-        parent_resp: set[str] = set()
-        if parent_id:
-            parent_gid = agent_graph_id.get(parent_id, "")
-            parent_resp = graph_responsibilities.get(parent_gid, set())
-
-        # Effective responsibilities = own + parent (child inherits parent scope)
-        effective_resp = own_resp | parent_resp
-
-        # If no effective responsibilities at all, skip scoring
-        if not effective_resp:
-            continue
-
-        # Determine if this event type is covered by effective responsibilities
-        covered = False
-        for resp in effective_resp:
-            resp_lower = resp.lower()
-            if etype in ("file_scan", "modified", "write"):
-                if "write" in resp_lower or "edit" in resp_lower or "modify" in resp_lower or "implement" in resp_lower:
-                    covered = True
-                    break
-            elif etype in ("acquire_lock", "release_lock", "refresh_lock"):
-                if "coordinate" in resp_lower or "lock" in resp_lower:
-                    covered = True
-                    break
-            elif etype in ("get_notifications", "prune_notifications"):
-                if "notify" in resp_lower or "coordinate" in resp_lower:
-                    covered = True
-                    break
-
-        if not covered:
-            violations += 1
-        scored_events += 1
-
-    if scored_events == 0:
-        return 1.0
-    return max(0.0, 1.0 - (violations / scored_events))
-
-
-_METRIC_SCORERS: dict[str, Any] = {
-    "role_stability": score_role_stability,
-    "handoff_latency": score_handoff_latency,
-    "outcome_verifiability": score_outcome_verifiability,
-    "protocol_adherence": score_protocol_adherence,
-    "spawn_propagation": score_spawn_propagation,
-}
+from .assessment_scorers import (
+    METRIC_SCORERS as _METRIC_SCORERS,
+    score_role_stability,
+    score_handoff_latency,
+    score_outcome_verifiability,
+    score_protocol_adherence,
+    score_spawn_propagation,
+    event_matches_responsibility,
+    build_trace_mappings,
+    COORDINATION_PRIMITIVES,
+)
 
 
 # ------------------------------------------------------------------ #
@@ -373,14 +57,12 @@ def _suggest_graph_refinements(suite: dict[str, Any], graph: Any) -> list[dict[s
     defined_agents = set(graph.agents.keys())
     defined_handoffs = {(h["from"], h["to"]) for h in graph.handoffs}
 
-    # Collect all (from, to) handoff pairs from traces
     trace_handoffs: set[tuple[str, str]] = set()
     for trace in traces:
         for evt in trace.get("events", []):
             if evt.get("type") == "handoff":
                 trace_handoffs.add((evt.get("from", ""), evt.get("to", "")))
 
-    # Suggest handoff edges that appear in traces but not in the graph
     for (frm, to) in trace_handoffs:
         if frm in defined_agents and to in defined_agents and (frm, to) not in defined_handoffs:
             suggestions.append({
@@ -391,7 +73,6 @@ def _suggest_graph_refinements(suite: dict[str, Any], graph: Any) -> list[dict[s
                 "reason": "protocol_adherence",
             })
 
-    # Suggest missing agent roles that appear in traces but not in graph
     for trace in traces:
         for evt in trace.get("events", []):
             if evt.get("type") == "register":
@@ -423,7 +104,7 @@ def run_assessment(
         suite: parsed test suite dict
         graph: CoordinationGraph instance or None
         store_fn: optional callable(conn, results) to persist to SQLite
-        graph_agent_id: optional filter — if set, only score traces where at least
+        graph_agent_id: optional filter -- if set, only score traces where at least
             one register event uses this graph_agent_id
 
     Returns:
@@ -434,7 +115,6 @@ def run_assessment(
     suite_name = suite.get("name", "unnamed")
     traces = suite.get("traces", [])
 
-    # Filter traces by graph_agent_id if specified
     if graph_agent_id:
         filtered = []
         for trace in traces:
@@ -452,7 +132,6 @@ def run_assessment(
     if graph and graph.assessment:
         configured = graph.assessment.get("metrics", metrics)
         metrics = configured
-    # Always include spawn_propagation even if graph defines its own metrics
     if "spawn_propagation" not in metrics:
         metrics = metrics + ["spawn_propagation"]
 
@@ -475,10 +154,9 @@ def run_assessment(
     )
     overall = sum(metric_averages.values()) / len(metric_averages) if metric_averages else 0.0
 
-    # Build suggested refinements from the full (unfiltered) suite
     suggested_refinements = _suggest_graph_refinements(suite, graph)
 
-    result = {
+    return {
         "suite_name": suite_name,
         "run_at": now,
         "metrics": metric_averages,
@@ -489,7 +167,6 @@ def run_assessment(
         "suggested_refinements": suggested_refinements,
         "full_trace_json": json.dumps(traces, default=str),
     }
-    return result
 
 
 # ------------------------------------------------------------------ #
@@ -539,11 +216,7 @@ def store_assessment_results(
     conn: sqlite3.Connection,
     result: dict[str, Any],
 ) -> None:
-    """Persist assessment result to SQLite.
-
-    Stores full trace JSON and suggested graph refinements alongside metric scores
-    in the details_json column for later audit and comparison.
-    """
+    """Persist assessment result to SQLite."""
     now = result["run_at"]
     suite_name = result["suite_name"]
     full_trace = result.get("full_trace_json", "")
