@@ -170,12 +170,27 @@ class CoordinationEngine:
                     (agent_id, now, ttl, lock_type, str(self._storage.project_root), norm_path),
                 )
                 return {"acquired": True, "document_path": norm_path, "locked_by": agent_id, "expires_at": now + ttl}
-            conn.execute(
-                "INSERT INTO document_locks (document_path, locked_by, locked_at, lock_ttl, lock_type, worktree_root) "
-                "VALUES (?, ?, ?, ?, ?, ?)",
-                (norm_path, agent_id, now, ttl, lock_type, str(self._storage.project_root)),
-            )
-            return {"acquired": True, "document_path": norm_path, "locked_by": agent_id, "expires_at": now + ttl}
+            try:
+                conn.execute(
+                    "INSERT INTO document_locks (document_path, locked_by, locked_at, lock_ttl, lock_type, worktree_root) "
+                    "VALUES (?, ?, ?, ?, ?, ?)",
+                    (norm_path, agent_id, now, ttl, lock_type, str(self._storage.project_root)),
+                )
+                return {"acquired": True, "document_path": norm_path, "locked_by": agent_id, "expires_at": now + ttl}
+            except sqlite3.IntegrityError:
+                # Another thread inserted first — re-read and treat as contested
+                row = conn.execute(
+                    "SELECT * FROM document_locks WHERE document_path = ?", (norm_path,)
+                ).fetchone()
+                if row and row["locked_by"] == agent_id:
+                    return {"acquired": True, "document_path": norm_path, "locked_by": agent_id, "expires_at": now + ttl}
+                if row:
+                    return {
+                        "acquired": False, "locked_by": row["locked_by"],
+                        "locked_at": row["locked_at"], "expires_at": row["locked_at"] + row["lock_ttl"],
+                        "worktree": row["worktree_root"],
+                    }
+                return {"acquired": False, "locked_by": "unknown"}
 
     def release_lock(self, document_path: str, agent_id: str) -> dict[str, Any]:
         norm_path = normalize_path(document_path, self._storage.project_root)

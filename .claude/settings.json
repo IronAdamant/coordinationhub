@@ -1,0 +1,102 @@
+{
+  "hooks": {
+    "SessionStart": [
+      {
+        "matcher": "",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 coordinationhub/hooks/claude_code.py",
+            "timeout": 10,
+            "statusMessage": "Registering with CoordinationHub"
+          }
+        ]
+      }
+    ],
+    "PreToolUse": [
+      {
+        "matcher": "Write|Edit",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 coordinationhub/hooks/claude_code.py",
+            "timeout": 5,
+            "statusMessage": "Acquiring file lock"
+          }
+        ]
+      }
+    ],
+    "PostToolUse": [
+      {
+        "matcher": "Write|Edit",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 coordinationhub/hooks/claude_code.py",
+            "timeout": 5
+          }
+        ]
+      },
+      {
+        "matcher": "mcp__stele-context__index",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 coordinationhub/hooks/claude_code.py",
+            "timeout": 5,
+            "statusMessage": "Bridging Stele index to CoordinationHub"
+          }
+        ]
+      },
+      {
+        "matcher": "mcp__trammel__claim_step",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 coordinationhub/hooks/claude_code.py",
+            "timeout": 5,
+            "statusMessage": "Syncing Trammel step to CoordinationHub"
+          }
+        ]
+      }
+    ],
+    "SubagentStart": [
+      {
+        "matcher": "",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 coordinationhub/hooks/claude_code.py",
+            "timeout": 5,
+            "statusMessage": "Registering subagent"
+          }
+        ]
+      }
+    ],
+    "SubagentStop": [
+      {
+        "matcher": "",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 coordinationhub/hooks/claude_code.py",
+            "timeout": 5
+          }
+        ]
+      }
+    ],
+    "SessionEnd": [
+      {
+        "matcher": "",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 coordinationhub/hooks/claude_code.py",
+            "timeout": 10,
+            "statusMessage": "Releasing CoordinationHub locks"
+          }
+        ]
+      }
+    ]
+  }
+}

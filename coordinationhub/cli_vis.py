@@ -2,34 +2,11 @@
 
 from __future__ import annotations
 
-import argparse
 import json
 import sys
 from pathlib import Path
-from typing import Any
 
-from .core import CoordinationEngine
-
-
-def _print_json(data: Any) -> None:
-    print(json.dumps(data, indent=2, default=str))
-
-
-def _engine_from_args(args: argparse.Namespace) -> CoordinationEngine:
-    from pathlib import Path
-    storage_dir = Path(args.storage_dir) if args.storage_dir else None
-    project_root = Path(args.project_root) if args.project_root else None
-    namespace = getattr(args, "namespace", "hub")
-    engine = CoordinationEngine(storage_dir=storage_dir, project_root=project_root, namespace=namespace)
-    engine.start()
-    return engine
-
-
-def _close(engine: CoordinationEngine) -> None:
-    try:
-        engine.close()
-    except Exception:
-        pass
+from .cli_utils import print_json as _print_json, engine_from_args as _engine_from_args, close as _close
 
 
 # ------------------------------------------------------------------ #
