@@ -23,6 +23,7 @@ TOOL_DISPATCH: dict[str, tuple[str, list[str]]] = {
     "release_lock": ("release_lock", ["document_path", "agent_id"]),
     "refresh_lock": ("refresh_lock", ["document_path", "agent_id", "ttl"]),
     "get_lock_status": ("get_lock_status", ["document_path"]),
+    "list_locks": ("list_locks", ["agent_id"]),
     "release_agent_locks": ("release_agent_locks", ["agent_id"]),
     "reap_expired_locks": ("reap_expired_locks", []),
     "reap_stale_agents": ("reap_stale_agents", ["timeout"]),

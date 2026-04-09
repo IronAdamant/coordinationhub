@@ -13,13 +13,13 @@ Zero third-party dependencies in core. Works standalone or alongside Stele, Chis
 ```
 coordinationhub/
   __init__.py         — Package init, exports CoordinationEngine, CoordinationHubMCPServer
-  core.py             — CoordinationEngine: all 28 tool methods (~446 LOC)
+  core.py             — CoordinationEngine: all 29 tool methods (~470 LOC)
   _storage.py        — CoordinationStorage: SQLite pool, path resolution, lifecycle (~131 LOC)
   paths.py            — Project-root detection and path normalization (~47 LOC)
   context.py          — Context bundle builder for register_agent responses (~97 LOC)
   schemas.py          — Schema aggregator, re-exports TOOL_SCHEMAS (~31 LOC)
   schemas_identity.py  — Identity & Registration schemas (~123 LOC)
-  schemas_locking.py    — Document Locking schemas (~145 LOC)
+  schemas_locking.py    — Document Locking schemas (~160 LOC)
   schemas_coordination.py — Coordination Action schemas (~59 LOC)
   schemas_change.py     — Change Awareness schemas (~77 LOC)
   schemas_audit.py     — Audit & Status schemas (~43 LOC)
@@ -41,7 +41,7 @@ coordinationhub/
   cli_commands.py     — Re-exports all CLI handlers from domain sub-modules (~44 LOC)
   cli_utils.py        — Shared CLI helpers: print_json, engine_from_args, close (~30 LOC)
   cli_agents.py       — Agent identity & lifecycle CLI commands (~180 LOC)
-  cli_locks.py        — Document locking & coordination CLI commands (~189 LOC)
+  cli_locks.py        — Document locking & coordination CLI commands (~210 LOC)
   cli_vis.py          — Change awareness, audit, graph, assessment CLI + agent-tree (~323 LOC)
   db.py               — SQLite schema (canonical) + thread-local ConnectionPool (~215 LOC)
   agent_registry.py   — Thin re-export aggregator for registry_ops/registry_query (~23 LOC)
@@ -53,7 +53,7 @@ coordinationhub/
   hooks/
     __init__.py
     claude_code.py    — Claude Code hook: auto-locking, notifications, Stele/Trammel bridge (~310 LOC)
-  tests/              — pytest suite (202 tests, 14 test files)
+  tests/              — pytest suite (206 tests, 14 test files)
 ```
 
 ## Module Design
@@ -80,16 +80,16 @@ coordinationhub/
 - **SQLite WAL mode**: `PRAGMA wal_checkpoint(TRUNCATE)` on engine close ensures no unbounded WAL growth.
 - **`broadcast` message/action params removed**: The `message` and `action` positional params were removed (they were never stored). The `document_path` optional param remains — when provided, it is used to check for lock conflicts among acknowledged siblings and is not persisted.
 
-## 28 MCP Tools
+## 29 MCP Tools
 
 Identity: `register_agent`, `heartbeat`, `deregister_agent`, `list_agents`, `get_lineage`, `get_siblings`
-Locking: `acquire_lock`, `release_lock`, `refresh_lock`, `get_lock_status`, `release_agent_locks`, `reap_expired_locks`, `reap_stale_agents`
+Locking: `acquire_lock`, `release_lock`, `refresh_lock`, `get_lock_status`, `list_locks`, `release_agent_locks`, `reap_expired_locks`, `reap_stale_agents`
 Coordination: `broadcast`, `wait_for_locks`
 Change: `notify_change`, `get_notifications`, `prune_notifications`
 Audit: `get_conflicts`, `status`
 Graph & Visibility (0.3.1): `load_coordination_spec`, `validate_graph`, `scan_project`, `get_agent_status`, `get_file_agent_map`, `update_agent_status`, `run_assessment`, `get_agent_tree`
 
-**Tool count is dynamic** — `status()` returns `len(TOOL_DISPATCH)` (currently 28), not a hardcoded number.
+**Tool count is dynamic** — `status()` returns `len(TOOL_DISPATCH)` (currently 29), not a hardcoded number.
 
 ## Dev Commands
 
@@ -144,9 +144,9 @@ To disable hooks temporarily, add `"disableAllHooks": true` to `~/.claude/settin
 
 ```bash
 python -m pytest tests/ -v
-# 202 tests across 14 test files:
+# 206 tests across 14 test files:
 #   test_agent_lifecycle.py  — 21 tests
-#   test_locking.py          — 16 tests
+#   test_locking.py          — 21 tests
 #   test_notifications.py    — 8 tests
 #   test_conflicts.py        — 6 tests
 #   test_coordination.py     — 7 tests

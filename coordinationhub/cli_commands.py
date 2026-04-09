@@ -23,6 +23,7 @@ from .cli_locks import (
     cmd_release_lock,
     cmd_refresh_lock,
     cmd_lock_status,
+    cmd_list_locks,
     cmd_release_agent_locks,
     cmd_reap_expired_locks,
     cmd_reap_stale_agents,

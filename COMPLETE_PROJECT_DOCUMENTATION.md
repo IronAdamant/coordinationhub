@@ -1,7 +1,24 @@
 # CoordinationHub — Complete Project Documentation
 
-**Version:** 0.3.1
-**Last updated:** 2026-04-09
+**Version:** 0.3.2
+**Last updated:** 2026-04-10
+
+## v0.3.2 Changelog
+
+### Added
+- **`list_locks` MCP tool** — lists all active (non-expired) locks, optionally filtered by `agent_id`. Returns lock details: document path, holder, expiry time, lock type, worktree.
+- **`list-locks` CLI command** — `coordinationhub list-locks [--agent-id <id>]` for lock observability.
+- **5 new tests** in `test_locking.py` for `list_locks`: empty, active, expired-excluded, agent-filtered, detail fields.
+
+### Changed
+- **Hook TTL reduced from 600s to 120s** — `handle_pre_write` now uses 120s lock TTL (was 600s). Prevents stale locks from completed agents blocking work for 10 minutes.
+- **Hook reaps expired locks before acquire** — `handle_pre_write` calls `reap_expired_locks()` before `acquire_lock()` as a safety net for stale locks from crashed agents.
+- Tool count: 28 → 29. CLI commands: 29 → 30. Test count: 202 → 206.
+
+### Fixed
+- **Review Ten bug: stale locks from completed agents** — combination of shorter TTL + pre-acquire reaping ensures expired locks are cleaned up before blocking new work.
+
+---
 
 ## v0.3.1 Changelog
 
@@ -34,13 +51,13 @@
 | Path | Purpose | Dependencies |
 |------|---------|--------------|
 | `coordinationhub/__init__.py` | Package init, exports `CoordinationEngine`, `CoordinationHubMCPServer` | core, mcp_server |
-| `coordinationhub/core.py` | `CoordinationEngine` — all 28 MCP tool methods (~446 LOC) | _storage, agent_registry, lock_ops, conflict_log, notifications, graphs, visibility, assessment, paths, context |
+| `coordinationhub/core.py` | `CoordinationEngine` — all 29 MCP tool methods (~470 LOC) | _storage, agent_registry, lock_ops, conflict_log, notifications, graphs, visibility, assessment, paths, context |
 | `coordinationhub/_storage.py` | `CoordinationStorage` — SQLite pool, path resolution, thread-safe ID gen (~131 LOC) | db |
 | `coordinationhub/paths.py` | Project-root detection and path normalization (~48 LOC) | (no internal deps) |
 | `coordinationhub/context.py` | Context bundle builder for `register_agent` responses (~100 LOC) | (no internal deps) |
 | `coordinationhub/schemas.py` | Schema aggregator — imports all groups, re-exports `TOOL_SCHEMAS` (~31 LOC) | (no internal deps) |
 | `coordinationhub/schemas_identity.py` | Identity & Registration schemas (6 tools, ~123 LOC) | (no internal deps) |
-| `coordinationhub/schemas_locking.py` | Document Locking schemas (7 tools, ~145 LOC) | (no internal deps) |
+| `coordinationhub/schemas_locking.py` | Document Locking schemas (8 tools, ~160 LOC) | (no internal deps) |
 | `coordinationhub/schemas_coordination.py` | Coordination Action schemas (2 tools, ~59 LOC) | (no internal deps) |
 | `coordinationhub/schemas_change.py` | Change Awareness schemas (3 tools, ~77 LOC) | (no internal deps) |
 | `coordinationhub/schemas_audit.py` | Audit & Status schemas (2 tools, ~43 LOC) | (no internal deps) |
@@ -65,7 +82,7 @@
 | `coordinationhub/cli_commands.py` | Re-exports all CLI handlers from domain sub-modules (~44 LOC) | cli_agents, cli_locks, cli_vis |
 | `coordinationhub/cli_utils.py` | Shared CLI helpers: print_json, engine_from_args, close (~30 LOC) | core |
 | `coordinationhub/cli_agents.py` | Agent identity & lifecycle CLI commands (~180 LOC) | cli_utils |
-| `coordinationhub/cli_locks.py` | Document locking & coordination CLI commands (~189 LOC) | cli_utils |
+| `coordinationhub/cli_locks.py` | Document locking & coordination CLI commands (~210 LOC) | cli_utils |
 | `coordinationhub/cli_vis.py` | Change awareness, audit, graph, assessment, dashboard CLI + agent-tree (~323 LOC) | cli_utils |
 | `coordinationhub/db.py` | SQLite schema + thread-local `ConnectionPool` (~215 LOC) | (no internal deps) |
 | `coordinationhub/lock_ops.py` | Shared lock primitives: acquire, release, refresh, reap (~119 LOC) | db |
@@ -75,7 +92,7 @@
 | `coordinationhub/hooks/claude_code.py` | Claude Code hook: auto-locking, notifications, Stele/Trammel bridge (~310 LOC) | core |
 | `tests/conftest.py` | pytest fixtures: `engine`, `registered_agent`, `two_agents` | core |
 | `tests/test_agent_lifecycle.py` | Agent lifecycle tests (21 tests) | conftest |
-| `tests/test_locking.py` | Lock acquisition, release, refresh, status, reap (16 tests) | conftest |
+| `tests/test_locking.py` | Lock acquisition, release, refresh, status, list, reap (21 tests) | conftest |
 | `tests/test_notifications.py` | Change notification tests (8 tests) | conftest |
 | `tests/test_conflicts.py` | Conflict logging and lineage table tests (6 tests) | conftest |
 | `tests/test_coordination.py` | Broadcast and wait_for_locks tests (7 tests) | conftest |
@@ -90,7 +107,7 @@
 | `pyproject.toml` | Package config, dependencies, entry points | — |
 | `.claude/settings.json` | Claude Code hooks: auto-lock, notify, Stele/Trammel bridge | — |
 
-**Total: 202 tests across 14 test files.**
+**Total: 206 tests across 14 test files.**
 
 ---
 
@@ -99,13 +116,13 @@
 ```
 coordinationhub/
   __init__.py         — Package init, exports CoordinationEngine, CoordinationHubMCPServer
-  core.py             — CoordinationEngine: all 28 tool methods (~446 LOC)
+  core.py             — CoordinationEngine: all 29 tool methods (~470 LOC)
   _storage.py         — CoordinationStorage: SQLite pool, path resolution, thread-safe ID gen (~131 LOC)
   paths.py            — Project-root detection and path normalization (~47 LOC)
   context.py          — Context bundle builder for register_agent responses (~97 LOC)
   schemas.py          — Schema aggregator, re-exports TOOL_SCHEMAS (~31 LOC)
   schemas_identity.py — Identity & Registration schemas (~123 LOC)
-  schemas_locking.py   — Document Locking schemas (~145 LOC)
+  schemas_locking.py   — Document Locking schemas (~160 LOC)
   schemas_coordination.py — Coordination Action schemas (~59 LOC)
   schemas_change.py    — Change Awareness schemas (~77 LOC)
   schemas_audit.py    — Audit & Status schemas (~43 LOC)
@@ -130,7 +147,7 @@ coordinationhub/
   cli_commands.py     — Re-exports all CLI handlers (~44 LOC)
   cli_utils.py        — Shared CLI helpers: print_json, engine_from_args, close (~30 LOC)
   cli_agents.py       — Agent identity & lifecycle CLI commands (~180 LOC)
-  cli_locks.py        — Document locking & coordination CLI commands (~189 LOC)
+  cli_locks.py        — Document locking & coordination CLI commands (~210 LOC)
   cli_vis.py          — Change awareness, audit, graph & assessment CLI + agent-tree (~323 LOC)
   db.py               — SQLite schema (canonical) + thread-local ConnectionPool (~215 LOC)
   lock_ops.py         — Shared lock primitives (~119 LOC)
@@ -138,7 +155,7 @@ coordinationhub/
   notifications.py    — Change notification storage and retrieval (~94 LOC)
   hooks/
     claude_code.py    — Claude Code hook: auto-locking, notifications, Stele/Trammel bridge (~310 LOC)
-  tests/              — 202 tests across 14 test files
+  tests/              — 206 tests across 14 test files
 ```
 
 **Module design principles:**
@@ -366,7 +383,7 @@ CREATE TABLE assessment_results (
 
 ---
 
-## MCP Tools (28 total)
+## MCP Tools (29 total)
 
 ### Identity & Registration
 
@@ -381,7 +398,7 @@ CREATE TABLE assessment_results (
 
 ### Document Locking
 
-`acquire_lock`, `release_lock`, `refresh_lock`, `get_lock_status`,
+`acquire_lock`, `release_lock`, `refresh_lock`, `get_lock_status`, `list_locks`,
 `release_agent_locks`, `reap_expired_locks`, `reap_stale_agents`.
 
 ### Coordination Actions
@@ -469,7 +486,7 @@ After running an assessment, `suggested_refinements` lists:
 
 ---
 
-## CLI Subcommands (29 total)
+## CLI Subcommands (30 total)
 
 ### Server
 `serve`, `serve-mcp`
@@ -490,8 +507,8 @@ After running an assessment, `suggested_refinements` lists:
 `register`, `heartbeat`, `deregister`, `list-agents`, `lineage`, `siblings`
 
 ### Locking
-`acquire-lock`, `release-lock`, `refresh-lock`, `lock-status`, `release-agent-locks`,
-`reap-expired-locks`, `reap-stale-agents`
+`acquire-lock`, `release-lock`, `refresh-lock`, `lock-status`, `list-locks`,
+`release-agent-locks`, `reap-expired-locks`, `reap-stale-agents`
 
 ### Coordination
 `broadcast`, `wait-for-locks`
@@ -535,7 +552,7 @@ Air-gapped install: `pip install coordinationhub --no-deps`.
 
 ```bash
 python -m pytest tests/ -v
-# 202 tests across 14 test files
+# 206 tests across 14 test files
 ```
 
 ---

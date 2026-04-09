@@ -93,10 +93,10 @@ class TestHTTPTransport:
         """GET /health returns 200."""
         assert test_server.client.get_health() == 200
 
-    def test_get_tools_returns_all_28_tools(self, test_server):
+    def test_get_tools_returns_all_29_tools(self, test_server):
         """GET /tools lists every tool in TOOL_SCHEMAS."""
         tools = test_server.client.get_tools()
-        assert len(tools) == 28
+        assert len(tools) == 29
         # Each tool dict has a "description" and "parameters" key; tool name is the dict key
         for t in tools:
             assert "description" in t
@@ -173,7 +173,7 @@ class TestHTTPTransport:
         assert "registered_agents" in result
         assert "active_agents" in result
         assert "active_locks" in result
-        assert result.get("tools") == 28
+        assert result.get("tools") == 29
 
     def test_list_agents_via_http(self, test_server):
         """list_agents returns our registered agent."""

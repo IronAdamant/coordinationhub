@@ -120,7 +120,11 @@ def handle_pre_write(event: dict) -> dict | None:
         agent_id = _resolve_agent_id(event)
         _ensure_registered(engine, agent_id)
 
-        result = engine.acquire_lock(file_path, agent_id, ttl=600.0)
+        # Reap expired locks before attempting acquire — prevents stale locks
+        # from completed agents blocking new work (Review Ten finding #1)
+        engine.reap_expired_locks()
+
+        result = engine.acquire_lock(file_path, agent_id, ttl=120.0)
         if result.get("acquired"):
             return {
                 "hookSpecificOutput": {
