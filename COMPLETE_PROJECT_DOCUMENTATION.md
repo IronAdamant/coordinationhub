@@ -57,7 +57,8 @@
 | `coordinationhub/agent_registry.py` | Thin re-export aggregator for registry_ops/registry_query (~23 LOC) | registry_ops, registry_query |
 | `coordinationhub/registry_ops.py` | Agent lifecycle ops: register, heartbeat, deregister (~120 LOC) | db |
 | `coordinationhub/registry_query.py` | Agent registry queries: list, lineage, siblings, reaping (~142 LOC) | db |
-| `coordinationhub/assessment.py` | Assessment runner, 5 metric scorers, Markdown report (~568 LOC). **Keyword-matching limitation**: `role_stability`, `protocol_adherence`, and `spawn_propagation` scorers use keyword heuristics against declared responsibilities — non-standard vocabulary reduces scores. | graphs |
+| `coordinationhub/assessment_scorers.py` | 5 metric scorers + shared `event_matches_responsibility` helper + `_EVENT_RESPONSIBILITY_MAP` (~304 LOC) | (no internal deps) |
+| `coordinationhub/assessment.py` | Suite loading, `run_assessment`, Markdown report, SQLite storage (~241 LOC). Re-exports scorers for backward compat. | assessment_scorers, graphs |
 | `coordinationhub/mcp_server.py` | HTTP MCP server (`ThreadedHTTPServer`, stdlib only) | core, dispatch, schemas |
 | `coordinationhub/mcp_stdio.py` | Stdio MCP server (requires optional `mcp` package) | core, mcp_server, schemas |
 | `coordinationhub/cli.py` | argparse CLI argument parser + lazy dispatch (~237 LOC) | core |
@@ -121,7 +122,8 @@ coordinationhub/
   agent_registry.py   — Thin re-export aggregator (~23 LOC)
   registry_ops.py     — Agent lifecycle ops (~106 LOC)
   registry_query.py   — Agent registry queries (~152 LOC)
-  assessment.py       — Assessment runner, 5 metric scorers (~568 LOC)
+  assessment_scorers.py — 5 metric scorers + shared event_matches_responsibility (~304 LOC)
+  assessment.py       — Suite loading, run_assessment, report, storage (~241 LOC)
   mcp_server.py       — HTTP MCP server (ThreadedHTTPServer, stdlib only, ~275 LOC)
   mcp_stdio.py        — Stdio MCP server (requires optional mcp package, ~175 LOC)
   cli.py              — argparse CLI parser + lazy dispatch (~237 LOC)

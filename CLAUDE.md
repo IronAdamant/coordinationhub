@@ -33,7 +33,8 @@ coordinationhub/
   scan.py             — File ownership scan, nearest-ancestor assignment (~207 LOC)
   agent_status.py     — Agent status query, file map, and agent tree helpers (~225 LOC)
   responsibilities.py  — Agent role/responsibilities storage from graph (~35 LOC)
-  assessment.py       — Assessment runner, 5 metric scorers, Markdown report (~568 LOC)
+  assessment_scorers.py — 5 metric scorers + shared event_matches_responsibility helper (~304 LOC)
+  assessment.py       — Suite loading, run_assessment, Markdown report, SQLite storage (~241 LOC)
   mcp_server.py       — HTTP MCP server (ThreadedHTTPServer, stdlib only, ~275 LOC)
   mcp_stdio.py        — Stdio MCP server (optional mcp package required, ~175 LOC)
   cli.py              — argparse CLI parser + lazy dispatch (~237 LOC)
@@ -71,7 +72,7 @@ coordinationhub/
 - **Agent ID format**: `{namespace}.{PID}.{sequence}` for root agents, `{parent_id}.{sequence}` for children. PID encoded to distinguish agents from different processes. Sequence numbers derived via `_next_seq_atomic()` with in-memory counters seeded from DB, serialized by `_seq_lock`.
 - **Concurrent lock safety**: `acquire_lock` handles `IntegrityError` on INSERT (two threads racing for the same file) by re-reading the row and returning the correct lock holder.
 - **TTL-based locks**: All locks expire unless refreshed. Default 300s. `heartbeat()` does NOT reap expired locks — call `reap_expired_locks()` explicitly.
-- **Assessment keyword matching**: The `role_stability`, `protocol_adherence`, and `spawn_propagation` metric scorers use keyword heuristics to match event types against declared responsibilities (e.g. `"write" in resp_lower`). Non-standard vocabulary (e.g. `"perform_edits"` instead of `"write_code"`) will reduce scores. The assessment framework is designed for human-readable traces with conventional responsibility names.
+- **Assessment keyword matching**: Shared `event_matches_responsibility()` in `assessment_scorers.py` maps event types to responsibility keywords via `_EVENT_RESPONSIBILITY_MAP` dict. Extensible — add new event-type groups to the map to support custom vocabularies. Non-standard terms that don't contain any mapped keyword will reduce scores.
 - **Force steal with conflict log**: `acquire_lock(force=True)` records the steal in `lock_conflicts` before overwriting, so conflicts are auditable.
 - **Cascade orphaning**: When an agent dies, children are re-parented to the grandparent (or become root if no grandparent). The stale `lineage` rows referencing the dead agent as parent are deleted so the responsibility-inheritance scan always joins on a live spawning parent. No agent is permanently orphaned.
 - **No message passing**: CoordinationHub is a shared database, not a message bus. Agents communicate by convention (lock acquisition, change notifications) and polling.
@@ -131,7 +132,9 @@ Project-level hooks in `.claude/settings.json` wire CoordinationHub into Claude 
 
 The hook script is at `coordinationhub/hooks/claude_code.py`. It reads JSON from stdin, creates a lightweight engine per call (~5ms), and fails open on any error.
 
-To disable hooks temporarily, add `"disableAllHooks": true` to `.claude/settings.json`.
+**Hooks are global** — configured in `~/.claude/settings.json` using `python3 -m coordinationhub.hooks.claude_code` so they fire across all projects. If coordinationhub is not installed in a project's environment, the hook silently no-ops.
+
+To disable hooks temporarily, add `"disableAllHooks": true` to `~/.claude/settings.json` or a project's `.claude/settings.json`.
 
 ## Known Issues
 
