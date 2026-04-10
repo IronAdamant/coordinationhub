@@ -32,12 +32,19 @@ pip install coordinationhub
 ## Quick Start
 
 ```bash
+# One-time setup: creates DB, configures Claude Code hooks
+coordinationhub init
+
+# Verify everything is working
+coordinationhub doctor
+
 # Start the coordination server
 coordinationhub serve
 
 # In another terminal — see what's happening
 coordinationhub dashboard
 coordinationhub agent-tree
+coordinationhub watch              # live-refresh agent tree
 coordinationhub contention-hotspots
 ```
 
@@ -127,9 +134,13 @@ Agents don't message each other directly. Instead they communicate through the s
 | **Audit** | `get_conflicts`, `get_contention_hotspots`, `status` |
 | **Visibility** | `load_coordination_spec`, `validate_graph`, `scan_project`, `get_agent_status`, `get_file_agent_map`, `update_agent_status`, `run_assessment`, [`get_agent_tree`](#agent-tree-view) |
 
-## CLI Commands (31)
+## CLI Commands (34)
 
 ```bash
+# Setup & diagnostics
+coordinationhub init                   # one-time: create DB, configure hooks
+coordinationhub doctor                 # validate setup, detect venv issues
+
 # Server
 coordinationhub serve --port 9877
 coordinationhub serve-mcp              # stdio mode (requires: pip install coordinationhub[mcp])
@@ -140,6 +151,7 @@ coordinationhub dashboard              # full view (also: --json, --minimal)
 coordinationhub agent-tree             # agent hierarchy
 coordinationhub agent-status <id>      # single agent detail
 coordinationhub contention-hotspots    # files with most conflicts
+coordinationhub watch                  # live agent tree (Ctrl+C to stop)
 
 # Agent lifecycle
 coordinationhub register <id> [--parent-id <parent>]
@@ -204,8 +216,9 @@ coordinationhub/
   mcp_server.py       — HTTP server (stdlib only)
   mcp_stdio.py        — Stdio server (optional mcp package)
   cli.py              — CLI parser + dispatch
+  cli_setup.py        — doctor, init, watch commands
   hooks/claude_code.py — Claude Code session hooks
-  tests/              — 261 tests across 15 files
+  tests/              — 272 tests across 16 files
 ```
 
 ## Zero-Dependency Guarantee

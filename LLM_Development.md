@@ -1,11 +1,54 @@
 # LLM_Development.md — CoordinationHub
 
-**Version:** 0.3.6
-**Last updated:** 2026-04-10
+**Version:** 0.3.7
+**Last updated:** 2026-04-11
 
 ## Change Log
 
 All significant changes to the CoordinationHub project are documented here in reverse chronological order.
+
+---
+
+## 2026-04-11 — v0.3.7 Adoption Friction Fixes: init, doctor, watch, error logging, session summary
+
+### Motivation
+
+Five adoption friction points identified during post-Review-Twelve analysis:
+1. Silent failure masking (`except Exception: pass`) hid bugs across multiple review cycles.
+2. No one-command setup — users manually edited `~/.claude/settings.json`.
+3. No "is it working?" signal during normal operation.
+4. The venv trap — `python3` in hooks resolved to a venv Python without coordinationhub.
+5. Dashboard is pull-only — no live view during multi-agent sessions.
+
+### New Commands
+
+- **`coordinationhub init`** — One-command setup: creates `.coordinationhub/`, initializes DB, writes/merges hook config into `~/.claude/settings.json` using `sys.executable` (absolute path, avoids venv trap), then runs doctor checks.
+- **`coordinationhub doctor`** — 5 diagnostic checks: importability, hooks config, storage dir, schema version, hook Python interpreter. Returns structured OK/FAIL per check.
+- **`coordinationhub watch [--interval N]`** — Live-refresh agent tree with status bar (agents, locks, conflicts). Ctrl+C to stop.
+
+### Hook Improvements
+
+- **Error logging to `~/.coordinationhub/hook.log`** — Timestamps, tracebacks, auto-truncation at 1 MB. Also prints to stderr. Replaces `except Exception: pass` in main dispatch.
+- **Session summary on SessionEnd** — Returns "Session summary: N agents tracked, N locks held, N conflicts, N notifications" as `additionalContext`.
+
+### Hook Merge Logic
+
+`_merge_hooks(existing, new)` merges CoordinationHub hooks into existing config:
+- For each event type, checks if a coordinationhub hook already exists by command string.
+- If found, updates the command (e.g., new Python path). If not, appends.
+- Preserves all non-CoordinationHub hooks (e.g., user's custom Bash lint hooks).
+- Idempotent: running `init` twice produces identical config.
+
+### Files Changed
+
+- New: `cli_setup.py` (~348 LOC), `tests/test_setup.py` (8 tests).
+- Modified: `hooks/claude_code.py` (~330 → ~400 LOC), `cli.py` (~237 → ~267 LOC), `cli_commands.py` (~44 → ~51 LOC).
+- Docs: all 4 docs updated (README, COMPLETE_PROJECT_DOCUMENTATION, LLM_Development, CLAUDE.md).
+
+### Counts
+
+- CLI commands: 31 → 34.
+- Tests: 261 → 272 across 16 files (was 15). `test_hooks.py`: 28 → 31. New: `test_setup.py` (8).
 
 ---
 

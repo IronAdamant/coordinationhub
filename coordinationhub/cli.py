@@ -191,6 +191,17 @@ def create_parser() -> argparse.ArgumentParser:
     p.add_argument("--graph-agent-id", dest="graph_agent_id", default=None,
                    help="Filter traces to this graph agent role (e.g. planner, executor)")
 
+    # doctor
+    sub.add_parser("doctor", parents=[shared], help="Validate CoordinationHub setup and diagnose issues")
+
+    # init
+    sub.add_parser("init", parents=[shared], help="Set up CoordinationHub: create DB, configure hooks")
+
+    # watch
+    p = sub.add_parser("watch", parents=[shared], help="Live-refresh agent tree (Ctrl+C to stop)")
+    p.add_argument("agent_id", nargs="?", default=None, help="Root agent (default: oldest root)")
+    p.add_argument("--interval", type=int, default=5, help="Refresh interval in seconds (default: 5)")
+
     return parser
 
 
@@ -214,6 +225,9 @@ _COMMANDS = {
     "scan-project": "cmd_scan_project", "dashboard": "cmd_dashboard",
     "agent-status": "cmd_agent_status", "assess": "cmd_assess",
     "agent-tree": "cmd_agent_tree",
+    "doctor": "cmd_doctor",
+    "init": "cmd_init",
+    "watch": "cmd_watch",
 }
 
 

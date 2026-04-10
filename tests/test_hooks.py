@@ -13,6 +13,7 @@ from coordinationhub.hooks.claude_code import (
     _session_agent_id,
     _subagent_id,
     _resolve_agent_id,
+    _log_error,
     handle_session_start,
     handle_pre_write,
     handle_post_write,
@@ -297,9 +298,53 @@ class TestSessionEnd:
         event = _make_event("PreToolUse", tool_name="Edit", cwd=hook_cwd,
                            tool_input={"file_path": "/tmp/test_end.py"})
         handle_pre_write(event)
-        # End session
+        # End session — now returns summary
         result = handle_session_end(_make_event("SessionEnd", cwd=hook_cwd))
-        assert result is None
+        assert result is not None
+        assert "Session summary" in result["hookSpecificOutput"]["additionalContext"]
+
+
+class TestErrorLogging:
+    def test_log_error_creates_log_file(self, tmp_path):
+        """_log_error writes to hook.log in the specified directory."""
+        with patch("coordinationhub.hooks.claude_code.Path") as mock_path:
+            mock_path.home.return_value = tmp_path
+            log_dir = tmp_path / ".coordinationhub"
+            try:
+                exc = RuntimeError("test error")
+                _log_error("TestEvent", exc)
+                log_file = log_dir / "hook.log"
+                assert log_file.exists()
+                content = log_file.read_text()
+                assert "TestEvent" in content
+                assert "test error" in content
+            finally:
+                pass
+
+    def test_log_error_never_raises(self):
+        """_log_error must never raise, even with pathological inputs."""
+        # This should not raise
+        _log_error("Test", RuntimeError("x"))
+
+
+class TestSessionSummary:
+    def test_session_end_returns_summary(self, hook_cwd):
+        """SessionEnd should return a summary with counts."""
+        handle_session_start(_make_event("SessionStart", cwd=hook_cwd))
+        # Make some activity
+        handle_pre_write(_make_event(
+            "PreToolUse", tool_name="Write", cwd=hook_cwd,
+            tool_input={"file_path": "/tmp/test_summary.py"}))
+        handle_post_write(_make_event(
+            "PostToolUse", tool_name="Write", cwd=hook_cwd,
+            tool_input={"file_path": "/tmp/test_summary.py"}))
+
+        result = handle_session_end(_make_event("SessionEnd", cwd=hook_cwd))
+        assert result is not None
+        ctx = result["hookSpecificOutput"]["additionalContext"]
+        assert "Session summary" in ctx
+        assert "agents tracked" in ctx
+        assert "notifications" in ctx
 
 
 class TestBridges:

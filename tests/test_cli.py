@@ -14,6 +14,7 @@ EXPECTED_COMMANDS = {
     "notify-change", "get-notifications", "prune-notifications", "get-conflicts", "contention-hotspots",
     "load-spec", "validate-spec", "scan-project", "dashboard",
     "agent-status", "assess", "agent-tree",
+    "doctor", "init", "watch",
 }
 
 
