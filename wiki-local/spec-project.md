@@ -316,6 +316,11 @@ coordinationhub/
   lock_ops.py          -- Shared lock primitives + region overlap (~175 LOC)
   conflict_log.py      -- Conflict recording (~53 LOC)
   notifications.py     -- Change notification storage (~115 LOC)
+  _storage.py          -- CoordinationStorage: SQLite pool, path resolution, thread-safe ID gen (~131 LOC)
+  cli_utils.py         -- Shared CLI helpers: print_json, engine_from_args, close (~30 LOC)
+  hooks/
+    __init__.py        -- Hooks package init
+    claude_code.py     -- Claude Code hook: auto-locking, notifications, Stele/Trammel bridge (~310 LOC)
 tests/
   conftest.py
   test_agent_lifecycle.py
@@ -328,6 +333,10 @@ tests/
   test_assessment.py
   test_integration.py
   test_core.py
+  test_cli.py
+  test_concurrent.py
+  test_scenario.py
+  test_hooks.py
 pyproject.toml
 coordination_spec.yaml   -- Example spec (YAML)
 coordination_spec.json    -- Example spec (JSON)
@@ -373,6 +382,13 @@ Default port: `9877`
 ---
 
 ## Version History
+
+### Review Eleven — Multi-agent coordination validation (2026-04-10)
+- 3-agent parallel refactor validated CoordinationHub's design without code changes
+- Prompt-based boundaries proved fragile (agent crossed file ownership boundary undetected)
+- Region locking, `wait_for_locks`, and `notify_change` confirmed as solutions to observed coordination problems
+- No overwrites occurred due to careful pre-partitioning — CoordinationHub automates this safety
+- Remaining: real integration test with CoordinationHub MCP server in a multi-agent workflow
 
 ### 0.3.4 — Core split, assessment synonyms, SQLite perf (2026-04-10)
 - `core.py` split: locking/coordination methods extracted to `core_locking.py` (~230 LOC) as `LockingMixin`

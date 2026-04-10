@@ -1,7 +1,7 @@
 # CoordinationHub wiki
 
-**Version:** 0.3.1
-**Last updated:** 2026-04-07
+**Version:** 0.3.4
+**Last updated:** 2026-04-10
 
 ## Pages
 
@@ -32,7 +32,7 @@ CoordinationHub is self-contained and works standalone. When co-installed with S
 
 ## Test Suite
 
-187 tests across 12 test files. Run with:
+246 tests across 15 test files. Run with:
 ```bash
 python -m pytest tests/ -v
 ```

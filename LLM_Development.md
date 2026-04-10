@@ -9,6 +9,34 @@ All significant changes to the CoordinationHub project are documented here in re
 
 ---
 
+## 2026-04-10 — Review Eleven Findings (No Code Changes)
+
+### Summary
+
+CoordinationHub was indirectly challenged during a 3-agent parallel refactor in RecipeLab (DistributedRecipeValidator feature + multi-agent refactor). The feature phase did not exercise CoordinationHub (single-agent service simulating consensus, not real multi-agent coordination). The refactor phase spawned 3 agents with prompt-based file boundaries — no automated locking.
+
+### Key Validations
+
+1. **Prompt-based boundaries are fragile** — Agent A crossed into Agent B's territory (modified `mcpChallengeRoutes.js`, a route file assigned to Agent B) because import paths changed. `acquire_lock` contention detection would have caught this.
+2. **Completion order matters** — Agent B finished before Agent A, creating a race condition on `routeLoader.js`. `wait_for_locks` + `notify_change` would have sequenced this.
+3. **Region locking is needed** — `routeLoader.js` is a coordination chokepoint touched by every feature/route change. Region locking (`region_start`/`region_end`) would allow multiple agents to lock non-overlapping sections.
+4. **Manual agent tracking is inferior** — Task IDs + output polling vs `register_agent`/`get_agent_tree`/`heartbeat`.
+5. **No overwrites occurred (lucky)** — careful pre-partitioning prevented conflicts, but this is exactly the fragile coordination CoordinationHub automates.
+
+### Remaining Gaps (Future Testing)
+
+- Actually connect CoordinationHub MCP server in a multi-agent workflow
+- Test region-based locking on shared files
+- Test cascade orphaning by killing an agent mid-work
+- Test `broadcast` for conflict pre-check before writes
+- Compare prompt-based vs lock-based coordination on overlapping file assignments
+
+### Verdict
+
+No code changes required. Existing design (region locking, cascade orphaning, lock contention, change notifications) addresses all observed coordination problems. Findings closed.
+
+---
+
 ## 2026-04-10 — v0.3.4 Core Split, Assessment Synonyms, SQLite Perf
 
 ### New Features
