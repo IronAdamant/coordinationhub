@@ -26,6 +26,11 @@ All significant changes to the CoordinationHub project are documented here in re
 - CLI: `coordinationhub contention-hotspots [--limit N]`.
 - Identifies coordination chokepoints — files that multiple agents need concurrent access to.
 
+**Rich agent tree (`agent_status.py`):**
+- `get_agent_tree` now renders a project-management-style view: each agent node shows its current task, active file locks (with lock type and region info), and boundary crossing warnings.
+- Any agent in the swarm calls `agent-tree` to see the same live hierarchy — shared situational awareness across the swarm.
+- `agent_status.py`: ~225 LOC → ~290 LOC (rich tree renderer extracted as `_render_rich_tree` / `_render_node`).
+
 ### Motivation (Review Eleven)
 
 These features directly address gaps observed during a 3-agent parallel refactor:
