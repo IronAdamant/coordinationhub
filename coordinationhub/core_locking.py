@@ -1,0 +1,246 @@
+"""Locking and coordination methods for CoordinationEngine.
+
+Extracted from core.py to keep each module under 500 LOC.
+Uses mixin pattern — CoordinationEngine inherits from this.
+"""
+
+from __future__ import annotations
+
+import sqlite3
+import time
+from typing import Any
+
+from . import conflict_log as _cl
+from . import lock_ops as _lo
+from . import agent_registry as _ar
+from .paths import normalize_path
+
+
+class LockingMixin:
+    """Mixin providing document locking and coordination methods.
+
+    Expects the host class to provide:
+    - ``_connect() -> sqlite3.Connection``
+    - ``_storage.project_root``
+    - ``DEFAULT_TTL``
+    """
+
+    DEFAULT_TTL = 300.0
+
+    def acquire_lock(
+        self, document_path: str, agent_id: str,
+        lock_type: str = "exclusive", ttl: float = DEFAULT_TTL, force: bool = False,
+        region_start: int | None = None, region_end: int | None = None,
+    ) -> dict[str, Any]:
+        now = time.time()
+        norm_path = normalize_path(document_path, self._storage.project_root)
+        worktree = str(self._storage.project_root)
+        conn = self._connect()
+        conn.execute("BEGIN IMMEDIATE")
+        try:
+            own = _lo.find_own_lock(conn, "document_locks", norm_path, agent_id, region_start, region_end)
+            if own is not None:
+                conn.execute(
+                    "UPDATE document_locks SET locked_at = ?, lock_ttl = ?, lock_type = ? WHERE id = ?",
+                    (now, ttl, lock_type, own["id"]),
+                )
+                conn.execute("COMMIT")
+                return {"acquired": True, "document_path": norm_path, "locked_by": agent_id,
+                        "expires_at": now + ttl, "region_start": region_start, "region_end": region_end}
+
+            conflicts = _lo.find_conflicting_locks(
+                conn, "document_locks", norm_path, agent_id, lock_type, region_start, region_end,
+            )
+            if conflicts and not force:
+                conn.execute("COMMIT")
+                first = conflicts[0]
+                return {
+                    "acquired": False, "locked_by": first["locked_by"],
+                    "locked_at": first["locked_at"], "expires_at": first["locked_at"] + first["lock_ttl"],
+                    "worktree": first["worktree_root"],
+                    "conflicts": [{"locked_by": c["locked_by"], "region_start": c["region_start"],
+                                   "region_end": c["region_end"]} for c in conflicts],
+                }
+            if conflicts and force:
+                for c in conflicts:
+                    _cl.record_conflict(self._connect, norm_path, c["locked_by"], agent_id,
+                                        "lock_stolen", resolution="force_overwritten")
+                    conn.execute("DELETE FROM document_locks WHERE id = ?", (c["id"],))
+
+            conn.execute(
+                "INSERT INTO document_locks (document_path, locked_by, locked_at, lock_ttl, "
+                "lock_type, region_start, region_end, worktree_root) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                (norm_path, agent_id, now, ttl, lock_type, region_start, region_end, worktree),
+            )
+            conn.execute("COMMIT")
+            return {"acquired": True, "document_path": norm_path, "locked_by": agent_id,
+                    "expires_at": now + ttl, "region_start": region_start, "region_end": region_end}
+        except Exception:
+            conn.execute("ROLLBACK")
+            raise
+
+    def release_lock(
+        self, document_path: str, agent_id: str,
+        region_start: int | None = None, region_end: int | None = None,
+    ) -> dict[str, Any]:
+        norm_path = normalize_path(document_path, self._storage.project_root)
+        with self._connect() as conn:
+            if region_start is not None:
+                rows = conn.execute(
+                    "SELECT id, locked_by FROM document_locks WHERE document_path = ? "
+                    "AND region_start = ? AND region_end = ?",
+                    (norm_path, region_start, region_end),
+                ).fetchall()
+            else:
+                rows = conn.execute(
+                    "SELECT id, locked_by FROM document_locks WHERE document_path = ? "
+                    "AND region_start IS NULL",
+                    (norm_path,),
+                ).fetchall()
+            if not rows:
+                return {"released": False, "reason": "not_locked"}
+            owned = [r for r in rows if r["locked_by"] == agent_id]
+            if not owned:
+                return {"released": False, "reason": "not_owner"}
+            for r in owned:
+                conn.execute("DELETE FROM document_locks WHERE id = ?", (r["id"],))
+            return {"released": True, "count": len(owned)}
+
+    def refresh_lock(
+        self, document_path: str, agent_id: str, ttl: float = DEFAULT_TTL,
+        region_start: int | None = None, region_end: int | None = None,
+    ) -> dict[str, Any]:
+        norm_path = normalize_path(document_path, self._storage.project_root)
+        with self._connect() as conn:
+            result = _lo.refresh_lock(
+                conn, "document_locks", norm_path, agent_id, ttl, "not_locked",
+                region_start=region_start, region_end=region_end,
+            )
+        return result
+
+    def get_lock_status(self, document_path: str) -> dict[str, Any]:
+        norm_path = normalize_path(document_path, self._storage.project_root)
+        now = time.time()
+        with self._connect() as conn:
+            conn.execute(
+                "DELETE FROM document_locks WHERE document_path = ? AND locked_at + lock_ttl < ?",
+                (norm_path, now),
+            )
+            rows = conn.execute(
+                "SELECT * FROM document_locks WHERE document_path = ?", (norm_path,)
+            ).fetchall()
+            if not rows:
+                return {"locked": False}
+            locks = []
+            for row in rows:
+                locks.append({
+                    "locked_by": row["locked_by"], "locked_at": row["locked_at"],
+                    "expires_at": row["locked_at"] + row["lock_ttl"],
+                    "lock_type": row["lock_type"],
+                    "region_start": row["region_start"], "region_end": row["region_end"],
+                    "worktree": row["worktree_root"],
+                })
+            if len(locks) == 1:
+                return {"locked": True, **locks[0]}
+            return {"locked": True, "holders": locks}
+
+    def list_locks(self, agent_id: str | None = None) -> dict[str, Any]:
+        """List all active (non-expired) locks, optionally filtered by agent."""
+        now = time.time()
+        with self._connect() as conn:
+            if agent_id:
+                rows = conn.execute(
+                    "SELECT * FROM document_locks WHERE locked_by = ? AND locked_at + lock_ttl > ?",
+                    (agent_id, now),
+                ).fetchall()
+            else:
+                rows = conn.execute(
+                    "SELECT * FROM document_locks WHERE locked_at + lock_ttl > ?",
+                    (now,),
+                ).fetchall()
+        locks = []
+        for row in rows:
+            locks.append({
+                "document_path": row["document_path"],
+                "locked_by": row["locked_by"],
+                "locked_at": row["locked_at"],
+                "expires_at": row["locked_at"] + row["lock_ttl"],
+                "lock_type": row["lock_type"],
+                "region_start": row["region_start"],
+                "region_end": row["region_end"],
+                "worktree": row["worktree_root"],
+            })
+        return {"locks": locks, "count": len(locks)}
+
+    def release_agent_locks(self, agent_id: str) -> dict[str, Any]:
+        with self._connect() as conn:
+            result = _lo.release_agent_locks(conn, "document_locks", agent_id, delete=True)
+        return result
+
+    def reap_expired_locks(self) -> dict[str, Any]:
+        with self._connect() as conn:
+            result = _lo.reap_expired_locks(conn, "document_locks")
+        return result
+
+    def reap_stale_agents(self, timeout: float = 600.0) -> dict[str, Any]:
+        result = _ar.reap_stale_agents(self._connect, timeout)
+        with self._connect() as conn:
+            stale_rows = conn.execute(
+                "SELECT agent_id FROM agents WHERE status = 'stopped'"
+            ).fetchall()
+            if stale_rows:
+                stale_ids = [r["agent_id"] for r in stale_rows]
+                placeholders = ",".join("?" * len(stale_ids))
+                cursor = conn.execute(
+                    f"DELETE FROM document_locks WHERE locked_by IN ({placeholders})", stale_ids,
+                )
+                result["locks_released"] = cursor.rowcount
+        return result
+
+    def broadcast(
+        self, agent_id: str, document_path: str | None = None, ttl: float = 30.0,
+    ) -> dict[str, Any]:
+        """Announce an intention to siblings and check for lock conflicts."""
+        siblings = _ar.get_siblings(self._connect, agent_id)
+        acknowledged_by: list[str] = []
+        conflicts: list[dict[str, Any]] = []
+        now = time.time()
+        for sib in siblings:
+            if now - sib.get("last_heartbeat", 0) <= 60.0:
+                acknowledged_by.append(sib["agent_id"])
+        if document_path and acknowledged_by:
+            norm_path = normalize_path(document_path, self._storage.project_root)
+            placeholders = ",".join("?" * len(acknowledged_by))
+            with self._connect() as conn:
+                lock_rows = conn.execute(
+                    f"SELECT locked_by FROM document_locks WHERE document_path = ? AND locked_by IN ({placeholders})",
+                    [norm_path] + acknowledged_by,
+                ).fetchall()
+                for row in lock_rows:
+                    if row["locked_by"] != agent_id:
+                        conflicts.append({"document_path": document_path, "locked_by": row["locked_by"]})
+        return {"acknowledged_by": acknowledged_by, "conflicts": conflicts}
+
+    def wait_for_locks(
+        self, document_paths: list[str], agent_id: str, timeout_s: float = 60.0,
+    ) -> dict[str, Any]:
+        start = time.time()
+        released: list[str] = []
+        timed_out: list[str] = []
+        for path in document_paths:
+            norm_path = normalize_path(path, self._storage.project_root)
+            remaining = timeout_s - (time.time() - start)
+            if remaining <= 0:
+                timed_out.append(norm_path)
+                continue
+            poll_start = time.time()
+            poll_interval = 2.0
+            while time.time() - poll_start < remaining:
+                status = self.get_lock_status(norm_path)
+                if not status.get("locked", False) or status.get("locked_by") == agent_id:
+                    released.append(norm_path)
+                    break
+                time.sleep(min(poll_interval, remaining - (time.time() - poll_start)))
+            else:
+                timed_out.append(norm_path)
+        return {"released": released, "timed_out": timed_out}
