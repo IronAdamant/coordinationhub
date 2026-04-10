@@ -115,7 +115,7 @@ assessment:
     - spawn_propagation
 ```
 
-## 29 MCP Tools
+## 30 MCP Tools
 
 | Tool | Purpose |
 |------|---------|
@@ -139,6 +139,7 @@ assessment:
 | `get_notifications` | Poll for change notifications |
 | `prune_notifications` | Clean up old notifications |
 | `get_conflicts` | Query the conflict log |
+| `get_contention_hotspots` | Rank files by lock contention frequency (coordination chokepoints) |
 | `status` | System status summary (includes `graph_loaded`) |
 | `load_coordination_spec` | Reload coordination spec from disk |
 | `validate_graph` | Validate loaded graph schema |
@@ -203,6 +204,7 @@ coordinationhub notify-change <path> <type> <agent_id>
 coordinationhub get-notifications
 coordinationhub prune-notifications
 coordinationhub get-conflicts
+coordinationhub contention-hotspots
 ```
 
 ## Agent ID Format

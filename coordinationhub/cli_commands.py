@@ -35,6 +35,7 @@ from .cli_vis import (
     cmd_get_notifications,
     cmd_prune_notifications,
     cmd_get_conflicts,
+    cmd_contention_hotspots,
     cmd_load_spec,
     cmd_validate_spec,
     cmd_scan_project,

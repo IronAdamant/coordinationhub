@@ -193,6 +193,29 @@ class CoordinationEngine(LockingMixin):
             "tools": len(TOOL_DISPATCH),
         }
 
+    def get_contention_hotspots(self, limit: int = 10) -> dict[str, Any]:
+        """Rank files by lock contention frequency from the conflict log."""
+        with self._connect() as conn:
+            rows = conn.execute(
+                "SELECT document_path, COUNT(*) AS conflict_count, "
+                "GROUP_CONCAT(DISTINCT agent_a) AS agents_a, "
+                "GROUP_CONCAT(DISTINCT agent_b) AS agents_b "
+                "FROM lock_conflicts GROUP BY document_path "
+                "ORDER BY conflict_count DESC LIMIT ?",
+                (limit,),
+            ).fetchall()
+        hotspots = []
+        for row in rows:
+            agents_a = set(row["agents_a"].split(",")) if row["agents_a"] else set()
+            agents_b = set(row["agents_b"].split(",")) if row["agents_b"] else set()
+            all_agents = sorted(agents_a | agents_b)
+            hotspots.append({
+                "document_path": row["document_path"],
+                "conflict_count": row["conflict_count"],
+                "agents_involved": all_agents,
+            })
+        return {"hotspots": hotspots, "total": len(hotspots)}
+
     # ------------------------------------------------------------------ #
     # Graph & Visibility
     # ------------------------------------------------------------------ #

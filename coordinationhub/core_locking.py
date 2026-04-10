@@ -73,11 +73,44 @@ class LockingMixin:
                 (norm_path, agent_id, now, ttl, lock_type, region_start, region_end, worktree),
             )
             conn.execute("COMMIT")
-            return {"acquired": True, "document_path": norm_path, "locked_by": agent_id,
-                    "expires_at": now + ttl, "region_start": region_start, "region_end": region_end}
+
+            # Check file_ownership for boundary crossing
+            ownership_warning = self._check_ownership_boundary(conn, norm_path, agent_id)
+            result = {"acquired": True, "document_path": norm_path, "locked_by": agent_id,
+                      "expires_at": now + ttl, "region_start": region_start, "region_end": region_end}
+            if ownership_warning:
+                result["ownership_warning"] = ownership_warning
+            return result
         except Exception:
             conn.execute("ROLLBACK")
             raise
+
+    def _check_ownership_boundary(
+        self, conn, norm_path: str, agent_id: str,
+    ) -> dict[str, Any] | None:
+        """Check if agent is locking a file owned by another agent.
+
+        If so, record a boundary_crossing conflict and notification.
+        Returns warning dict or None.
+        """
+        row = conn.execute(
+            "SELECT assigned_agent_id FROM file_ownership WHERE document_path = ?",
+            (norm_path,),
+        ).fetchone()
+        if row is None or row["assigned_agent_id"] == agent_id:
+            return None
+        owner = row["assigned_agent_id"]
+        _cl.record_conflict(
+            self._connect, norm_path, owner, agent_id,
+            "boundary_crossing", resolution="allowed",
+            details={"message": f"Agent {agent_id} locked file owned by {owner}"},
+        )
+        from . import notifications as _cn
+        _cn.notify_change(
+            self._connect, norm_path, "boundary_crossing", agent_id,
+            str(self._storage.project_root),
+        )
+        return {"owned_by": owner, "message": f"File is assigned to {owner} in file_ownership"}
 
     def release_lock(
         self, document_path: str, agent_id: str,

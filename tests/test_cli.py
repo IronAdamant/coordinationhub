@@ -11,7 +11,7 @@ EXPECTED_COMMANDS = {
     "list-agents", "lineage", "siblings", "acquire-lock", "release-lock",
     "refresh-lock", "lock-status", "list-locks", "release-agent-locks",
     "reap-expired-locks", "reap-stale-agents", "broadcast", "wait-for-locks",
-    "notify-change", "get-notifications", "prune-notifications", "get-conflicts",
+    "notify-change", "get-notifications", "prune-notifications", "get-conflicts", "contention-hotspots",
     "load-spec", "validate-spec", "scan-project", "dashboard",
     "agent-status", "assess", "agent-tree",
 }

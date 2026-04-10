@@ -1,4 +1,4 @@
-"""CoordinationHub CLI — command-line interface for all 29 coordination tool methods.
+"""CoordinationHub CLI — command-line interface for all 30 coordination tool methods.
 
 Delegates to cli_commands.py for all command handlers.
 """
@@ -146,6 +146,11 @@ def create_parser() -> argparse.ArgumentParser:
     p.add_argument("--agent-id", default=None)
     p.add_argument("--limit", type=int, default=20)
 
+    # contention-hotspots
+    p = sub.add_parser("contention-hotspots", parents=[shared],
+                       help="Rank files by lock contention frequency")
+    p.add_argument("--limit", type=int, default=10)
+
     # --- NEW SUBMANDS ---
 
     # load-spec
@@ -204,7 +209,7 @@ _COMMANDS = {
     "reap-stale-agents": "cmd_reap_stale_agents", "broadcast": "cmd_broadcast",
     "wait-for-locks": "cmd_wait_for_locks", "notify-change": "cmd_notify_change",
     "get-notifications": "cmd_get_notifications", "prune-notifications": "cmd_prune_notifications",
-    "get-conflicts": "cmd_get_conflicts",
+    "get-conflicts": "cmd_get_conflicts", "contention-hotspots": "cmd_contention_hotspots",
     "load-spec": "cmd_load_spec", "validate-spec": "cmd_validate_spec",
     "scan-project": "cmd_scan_project", "dashboard": "cmd_dashboard",
     "agent-status": "cmd_agent_status", "assess": "cmd_assess",

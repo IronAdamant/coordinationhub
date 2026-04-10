@@ -1,11 +1,42 @@
 # LLM_Development.md — CoordinationHub
 
-**Version:** 0.3.4
+**Version:** 0.3.5
 **Last updated:** 2026-04-10
 
 ## Change Log
 
 All significant changes to the CoordinationHub project are documented here in reverse chronological order.
+
+---
+
+## 2026-04-10 — v0.3.5 Ownership-Aware Locking & Contention Hotspots
+
+### New Features
+
+**Ownership-aware locking (`core_locking.py`):**
+- `acquire_lock` now cross-checks the `file_ownership` table after acquiring a lock.
+- When an agent locks a file assigned to a different agent, the response includes `ownership_warning: {owned_by: "<owner_agent_id>", message: "..."}`.
+- A `boundary_crossing` conflict is recorded in `lock_conflicts` with resolution `allowed`.
+- A `boundary_crossing` change notification is fired so the owning agent (or project manager) discovers the incursion via `get_notifications`.
+- Self-lock refreshes (re-acquiring own lock) skip the ownership check entirely — no false warnings.
+
+**`get_contention_hotspots` MCP tool + CLI (`core.py`, `schemas_audit.py`, `dispatch.py`, `cli_vis.py`, `cli.py`):**
+- Queries `lock_conflicts` grouped by `document_path`, ranked by conflict count descending.
+- Returns `{hotspots: [{document_path, conflict_count, agents_involved}], total}`.
+- CLI: `coordinationhub contention-hotspots [--limit N]`.
+- Identifies coordination chokepoints — files that multiple agents need concurrent access to.
+
+### Motivation (Review Eleven)
+
+These features directly address gaps observed during a 3-agent parallel refactor:
+1. Agent A crossed into Agent B's file territory undetected — ownership-aware locking now surfaces this.
+2. `routeLoader.js` was a coordination chokepoint touched by every agent — contention hotspots tool now identifies such files.
+
+### Counts
+
+- MCP tools: 29 → 30
+- CLI commands: 30 → 31
+- Tests: 246 → 256 across 15 files. `test_conflicts.py`: 6 → 16 tests.
 
 ---
 

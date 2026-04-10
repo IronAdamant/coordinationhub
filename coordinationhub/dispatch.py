@@ -36,6 +36,7 @@ TOOL_DISPATCH: dict[str, tuple[str, list[str]]] = {
     "prune_notifications": ("prune_notifications", ["max_age_seconds", "max_entries"]),
     # Audit
     "get_conflicts": ("get_conflicts", ["document_path", "agent_id", "limit"]),
+    "get_contention_hotspots": ("get_contention_hotspots", ["limit"]),
     # Status
     "status": ("status", []),
     # Graph & Visibility

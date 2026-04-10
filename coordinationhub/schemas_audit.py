@@ -29,6 +29,24 @@ TOOL_SCHEMAS_AUDIT: dict[str, dict] = {
             },
         },
     },
+    "get_contention_hotspots": {
+        "description": (
+            "Rank files by lock contention frequency. Returns files ordered by "
+            "how many lock conflicts they've been involved in, along with the "
+            "agents involved. Use to identify coordination chokepoints — files "
+            "that multiple agents need access to and that cause frequent contention."
+        ),
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "limit": {
+                    "type": "integer",
+                    "description": "Maximum number of hotspots to return",
+                    "default": 10,
+                },
+            },
+        },
+    },
     "status": {
         "description": (
             "Get a summary of the coordination system state: "
