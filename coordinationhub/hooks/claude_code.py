@@ -259,15 +259,31 @@ def handle_subagent_start(event: dict) -> dict | None:
     Stores the raw Claude Code hex ID (``subagent_id`` / ``agent_id``
     from the event) as ``claude_agent_id`` on the child record so that
     subsequent PreToolUse/PostToolUse hooks can map it back.
+
+    Deduplicates by ``claude_agent_id`` — background agents
+    (``run_in_background: true``) fire SubagentStart twice with the
+    same hex ID but would otherwise get two different sequence numbers.
     """
     engine = _get_engine(event.get("cwd", "."))
     try:
         parent_id = _session_agent_id(event.get("session_id", ""))
         _ensure_registered(engine, parent_id)
-        child_id = _subagent_id(parent_id, event, engine=engine)
 
         # Capture the raw Claude Code hex ID for later lookup
         raw_claude_id = event.get("subagent_id") or event.get("agent_id")
+
+        # Dedup: if an agent with this claude_agent_id already exists, heartbeat it
+        if raw_claude_id:
+            existing = engine.find_agent_by_claude_id(raw_claude_id)
+            if existing:
+                engine.heartbeat(existing)
+                tool_input = event.get("tool_input", {})
+                desc = tool_input.get("description", "")
+                if desc:
+                    engine.update_agent_status(existing, current_task=desc)
+                return None
+
+        child_id = _subagent_id(parent_id, event, engine=engine)
 
         # Register with parent hierarchy AND the raw Claude Code ID mapping
         agents = engine.list_agents(active_only=True)
@@ -290,11 +306,22 @@ def handle_subagent_start(event: dict) -> dict | None:
 
 
 def handle_subagent_stop(event: dict) -> dict | None:
-    """Deregister child agent when subagent finishes."""
+    """Deregister child agent when subagent finishes.
+
+    Resolves the agent's ``hub.cc.*`` ID from the raw Claude hex ID
+    stored during SubagentStart, then marks it as ``stopped``.
+    """
     engine = _get_engine(event.get("cwd", "."))
     try:
+        # Look up the hub.cc.* child ID from the raw Claude hex ID
+        child_id = _resolve_agent_id(event, engine=engine)
+
+        # If resolve returned the session root (no subagent_id in event),
+        # fall back to _subagent_id derivation
         parent_id = _session_agent_id(event.get("session_id", ""))
-        child_id = _subagent_id(parent_id, event, engine=engine)
+        if child_id == parent_id:
+            child_id = _subagent_id(parent_id, event, engine=engine)
+
         try:
             engine.deregister_agent(child_id)
         except Exception:

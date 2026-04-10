@@ -54,7 +54,7 @@ coordinationhub/
   notifications.py     — Change notification storage and retrieval (~94 LOC)
   hooks/
     __init__.py
-    claude_code.py    — Claude Code hook: auto-locking, notifications, agent ID mapping, Stele/Trammel bridge (~400 LOC)
+    claude_code.py    — Claude Code hook: auto-locking, notifications, agent ID mapping, Stele/Trammel bridge (~428 LOC)
   tests/              — pytest suite (256 tests, 15 test files)
 ```
 
@@ -85,6 +85,8 @@ coordinationhub/
 - **Region locking**: `document_locks` uses `id INTEGER PRIMARY KEY AUTOINCREMENT` with `region_start INTEGER` and `region_end INTEGER` columns, allowing multiple locks per file on non-overlapping regions. Shared locks (multiple readers) are enforced — multiple shared locks on the same region are allowed, but an exclusive lock blocks all others. `_regions_overlap()`, `find_conflicting_locks()`, and `find_own_lock()` in `lock_ops.py` handle overlap detection. `acquire_lock` uses `BEGIN IMMEDIATE` for thread-safe concurrent locking.
 - **DB schema versioning**: `db.py` tracks `schema_version` table with `_CURRENT_SCHEMA_VERSION = 3`. `init_schema()` auto-migrates through v1→v2 (document_locks restructure) and v2→v3 (agents.claude_agent_id column). Migration runner preserves existing data.
 - **Claude Code agent ID mapping**: `agents.claude_agent_id` stores the raw hex ID that Claude Code assigns to spawned sub-agents. During SubagentStart, the hook stores this mapping. During PreToolUse/PostToolUse, `_resolve_agent_id` looks up the mapping to return the `hub.cc.*` child ID instead of the raw hex — preventing ghost agent duplication and hierarchy disconnection.
+- **SubagentStop resolves via claude_agent_id**: `handle_subagent_stop` uses `_resolve_agent_id` (not `_subagent_id`) to find the correct `hub.cc.*` child ID from the raw Claude hex ID. This ensures `deregister_agent` sets `status='stopped'` on the correct agent record. Falls back to `_subagent_id` derivation if no mapping exists.
+- **Background agent dedup**: `handle_subagent_start` checks `find_agent_by_claude_id` before generating a new child ID. If an agent with the same `claude_agent_id` already exists (e.g., `run_in_background` agents that fire SubagentStart twice), the existing agent is heartbeated instead of creating a duplicate.
 - **`broadcast` message/action params removed**: The `message` and `action` positional params were removed (they were never stored). The `document_path` optional param remains — when provided, it is used to check for lock conflicts among acknowledged siblings and is not persisted.
 
 ## 30 MCP Tools + 3 Setup Commands
@@ -157,7 +159,7 @@ To disable hooks temporarily, add `"disableAllHooks": true` to `~/.claude/settin
 
 ```bash
 python -m pytest tests/ -v
-# 272 tests across 16 test files:
+# 274 tests across 16 test files:
 #   test_agent_lifecycle.py  — 21 tests
 #   test_locking.py          — 38 tests
 #   test_notifications.py    — 8 tests
@@ -171,7 +173,7 @@ python -m pytest tests/ -v
 #   test_cli.py              — 11 tests (argparse parser, subcommand dispatch)
 #   test_concurrent.py       — 8 tests (threading: locks, registration, notifications)
 #   test_scenario.py         — 6 tests (end-to-end multi-agent lifecycle workflows)
-#   test_hooks.py            — 31 tests (Claude Code hook handlers, agent ID mapping, session summary)
+#   test_hooks.py            — 33 tests (Claude Code hook handlers, agent ID mapping, session summary)
 #   test_setup.py            — 8 tests (doctor, init, hook merge)
 ```
 
