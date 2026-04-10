@@ -13,13 +13,13 @@ Zero third-party dependencies in core. Works standalone or alongside Stele, Chis
 ```
 coordinationhub/
   __init__.py         — Package init, exports CoordinationEngine, CoordinationHubMCPServer
-  core.py             — CoordinationEngine: all 29 tool methods (~470 LOC)
+  core.py             — CoordinationEngine: all 29 tool methods (~495 LOC)
   _storage.py        — CoordinationStorage: SQLite pool, path resolution, lifecycle (~131 LOC)
   paths.py            — Project-root detection and path normalization (~47 LOC)
   context.py          — Context bundle builder for register_agent responses (~97 LOC)
   schemas.py          — Schema aggregator, re-exports TOOL_SCHEMAS (~31 LOC)
   schemas_identity.py  — Identity & Registration schemas (~123 LOC)
-  schemas_locking.py    — Document Locking schemas (~160 LOC)
+  schemas_locking.py    — Document Locking schemas (~165 LOC)
   schemas_coordination.py — Coordination Action schemas (~59 LOC)
   schemas_change.py     — Change Awareness schemas (~77 LOC)
   schemas_audit.py     — Audit & Status schemas (~43 LOC)
@@ -43,17 +43,17 @@ coordinationhub/
   cli_agents.py       — Agent identity & lifecycle CLI commands (~180 LOC)
   cli_locks.py        — Document locking & coordination CLI commands (~210 LOC)
   cli_vis.py          — Change awareness, audit, graph, assessment CLI + agent-tree (~323 LOC)
-  db.py               — SQLite schema (canonical) + thread-local ConnectionPool (~215 LOC)
+  db.py               — SQLite schema (canonical) + schema versioning + thread-local ConnectionPool (~275 LOC)
   agent_registry.py   — Thin re-export aggregator for registry_ops/registry_query (~23 LOC)
   registry_ops.py     — Agent lifecycle ops: register, heartbeat, deregister (~106 LOC)
   registry_query.py   — Agent registry queries: list, lineage, siblings, reaping (~152 LOC)
-  lock_ops.py         — Shared lock primitives (~119 LOC)
+  lock_ops.py         — Shared lock primitives: acquire, release, refresh, region overlap (~175 LOC)
   conflict_log.py     — Conflict recording and querying (~52 LOC)
   notifications.py     — Change notification storage and retrieval (~94 LOC)
   hooks/
     __init__.py
     claude_code.py    — Claude Code hook: auto-locking, notifications, Stele/Trammel bridge (~310 LOC)
-  tests/              — pytest suite (206 tests, 14 test files)
+  tests/              — pytest suite (246 tests, 15 test files)
 ```
 
 ## Module Design
@@ -78,6 +78,8 @@ coordinationhub/
 - **No message passing**: CoordinationHub is a shared database, not a message bus. Agents communicate by convention (lock acquisition, change notifications) and polling.
 - **Coordination URL in context bundle**: Parent agents embed `coordination_url` string. Override via `COORDINATIONHUB_COORDINATION_URL` environment variable.
 - **SQLite WAL mode**: `PRAGMA wal_checkpoint(TRUNCATE)` on engine close ensures no unbounded WAL growth.
+- **Region locking**: `document_locks` uses `id INTEGER PRIMARY KEY AUTOINCREMENT` with `region_start INTEGER` and `region_end INTEGER` columns, allowing multiple locks per file on non-overlapping regions. Shared locks (multiple readers) are enforced — multiple shared locks on the same region are allowed, but an exclusive lock blocks all others. `_regions_overlap()`, `find_conflicting_locks()`, and `find_own_lock()` in `lock_ops.py` handle overlap detection. `acquire_lock` uses `BEGIN IMMEDIATE` for thread-safe concurrent locking.
+- **DB schema versioning**: `db.py` tracks `schema_version` table with `_CURRENT_SCHEMA_VERSION = 2`. `init_schema()` auto-migrates from v1 to v2 (document_locks table restructure for region locking). Migration runner `_migrate_v1_to_v2` preserves existing lock data.
 - **`broadcast` message/action params removed**: The `message` and `action` positional params were removed (they were never stored). The `document_path` optional param remains — when provided, it is used to check for lock conflicts among acknowledged siblings and is not persisted.
 
 ## 29 MCP Tools
@@ -144,9 +146,9 @@ To disable hooks temporarily, add `"disableAllHooks": true` to `~/.claude/settin
 
 ```bash
 python -m pytest tests/ -v
-# 206 tests across 14 test files:
+# 246 tests across 15 test files:
 #   test_agent_lifecycle.py  — 21 tests
-#   test_locking.py          — 21 tests
+#   test_locking.py          — 38 tests
 #   test_notifications.py    — 8 tests
 #   test_conflicts.py        — 6 tests
 #   test_coordination.py     — 7 tests
@@ -158,6 +160,7 @@ python -m pytest tests/ -v
 #   test_cli.py              — 11 tests (argparse parser, subcommand dispatch)
 #   test_concurrent.py       — 8 tests (threading: locks, registration, notifications)
 #   test_scenario.py         — 6 tests (end-to-end multi-agent lifecycle workflows)
+#   test_hooks.py            — 23 tests (Claude Code hook handlers)
 ```
 
 Always run the test suite before and after changes.

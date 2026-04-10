@@ -125,7 +125,7 @@ assessment:
 | `list_agents` | List registered agents with staleness |
 | `get_lineage` | Get ancestors and descendants of an agent |
 | `get_siblings` | Get agents sharing the same parent |
-| `acquire_lock` | Acquire exclusive or shared lock on a document |
+| `acquire_lock` | Acquire exclusive or shared lock on a document (supports region locking via `region_start`/`region_end`) |
 | `release_lock` | Release a held lock |
 | `refresh_lock` | Extend lock TTL without releasing |
 | `get_lock_status` | Check if a document is locked |
@@ -186,9 +186,9 @@ coordinationhub lineage <agent_id>
 coordinationhub siblings <agent_id>
 
 # Locking
-coordinationhub acquire-lock <path> <agent_id>
-coordinationhub release-lock <path> <agent_id>
-coordinationhub refresh-lock <path> <agent_id>
+coordinationhub acquire-lock <path> <agent_id> [--region-start N] [--region-end N]
+coordinationhub release-lock <path> <agent_id> [--region-start N] [--region-end N]
+coordinationhub refresh-lock <path> <agent_id> [--region-start N] [--region-end N]
 coordinationhub lock-status <path>
 coordinationhub list-locks
 coordinationhub list-locks --agent-id <agent_id>
@@ -222,7 +222,7 @@ When a coordination graph is loaded, agents may also have a `graph_agent_id`
 ```
 coordinationhub/
   __init__.py         — Package init, exports CoordinationEngine, CoordinationHubMCPServer
-  core.py             — CoordinationEngine: all 28 tool methods (~431 LOC)
+  core.py             — CoordinationEngine: all 29 tool methods (~495 LOC)
   _storage.py         — CoordinationStorage: SQLite pool, path resolution, lifecycle (~121 LOC)
   paths.py            — Project-root detection and path normalization (~48 LOC)
   context.py          — Context bundle builder for register_agent responses (~100 LOC)
@@ -253,11 +253,11 @@ coordinationhub/
   cli_agents.py       — Agent identity & lifecycle CLI commands (~205 LOC)
   cli_locks.py        — Document locking & coordination CLI commands (~214 LOC)
   cli_vis.py          — Change awareness, audit, graph & assessment CLI + agent-tree (~346 LOC)
-  db.py               — SQLite schema + thread-local ConnectionPool (~215 LOC)
-  lock_ops.py         — Shared lock primitives (~119 LOC)
+  db.py               — SQLite schema + schema versioning + thread-local ConnectionPool (~275 LOC)
+  lock_ops.py         — Shared lock primitives + region overlap (~175 LOC)
   conflict_log.py     — Conflict recording and querying (~53 LOC)
   notifications.py    — Change notification storage and retrieval (~115 LOC)
-  tests/              — pytest suite (187 tests, 12 test files)
+  tests/              — pytest suite (246 tests, 15 test files)
 ```
 
 ## Zero-Dependency Guarantee

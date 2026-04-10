@@ -31,7 +31,10 @@ def _fmt_lock_result(result: dict[str, Any], document_path: str) -> None:
 def cmd_acquire_lock(args):
     engine = _engine_from_args(args)
     try:
-        result = engine.acquire_lock(args.document_path, args.agent_id, args.lock_type, args.ttl, args.force)
+        result = engine.acquire_lock(
+            args.document_path, args.agent_id, args.lock_type, args.ttl, args.force,
+            region_start=args.region_start, region_end=args.region_end,
+        )
         if args.json_output:
             _print_json(result)
         else:
@@ -47,7 +50,10 @@ def cmd_acquire_lock(args):
 def cmd_release_lock(args):
     engine = _engine_from_args(args)
     try:
-        result = engine.release_lock(args.document_path, args.agent_id)
+        result = engine.release_lock(
+            args.document_path, args.agent_id,
+            region_start=args.region_start, region_end=args.region_end,
+        )
         if args.json_output:
             _print_json(result)
         else:
@@ -66,7 +72,10 @@ def cmd_release_lock(args):
 def cmd_refresh_lock(args):
     engine = _engine_from_args(args)
     try:
-        result = engine.refresh_lock(args.document_path, args.agent_id, ttl=args.ttl)
+        result = engine.refresh_lock(
+            args.document_path, args.agent_id, ttl=args.ttl,
+            region_start=args.region_start, region_end=args.region_end,
+        )
         if args.json_output:
             _print_json(result)
         else:

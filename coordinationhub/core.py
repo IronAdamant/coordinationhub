@@ -140,94 +140,125 @@ class CoordinationEngine:
     def acquire_lock(
         self, document_path: str, agent_id: str,
         lock_type: str = "exclusive", ttl: float = DEFAULT_TTL, force: bool = False,
+        region_start: int | None = None, region_end: int | None = None,
     ) -> dict[str, Any]:
         now = time.time()
         norm_path = normalize_path(document_path, self._storage.project_root)
-        with self._connect() as conn:
-            row = conn.execute(
-                "SELECT * FROM document_locks WHERE document_path = ?", (norm_path,)
-            ).fetchone()
-            if row is not None:
-                expired = now > row["locked_at"] + row["lock_ttl"]
-                if row["locked_by"] == agent_id:
-                    conn.execute(
-                        "UPDATE document_locks SET locked_at = ?, lock_ttl = ?, lock_type = ? "
-                        "WHERE document_path = ?",
-                        (now, ttl, lock_type, norm_path),
-                    )
-                    return {"acquired": True, "document_path": norm_path, "locked_by": agent_id, "expires_at": now + ttl}
-                if not expired and not force:
-                    return {
-                        "acquired": False, "locked_by": row["locked_by"],
-                        "locked_at": row["locked_at"], "expires_at": row["locked_at"] + row["lock_ttl"],
-                        "worktree": row["worktree_root"],
-                    }
-                _cl.record_conflict(self._connect, norm_path, row["locked_by"], agent_id,
-                                    "lock_stolen", resolution="force_overwritten")
+        worktree = str(self._storage.project_root)
+        conn = self._connect()
+        # Use BEGIN IMMEDIATE to serialize concurrent acquire attempts
+        conn.execute("BEGIN IMMEDIATE")
+        try:
+            # Check if we already hold this exact lock (same agent + region)
+            own = _lo.find_own_lock(conn, "document_locks", norm_path, agent_id, region_start, region_end)
+            if own is not None:
                 conn.execute(
-                    "UPDATE document_locks SET locked_by = ?, locked_at = ?, lock_ttl = ?, "
-                    "lock_type = ?, worktree_root = ? WHERE document_path = ?",
-                    (agent_id, now, ttl, lock_type, str(self._storage.project_root), norm_path),
+                    "UPDATE document_locks SET locked_at = ?, lock_ttl = ?, lock_type = ? WHERE id = ?",
+                    (now, ttl, lock_type, own["id"]),
                 )
-                return {"acquired": True, "document_path": norm_path, "locked_by": agent_id, "expires_at": now + ttl}
-            try:
-                conn.execute(
-                    "INSERT INTO document_locks (document_path, locked_by, locked_at, lock_ttl, lock_type, worktree_root) "
-                    "VALUES (?, ?, ?, ?, ?, ?)",
-                    (norm_path, agent_id, now, ttl, lock_type, str(self._storage.project_root)),
-                )
-                return {"acquired": True, "document_path": norm_path, "locked_by": agent_id, "expires_at": now + ttl}
-            except sqlite3.IntegrityError:
-                # Another thread inserted first — re-read and treat as contested
-                row = conn.execute(
-                    "SELECT * FROM document_locks WHERE document_path = ?", (norm_path,)
-                ).fetchone()
-                if row and row["locked_by"] == agent_id:
-                    return {"acquired": True, "document_path": norm_path, "locked_by": agent_id, "expires_at": now + ttl}
-                if row:
-                    return {
-                        "acquired": False, "locked_by": row["locked_by"],
-                        "locked_at": row["locked_at"], "expires_at": row["locked_at"] + row["lock_ttl"],
-                        "worktree": row["worktree_root"],
-                    }
-                return {"acquired": False, "locked_by": "unknown"}
+                conn.execute("COMMIT")
+                return {"acquired": True, "document_path": norm_path, "locked_by": agent_id,
+                        "expires_at": now + ttl, "region_start": region_start, "region_end": region_end}
 
-    def release_lock(self, document_path: str, agent_id: str) -> dict[str, Any]:
+            # Find conflicting locks from other agents
+            conflicts = _lo.find_conflicting_locks(
+                conn, "document_locks", norm_path, agent_id, lock_type, region_start, region_end,
+            )
+            if conflicts and not force:
+                conn.execute("COMMIT")
+                first = conflicts[0]
+                return {
+                    "acquired": False, "locked_by": first["locked_by"],
+                    "locked_at": first["locked_at"], "expires_at": first["locked_at"] + first["lock_ttl"],
+                    "worktree": first["worktree_root"],
+                    "conflicts": [{"locked_by": c["locked_by"], "region_start": c["region_start"],
+                                   "region_end": c["region_end"]} for c in conflicts],
+                }
+            if conflicts and force:
+                for c in conflicts:
+                    _cl.record_conflict(self._connect, norm_path, c["locked_by"], agent_id,
+                                        "lock_stolen", resolution="force_overwritten")
+                    conn.execute("DELETE FROM document_locks WHERE id = ?", (c["id"],))
+
+            # Insert new lock
+            conn.execute(
+                "INSERT INTO document_locks (document_path, locked_by, locked_at, lock_ttl, "
+                "lock_type, region_start, region_end, worktree_root) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                (norm_path, agent_id, now, ttl, lock_type, region_start, region_end, worktree),
+            )
+            conn.execute("COMMIT")
+            return {"acquired": True, "document_path": norm_path, "locked_by": agent_id,
+                    "expires_at": now + ttl, "region_start": region_start, "region_end": region_end}
+        except Exception:
+            conn.execute("ROLLBACK")
+            raise
+
+    def release_lock(
+        self, document_path: str, agent_id: str,
+        region_start: int | None = None, region_end: int | None = None,
+    ) -> dict[str, Any]:
         norm_path = normalize_path(document_path, self._storage.project_root)
         with self._connect() as conn:
-            row = conn.execute(
-                "SELECT locked_by FROM document_locks WHERE document_path = ?", (norm_path,)
-            ).fetchone()
-            if row is None:
+            if region_start is not None:
+                rows = conn.execute(
+                    "SELECT id, locked_by FROM document_locks WHERE document_path = ? "
+                    "AND region_start = ? AND region_end = ?",
+                    (norm_path, region_start, region_end),
+                ).fetchall()
+            else:
+                rows = conn.execute(
+                    "SELECT id, locked_by FROM document_locks WHERE document_path = ? "
+                    "AND region_start IS NULL",
+                    (norm_path,),
+                ).fetchall()
+            if not rows:
                 return {"released": False, "reason": "not_locked"}
-            if row["locked_by"] != agent_id:
+            owned = [r for r in rows if r["locked_by"] == agent_id]
+            if not owned:
                 return {"released": False, "reason": "not_owner"}
-            conn.execute("DELETE FROM document_locks WHERE document_path = ?", (norm_path,))
-            return {"released": True}
+            for r in owned:
+                conn.execute("DELETE FROM document_locks WHERE id = ?", (r["id"],))
+            return {"released": True, "count": len(owned)}
 
-    def refresh_lock(self, document_path: str, agent_id: str, ttl: float = DEFAULT_TTL) -> dict[str, Any]:
+    def refresh_lock(
+        self, document_path: str, agent_id: str, ttl: float = DEFAULT_TTL,
+        region_start: int | None = None, region_end: int | None = None,
+    ) -> dict[str, Any]:
         norm_path = normalize_path(document_path, self._storage.project_root)
         with self._connect() as conn:
-            result = _lo.refresh_lock(conn, "document_locks", norm_path, agent_id, ttl, "not_locked")
+            result = _lo.refresh_lock(
+                conn, "document_locks", norm_path, agent_id, ttl, "not_locked",
+                region_start=region_start, region_end=region_end,
+            )
         return result
 
     def get_lock_status(self, document_path: str) -> dict[str, Any]:
         norm_path = normalize_path(document_path, self._storage.project_root)
         now = time.time()
         with self._connect() as conn:
-            row = conn.execute(
+            # Reap expired for this path
+            conn.execute(
+                "DELETE FROM document_locks WHERE document_path = ? AND locked_at + lock_ttl < ?",
+                (norm_path, now),
+            )
+            rows = conn.execute(
                 "SELECT * FROM document_locks WHERE document_path = ?", (norm_path,)
-            ).fetchone()
-            if row is None:
+            ).fetchall()
+            if not rows:
                 return {"locked": False}
-            if now > row["locked_at"] + row["lock_ttl"]:
-                conn.execute("DELETE FROM document_locks WHERE document_path = ?", (norm_path,))
-                return {"locked": False}
-            return {
-                "locked": True, "locked_by": row["locked_by"],
-                "locked_at": row["locked_at"], "expires_at": row["locked_at"] + row["lock_ttl"],
-                "worktree": row["worktree_root"],
-            }
+            locks = []
+            for row in rows:
+                locks.append({
+                    "locked_by": row["locked_by"], "locked_at": row["locked_at"],
+                    "expires_at": row["locked_at"] + row["lock_ttl"],
+                    "lock_type": row["lock_type"],
+                    "region_start": row["region_start"], "region_end": row["region_end"],
+                    "worktree": row["worktree_root"],
+                })
+            # Backward-compatible: single-lock response when only one lock
+            if len(locks) == 1:
+                return {"locked": True, **locks[0]}
+            return {"locked": True, "holders": locks}
 
     def list_locks(self, agent_id: str | None = None) -> dict[str, Any]:
         """List all active (non-expired) locks, optionally filtered by agent."""
@@ -251,6 +282,8 @@ class CoordinationEngine:
                 "locked_at": row["locked_at"],
                 "expires_at": row["locked_at"] + row["lock_ttl"],
                 "lock_type": row["lock_type"],
+                "region_start": row["region_start"],
+                "region_end": row["region_end"],
                 "worktree": row["worktree_root"],
             })
         return {"locks": locks, "count": len(locks)}

@@ -1,7 +1,23 @@
 # CoordinationHub — Complete Project Documentation
 
-**Version:** 0.3.2
+**Version:** 0.3.3
 **Last updated:** 2026-04-10
+
+## v0.3.3 Changelog
+
+### Added
+- **CI test workflow** — `.github/workflows/test.yml` runs pytest on push/PR across Python 3.10-3.12.
+- **DB schema versioning** — `db.py` now has `schema_version` table, `_CURRENT_SCHEMA_VERSION = 2`, migration runner (`_migrate_v1_to_v2`), auto-migration on `init_schema()`.
+- **Region locking** — `document_locks` table changed from `document_path TEXT PRIMARY KEY` to `id INTEGER PRIMARY KEY AUTOINCREMENT` with `region_start INTEGER` and `region_end INTEGER` columns. Multiple locks per file on non-overlapping regions. Shared locks enforced (multiple shared locks allowed, exclusive blocks). `acquire_lock`, `release_lock`, `refresh_lock`, `get_lock_status`, `list_locks` all support `region_start`/`region_end` params. New functions in `lock_ops.py`: `_regions_overlap`, `find_conflicting_locks`, `find_own_lock`.
+- **Hook unit tests** — new `tests/test_hooks.py` with 23 tests covering all hook handlers.
+- **`acquire_lock` uses `BEGIN IMMEDIATE`** for thread-safe concurrent locking with new schema.
+- CLI commands `acquire-lock`, `release-lock`, `refresh-lock` have `--region-start`/`--region-end` flags.
+
+### Changed
+- `lock_ops.py`: ~119 LOC → ~175 LOC. `db.py`: ~215 LOC → ~275 LOC. `core.py`: ~470 LOC → ~495 LOC. `schemas_locking.py`: ~160 LOC → ~165 LOC.
+- Test count: 206 → 246 across 15 files (was 14). `test_locking.py`: 21 → 38 tests.
+
+---
 
 ## v0.3.2 Changelog
 
@@ -51,13 +67,13 @@
 | Path | Purpose | Dependencies |
 |------|---------|--------------|
 | `coordinationhub/__init__.py` | Package init, exports `CoordinationEngine`, `CoordinationHubMCPServer` | core, mcp_server |
-| `coordinationhub/core.py` | `CoordinationEngine` — all 29 MCP tool methods (~470 LOC) | _storage, agent_registry, lock_ops, conflict_log, notifications, graphs, visibility, assessment, paths, context |
+| `coordinationhub/core.py` | `CoordinationEngine` — all 29 MCP tool methods (~495 LOC) | _storage, agent_registry, lock_ops, conflict_log, notifications, graphs, visibility, assessment, paths, context |
 | `coordinationhub/_storage.py` | `CoordinationStorage` — SQLite pool, path resolution, thread-safe ID gen (~131 LOC) | db |
 | `coordinationhub/paths.py` | Project-root detection and path normalization (~48 LOC) | (no internal deps) |
 | `coordinationhub/context.py` | Context bundle builder for `register_agent` responses (~100 LOC) | (no internal deps) |
 | `coordinationhub/schemas.py` | Schema aggregator — imports all groups, re-exports `TOOL_SCHEMAS` (~31 LOC) | (no internal deps) |
 | `coordinationhub/schemas_identity.py` | Identity & Registration schemas (6 tools, ~123 LOC) | (no internal deps) |
-| `coordinationhub/schemas_locking.py` | Document Locking schemas (8 tools, ~160 LOC) | (no internal deps) |
+| `coordinationhub/schemas_locking.py` | Document Locking schemas (8 tools, ~165 LOC) | (no internal deps) |
 | `coordinationhub/schemas_coordination.py` | Coordination Action schemas (2 tools, ~59 LOC) | (no internal deps) |
 | `coordinationhub/schemas_change.py` | Change Awareness schemas (3 tools, ~77 LOC) | (no internal deps) |
 | `coordinationhub/schemas_audit.py` | Audit & Status schemas (2 tools, ~43 LOC) | (no internal deps) |
@@ -84,15 +100,15 @@
 | `coordinationhub/cli_agents.py` | Agent identity & lifecycle CLI commands (~180 LOC) | cli_utils |
 | `coordinationhub/cli_locks.py` | Document locking & coordination CLI commands (~210 LOC) | cli_utils |
 | `coordinationhub/cli_vis.py` | Change awareness, audit, graph, assessment, dashboard CLI + agent-tree (~323 LOC) | cli_utils |
-| `coordinationhub/db.py` | SQLite schema + thread-local `ConnectionPool` (~215 LOC) | (no internal deps) |
-| `coordinationhub/lock_ops.py` | Shared lock primitives: acquire, release, refresh, reap (~119 LOC) | db |
+| `coordinationhub/db.py` | SQLite schema + schema versioning + thread-local `ConnectionPool` (~275 LOC) | (no internal deps) |
+| `coordinationhub/lock_ops.py` | Shared lock primitives: acquire, release, refresh, reap, region overlap (~175 LOC) | db |
 | `coordinationhub/conflict_log.py` | Conflict recording and querying (~52 LOC) | lock_ops |
 | `coordinationhub/notifications.py` | Change notification storage and retrieval (~94 LOC) | db |
 | `coordinationhub/hooks/__init__.py` | Hooks package init | — |
 | `coordinationhub/hooks/claude_code.py` | Claude Code hook: auto-locking, notifications, Stele/Trammel bridge (~310 LOC) | core |
 | `tests/conftest.py` | pytest fixtures: `engine`, `registered_agent`, `two_agents` | core |
 | `tests/test_agent_lifecycle.py` | Agent lifecycle tests (21 tests) | conftest |
-| `tests/test_locking.py` | Lock acquisition, release, refresh, status, list, reap (21 tests) | conftest |
+| `tests/test_locking.py` | Lock acquisition, release, refresh, status, list, reap, region locking (38 tests) | conftest |
 | `tests/test_notifications.py` | Change notification tests (8 tests) | conftest |
 | `tests/test_conflicts.py` | Conflict logging and lineage table tests (6 tests) | conftest |
 | `tests/test_coordination.py` | Broadcast and wait_for_locks tests (7 tests) | conftest |
@@ -104,10 +120,11 @@
 | `tests/test_cli.py` | CLI argument parser and subcommand dispatch (11 tests) | conftest, core |
 | `tests/test_concurrent.py` | Concurrent stress tests: locks, registration, notifications (8 tests) | conftest |
 | `tests/test_scenario.py` | End-to-end multi-agent lifecycle workflows (6 tests) | conftest |
+| `tests/test_hooks.py` | Claude Code hook handler tests (23 tests) | conftest, hooks |
 | `pyproject.toml` | Package config, dependencies, entry points | — |
 | `.claude/settings.json` | Claude Code hooks: auto-lock, notify, Stele/Trammel bridge | — |
 
-**Total: 206 tests across 14 test files.**
+**Total: 246 tests across 15 test files.**
 
 ---
 
@@ -116,13 +133,13 @@
 ```
 coordinationhub/
   __init__.py         — Package init, exports CoordinationEngine, CoordinationHubMCPServer
-  core.py             — CoordinationEngine: all 29 tool methods (~470 LOC)
+  core.py             — CoordinationEngine: all 29 tool methods (~495 LOC)
   _storage.py         — CoordinationStorage: SQLite pool, path resolution, thread-safe ID gen (~131 LOC)
   paths.py            — Project-root detection and path normalization (~47 LOC)
   context.py          — Context bundle builder for register_agent responses (~97 LOC)
   schemas.py          — Schema aggregator, re-exports TOOL_SCHEMAS (~31 LOC)
   schemas_identity.py — Identity & Registration schemas (~123 LOC)
-  schemas_locking.py   — Document Locking schemas (~160 LOC)
+  schemas_locking.py   — Document Locking schemas (~165 LOC)
   schemas_coordination.py — Coordination Action schemas (~59 LOC)
   schemas_change.py    — Change Awareness schemas (~77 LOC)
   schemas_audit.py    — Audit & Status schemas (~43 LOC)
@@ -149,13 +166,13 @@ coordinationhub/
   cli_agents.py       — Agent identity & lifecycle CLI commands (~180 LOC)
   cli_locks.py        — Document locking & coordination CLI commands (~210 LOC)
   cli_vis.py          — Change awareness, audit, graph & assessment CLI + agent-tree (~323 LOC)
-  db.py               — SQLite schema (canonical) + thread-local ConnectionPool (~215 LOC)
-  lock_ops.py         — Shared lock primitives (~119 LOC)
+  db.py               — SQLite schema (canonical) + schema versioning + thread-local ConnectionPool (~275 LOC)
+  lock_ops.py         — Shared lock primitives + region overlap (~175 LOC)
   conflict_log.py     — Conflict recording and querying (~52 LOC)
   notifications.py    — Change notification storage and retrieval (~94 LOC)
   hooks/
     claude_code.py    — Claude Code hook: auto-locking, notifications, Stele/Trammel bridge (~310 LOC)
-  tests/              — 206 tests across 14 test files
+  tests/              — 246 tests across 15 test files
 ```
 
 **Module design principles:**
@@ -301,14 +318,19 @@ CREATE TABLE lineage (
 
 ```sql
 CREATE TABLE document_locks (
-    document_path TEXT PRIMARY KEY,
+    id           INTEGER PRIMARY KEY AUTOINCREMENT,
+    document_path TEXT NOT NULL,
     locked_by    TEXT NOT NULL,
     locked_at    REAL NOT NULL,
     lock_ttl     REAL DEFAULT 300.0,
     lock_type    TEXT DEFAULT 'exclusive',
-    worktree_root TEXT
+    worktree_root TEXT,
+    region_start INTEGER,
+    region_end   INTEGER
 )
 ```
+
+Multiple locks per file are allowed for non-overlapping regions. Shared locks on overlapping regions are permitted; exclusive locks block all others on the same region. `region_start`/`region_end` of `NULL` means whole-file lock.
 
 ### `lock_conflicts` Table
 
@@ -400,6 +422,8 @@ CREATE TABLE assessment_results (
 
 `acquire_lock`, `release_lock`, `refresh_lock`, `get_lock_status`, `list_locks`,
 `release_agent_locks`, `reap_expired_locks`, `reap_stale_agents`.
+
+All locking tools support optional `region_start`/`region_end` parameters for region-level locking. Shared locks on overlapping regions are permitted; exclusive locks block all others.
 
 ### Coordination Actions
 
@@ -552,7 +576,7 @@ Air-gapped install: `pip install coordinationhub --no-deps`.
 
 ```bash
 python -m pytest tests/ -v
-# 206 tests across 14 test files
+# 246 tests across 15 test files
 ```
 
 ---
