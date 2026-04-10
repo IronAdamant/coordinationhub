@@ -137,9 +137,10 @@ TOOL_SCHEMAS_VISIBILITY: dict[str, dict] = {
     },
     "get_agent_tree": {
         "description": (
-            "Get the hierarchical agent tree rooted at a specific agent, "
-            "including all descendants rendered as a nested structure and plain-text tree. "
-            "Use this for human or LLM review of the full agent hierarchy. "
+            "Get the hierarchical agent tree with live work status. Each node shows "
+            "the agent's current task, active file locks (with type and region), and "
+            "boundary crossing warnings when locking files owned by other agents. "
+            "Use as a shared situational reference — any agent sees the same live state. "
             "If agent_id is omitted, returns the tree rooted at the oldest active root agent."
         ),
         "parameters": {

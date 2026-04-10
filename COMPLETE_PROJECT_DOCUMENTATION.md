@@ -115,7 +115,7 @@
 | `coordinationhub/graph.py` | CoordinationGraph in-memory object with lookup helpers (~66 LOC) | graph_validate |
 | `coordinationhub/visibility.py` | Thin re-export aggregator for scan/agent_status/responsibilities (~15 LOC) | scan, agent_status, responsibilities |
 | `coordinationhub/scan.py` | File ownership scan, graph-role-aware assignment, spawned-agent inheritance (~207 LOC) | (no internal deps) |
-| `coordinationhub/agent_status.py` | Agent status query, file map, agent tree helpers (~225 LOC) | (no internal deps) |
+| `coordinationhub/agent_status.py` | Agent status query, file map, rich agent tree with locks/warnings (~290 LOC) | (no internal deps) |
 | `coordinationhub/responsibilities.py` | Agent role/responsibilities storage from graph (~35 LOC) | (no internal deps) |
 | `coordinationhub/agent_registry.py` | Thin re-export aggregator for registry_ops/registry_query (~23 LOC) | registry_ops, registry_query |
 | `coordinationhub/registry_ops.py` | Agent lifecycle ops: register, heartbeat, deregister (~120 LOC) | db |
@@ -182,7 +182,7 @@ coordinationhub/
   graph.py            — CoordinationGraph in-memory object (~66 LOC)
   visibility.py       — Thin re-export aggregator (~15 LOC)
   scan.py             — File ownership scan, graph-role-aware (~207 LOC)
-  agent_status.py     — Agent status query, file map, and agent tree helpers (~225 LOC)
+  agent_status.py     — Agent status query, file map, rich agent tree with locks/warnings (~290 LOC)
   responsibilities.py — Agent role/responsibilities storage (~35 LOC)
   agent_registry.py   — Thin re-export aggregator (~23 LOC)
   registry_ops.py     — Agent lifecycle ops (~106 LOC)
@@ -485,7 +485,7 @@ All locking tools support optional `region_start`/`region_end` parameters for re
 | `get_file_agent_map` | Full file→agent→role→responsibilities→task map |
 | `update_agent_status` | Set `current_task` for an agent |
 | `run_assessment` | Run suite, output report, store results incl. full traces + refinements |
-| `get_agent_tree` | Hierarchical agent tree: nested children + plain-text rendering |
+| `get_agent_tree` | Rich hierarchical agent tree: current tasks, active locks, boundary warnings, nested children |
 
 ---
 

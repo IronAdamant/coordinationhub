@@ -13,8 +13,8 @@ Zero third-party dependencies in core. Works standalone or alongside Stele, Chis
 ```
 coordinationhub/
   __init__.py         — Package init, exports CoordinationEngine, CoordinationHubMCPServer
-  core.py             — CoordinationEngine: identity, change, audit, graph/visibility methods (~260 LOC)
-  core_locking.py     — LockingMixin: all locking + coordination methods (~230 LOC)
+  core.py             — CoordinationEngine: identity, change, audit, graph/visibility methods (~280 LOC)
+  core_locking.py     — LockingMixin: all locking + coordination methods (~260 LOC)
   _storage.py        — CoordinationStorage: SQLite pool, path resolution, lifecycle (~131 LOC)
   paths.py            — Project-root detection and path normalization (~47 LOC)
   context.py          — Context bundle builder for register_agent responses (~97 LOC)
@@ -23,7 +23,7 @@ coordinationhub/
   schemas_locking.py    — Document Locking schemas (~165 LOC)
   schemas_coordination.py — Coordination Action schemas (~59 LOC)
   schemas_change.py     — Change Awareness schemas (~77 LOC)
-  schemas_audit.py     — Audit & Status schemas (~43 LOC)
+  schemas_audit.py     — Audit & Status schemas (~60 LOC)
   schemas_visibility.py — Graph & Visibility schemas (8 tools, ~156 LOC)
   dispatch.py         — Tool dispatch table (~49 LOC)
   graphs.py           — Graph aggregator: singleton + disk loading + validation (~146 LOC)
@@ -32,7 +32,7 @@ coordinationhub/
   graph.py            — CoordinationGraph in-memory object (~66 LOC)
   visibility.py       — Thin re-export aggregator for scan/agent_status/responsibilities (~15 LOC)
   scan.py             — File ownership scan, nearest-ancestor assignment (~207 LOC)
-  agent_status.py     — Agent status query, file map, and agent tree helpers (~225 LOC)
+  agent_status.py     — Agent status query, file map, rich agent tree with locks/warnings (~290 LOC)
   responsibilities.py  — Agent role/responsibilities storage from graph (~35 LOC)
   assessment_scorers.py — 5 metric scorers + shared event_matches_responsibility helper (~315 LOC)
   assessment.py       — Suite loading, run_assessment, Markdown report, SQLite storage (~241 LOC)
@@ -43,7 +43,7 @@ coordinationhub/
   cli_utils.py        — Shared CLI helpers: print_json, engine_from_args, close (~30 LOC)
   cli_agents.py       — Agent identity & lifecycle CLI commands (~180 LOC)
   cli_locks.py        — Document locking & coordination CLI commands (~210 LOC)
-  cli_vis.py          — Change awareness, audit, graph, assessment CLI + agent-tree (~323 LOC)
+  cli_vis.py          — Change awareness, audit, graph, assessment CLI + agent-tree (~340 LOC)
   db.py               — SQLite schema (canonical) + schema versioning + thread-local ConnectionPool (~280 LOC)
   agent_registry.py   — Thin re-export aggregator for registry_ops/registry_query (~23 LOC)
   registry_ops.py     — Agent lifecycle ops: register, heartbeat, deregister (~106 LOC)
@@ -54,7 +54,7 @@ coordinationhub/
   hooks/
     __init__.py
     claude_code.py    — Claude Code hook: auto-locking, notifications, Stele/Trammel bridge (~310 LOC)
-  tests/              — pytest suite (246 tests, 15 test files)
+  tests/              — pytest suite (256 tests, 15 test files)
 ```
 
 ## Module Design
@@ -121,6 +121,7 @@ coordinationhub get-conflicts
 - Call `notify_change(path, 'modified', agent_id)` after writing a shared document
 - Use `broadcast(agent_id, document_path=<path>)` before taking a significant action that affects siblings
 - Lock files before writing shared documents: `acquire_lock(path, agent_id, force=False)`
+- Use `get_agent_tree()` as a shared situational reference — every agent sees the same live hierarchy with current tasks, active locks, and boundary warnings
 
 ## Claude Code Integration
 

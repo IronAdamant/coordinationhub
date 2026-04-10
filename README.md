@@ -76,6 +76,28 @@ handoffs:
     condition: task_size < 500 && no_blockers
 ```
 
+### Agent Tree View
+
+Every agent in the swarm sees the same live hierarchy. Call `coordinationhub agent-tree` from any agent:
+
+```
+hub.cc.main [active] — "observing..."
+├── hub.cc.main.0 [Agent A] — service consolidation
+│   ├─ ◆ src/services/mcpProbes.js [exclusive]
+│   └─ ◆ mcpChallengeRoutes.js [exclusive] ⚠ owned by hub.cc.main.1
+├── hub.cc.main.1 [Agent B] — "route simplification"
+│   ├─ ◆ routeLoader.js [exclusive L325-360]
+│   └─ ◆ vcsRoutes.js [exclusive]
+└── hub.cc.main.2 [Agent C] — data layer
+    ├── hub.cc.main.2.0 [CA] — "working on fileStore.js"
+    │   └─ ◆ fileStore.js [exclusive]
+    └── hub.cc.main.2.1 [CB] — "working on BaseModel"
+        ├─ ◆ BaseModel.js [exclusive]
+        └─ ◆ baseModel.test.js [shared]
+```
+
+Each node shows: agent ID, role/task, active file locks with type and region, and boundary warnings when an agent locks a file owned by another.
+
 ---
 
 ## How It Works
@@ -103,7 +125,7 @@ Agents don't message each other directly. Instead they communicate through the s
 | **Coordination** | `broadcast`, `wait_for_locks` |
 | **Changes** | `notify_change`, `get_notifications`, `prune_notifications` |
 | **Audit** | `get_conflicts`, `get_contention_hotspots`, `status` |
-| **Visibility** | `load_coordination_spec`, `validate_graph`, `scan_project`, `get_agent_status`, `get_file_agent_map`, `update_agent_status`, `run_assessment`, `get_agent_tree` |
+| **Visibility** | `load_coordination_spec`, `validate_graph`, `scan_project`, `get_agent_status`, `get_file_agent_map`, `update_agent_status`, `run_assessment`, [`get_agent_tree`](#agent-tree-view) |
 
 ## CLI Commands (31)
 

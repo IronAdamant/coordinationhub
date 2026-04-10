@@ -298,7 +298,7 @@ coordinationhub/
   graph.py             -- CoordinationGraph in-memory object (~66 LOC)
   visibility.py        -- Thin re-export aggregator (~20 LOC)
   scan.py              -- File ownership scan, graph-role-aware (~165 LOC)
-  agent_status.py      -- Agent status query, file map, and agent tree helpers (~225 LOC)
+  agent_status.py      -- Agent status query, file map, rich agent tree with locks/warnings (~290 LOC)
   responsibilities.py   -- Agent role/responsibilities storage (~35 LOC)
   agent_registry.py    -- Agent lifecycle (registry_ops + registry_query)
   registry_ops.py      -- Agent lifecycle ops (~107 LOC)
@@ -387,6 +387,7 @@ Default port: `9877`
 - `acquire_lock` cross-checks `file_ownership`: warns when agent locks file owned by another, records `boundary_crossing` conflict + notification
 - `get_contention_hotspots` tool: ranks files by conflict count, identifies coordination chokepoints
 - `contention-hotspots` CLI command
+- Rich `agent-tree`: each node shows current task, active locks (type + region), boundary warnings
 - 30 MCP tools, 31 CLI commands, 256 tests
 
 ### Review Eleven — Multi-agent coordination validation (2026-04-10)
