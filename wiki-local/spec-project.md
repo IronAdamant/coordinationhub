@@ -1,6 +1,6 @@
 # CoordinationHub — Multi-Agent Swarm Coordination MCP
 
-**Version:** 0.3.4
+**Version:** 0.3.5
 **Language:** Python 3.10+ (stdlib-only core — **zero third-party dependencies**, `mcp` optional for stdio only)
 **Transports:** stdio + HTTP (both, like Stele/Chisel/Trammel)
 
@@ -145,7 +145,7 @@ trace against 5 metric scorers, and outputs a Markdown report. Metric scorers:
 
 ---
 
-## SQLite Schema (v0.3.4)
+## SQLite Schema (v0.3.5)
 
 ### Tables
 
@@ -244,7 +244,7 @@ Multiple locks per file are allowed for non-overlapping regions. Shared locks on
 
 ---
 
-## MCP Tools (29 total — v0.3.4)
+## MCP Tools (30 total — v0.3.5)
 
 ### Identity & Registration
 
@@ -266,7 +266,7 @@ Multiple locks per file are allowed for non-overlapping regions. Shared locks on
 
 ### Audit
 
-`get_conflicts`, `status`
+`get_conflicts`, `get_contention_hotspots`, `status`
 
 ### Graph & Visibility (8 tools in 0.3.1)
 
@@ -275,7 +275,7 @@ Multiple locks per file are allowed for non-overlapping regions. Shared locks on
 
 ---
 
-## Project Layout (v0.3.4)
+## Project Layout (v0.3.5)
 
 ```
 coordinationhub/
@@ -382,6 +382,12 @@ Default port: `9877`
 ---
 
 ## Version History
+
+### 0.3.5 — Ownership-aware locking & contention hotspots (2026-04-10)
+- `acquire_lock` cross-checks `file_ownership`: warns when agent locks file owned by another, records `boundary_crossing` conflict + notification
+- `get_contention_hotspots` tool: ranks files by conflict count, identifies coordination chokepoints
+- `contention-hotspots` CLI command
+- 30 MCP tools, 31 CLI commands, 256 tests
 
 ### Review Eleven — Multi-agent coordination validation (2026-04-10)
 - 3-agent parallel refactor validated CoordinationHub's design without code changes

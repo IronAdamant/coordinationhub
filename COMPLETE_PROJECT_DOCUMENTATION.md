@@ -1,7 +1,22 @@
 # CoordinationHub — Complete Project Documentation
 
-**Version:** 0.3.4
+**Version:** 0.3.5
 **Last updated:** 2026-04-10
+
+## v0.3.5 Changelog
+
+### Added
+- **Ownership-aware locking** — `acquire_lock` now cross-checks `file_ownership` table. When an agent locks a file owned by another agent, the response includes an `ownership_warning` field identifying the owner. A `boundary_crossing` conflict is recorded in the conflict log, and a `boundary_crossing` change notification is fired for the owning agent to discover via polling.
+- **`get_contention_hotspots` MCP tool** — Ranks files by lock contention frequency from the conflict log. Returns files ordered by conflict count with all involved agents listed. Identifies coordination chokepoints (files that multiple agents need access to).
+- **`contention-hotspots` CLI command** — `coordinationhub contention-hotspots [--limit N]` for chokepoint identification.
+- **10 new tests** in `test_conflicts.py`: 6 boundary crossing tests (no warning when no ownership, same owner, cross-owner warning, conflict logging, notification firing, self-refresh no warning) + 4 contention hotspot tests (empty, ranked by count, all agents included, limit).
+
+### Changed
+- `core_locking.py`: ~230 LOC → ~260 LOC (ownership boundary check method).
+- `core.py`: ~260 LOC → ~280 LOC (get_contention_hotspots method).
+- Tool count: 29 → 30. CLI commands: 30 → 31. Tests: 246 → 256 across 15 files.
+
+---
 
 ## v0.3.4 Changelog
 
@@ -125,7 +140,7 @@
 | `tests/test_agent_lifecycle.py` | Agent lifecycle tests (21 tests) | conftest |
 | `tests/test_locking.py` | Lock acquisition, release, refresh, status, list, reap, region locking (38 tests) | conftest |
 | `tests/test_notifications.py` | Change notification tests (8 tests) | conftest |
-| `tests/test_conflicts.py` | Conflict logging and lineage table tests (6 tests) | conftest |
+| `tests/test_conflicts.py` | Conflict logging, boundary crossing, contention hotspots, lineage table tests (16 tests) | conftest |
 | `tests/test_coordination.py` | Broadcast and wait_for_locks tests (7 tests) | conftest |
 | `tests/test_visibility.py` | Visibility tools, file scan, graph loading, agent tree tests (30 tests) | conftest, graphs |
 | `tests/test_graphs.py` | Graph validation and CoordinationGraph tests (22 tests) | graphs |
@@ -139,7 +154,7 @@
 | `pyproject.toml` | Package config, dependencies, entry points | — |
 | `.claude/settings.json` | Claude Code hooks: auto-lock, notify, Stele/Trammel bridge | — |
 
-**Total: 246 tests across 15 test files.**
+**Total: 256 tests across 15 test files.**
 
 ---
 
@@ -421,7 +436,7 @@ CREATE TABLE assessment_results (
 
 ---
 
-## MCP Tools (29 total)
+## MCP Tools (30 total)
 
 ### Identity & Registration
 
@@ -453,7 +468,7 @@ All locking tools support optional `region_start`/`region_end` parameters for re
 
 ### Audit
 
-`get_conflicts`.
+`get_conflicts`, `get_contention_hotspots`.
 
 ### Status
 
@@ -526,7 +541,7 @@ After running an assessment, `suggested_refinements` lists:
 
 ---
 
-## CLI Subcommands (30 total)
+## CLI Subcommands (31 total)
 
 ### Server
 `serve`, `serve-mcp`
@@ -557,7 +572,7 @@ After running an assessment, `suggested_refinements` lists:
 `notify-change`, `get-notifications`, `prune-notifications`
 
 ### Audit
-`get-conflicts`
+`get-conflicts`, `contention-hotspots`
 
 ---
 

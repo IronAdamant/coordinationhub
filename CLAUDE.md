@@ -75,6 +75,7 @@ coordinationhub/
 - **Concurrent lock safety**: `acquire_lock` uses `BEGIN IMMEDIATE` to serialize concurrent lock attempts. Two threads racing for the same file are sequenced at the transaction level rather than catching `IntegrityError` after the fact.
 - **TTL-based locks**: All locks expire unless refreshed. Default 300s. `heartbeat()` does NOT reap expired locks — call `reap_expired_locks()` explicitly.
 - **Assessment keyword matching**: Shared `event_matches_responsibility()` in `assessment_scorers.py` maps event types to responsibility keywords via `_EVENT_RESPONSIBILITY_MAP` dict. Extensible — add new event-type groups to the map to support custom vocabularies. Non-standard terms that don't contain any mapped keyword will reduce scores.
+- **Ownership-aware locking**: `acquire_lock` cross-checks `file_ownership` after acquiring. When an agent locks a file owned by another agent, the response includes `ownership_warning` and a `boundary_crossing` conflict + notification are recorded. Self-lock refreshes skip this check.
 - **Force steal with conflict log**: `acquire_lock(force=True)` records the steal in `lock_conflicts` before overwriting, so conflicts are auditable.
 - **Cascade orphaning**: When an agent dies, children are re-parented to the grandparent (or become root if no grandparent). The stale `lineage` rows referencing the dead agent as parent are deleted so the responsibility-inheritance scan always joins on a live spawning parent. No agent is permanently orphaned.
 - **No message passing**: CoordinationHub is a shared database, not a message bus. Agents communicate by convention (lock acquisition, change notifications) and polling.
@@ -84,16 +85,16 @@ coordinationhub/
 - **DB schema versioning**: `db.py` tracks `schema_version` table with `_CURRENT_SCHEMA_VERSION = 2`. `init_schema()` auto-migrates from v1 to v2 (document_locks table restructure for region locking). Migration runner `_migrate_v1_to_v2` preserves existing lock data.
 - **`broadcast` message/action params removed**: The `message` and `action` positional params were removed (they were never stored). The `document_path` optional param remains — when provided, it is used to check for lock conflicts among acknowledged siblings and is not persisted.
 
-## 29 MCP Tools
+## 30 MCP Tools
 
 Identity: `register_agent`, `heartbeat`, `deregister_agent`, `list_agents`, `get_lineage`, `get_siblings`
 Locking: `acquire_lock`, `release_lock`, `refresh_lock`, `get_lock_status`, `list_locks`, `release_agent_locks`, `reap_expired_locks`, `reap_stale_agents`
 Coordination: `broadcast`, `wait_for_locks`
 Change: `notify_change`, `get_notifications`, `prune_notifications`
-Audit: `get_conflicts`, `status`
+Audit: `get_conflicts`, `get_contention_hotspots`, `status`
 Graph & Visibility (0.3.1): `load_coordination_spec`, `validate_graph`, `scan_project`, `get_agent_status`, `get_file_agent_map`, `update_agent_status`, `run_assessment`, `get_agent_tree`
 
-**Tool count is dynamic** — `status()` returns `len(TOOL_DISPATCH)` (currently 29), not a hardcoded number.
+**Tool count is dynamic** — `status()` returns `len(TOOL_DISPATCH)` (currently 30), not a hardcoded number.
 
 ## Dev Commands
 
@@ -148,11 +149,11 @@ To disable hooks temporarily, add `"disableAllHooks": true` to `~/.claude/settin
 
 ```bash
 python -m pytest tests/ -v
-# 246 tests across 15 test files:
+# 256 tests across 15 test files:
 #   test_agent_lifecycle.py  — 21 tests
 #   test_locking.py          — 38 tests
 #   test_notifications.py    — 8 tests
-#   test_conflicts.py        — 6 tests
+#   test_conflicts.py        — 16 tests
 #   test_coordination.py     — 7 tests
 #   test_visibility.py       — 30 tests
 #   test_graphs.py           — 22 tests

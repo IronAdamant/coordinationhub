@@ -86,6 +86,29 @@ def cmd_get_conflicts(args):
 
 
 # ------------------------------------------------------------------ #
+# contention-hotspots
+# ------------------------------------------------------------------ #
+
+def cmd_contention_hotspots(args):
+    engine = _engine_from_args(args)
+    try:
+        result = engine.get_contention_hotspots(limit=args.limit)
+        if args.json_output:
+            _print_json(result)
+        else:
+            hotspots = result.get("hotspots", [])
+            if not hotspots:
+                print("No contention hotspots")
+            else:
+                print(f"{len(hotspots)} contention hotspot(s):")
+                for h in hotspots:
+                    agents = ", ".join(h["agents_involved"])
+                    print(f"  {h['document_path']}: {h['conflict_count']} conflicts ({agents})")
+    finally:
+        _close(engine)
+
+
+# ------------------------------------------------------------------ #
 # load-spec
 # ------------------------------------------------------------------ #
 
