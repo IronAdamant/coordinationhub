@@ -13,7 +13,7 @@ Zero third-party dependencies in core. Works standalone or alongside Stele, Chis
 ```
 coordinationhub/
   __init__.py         — Package init, exports CoordinationEngine, CoordinationHubMCPServer
-  core.py             — CoordinationEngine: identity, change, audit, graph/visibility methods (~280 LOC)
+  core.py             — CoordinationEngine: identity, change, audit, graph/visibility methods (~285 LOC)
   core_locking.py     — LockingMixin: all locking + coordination methods (~260 LOC)
   _storage.py        — CoordinationStorage: SQLite pool, path resolution, lifecycle (~131 LOC)
   paths.py            — Project-root detection and path normalization (~47 LOC)
@@ -44,16 +44,16 @@ coordinationhub/
   cli_agents.py       — Agent identity & lifecycle CLI commands (~180 LOC)
   cli_locks.py        — Document locking & coordination CLI commands (~210 LOC)
   cli_vis.py          — Change awareness, audit, graph, assessment CLI + agent-tree (~340 LOC)
-  db.py               — SQLite schema (canonical) + schema versioning + thread-local ConnectionPool (~280 LOC)
+  db.py               — SQLite schema (canonical) + schema versioning (v3) + thread-local ConnectionPool (~295 LOC)
   agent_registry.py   — Thin re-export aggregator for registry_ops/registry_query (~23 LOC)
-  registry_ops.py     — Agent lifecycle ops: register, heartbeat, deregister (~106 LOC)
+  registry_ops.py     — Agent lifecycle ops: register, heartbeat, deregister, find_by_claude_id (~145 LOC)
   registry_query.py   — Agent registry queries: list, lineage, siblings, reaping (~152 LOC)
   lock_ops.py         — Shared lock primitives: acquire, release, refresh, region overlap (~175 LOC)
   conflict_log.py     — Conflict recording and querying (~52 LOC)
   notifications.py     — Change notification storage and retrieval (~94 LOC)
   hooks/
     __init__.py
-    claude_code.py    — Claude Code hook: auto-locking, notifications, Stele/Trammel bridge (~310 LOC)
+    claude_code.py    — Claude Code hook: auto-locking, notifications, agent ID mapping, Stele/Trammel bridge (~330 LOC)
   tests/              — pytest suite (256 tests, 15 test files)
 ```
 
@@ -82,7 +82,8 @@ coordinationhub/
 - **Coordination URL in context bundle**: Parent agents embed `coordination_url` string. Override via `COORDINATIONHUB_COORDINATION_URL` environment variable.
 - **SQLite WAL mode**: `PRAGMA wal_checkpoint(TRUNCATE)` on engine close ensures no unbounded WAL growth.
 - **Region locking**: `document_locks` uses `id INTEGER PRIMARY KEY AUTOINCREMENT` with `region_start INTEGER` and `region_end INTEGER` columns, allowing multiple locks per file on non-overlapping regions. Shared locks (multiple readers) are enforced — multiple shared locks on the same region are allowed, but an exclusive lock blocks all others. `_regions_overlap()`, `find_conflicting_locks()`, and `find_own_lock()` in `lock_ops.py` handle overlap detection. `acquire_lock` uses `BEGIN IMMEDIATE` for thread-safe concurrent locking.
-- **DB schema versioning**: `db.py` tracks `schema_version` table with `_CURRENT_SCHEMA_VERSION = 2`. `init_schema()` auto-migrates from v1 to v2 (document_locks table restructure for region locking). Migration runner `_migrate_v1_to_v2` preserves existing lock data.
+- **DB schema versioning**: `db.py` tracks `schema_version` table with `_CURRENT_SCHEMA_VERSION = 3`. `init_schema()` auto-migrates through v1→v2 (document_locks restructure) and v2→v3 (agents.claude_agent_id column). Migration runner preserves existing data.
+- **Claude Code agent ID mapping**: `agents.claude_agent_id` stores the raw hex ID that Claude Code assigns to spawned sub-agents. During SubagentStart, the hook stores this mapping. During PreToolUse/PostToolUse, `_resolve_agent_id` looks up the mapping to return the `hub.cc.*` child ID instead of the raw hex — preventing ghost agent duplication and hierarchy disconnection.
 - **`broadcast` message/action params removed**: The `message` and `action` positional params were removed (they were never stored). The `document_path` optional param remains — when provided, it is used to check for lock conflicts among acknowledged siblings and is not persisted.
 
 ## 30 MCP Tools
@@ -150,7 +151,7 @@ To disable hooks temporarily, add `"disableAllHooks": true` to `~/.claude/settin
 
 ```bash
 python -m pytest tests/ -v
-# 256 tests across 15 test files:
+# 261 tests across 15 test files:
 #   test_agent_lifecycle.py  — 21 tests
 #   test_locking.py          — 38 tests
 #   test_notifications.py    — 8 tests
@@ -164,7 +165,7 @@ python -m pytest tests/ -v
 #   test_cli.py              — 11 tests (argparse parser, subcommand dispatch)
 #   test_concurrent.py       — 8 tests (threading: locks, registration, notifications)
 #   test_scenario.py         — 6 tests (end-to-end multi-agent lifecycle workflows)
-#   test_hooks.py            — 23 tests (Claude Code hook handlers)
+#   test_hooks.py            — 28 tests (Claude Code hook handlers, agent ID mapping)
 ```
 
 Always run the test suite before and after changes.

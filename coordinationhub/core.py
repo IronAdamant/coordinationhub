@@ -83,11 +83,12 @@ class CoordinationEngine(LockingMixin):
         parent_id: str | None = None,
         graph_agent_id: str | None = None,
         worktree_root: str | None = None,
+        claude_agent_id: str | None = None,
     ) -> dict[str, Any]:
         worktree = worktree_root or (
             str(self._storage.project_root) if self._storage.project_root else os.getcwd()
         )
-        _ar.register_agent(self._connect, agent_id, worktree, parent_id)
+        _ar.register_agent(self._connect, agent_id, worktree, parent_id, claude_agent_id=claude_agent_id)
         if parent_id is not None:
             with self._connect() as conn:
                 conn.execute(
@@ -132,6 +133,10 @@ class CoordinationEngine(LockingMixin):
     def get_siblings(self, agent_id: str) -> dict[str, Any]:
         siblings = _ar.get_siblings(self._connect, agent_id)
         return {"siblings": siblings}
+
+    def find_agent_by_claude_id(self, claude_agent_id: str) -> str | None:
+        """Look up a hub.cc.* agent_id by the raw Claude Code hex ID."""
+        return _ar.find_agent_by_claude_id(self._connect, claude_agent_id)
 
     # ------------------------------------------------------------------ #
     # Change Awareness

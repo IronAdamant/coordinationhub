@@ -72,15 +72,21 @@ def _subagent_id(parent_id: str, event: dict, engine=None) -> str:
     return f"{parent_id}.{agent_type}.{seq}"
 
 
-def _resolve_agent_id(event: dict) -> str:
+def _resolve_agent_id(event: dict, engine=None) -> str:
     """Return the most specific agent ID available in the event.
 
-    Prefers ``subagent_id`` (if Claude Code populates it for subagent
-    tool calls) over the session root ID.
+    When *engine* is provided, maps raw Claude Code hex IDs (e.g.
+    ``ac70a34bf2d2264d4``) back to the ``hub.cc.*`` child ID that
+    SubagentStart registered.  Falls back to the raw ID (registering a
+    new agent) only when no mapping exists.
     """
-    subagent_id = event.get("subagent_id") or event.get("agent_id")
-    if subagent_id:
-        return subagent_id
+    raw_id = event.get("subagent_id") or event.get("agent_id")
+    if raw_id:
+        if engine is not None:
+            mapped = engine.find_agent_by_claude_id(raw_id)
+            if mapped:
+                return mapped
+        return raw_id
     return _session_agent_id(event.get("session_id", ""))
 
 
@@ -117,7 +123,7 @@ def handle_pre_write(event: dict) -> dict | None:
 
     engine = _get_engine(event.get("cwd", "."))
     try:
-        agent_id = _resolve_agent_id(event)
+        agent_id = _resolve_agent_id(event, engine=engine)
         _ensure_registered(engine, agent_id)
 
         # Reap expired locks before attempting acquire — prevents stale locks
@@ -161,7 +167,7 @@ def handle_post_write(event: dict) -> dict | None:
 
     engine = _get_engine(event.get("cwd", "."))
     try:
-        agent_id = _resolve_agent_id(event)
+        agent_id = _resolve_agent_id(event, engine=engine)
         engine.notify_change(file_path, "modified", agent_id)
     finally:
         engine.close()
@@ -184,7 +190,7 @@ def handle_post_stele_index(event: dict) -> dict | None:
 
     engine = _get_engine(event.get("cwd", "."))
     try:
-        agent_id = _resolve_agent_id(event)
+        agent_id = _resolve_agent_id(event, engine=engine)
         if doc_path:
             engine.notify_change(str(doc_path), "indexed", agent_id)
         for p in paths:
@@ -202,7 +208,7 @@ def handle_post_trammel_claim(event: dict) -> dict | None:
 
     engine = _get_engine(event.get("cwd", "."))
     try:
-        agent_id = _resolve_agent_id(event)
+        agent_id = _resolve_agent_id(event, engine=engine)
         _ensure_registered(engine, agent_id)
         task = f"trammel:{plan_id}/{step_id}" if plan_id else str(step_id)
         engine.update_agent_status(agent_id, current_task=task)
@@ -212,13 +218,31 @@ def handle_post_trammel_claim(event: dict) -> dict | None:
 
 
 def handle_subagent_start(event: dict) -> dict | None:
-    """Register child agent when Claude Code spawns a subagent."""
+    """Register child agent when Claude Code spawns a subagent.
+
+    Stores the raw Claude Code hex ID (``subagent_id`` / ``agent_id``
+    from the event) as ``claude_agent_id`` on the child record so that
+    subsequent PreToolUse/PostToolUse hooks can map it back.
+    """
     engine = _get_engine(event.get("cwd", "."))
     try:
         parent_id = _session_agent_id(event.get("session_id", ""))
         _ensure_registered(engine, parent_id)
         child_id = _subagent_id(parent_id, event, engine=engine)
-        _ensure_registered(engine, child_id, parent_id=parent_id)
+
+        # Capture the raw Claude Code hex ID for later lookup
+        raw_claude_id = event.get("subagent_id") or event.get("agent_id")
+
+        # Register with parent hierarchy AND the raw Claude Code ID mapping
+        agents = engine.list_agents(active_only=True)
+        if any(a["agent_id"] == child_id for a in agents.get("agents", [])):
+            engine.heartbeat(child_id)
+        else:
+            engine.register_agent(
+                child_id,
+                parent_id=parent_id,
+                claude_agent_id=raw_claude_id,
+            )
 
         tool_input = event.get("tool_input", {})
         desc = tool_input.get("description", "")

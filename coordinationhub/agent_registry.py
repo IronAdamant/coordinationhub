@@ -14,6 +14,7 @@ from .registry_ops import (
     register_agent,
     heartbeat,
     deregister_agent,
+    find_agent_by_claude_id,
 )
 from .registry_query import (
     list_agents,
