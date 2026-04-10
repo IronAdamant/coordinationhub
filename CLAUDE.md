@@ -13,7 +13,8 @@ Zero third-party dependencies in core. Works standalone or alongside Stele, Chis
 ```
 coordinationhub/
   __init__.py         — Package init, exports CoordinationEngine, CoordinationHubMCPServer
-  core.py             — CoordinationEngine: all 29 tool methods (~495 LOC)
+  core.py             — CoordinationEngine: identity, change, audit, graph/visibility methods (~260 LOC)
+  core_locking.py     — LockingMixin: all locking + coordination methods (~230 LOC)
   _storage.py        — CoordinationStorage: SQLite pool, path resolution, lifecycle (~131 LOC)
   paths.py            — Project-root detection and path normalization (~47 LOC)
   context.py          — Context bundle builder for register_agent responses (~97 LOC)
@@ -33,7 +34,7 @@ coordinationhub/
   scan.py             — File ownership scan, nearest-ancestor assignment (~207 LOC)
   agent_status.py     — Agent status query, file map, and agent tree helpers (~225 LOC)
   responsibilities.py  — Agent role/responsibilities storage from graph (~35 LOC)
-  assessment_scorers.py — 5 metric scorers + shared event_matches_responsibility helper (~304 LOC)
+  assessment_scorers.py — 5 metric scorers + shared event_matches_responsibility helper (~315 LOC)
   assessment.py       — Suite loading, run_assessment, Markdown report, SQLite storage (~241 LOC)
   mcp_server.py       — HTTP MCP server (ThreadedHTTPServer, stdlib only, ~275 LOC)
   mcp_stdio.py        — Stdio MCP server (optional mcp package required, ~175 LOC)
@@ -43,7 +44,7 @@ coordinationhub/
   cli_agents.py       — Agent identity & lifecycle CLI commands (~180 LOC)
   cli_locks.py        — Document locking & coordination CLI commands (~210 LOC)
   cli_vis.py          — Change awareness, audit, graph, assessment CLI + agent-tree (~323 LOC)
-  db.py               — SQLite schema (canonical) + schema versioning + thread-local ConnectionPool (~275 LOC)
+  db.py               — SQLite schema (canonical) + schema versioning + thread-local ConnectionPool (~280 LOC)
   agent_registry.py   — Thin re-export aggregator for registry_ops/registry_query (~23 LOC)
   registry_ops.py     — Agent lifecycle ops: register, heartbeat, deregister (~106 LOC)
   registry_query.py   — Agent registry queries: list, lineage, siblings, reaping (~152 LOC)
@@ -59,6 +60,7 @@ coordinationhub/
 ## Module Design
 
 - **Zero internal deps in sub-modules**: `agent_registry.py`, `lock_ops.py`, `conflict_log.py`, `notifications.py`, `visibility.py` all receive `connect: ConnectFn` from the caller. They have no internal imports from each other.
+- **LockingMixin in `core_locking.py`**: All locking and coordination methods (`acquire_lock`, `release_lock`, `refresh_lock`, `get_lock_status`, `list_locks`, `release_agent_locks`, `reap_expired_locks`, `reap_stale_agents`, `broadcast`, `wait_for_locks`) live in `LockingMixin`. `CoordinationEngine` inherits from `LockingMixin`, keeping `core.py` focused on identity, change awareness, audit, and graph/visibility.
 - **Storage layer isolated in `_storage.py`**: `CoordinationStorage` owns the SQLite pool, path resolution, and schema init. Both `core.py` and CLI entry points depend on it.
 - **Canonical schemas in `db.py` only**: All table definitions and indexes live in `db.py._SCHEMAS` and `db.py._INDEXES`. Sub-modules do not define their own schemas — `init_schema()` creates everything.
 - **Thread-local connection pool**: `db.py` provides a `ConnectionPool` that gives each thread its own reused SQLite connection. WAL mode enabled, 30s busy timeout.
@@ -70,7 +72,7 @@ coordinationhub/
 ## Key Design Decisions
 
 - **Agent ID format**: `{namespace}.{PID}.{sequence}` for root agents, `{parent_id}.{sequence}` for children. PID encoded to distinguish agents from different processes. Sequence numbers derived via `_next_seq_atomic()` with in-memory counters seeded from DB, serialized by `_seq_lock`.
-- **Concurrent lock safety**: `acquire_lock` handles `IntegrityError` on INSERT (two threads racing for the same file) by re-reading the row and returning the correct lock holder.
+- **Concurrent lock safety**: `acquire_lock` uses `BEGIN IMMEDIATE` to serialize concurrent lock attempts. Two threads racing for the same file are sequenced at the transaction level rather than catching `IntegrityError` after the fact.
 - **TTL-based locks**: All locks expire unless refreshed. Default 300s. `heartbeat()` does NOT reap expired locks — call `reap_expired_locks()` explicitly.
 - **Assessment keyword matching**: Shared `event_matches_responsibility()` in `assessment_scorers.py` maps event types to responsibility keywords via `_EVENT_RESPONSIBILITY_MAP` dict. Extensible — add new event-type groups to the map to support custom vocabularies. Non-standard terms that don't contain any mapped keyword will reduce scores.
 - **Force steal with conflict log**: `acquire_lock(force=True)` records the steal in `lock_conflicts` before overwriting, so conflicts are auditable.
