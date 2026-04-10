@@ -1,98 +1,71 @@
 # CoordinationHub
 
-**Coordination hub for multi-agent coding swarms — root agent as project manager, spawned agents as team members, zero third-party deps in core.**
+**Stop AI agents from overwriting each other's work.**
 
-CoordinationHub tracks who is doing what across a swarm. The root agent acts as project manager (top-level coordinator), spawning child agents that act as team leaders or team members. Files are locked and owned by Agent ID — every agent and human can see the full assignment tree at any time.
+CoordinationHub is a lightweight MCP server that coordinates multiple AI coding agents working on the same codebase. It tracks which agent owns which files, prevents two agents from editing the same file at once, and gives you a live view of who is doing what.
 
-Works standalone or alongside **Stele + Chisel + Trammel + CoordinationHub**.
+Built for Claude Code, compatible with any MCP client. Zero third-party dependencies. Python stdlib only.
 
-## How It Works
+## The Problem
 
-```
-Root Agent (project manager)
-├── Child Agent A (team leader)
-│   ├── Grandchild A.0 (team member — does the work)
-│   └── Grandchild A.1 (team member)
-├── Child Agent B (team leader)
-│   └── Grandchild B.0 (team member)
-└── Child Agent C (team member)
-```
+When you spawn multiple AI agents on the same project, they can silently overwrite each other's changes. There's no way to know which agent is editing which file, no protection against two agents touching the same code, and no visibility into what's happening across your swarm.
 
-Every node in the tree is a registered agent with an Agent ID. Files are locked by Agent ID so the project manager can see who holds what. Children are re-parented to the grandparent if their parent dies (cascade orphaning) — no agent is permanently stranded.
+CoordinationHub fixes this by acting as a shared coordination layer — a single source of truth for file ownership, agent identity, and work status.
 
-## Coordination Model
+## What It Does
 
-| Role | Description |
-|------|-------------|
-| **Root agent** | Project manager — top-level coordinator. Spawns team leaders. Does not do the work itself. |
-| **Team leader** | Child of root (or grandchild). Spawns team members, assigns tasks, reviews work. |
-| **Team member** | Leaf node. Does the work: writes code, runs tests, calls `notify_change` when done. |
+- **File locking** — Agents lock files before editing. If another agent tries to edit the same file, it gets blocked (or warned).
+- **Boundary detection** — Warns when an agent crosses into another agent's assigned territory.
+- **Agent tracking** — Every spawned agent gets an ID. See the full hierarchy, who's alive, who's stale.
+- **Change notifications** — Agents report what they changed. Others poll to stay in sync.
+- **Contention hotspots** — Identifies files that cause the most conflicts between agents.
+- **Cascade cleanup** — When an agent dies, its children get re-parented and its locks get released. Nothing is orphaned.
+- **Region locking** — Two agents can edit different sections of the same file simultaneously.
+- **Dashboard** — Live CLI or JSON view of all agents, locks, and file assignments.
 
-**Agents communicate via change notifications, not messages.** A team member calls `notify_change(path, 'modified', agent_id)` after writing a shared file. Teammates poll `get_notifications` to discover what changed. `broadcast` checks sibling lock state before a significant action — it does not send or store messages; the calling agent decides what to do with the conflict data.
-
-`acquire_lock` enforces exclusive access: a team member locks a file before writing, releases it when done. Review the full agent tree at any time:
+## Install
 
 ```bash
-coordinationhub agent-tree                    # oldest root agent as root
-coordinationhub agent-tree hub.12345.0        # specific agent as root
-coordinationhub agent-status <agent_id> --tree
+pip install coordinationhub
 ```
 
-- **Declarative coordination graphs** — agents, handoffs, escalation rules, and assessment
-  criteria defined in `coordination_spec.yaml` or `coordination_spec.json` at project root.
-- **File ownership tracking** — SQLite `file_ownership` table populated by `scan_project`;
-  maps every tracked file to its responsible Agent ID.
-- **Visibility layer** — MCP tools + `coordinationhub dashboard` CLI command for live
-  human/LLM-readable status.
-- **Assessment runner** — `coordinationhub assess --suite <file>` scores graph fidelity
-  against MiniMax coordination test traces. 5 real metric scorers.
-- **Agent identity & lineage** — Hierarchical agent IDs with parent-child relationships.
-- **Document locking** — TTL-based exclusive/shared locks with force-steal and conflict recording.
-- **Cascade orphaning** — Children re-parented to grandparent when parent dies.
-- **Change notifications** — Polling-based change awareness across agents.
-- **Zero third-party dependencies in core** — Supply chain security is non-negotiable.
-
-## Quickstart
+## Quick Start
 
 ```bash
-# HTTP server (stdlib only)
-coordinationhub serve --port 9877
+# Start the coordination server
+coordinationhub serve
 
-# Stdio MCP (requires optional mcp package):
-pip install coordinationhub[mcp]
-coordinationhub serve-mcp
-
-# Scan project and assign file ownership
-coordinationhub scan-project
-
-# View live dashboard
+# In another terminal — see what's happening
 coordinationhub dashboard
-coordinationhub dashboard --json
-
-# Run assessment suite
-coordinationhub assess --suite my_minimax_tests.json
-coordinationhub assess --suite my_minimax_tests.json --graph-agent-id planner
+coordinationhub agent-tree
+coordinationhub contention-hotspots
 ```
 
-## Coordination Graph
+### Claude Code Integration
 
-Place `coordination_spec.yaml` (or `.json`) at your project root.
-Example files are provided in the repo root:
+CoordinationHub hooks into Claude Code automatically via project-level hooks. Once configured:
 
-- [`coordination_spec.yaml`](coordination_spec.yaml) — YAML format
-- [`coordination_spec.json`](coordination_spec.json) — JSON format
+- Agents are registered on session start
+- Files are locked before every write
+- Changes are broadcast after every edit
+- Subagents are tracked in the agent tree
+- Everything is cleaned up on session end
+
+See `coordinationhub/hooks/claude_code.py` and `.claude/settings.json` for the hook configuration.
+
+### Coordination Graph (Optional)
+
+Define your agent roles and handoff rules in a `coordination_spec.yaml` at your project root:
 
 ```yaml
 agents:
   - id: planner
     role: decompose tasks
-    model: minimax-m2.7
     responsibilities:
       - break down user stories
       - assign subtasks
   - id: executor
     role: implement
-    model: minimax-m2.7
     responsibilities:
       - write code
       - run tests
@@ -101,174 +74,121 @@ handoffs:
   - from: planner
     to: executor
     condition: task_size < 500 && no_blockers
-
-escalation:
-  max_retries: 3
-  fallback: human_review
-
-assessment:
-  metrics:
-    - role_stability
-    - handoff_latency
-    - outcome_verifiability
-    - protocol_adherence
-    - spawn_propagation
 ```
 
-## 30 MCP Tools
+---
 
-| Tool | Purpose |
-|------|---------|
-| `register_agent` | Register and get coordination context + responsibilities from graph |
-| `heartbeat` | Keep agent alive (updates timestamp only) |
-| `deregister_agent` | Remove agent, orphan children, release locks |
-| `list_agents` | List registered agents with staleness |
-| `get_lineage` | Get ancestors and descendants of an agent |
-| `get_siblings` | Get agents sharing the same parent |
-| `acquire_lock` | Acquire exclusive or shared lock on a document (supports region locking via `region_start`/`region_end`) |
-| `release_lock` | Release a held lock |
-| `refresh_lock` | Extend lock TTL without releasing |
-| `get_lock_status` | Check if a document is locked |
-| `list_locks` | List all active locks (optionally filtered by agent) |
-| `release_agent_locks` | Release all locks held by an agent |
-| `reap_expired_locks` | Clear all expired locks |
-| `reap_stale_agents` | Mark stale agents as stopped |
-| `broadcast` | Announce intention to siblings (checks lock state only) |
-| `wait_for_locks` | Poll until locks are released |
-| `notify_change` | Record a change event |
-| `get_notifications` | Poll for change notifications |
-| `prune_notifications` | Clean up old notifications |
-| `get_conflicts` | Query the conflict log |
-| `get_contention_hotspots` | Rank files by lock contention frequency (coordination chokepoints) |
-| `status` | System status summary (includes `graph_loaded`) |
-| `load_coordination_spec` | Reload coordination spec from disk |
-| `validate_graph` | Validate loaded graph schema |
-| `scan_project` | Perform file ownership scan |
-| `get_agent_status` | Full status for an agent (work, responsibilities, owned files) |
-| `get_file_agent_map` | Map of all tracked files → agent + responsibility |
-| `update_agent_status` | Broadcast what an agent is currently working on |
-| `run_assessment` | Run an assessment suite against the loaded graph |
-| `get_agent_tree` | Hierarchical agent tree for human/LLM review (nested + plain-text) |
+## How It Works
 
-## CLI Commands
+```
+Root Agent (project manager)
+├── Agent A (team leader)
+│   ├── Agent A.0 (writes code)
+│   └── Agent A.1 (writes tests)
+├── Agent B (team leader)
+│   └── Agent B.0 (refactoring)
+└── Agent C (documentation)
+```
+
+Every agent gets a unique ID. Files are locked by agent ID. The root agent (your main Claude Code session) acts as project manager — it spawns child agents and can see the full tree at any time.
+
+Agents don't message each other directly. Instead they communicate through the shared database: lock a file, write to it, notify that it changed, release the lock. Other agents poll for notifications to see what happened.
+
+## MCP Tools (30)
+
+| Category | Tools |
+|----------|-------|
+| **Identity** | `register_agent`, `heartbeat`, `deregister_agent`, `list_agents`, `get_lineage`, `get_siblings` |
+| **Locking** | `acquire_lock`, `release_lock`, `refresh_lock`, `get_lock_status`, `list_locks`, `release_agent_locks`, `reap_expired_locks`, `reap_stale_agents` |
+| **Coordination** | `broadcast`, `wait_for_locks` |
+| **Changes** | `notify_change`, `get_notifications`, `prune_notifications` |
+| **Audit** | `get_conflicts`, `get_contention_hotspots`, `status` |
+| **Visibility** | `load_coordination_spec`, `validate_graph`, `scan_project`, `get_agent_status`, `get_file_agent_map`, `update_agent_status`, `run_assessment`, `get_agent_tree` |
+
+## CLI Commands (31)
 
 ```bash
 # Server
 coordinationhub serve --port 9877
-coordinationhub serve-mcp
+coordinationhub serve-mcp              # stdio mode (requires: pip install coordinationhub[mcp])
 
-# Status & visibility
+# See what's happening
 coordinationhub status
-coordinationhub list-agents
-coordinationhub dashboard
-coordinationhub dashboard --json
-coordinationhub agent-status <agent_id>
-coordinationhub agent-status <agent_id> --json
-coordinationhub agent-status <agent_id> --tree
-coordinationhub agent-tree <agent_id>
-coordinationhub agent-tree
-
-# Graph
-coordinationhub load-spec
-coordinationhub validate-spec
-
-# File ownership
-coordinationhub scan-project
-
-# Assessment
-coordinationhub assess --suite my_minimax_tests.json
+coordinationhub dashboard              # full view (also: --json, --minimal)
+coordinationhub agent-tree             # agent hierarchy
+coordinationhub agent-status <id>      # single agent detail
+coordinationhub contention-hotspots    # files with most conflicts
 
 # Agent lifecycle
-coordinationhub register <agent_id>
-coordinationhub register <agent_id> --parent-id <parent>
-coordinationhub heartbeat <agent_id>
-coordinationhub deregister <agent_id>
-coordinationhub lineage <agent_id>
-coordinationhub siblings <agent_id>
+coordinationhub register <id> [--parent-id <parent>]
+coordinationhub heartbeat <id>
+coordinationhub deregister <id>
+coordinationhub list-agents
+coordinationhub lineage <id>
+coordinationhub siblings <id>
 
-# Locking
-coordinationhub acquire-lock <path> <agent_id> [--region-start N] [--region-end N]
-coordinationhub release-lock <path> <agent_id> [--region-start N] [--region-end N]
-coordinationhub refresh-lock <path> <agent_id> [--region-start N] [--region-end N]
+# File locking
+coordinationhub acquire-lock <path> <id> [--region-start N --region-end N]
+coordinationhub release-lock <path> <id>
+coordinationhub refresh-lock <path> <id>
 coordinationhub lock-status <path>
-coordinationhub list-locks
-coordinationhub list-locks --agent-id <agent_id>
-coordinationhub release-agent-locks <agent_id>
+coordinationhub list-locks [--agent-id <id>]
+coordinationhub release-agent-locks <id>
 coordinationhub reap-expired-locks
 coordinationhub reap-stale-agents
 
-# Coordination
-coordinationhub broadcast <agent_id> [--document-path <path>]
-coordinationhub wait-for-locks <agent_id> <paths...>
-coordinationhub notify-change <path> <type> <agent_id>
+# Coordination & changes
+coordinationhub broadcast <id> [--document-path <path>]
+coordinationhub wait-for-locks <id> <paths...>
+coordinationhub notify-change <path> <type> <id>
 coordinationhub get-notifications
 coordinationhub prune-notifications
 coordinationhub get-conflicts
-coordinationhub contention-hotspots
+
+# Graph & assessment
+coordinationhub load-spec
+coordinationhub validate-spec
+coordinationhub scan-project
+coordinationhub assess --suite <file>
 ```
 
 ## Agent ID Format
 
 ```
 hub.12345.0           — root agent (namespace.PID.sequence)
-hub.12345.0.0         — child of hub.12345.0
-hub.12345.0.1         — another child of hub.12345.0
+hub.12345.0.0         — child of root
+hub.12345.0.1         — sibling
 hub.12345.0.0.0       — grandchild
 ```
 
-When a coordination graph is loaded, agents may also have a `graph_agent_id`
-(e.g., `planner`) mapped via the `agent_responsibilities` table.
-
 ## Architecture
+
+SQLite-backed, thread-safe, WAL mode. Each module is under 500 LOC with single responsibility. Zero internal cross-dependencies between sub-modules — they all receive a `connect` callable from the caller.
 
 ```
 coordinationhub/
-  __init__.py         — Package init, exports CoordinationEngine, CoordinationHubMCPServer
-  core.py             — CoordinationEngine: identity, change, audit, graph/visibility methods (~260 LOC)
-  core_locking.py     — LockingMixin: all locking + coordination methods (~230 LOC)
-  _storage.py         — CoordinationStorage: SQLite pool, path resolution, lifecycle (~121 LOC)
-  paths.py            — Project-root detection and path normalization (~48 LOC)
-  context.py          — Context bundle builder for register_agent responses (~100 LOC)
-  schemas.py           — Schema aggregator, re-exports TOOL_SCHEMAS (~31 LOC)
-  schemas_identity.py   — Identity & Registration schemas (~123 LOC)
-  schemas_locking.py    — Document Locking schemas (~145 LOC)
-  schemas_coordination.py — Coordination Action schemas (~59 LOC)
-  schemas_change.py     — Change Awareness schemas (~77 LOC)
-  schemas_audit.py     — Audit & Status schemas (~43 LOC)
-  schemas_visibility.py — Graph & Visibility schemas (8 tools, ~156 LOC)
-  dispatch.py          — Tool dispatch table (~48 LOC)
-  graphs.py           — Thin aggregator + graph auto-mapping (~105 LOC)
-  graph_validate.py   — Pure validation functions (~131 LOC)
-  graph_loader.py     — File loading (YAML/JSON) and spec auto-detection (~49 LOC)
-  graph.py            — CoordinationGraph in-memory object (~66 LOC)
-  visibility.py       — Thin re-export aggregator (~15 LOC)
-  scan.py             — File ownership scan, graph-role-aware (~105 LOC)
-  agent_status.py     — Agent status query, file map, and agent tree helpers (~225 LOC)
-  responsibilities.py — Agent role/responsibilities storage (~35 LOC)
-  agent_registry.py   — Thin re-export aggregator (~23 LOC)
-  registry_ops.py     — Agent lifecycle ops (~120 LOC)
-  registry_query.py   — Agent registry queries (~142 LOC)
-  assessment_scorers.py — 5 metric scorers + event_matches_responsibility (~315 LOC)
-  assessment.py       — Suite loading, run_assessment, report, storage (~241 LOC)
-  mcp_server.py       — HTTP MCP server (ThreadedHTTPServer, stdlib only)
-  mcp_stdio.py        — Stdio MCP server (requires optional mcp package)
-  cli.py              — argparse CLI parser + lazy dispatch (~237 LOC)
-  cli_commands.py     — Re-exports all CLI handlers (~44 LOC)
-  cli_agents.py       — Agent identity & lifecycle CLI commands (~205 LOC)
-  cli_locks.py        — Document locking & coordination CLI commands (~214 LOC)
-  cli_vis.py          — Change awareness, audit, graph & assessment CLI + agent-tree (~346 LOC)
-  db.py               — SQLite schema + schema versioning + perf pragmas + thread-local ConnectionPool (~280 LOC)
-  lock_ops.py         — Shared lock primitives + region overlap (~175 LOC)
-  conflict_log.py     — Conflict recording and querying (~53 LOC)
-  notifications.py    — Change notification storage and retrieval (~115 LOC)
-  tests/              — pytest suite (246 tests, 15 test files)
+  core.py             — CoordinationEngine (identity, change, audit, graph/visibility)
+  core_locking.py     — LockingMixin (all lock + coordination methods)
+  _storage.py         — SQLite pool, path resolution, thread-safe ID generation
+  db.py               — Schema, versioning, perf pragmas, ConnectionPool
+  lock_ops.py         — Lock primitives + region overlap detection
+  agent_registry.py   — Agent lifecycle (register, heartbeat, deregister, lineage)
+  notifications.py    — Change notification storage
+  conflict_log.py     — Conflict recording and querying
+  scan.py             — File ownership scan
+  agent_status.py     — Agent status, file map, agent tree
+  graphs.py           — Coordination graph loading + validation
+  assessment.py       — Assessment runner (5 metric scorers)
+  mcp_server.py       — HTTP server (stdlib only)
+  mcp_stdio.py        — Stdio server (optional mcp package)
+  cli.py              — CLI parser + dispatch
+  hooks/claude_code.py — Claude Code session hooks
+  tests/              — 256 tests across 15 files
 ```
 
 ## Zero-Dependency Guarantee
 
-Core modules use **only the Python standard library**. The `mcp` package is
-**optional** — only needed for `mcp_stdio.py`. Air-gapped install:
-`pip install coordinationhub --no-deps`.
+Core uses **only the Python standard library**. The `mcp` package is optional (stdio transport only). Air-gapped install: `pip install coordinationhub --no-deps`.
 
 ## Port Allocation
 
