@@ -77,6 +77,124 @@ class TestAgentIdHelpers:
         assert _resolve_agent_id(event) == "hub.cc.sess12345678"
 
 
+class TestResolveAgentIdMapping:
+    """Tests for _resolve_agent_id mapping raw Claude Code IDs to hub.cc.* IDs."""
+
+    def test_maps_raw_claude_id_to_hub_child(self, hook_cwd):
+        """SubagentStart registers with claude_agent_id; PreToolUse resolves it."""
+        session_id = "sess-12345678"
+        raw_claude_id = "ac70a34bf2d2264d4"
+
+        # Step 1: SessionStart registers root agent
+        handle_session_start(_make_event("SessionStart", cwd=hook_cwd, session_id=session_id))
+
+        # Step 2: SubagentStart registers child with raw Claude ID mapping
+        event_start = _make_event(
+            "SubagentStart", cwd=hook_cwd, session_id=session_id,
+            tool_input={"subagent_type": "agent", "description": "test task"},
+            tool_use_id="toolu_abc123xyz",
+            subagent_id=raw_claude_id,
+        )
+        handle_subagent_start(event_start)
+
+        # Step 3: PreToolUse with the raw Claude ID should resolve to hub.cc.* child
+        from coordinationhub.hooks.claude_code import _get_engine
+        engine = _get_engine(hook_cwd)
+        try:
+            event_write = {"subagent_id": raw_claude_id, "session_id": session_id}
+            resolved = _resolve_agent_id(event_write, engine=engine)
+            assert resolved.startswith("hub.cc."), f"Expected hub.cc.* ID, got {resolved}"
+            assert resolved != raw_claude_id
+        finally:
+            engine.close()
+
+    def test_subagent_lock_uses_hub_id(self, hook_cwd):
+        """Sub-agent PreToolUse Write acquires lock under hub.cc.* ID, not raw hex."""
+        session_id = "sess-12345678"
+        raw_claude_id = "af2d34ada2a39871c"
+
+        handle_session_start(_make_event("SessionStart", cwd=hook_cwd, session_id=session_id))
+        handle_subagent_start(_make_event(
+            "SubagentStart", cwd=hook_cwd, session_id=session_id,
+            tool_input={"subagent_type": "coder"},
+            tool_use_id="toolu_xyz789abc",
+            subagent_id=raw_claude_id,
+        ))
+
+        # PreToolUse Write from the sub-agent using raw Claude ID
+        result = handle_pre_write(_make_event(
+            "PreToolUse", tool_name="Write", cwd=hook_cwd, session_id=session_id,
+            tool_input={"file_path": "/tmp/test_subagent_lock.py"},
+            subagent_id=raw_claude_id,
+        ))
+        assert result is not None
+        assert result["hookSpecificOutput"]["permissionDecision"] == "allow"
+
+    def test_no_ghost_agents(self, hook_cwd):
+        """After SubagentStart + PreToolUse, only ONE agent entry for the subagent."""
+        session_id = "sess-12345678"
+        raw_claude_id = "a60112d5f3898cadc"
+
+        handle_session_start(_make_event("SessionStart", cwd=hook_cwd, session_id=session_id))
+        handle_subagent_start(_make_event(
+            "SubagentStart", cwd=hook_cwd, session_id=session_id,
+            tool_input={"subagent_type": "explorer"},
+            tool_use_id="toolu_def456ghi",
+            subagent_id=raw_claude_id,
+        ))
+        handle_pre_write(_make_event(
+            "PreToolUse", tool_name="Write", cwd=hook_cwd, session_id=session_id,
+            tool_input={"file_path": "/tmp/test_no_ghost.py"},
+            subagent_id=raw_claude_id,
+        ))
+
+        # Check: no agent registered with the raw Claude ID as agent_id
+        from coordinationhub.hooks.claude_code import _get_engine
+        engine = _get_engine(hook_cwd)
+        try:
+            agents = engine.list_agents(active_only=False)
+            agent_ids = [a["agent_id"] for a in agents["agents"]]
+            assert raw_claude_id not in agent_ids, \
+                f"Ghost agent {raw_claude_id} should not exist"
+        finally:
+            engine.close()
+
+    def test_post_write_uses_hub_id(self, hook_cwd):
+        """PostToolUse change notifications use hub.cc.* ID, not raw hex."""
+        session_id = "sess-12345678"
+        raw_claude_id = "b1234567890abcdef"
+
+        handle_session_start(_make_event("SessionStart", cwd=hook_cwd, session_id=session_id))
+        handle_subagent_start(_make_event(
+            "SubagentStart", cwd=hook_cwd, session_id=session_id,
+            tool_input={"subagent_type": "writer"},
+            tool_use_id="toolu_post123abc",
+            subagent_id=raw_claude_id,
+        ))
+        handle_post_write(_make_event(
+            "PostToolUse", tool_name="Write", cwd=hook_cwd, session_id=session_id,
+            tool_input={"file_path": "/tmp/test_post_write_id.py"},
+            subagent_id=raw_claude_id,
+        ))
+
+        # Verify notification was recorded under hub.cc.* ID
+        from coordinationhub.hooks.claude_code import _get_engine
+        engine = _get_engine(hook_cwd)
+        try:
+            notifs = engine.get_notifications()
+            matching = [n for n in notifs.get("notifications", [])
+                        if n["agent_id"] == raw_claude_id]
+            assert len(matching) == 0, \
+                f"Notification should NOT use raw ID {raw_claude_id}"
+        finally:
+            engine.close()
+
+    def test_unmapped_raw_id_falls_back(self):
+        """Without engine, _resolve_agent_id returns raw ID (backward compat)."""
+        event = {"subagent_id": "ac70a34bf2d2264d4", "session_id": "sess123"}
+        assert _resolve_agent_id(event) == "ac70a34bf2d2264d4"
+
+
 class TestSessionStart:
     def test_registers_root_agent(self, hook_cwd):
         event = _make_event("SessionStart", cwd=hook_cwd)

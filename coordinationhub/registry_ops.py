@@ -20,8 +20,14 @@ def register_agent(
     worktree_root: str,
     parent_id: str | None = None,
     pid: int | None = None,
+    claude_agent_id: str | None = None,
 ) -> dict[str, Any]:
-    """Register a new agent or update heartbeat if already registered."""
+    """Register a new agent or update heartbeat if already registered.
+
+    ``claude_agent_id`` stores the raw Claude Code hex ID (e.g.
+    ``ac70a34bf2d2264d4``) so that PreToolUse hooks can map it back to
+    the ``hub.cc.*`` child ID created during SubagentStart.
+    """
     now = time.time()
     if pid is None:
         pid = os.getpid()
@@ -29,18 +35,37 @@ def register_agent(
         conn.execute(
             """
             INSERT INTO agents
-            (agent_id, parent_id, worktree_root, pid, started_at, last_heartbeat, status)
-            VALUES (?, ?, ?, ?, ?, ?, 'active')
+            (agent_id, parent_id, worktree_root, pid, started_at, last_heartbeat, status, claude_agent_id)
+            VALUES (?, ?, ?, ?, ?, ?, 'active', ?)
             ON CONFLICT(agent_id) DO UPDATE SET
                 parent_id       = excluded.parent_id,
                 worktree_root   = excluded.worktree_root,
                 pid             = excluded.pid,
                 last_heartbeat  = excluded.last_heartbeat,
-                status         = 'active'
+                status          = 'active',
+                claude_agent_id = COALESCE(excluded.claude_agent_id, agents.claude_agent_id)
             """,
-            (agent_id, parent_id, worktree_root, pid, now, now),
+            (agent_id, parent_id, worktree_root, pid, now, now, claude_agent_id),
         )
     return {"registered": True, "agent_id": agent_id}
+
+
+def find_agent_by_claude_id(
+    connect: ConnectFn,
+    claude_agent_id: str,
+) -> str | None:
+    """Look up a hub.cc.* agent_id by the raw Claude Code hex ID.
+
+    Returns the agent_id if found and active, otherwise None.
+    """
+    with connect() as conn:
+        row = conn.execute(
+            "SELECT agent_id FROM agents "
+            "WHERE claude_agent_id = ? AND status = 'active' "
+            "ORDER BY last_heartbeat DESC LIMIT 1",
+            (claude_agent_id,),
+        ).fetchone()
+        return row["agent_id"] if row else None
 
 
 def heartbeat(connect: ConnectFn, agent_id: str) -> dict[str, Any]:

@@ -205,7 +205,7 @@ coordinationhub/
   mcp_stdio.py        — Stdio server (optional mcp package)
   cli.py              — CLI parser + dispatch
   hooks/claude_code.py — Claude Code session hooks
-  tests/              — 256 tests across 15 files
+  tests/              — 261 tests across 15 files
 ```
 
 ## Zero-Dependency Guarantee

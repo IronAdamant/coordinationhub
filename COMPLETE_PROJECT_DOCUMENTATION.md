@@ -1,7 +1,27 @@
 # CoordinationHub — Complete Project Documentation
 
-**Version:** 0.3.5
+**Version:** 0.3.6
 **Last updated:** 2026-04-10
+
+## v0.3.6 Changelog
+
+### Fixed
+- **Critical: Sub-agent ID mismatch bug (Review Twelve)** — `_resolve_agent_id` in the Claude Code hook now maps raw Claude Code hex IDs (e.g. `ac70a34bf2d2264d4`) back to the `hub.cc.*` child IDs registered during SubagentStart. Previously, PreToolUse/PostToolUse hooks created ghost agent entries under the raw hex ID, disconnected from the parent-child hierarchy — causing 0 locks, empty parent_id, and broken assessment scoring for sub-agents.
+- **Ghost agent duplication eliminated** — Sub-agents no longer exist twice in the database (once from SubagentStart with correct hierarchy, once from PreToolUse with no parent). The `claude_agent_id` column on the agents table stores the mapping.
+
+### Added
+- **`claude_agent_id` column on agents table** — Stores the raw Claude Code hex ID on the `hub.cc.*` agent record. Indexed for fast lookup. Schema version 2 → 3 with auto-migration.
+- **`find_agent_by_claude_id` query** — New function in `registry_ops.py`, exposed via `agent_registry.py` and `CoordinationEngine`.
+- **5 new hook tests** — `test_maps_raw_claude_id_to_hub_child`, `test_subagent_lock_uses_hub_id`, `test_no_ghost_agents`, `test_post_write_uses_hub_id`, `test_unmapped_raw_id_falls_back`.
+
+### Changed
+- `db.py`: ~280 LOC → ~295 LOC (v3 migration). `_CURRENT_SCHEMA_VERSION = 3`.
+- `registry_ops.py`: ~106 LOC → ~145 LOC (`claude_agent_id` param + `find_agent_by_claude_id`).
+- `hooks/claude_code.py`: ~310 LOC → ~330 LOC (engine-aware `_resolve_agent_id`, SubagentStart stores mapping).
+- `core.py`: ~280 LOC → ~285 LOC (`claude_agent_id` passthrough + `find_agent_by_claude_id` method).
+- Tests: 256 → 261 across 15 files. `test_hooks.py`: 23 → 28 tests.
+
+---
 
 ## v0.3.5 Changelog
 
@@ -96,7 +116,7 @@
 | Path | Purpose | Dependencies |
 |------|---------|--------------|
 | `coordinationhub/__init__.py` | Package init, exports `CoordinationEngine`, `CoordinationHubMCPServer` | core, mcp_server |
-| `coordinationhub/core.py` | `CoordinationEngine` — identity, change, audit, graph/visibility methods (~260 LOC) | _storage, core_locking, agent_registry, lock_ops, conflict_log, notifications, graphs, visibility, assessment, paths, context |
+| `coordinationhub/core.py` | `CoordinationEngine` — identity, change, audit, graph/visibility methods (~285 LOC) | _storage, core_locking, agent_registry, lock_ops, conflict_log, notifications, graphs, visibility, assessment, paths, context |
 | `coordinationhub/core_locking.py` | `LockingMixin` — all locking + coordination methods (~230 LOC) | lock_ops, conflict_log |
 | `coordinationhub/_storage.py` | `CoordinationStorage` — SQLite pool, path resolution, thread-safe ID gen (~131 LOC) | db |
 | `coordinationhub/paths.py` | Project-root detection and path normalization (~48 LOC) | (no internal deps) |
@@ -118,7 +138,7 @@
 | `coordinationhub/agent_status.py` | Agent status query, file map, rich agent tree with locks/warnings (~290 LOC) | (no internal deps) |
 | `coordinationhub/responsibilities.py` | Agent role/responsibilities storage from graph (~35 LOC) | (no internal deps) |
 | `coordinationhub/agent_registry.py` | Thin re-export aggregator for registry_ops/registry_query (~23 LOC) | registry_ops, registry_query |
-| `coordinationhub/registry_ops.py` | Agent lifecycle ops: register, heartbeat, deregister (~120 LOC) | db |
+| `coordinationhub/registry_ops.py` | Agent lifecycle ops: register, heartbeat, deregister, find_by_claude_id (~145 LOC) | db |
 | `coordinationhub/registry_query.py` | Agent registry queries: list, lineage, siblings, reaping (~142 LOC) | db |
 | `coordinationhub/assessment_scorers.py` | 5 metric scorers + shared `event_matches_responsibility` helper + `_EVENT_RESPONSIBILITY_MAP` (~315 LOC) | (no internal deps) |
 | `coordinationhub/assessment.py` | Suite loading, `run_assessment`, Markdown report, SQLite storage (~241 LOC). Re-exports scorers for backward compat. | assessment_scorers, graphs |
@@ -130,12 +150,12 @@
 | `coordinationhub/cli_agents.py` | Agent identity & lifecycle CLI commands (~180 LOC) | cli_utils |
 | `coordinationhub/cli_locks.py` | Document locking & coordination CLI commands (~210 LOC) | cli_utils |
 | `coordinationhub/cli_vis.py` | Change awareness, audit, graph, assessment, dashboard CLI + agent-tree (~323 LOC) | cli_utils |
-| `coordinationhub/db.py` | SQLite schema + schema versioning + perf pragmas + thread-local `ConnectionPool` (~280 LOC) | (no internal deps) |
+| `coordinationhub/db.py` | SQLite schema + schema versioning (v3) + perf pragmas + thread-local `ConnectionPool` (~295 LOC) | (no internal deps) |
 | `coordinationhub/lock_ops.py` | Shared lock primitives: acquire, release, refresh, reap, region overlap (~175 LOC) | db |
 | `coordinationhub/conflict_log.py` | Conflict recording and querying (~52 LOC) | lock_ops |
 | `coordinationhub/notifications.py` | Change notification storage and retrieval (~94 LOC) | db |
 | `coordinationhub/hooks/__init__.py` | Hooks package init | — |
-| `coordinationhub/hooks/claude_code.py` | Claude Code hook: auto-locking, notifications, Stele/Trammel bridge (~310 LOC) | core |
+| `coordinationhub/hooks/claude_code.py` | Claude Code hook: auto-locking, notifications, agent ID mapping, Stele/Trammel bridge (~330 LOC) | core |
 | `tests/conftest.py` | pytest fixtures: `engine`, `registered_agent`, `two_agents` | core |
 | `tests/test_agent_lifecycle.py` | Agent lifecycle tests (21 tests) | conftest |
 | `tests/test_locking.py` | Lock acquisition, release, refresh, status, list, reap, region locking (38 tests) | conftest |
@@ -150,11 +170,11 @@
 | `tests/test_cli.py` | CLI argument parser and subcommand dispatch (11 tests) | conftest, core |
 | `tests/test_concurrent.py` | Concurrent stress tests: locks, registration, notifications (8 tests) | conftest |
 | `tests/test_scenario.py` | End-to-end multi-agent lifecycle workflows (6 tests) | conftest |
-| `tests/test_hooks.py` | Claude Code hook handler tests (23 tests) | conftest, hooks |
+| `tests/test_hooks.py` | Claude Code hook handler tests (28 tests) | conftest, hooks |
 | `pyproject.toml` | Package config, dependencies, entry points | — |
 | `.claude/settings.json` | Claude Code hooks: auto-lock, notify, Stele/Trammel bridge | — |
 
-**Total: 256 tests across 15 test files.**
+**Total: 261 tests across 15 test files.**
 
 ---
 
@@ -163,8 +183,8 @@
 ```
 coordinationhub/
   __init__.py         — Package init, exports CoordinationEngine, CoordinationHubMCPServer
-  core.py             — CoordinationEngine: identity, change, audit, graph/visibility methods (~260 LOC)
-  core_locking.py     — LockingMixin: all locking + coordination methods (~230 LOC)
+  core.py             — CoordinationEngine: identity, change, audit, graph/visibility methods (~285 LOC)
+  core_locking.py     — LockingMixin: all locking + coordination methods (~260 LOC)
   _storage.py         — CoordinationStorage: SQLite pool, path resolution, thread-safe ID gen (~131 LOC)
   paths.py            — Project-root detection and path normalization (~47 LOC)
   context.py          — Context bundle builder for register_agent responses (~97 LOC)
@@ -185,7 +205,7 @@ coordinationhub/
   agent_status.py     — Agent status query, file map, rich agent tree with locks/warnings (~290 LOC)
   responsibilities.py — Agent role/responsibilities storage (~35 LOC)
   agent_registry.py   — Thin re-export aggregator (~23 LOC)
-  registry_ops.py     — Agent lifecycle ops (~106 LOC)
+  registry_ops.py     — Agent lifecycle ops + claude_id lookup (~145 LOC)
   registry_query.py   — Agent registry queries (~152 LOC)
   assessment_scorers.py — 5 metric scorers + shared event_matches_responsibility (~315 LOC)
   assessment.py       — Suite loading, run_assessment, report, storage (~241 LOC)
@@ -197,7 +217,7 @@ coordinationhub/
   cli_agents.py       — Agent identity & lifecycle CLI commands (~180 LOC)
   cli_locks.py        — Document locking & coordination CLI commands (~210 LOC)
   cli_vis.py          — Change awareness, audit, graph & assessment CLI + agent-tree (~323 LOC)
-  db.py               — SQLite schema (canonical) + schema versioning + perf pragmas + thread-local ConnectionPool (~280 LOC)
+  db.py               — SQLite schema (canonical) + schema versioning (v3) + perf pragmas + thread-local ConnectionPool (~295 LOC)
   lock_ops.py         — Shared lock primitives + region overlap (~175 LOC)
   conflict_log.py     — Conflict recording and querying (~52 LOC)
   notifications.py    — Change notification storage and retrieval (~94 LOC)
@@ -324,15 +344,18 @@ Scan results are **upserted** (insert or update on conflict).
 
 ```sql
 CREATE TABLE agents (
-    agent_id      TEXT PRIMARY KEY,
-    parent_id    TEXT,
-    worktree_root TEXT NOT NULL,
-    pid          INTEGER,
-    started_at   REAL NOT NULL,
-    last_heartbeat REAL NOT NULL,
-    status       TEXT DEFAULT 'active'
+    agent_id        TEXT PRIMARY KEY,
+    parent_id       TEXT,
+    worktree_root   TEXT NOT NULL,
+    pid             INTEGER,
+    started_at      REAL NOT NULL,
+    last_heartbeat  REAL NOT NULL,
+    status          TEXT DEFAULT 'active',
+    claude_agent_id TEXT
 )
 ```
+
+`claude_agent_id` stores the raw Claude Code hex ID (e.g. `ac70a34bf2d2264d4`) so that PreToolUse/PostToolUse hooks can map it back to the `hub.cc.*` child ID registered during SubagentStart. Indexed via `idx_agents_claude_id`.
 
 ### `lineage` Table
 
@@ -607,7 +630,7 @@ Air-gapped install: `pip install coordinationhub --no-deps`.
 
 ```bash
 python -m pytest tests/ -v
-# 246 tests across 15 test files
+# 261 tests across 15 test files
 ```
 
 ---

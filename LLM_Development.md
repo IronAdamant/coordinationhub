@@ -1,11 +1,48 @@
 # LLM_Development.md — CoordinationHub
 
-**Version:** 0.3.5
+**Version:** 0.3.6
 **Last updated:** 2026-04-10
 
 ## Change Log
 
 All significant changes to the CoordinationHub project are documented here in reverse chronological order.
+
+---
+
+## 2026-04-10 — v0.3.6 Fix Sub-Agent ID Mismatch (Review Twelve)
+
+### Root Cause
+
+All sub-agent coordination failures (missing parent_id, 0 locks, ghost agents, broken assessment) traced to a single bug: `_resolve_agent_id` in the Claude Code hook returned the raw Claude Code hex ID (e.g. `ac70a34bf2d2264d4`) instead of the `hub.cc.*` child ID that SubagentStart created. This caused each sub-agent to exist twice in the DB — once properly parented (from SubagentStart, never used for tool calls) and once as a ghost (from PreToolUse, with no hierarchy).
+
+### Fix
+
+- **`claude_agent_id` column** added to agents table (schema v2 → v3 with auto-migration). Stores the raw Claude Code hex ID on the `hub.cc.*` agent record during SubagentStart.
+- **`_resolve_agent_id`** now accepts an engine parameter. When a raw Claude Code ID is present, it queries `find_agent_by_claude_id` to map it back to the `hub.cc.*` child before proceeding. Falls back to raw ID only when no mapping exists (backward compat).
+- **`handle_subagent_start`** now extracts the raw `subagent_id`/`agent_id` from the event and passes it as `claude_agent_id` during registration.
+- All handlers (`handle_pre_write`, `handle_post_write`, `handle_post_stele_index`, `handle_post_trammel_claim`) now pass the engine to `_resolve_agent_id`.
+
+### Cascade of Fixes
+
+1. **parent_id populated** — Sub-agents queried from PreToolUse/PostToolUse now resolve to the properly-parented `hub.cc.*` entries.
+2. **Locks acquired under correct ID** — Locks are associated with the hierarchical agent, not a disconnected ghost.
+3. **No ghost duplication** — A single agent record per sub-agent.
+4. **Assessment scoring works** — 5-metric assessment can now compute on sub-agents with proper parent-child relationships.
+5. **Change notifications attributed correctly** — PostToolUse notifications use the `hub.cc.*` ID, not the raw hex.
+
+### Files Changed
+
+- `db.py`: ~280 → ~295 LOC. `_CURRENT_SCHEMA_VERSION = 3`, `_migrate_v2_to_v3`, `claude_agent_id` column + index.
+- `registry_ops.py`: ~106 → ~145 LOC. `claude_agent_id` param on `register_agent`, new `find_agent_by_claude_id`.
+- `core.py`: ~280 → ~285 LOC. `claude_agent_id` passthrough + `find_agent_by_claude_id` method.
+- `agent_registry.py`: re-exports `find_agent_by_claude_id`.
+- `hooks/claude_code.py`: ~310 → ~330 LOC. Engine-aware `_resolve_agent_id`, SubagentStart stores mapping.
+- `test_hooks.py`: 23 → 28 tests (5 new: mapping, lock ID, no ghosts, post-write ID, fallback).
+
+### Counts
+
+- Tests: 256 → 261 across 15 files.
+- Schema version: 2 → 3.
 
 ---
 

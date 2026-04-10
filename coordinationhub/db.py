@@ -26,13 +26,14 @@ def _db_path(storage_dir: Path) -> Path:
 _SCHEMAS = {
     "agents": """
         CREATE TABLE IF NOT EXISTS agents (
-            agent_id      TEXT PRIMARY KEY,
-            parent_id     TEXT,
-            worktree_root TEXT NOT NULL,
-            pid           INTEGER,
-            started_at    REAL NOT NULL,
-            last_heartbeat REAL NOT NULL,
-            status        TEXT DEFAULT 'active'
+            agent_id        TEXT PRIMARY KEY,
+            parent_id       TEXT,
+            worktree_root   TEXT NOT NULL,
+            pid             INTEGER,
+            started_at      REAL NOT NULL,
+            last_heartbeat  REAL NOT NULL,
+            status          TEXT DEFAULT 'active',
+            claude_agent_id TEXT
         )
     """,
     "lineage": """
@@ -130,10 +131,11 @@ _INDEXES = [
     "CREATE INDEX IF NOT EXISTS idx_notif_agent ON change_notifications(agent_id)",
     "CREATE INDEX IF NOT EXISTS idx_file_owner_agent ON file_ownership(assigned_agent_id)",
     "CREATE INDEX IF NOT EXISTS idx_locks_expiry ON document_locks(document_path, locked_at, lock_ttl)",
+    "CREATE INDEX IF NOT EXISTS idx_agents_claude_id ON agents(claude_agent_id)",
 ]
 
 
-_CURRENT_SCHEMA_VERSION = 2
+_CURRENT_SCHEMA_VERSION = 3
 
 
 def _get_schema_version(conn: sqlite3.Connection) -> int:
@@ -171,8 +173,22 @@ def _migrate_v1_to_v2(conn: sqlite3.Connection) -> None:
     conn.execute("CREATE INDEX IF NOT EXISTS idx_locks_locked_by ON document_locks(locked_by)")
 
 
+def _migrate_v2_to_v3(conn: sqlite3.Connection) -> None:
+    """Add claude_agent_id column to agents table.
+
+    Maps raw Claude Code agent hex IDs back to hub.cc.* child IDs so that
+    PreToolUse hooks resolve the correct agent after SubagentStart registers.
+    """
+    cols = [row[1] for row in conn.execute("PRAGMA table_info(agents)").fetchall()]
+    if "claude_agent_id" in cols:
+        return  # Already migrated
+    conn.execute("ALTER TABLE agents ADD COLUMN claude_agent_id TEXT")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_agents_claude_id ON agents(claude_agent_id)")
+
+
 _MIGRATIONS = {
     2: _migrate_v1_to_v2,
+    3: _migrate_v2_to_v3,
 }
 
 
