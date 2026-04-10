@@ -222,7 +222,8 @@ When a coordination graph is loaded, agents may also have a `graph_agent_id`
 ```
 coordinationhub/
   __init__.py         — Package init, exports CoordinationEngine, CoordinationHubMCPServer
-  core.py             — CoordinationEngine: all 29 tool methods (~495 LOC)
+  core.py             — CoordinationEngine: identity, change, audit, graph/visibility methods (~260 LOC)
+  core_locking.py     — LockingMixin: all locking + coordination methods (~230 LOC)
   _storage.py         — CoordinationStorage: SQLite pool, path resolution, lifecycle (~121 LOC)
   paths.py            — Project-root detection and path normalization (~48 LOC)
   context.py          — Context bundle builder for register_agent responses (~100 LOC)
@@ -245,7 +246,8 @@ coordinationhub/
   agent_registry.py   — Thin re-export aggregator (~23 LOC)
   registry_ops.py     — Agent lifecycle ops (~120 LOC)
   registry_query.py   — Agent registry queries (~142 LOC)
-  assessment.py       — Assessment runner, 5 metric scorers (~394 LOC)
+  assessment_scorers.py — 5 metric scorers + event_matches_responsibility (~315 LOC)
+  assessment.py       — Suite loading, run_assessment, report, storage (~241 LOC)
   mcp_server.py       — HTTP MCP server (ThreadedHTTPServer, stdlib only)
   mcp_stdio.py        — Stdio MCP server (requires optional mcp package)
   cli.py              — argparse CLI parser + lazy dispatch (~237 LOC)
@@ -253,7 +255,7 @@ coordinationhub/
   cli_agents.py       — Agent identity & lifecycle CLI commands (~205 LOC)
   cli_locks.py        — Document locking & coordination CLI commands (~214 LOC)
   cli_vis.py          — Change awareness, audit, graph & assessment CLI + agent-tree (~346 LOC)
-  db.py               — SQLite schema + schema versioning + thread-local ConnectionPool (~275 LOC)
+  db.py               — SQLite schema + schema versioning + perf pragmas + thread-local ConnectionPool (~280 LOC)
   lock_ops.py         — Shared lock primitives + region overlap (~175 LOC)
   conflict_log.py     — Conflict recording and querying (~53 LOC)
   notifications.py    — Change notification storage and retrieval (~115 LOC)

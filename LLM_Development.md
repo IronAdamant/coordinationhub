@@ -1,11 +1,39 @@
 # LLM_Development.md — CoordinationHub
 
-**Version:** 0.3.3
+**Version:** 0.3.4
 **Last updated:** 2026-04-10
 
 ## Change Log
 
 All significant changes to the CoordinationHub project are documented here in reverse chronological order.
+
+---
+
+## 2026-04-10 — v0.3.4 Core Split, Assessment Synonyms, SQLite Perf
+
+### New Features
+
+**`core_locking.py` — LockingMixin extraction:**
+- All locking and coordination methods extracted from `core.py` into `core_locking.py` (~230 LOC) as `LockingMixin`.
+- `CoordinationEngine` inherits from `LockingMixin`, keeping `core.py` focused on identity, change awareness, audit, and graph/visibility (~260 LOC, down from ~495).
+- Methods moved: `acquire_lock`, `release_lock`, `refresh_lock`, `get_lock_status`, `list_locks`, `release_agent_locks`, `reap_expired_locks`, `reap_stale_agents`, `broadcast`, `wait_for_locks`.
+
+**Assessment keyword matching improved (`assessment_scorers.py`):**
+- `_EVENT_RESPONSIBILITY_MAP` expanded with ~20 synonyms covering common event-type variations.
+- Token-overlap fallback for unknown event types that don't match any mapped keyword.
+- `assessment_scorers.py`: ~304 → ~315 LOC.
+
+**SQLite performance tuning (`db.py`):**
+- `PRAGMA cache_size=-8000` (8MB page cache, up from default 2MB).
+- `PRAGMA mmap_size=67108864` (64MB memory-mapped I/O).
+- New composite expiry index `idx_locks_expiry` for faster lock reaping queries.
+- `db.py`: ~275 → ~280 LOC.
+
+### Counts
+
+- MCP tools: 29 (unchanged)
+- CLI commands: 30 (unchanged)
+- Tests: 246 across 15 files (unchanged)
 
 ---
 

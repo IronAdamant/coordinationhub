@@ -1,7 +1,21 @@
 # CoordinationHub — Complete Project Documentation
 
-**Version:** 0.3.3
+**Version:** 0.3.4
 **Last updated:** 2026-04-10
+
+## v0.3.4 Changelog
+
+### Added
+- **`core_locking.py` (~230 LOC)** — `LockingMixin` extracted from `core.py`. Contains all locking and coordination methods: `acquire_lock`, `release_lock`, `refresh_lock`, `get_lock_status`, `list_locks`, `release_agent_locks`, `reap_expired_locks`, `reap_stale_agents`, `broadcast`, `wait_for_locks`. `CoordinationEngine` inherits from `LockingMixin`.
+- **Assessment keyword synonyms** — `_EVENT_RESPONSIBILITY_MAP` in `assessment_scorers.py` expanded with ~20 synonyms + token-overlap fallback for unknown event types.
+- **SQLite perf tuning** — `db.py` adds `PRAGMA cache_size=-8000` and `PRAGMA mmap_size=67108864`. New composite expiry index `idx_locks_expiry`.
+
+### Changed
+- `core.py`: ~495 LOC → ~260 LOC (locking/coordination extracted to `core_locking.py`).
+- `assessment_scorers.py`: ~304 LOC → ~315 LOC (synonym expansion).
+- `db.py`: ~275 LOC → ~280 LOC (perf pragmas + expiry index).
+
+---
 
 ## v0.3.3 Changelog
 
@@ -67,7 +81,8 @@
 | Path | Purpose | Dependencies |
 |------|---------|--------------|
 | `coordinationhub/__init__.py` | Package init, exports `CoordinationEngine`, `CoordinationHubMCPServer` | core, mcp_server |
-| `coordinationhub/core.py` | `CoordinationEngine` — all 29 MCP tool methods (~495 LOC) | _storage, agent_registry, lock_ops, conflict_log, notifications, graphs, visibility, assessment, paths, context |
+| `coordinationhub/core.py` | `CoordinationEngine` — identity, change, audit, graph/visibility methods (~260 LOC) | _storage, core_locking, agent_registry, lock_ops, conflict_log, notifications, graphs, visibility, assessment, paths, context |
+| `coordinationhub/core_locking.py` | `LockingMixin` — all locking + coordination methods (~230 LOC) | lock_ops, conflict_log |
 | `coordinationhub/_storage.py` | `CoordinationStorage` — SQLite pool, path resolution, thread-safe ID gen (~131 LOC) | db |
 | `coordinationhub/paths.py` | Project-root detection and path normalization (~48 LOC) | (no internal deps) |
 | `coordinationhub/context.py` | Context bundle builder for `register_agent` responses (~100 LOC) | (no internal deps) |
@@ -90,7 +105,7 @@
 | `coordinationhub/agent_registry.py` | Thin re-export aggregator for registry_ops/registry_query (~23 LOC) | registry_ops, registry_query |
 | `coordinationhub/registry_ops.py` | Agent lifecycle ops: register, heartbeat, deregister (~120 LOC) | db |
 | `coordinationhub/registry_query.py` | Agent registry queries: list, lineage, siblings, reaping (~142 LOC) | db |
-| `coordinationhub/assessment_scorers.py` | 5 metric scorers + shared `event_matches_responsibility` helper + `_EVENT_RESPONSIBILITY_MAP` (~304 LOC) | (no internal deps) |
+| `coordinationhub/assessment_scorers.py` | 5 metric scorers + shared `event_matches_responsibility` helper + `_EVENT_RESPONSIBILITY_MAP` (~315 LOC) | (no internal deps) |
 | `coordinationhub/assessment.py` | Suite loading, `run_assessment`, Markdown report, SQLite storage (~241 LOC). Re-exports scorers for backward compat. | assessment_scorers, graphs |
 | `coordinationhub/mcp_server.py` | HTTP MCP server (`ThreadedHTTPServer`, stdlib only) | core, dispatch, schemas |
 | `coordinationhub/mcp_stdio.py` | Stdio MCP server (requires optional `mcp` package) | core, mcp_server, schemas |
@@ -100,7 +115,7 @@
 | `coordinationhub/cli_agents.py` | Agent identity & lifecycle CLI commands (~180 LOC) | cli_utils |
 | `coordinationhub/cli_locks.py` | Document locking & coordination CLI commands (~210 LOC) | cli_utils |
 | `coordinationhub/cli_vis.py` | Change awareness, audit, graph, assessment, dashboard CLI + agent-tree (~323 LOC) | cli_utils |
-| `coordinationhub/db.py` | SQLite schema + schema versioning + thread-local `ConnectionPool` (~275 LOC) | (no internal deps) |
+| `coordinationhub/db.py` | SQLite schema + schema versioning + perf pragmas + thread-local `ConnectionPool` (~280 LOC) | (no internal deps) |
 | `coordinationhub/lock_ops.py` | Shared lock primitives: acquire, release, refresh, reap, region overlap (~175 LOC) | db |
 | `coordinationhub/conflict_log.py` | Conflict recording and querying (~52 LOC) | lock_ops |
 | `coordinationhub/notifications.py` | Change notification storage and retrieval (~94 LOC) | db |
@@ -133,7 +148,8 @@
 ```
 coordinationhub/
   __init__.py         — Package init, exports CoordinationEngine, CoordinationHubMCPServer
-  core.py             — CoordinationEngine: all 29 tool methods (~495 LOC)
+  core.py             — CoordinationEngine: identity, change, audit, graph/visibility methods (~260 LOC)
+  core_locking.py     — LockingMixin: all locking + coordination methods (~230 LOC)
   _storage.py         — CoordinationStorage: SQLite pool, path resolution, thread-safe ID gen (~131 LOC)
   paths.py            — Project-root detection and path normalization (~47 LOC)
   context.py          — Context bundle builder for register_agent responses (~97 LOC)
@@ -156,7 +172,7 @@ coordinationhub/
   agent_registry.py   — Thin re-export aggregator (~23 LOC)
   registry_ops.py     — Agent lifecycle ops (~106 LOC)
   registry_query.py   — Agent registry queries (~152 LOC)
-  assessment_scorers.py — 5 metric scorers + shared event_matches_responsibility (~304 LOC)
+  assessment_scorers.py — 5 metric scorers + shared event_matches_responsibility (~315 LOC)
   assessment.py       — Suite loading, run_assessment, report, storage (~241 LOC)
   mcp_server.py       — HTTP MCP server (ThreadedHTTPServer, stdlib only, ~275 LOC)
   mcp_stdio.py        — Stdio MCP server (requires optional mcp package, ~175 LOC)
@@ -166,7 +182,7 @@ coordinationhub/
   cli_agents.py       — Agent identity & lifecycle CLI commands (~180 LOC)
   cli_locks.py        — Document locking & coordination CLI commands (~210 LOC)
   cli_vis.py          — Change awareness, audit, graph & assessment CLI + agent-tree (~323 LOC)
-  db.py               — SQLite schema (canonical) + schema versioning + thread-local ConnectionPool (~275 LOC)
+  db.py               — SQLite schema (canonical) + schema versioning + perf pragmas + thread-local ConnectionPool (~280 LOC)
   lock_ops.py         — Shared lock primitives + region overlap (~175 LOC)
   conflict_log.py     — Conflict recording and querying (~52 LOC)
   notifications.py    — Change notification storage and retrieval (~94 LOC)

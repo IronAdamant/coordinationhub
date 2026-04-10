@@ -1,6 +1,6 @@
 # CoordinationHub — Multi-Agent Swarm Coordination MCP
 
-**Version:** 0.3.3
+**Version:** 0.3.4
 **Language:** Python 3.10+ (stdlib-only core — **zero third-party dependencies**, `mcp` optional for stdio only)
 **Transports:** stdio + HTTP (both, like Stele/Chisel/Trammel)
 
@@ -145,7 +145,7 @@ trace against 5 metric scorers, and outputs a Markdown report. Metric scorers:
 
 ---
 
-## SQLite Schema (v0.3.3)
+## SQLite Schema (v0.3.4)
 
 ### Tables
 
@@ -244,7 +244,7 @@ Multiple locks per file are allowed for non-overlapping regions. Shared locks on
 
 ---
 
-## MCP Tools (29 total — v0.3.3)
+## MCP Tools (29 total — v0.3.4)
 
 ### Identity & Registration
 
@@ -275,12 +275,13 @@ Multiple locks per file are allowed for non-overlapping regions. Shared locks on
 
 ---
 
-## Project Layout (v0.3.1)
+## Project Layout (v0.3.4)
 
 ```
 coordinationhub/
   __init__.py          -- __version__, public API
-  core.py              -- CoordinationEngine: all 29 tool methods (~495 LOC)
+  core.py              -- CoordinationEngine: identity, change, audit, graph/visibility (~260 LOC)
+  core_locking.py      -- LockingMixin: all locking + coordination methods (~230 LOC)
   paths.py             -- Project-root detection and path normalization (~47 LOC)
   context.py           -- Context bundle builder for register_agent responses (~98 LOC)
   schemas.py           -- Schema aggregator, re-exports TOOL_SCHEMAS (~31 LOC)
@@ -302,7 +303,8 @@ coordinationhub/
   agent_registry.py    -- Agent lifecycle (registry_ops + registry_query)
   registry_ops.py      -- Agent lifecycle ops (~107 LOC)
   registry_query.py    -- Agent registry queries (~142 LOC)
-  assessment.py        -- Assessment runner, 5 metric scorers (~510 LOC)
+  assessment_scorers.py -- 5 metric scorers + event_matches_responsibility (~315 LOC)
+  assessment.py        -- Suite loading, run_assessment, report, storage (~241 LOC)
   mcp_server.py        -- HTTP MCP server (ThreadedHTTPServer, stdlib only)
   mcp_stdio.py         -- Stdio MCP server (requires optional mcp package)
   cli.py               -- argparse CLI parser + lazy dispatch (~235 LOC)
@@ -310,7 +312,7 @@ coordinationhub/
   cli_agents.py        -- Agent identity & lifecycle CLI commands (~205 LOC)
   cli_locks.py         -- Document locking & coordination CLI (~214 LOC)
   cli_vis.py           -- Change awareness, audit, graph & assessment CLI + agent-tree (~346 LOC)
-  db.py                -- SQLite schema, schema versioning, thread-local ConnectionPool (~275 LOC)
+  db.py                -- SQLite schema, schema versioning, perf pragmas, thread-local ConnectionPool (~280 LOC)
   lock_ops.py          -- Shared lock primitives + region overlap (~175 LOC)
   conflict_log.py      -- Conflict recording (~53 LOC)
   notifications.py     -- Change notification storage (~115 LOC)
@@ -371,6 +373,12 @@ Default port: `9877`
 ---
 
 ## Version History
+
+### 0.3.4 — Core split, assessment synonyms, SQLite perf (2026-04-10)
+- `core.py` split: locking/coordination methods extracted to `core_locking.py` (~230 LOC) as `LockingMixin`
+- `core.py` reduced from ~495 to ~260 LOC; `CoordinationEngine` inherits `LockingMixin`
+- `_EVENT_RESPONSIBILITY_MAP` expanded with ~20 synonyms + token-overlap fallback
+- SQLite perf: `cache_size=-8000`, `mmap_size=67108864`, composite `idx_locks_expiry` index
 
 ### 0.3.3 — Region locking & CI (2026-04-10)
 - CI test workflow: `.github/workflows/test.yml` runs pytest on push/PR across Python 3.10-3.12
