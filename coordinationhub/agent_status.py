@@ -98,7 +98,7 @@ def get_agent_tree_tool(
         ).fetchone()
         return row["agent_id"] if row else None
 
-    def _build_node(conn, aid):
+    def _build_node(conn, aid, now):
         """Build a single tree node for agent aid (no children filled yet)."""
         agent_row = conn.execute(
             "SELECT * FROM agents WHERE agent_id = ?", (aid,)
@@ -110,6 +110,33 @@ def get_agent_tree_tool(
         ).fetchone()
         resp = dict(resp_row) if resp_row else {}
         responsibilities = json.loads(resp.get("responsibilities") or "[]") if resp else []
+        # Active locks held by this agent
+        lock_rows = conn.execute(
+            "SELECT document_path, lock_type, region_start, region_end "
+            "FROM document_locks WHERE locked_by = ? AND locked_at + lock_ttl > ?",
+            (aid, now),
+        ).fetchall()
+        locks = []
+        for lr in lock_rows:
+            lock_entry: dict[str, Any] = {
+                "path": lr["document_path"], "type": lr["lock_type"],
+            }
+            if lr["region_start"] is not None:
+                lock_entry["region"] = f"L{lr['region_start']}-{lr['region_end']}"
+            locks.append(lock_entry)
+        # Check for boundary warnings on locked files
+        if locks:
+            lock_paths = [lk["path"] for lk in locks]
+            placeholders = ",".join("?" * len(lock_paths))
+            ownership_rows = conn.execute(
+                f"SELECT document_path, assigned_agent_id FROM file_ownership "
+                f"WHERE document_path IN ({placeholders})", lock_paths,
+            ).fetchall()
+            owner_map = {r["document_path"]: r["assigned_agent_id"] for r in ownership_rows}
+            for lk in locks:
+                owner = owner_map.get(lk["path"])
+                if owner and owner != aid:
+                    lk["boundary_warning"] = owner
         return {
             "agent_id": aid,
             "status": agent_row["status"],
@@ -117,12 +144,13 @@ def get_agent_tree_tool(
             "role": resp.get("role"),
             "current_task": resp.get("current_task"),
             "responsibilities": responsibilities,
+            "locks": locks,
             "children": [],
         }
 
-    def _build_tree(conn, aid):
+    def _build_tree(conn, aid, now):
         """Recursively build tree rooted at aid, filling in children."""
-        node = _build_node(conn, aid)
+        node = _build_node(conn, aid, now)
         if node is None:
             return None
         child_rows = conn.execute(
@@ -130,10 +158,12 @@ def get_agent_tree_tool(
             (aid,)
         ).fetchall()
         for child_row in child_rows:
-            child_node = _build_tree(conn, child_row["agent_id"])
+            child_node = _build_tree(conn, child_row["agent_id"], now)
             if child_node is not None:
                 node["children"].append(child_node)
         return node
+
+    now = _time.time()
 
     with connect() as conn:
         if agent_id is None:
@@ -141,14 +171,13 @@ def get_agent_tree_tool(
             if agent_id is None:
                 return {"error": "No active root agent found"}
         else:
-            # Verify the requested agent exists
             row = conn.execute(
                 "SELECT agent_id FROM agents WHERE agent_id = ?", (agent_id,)
             ).fetchone()
             if row is None:
                 return {"error": f"Agent not found: {agent_id}"}
 
-        root = _build_tree(conn, agent_id)
+        root = _build_tree(conn, agent_id, now)
         if root is None:
             return {"error": f"Agent not found: {agent_id}"}
 
@@ -164,27 +193,73 @@ def get_agent_tree_tool(
             ancestors.append({"agent_id": row["parent_id"]})
             current = row["parent_id"]
 
-        # Render text tree
-        def _render_text(node, prefix="", is_last=True):
-            lines = []
-            connector = "└── " if is_last else "├── "
-            label = node["agent_id"]
-            if node.get("graph_agent_id"):
-                label += f" [{node['graph_agent_id']}]"
-            label += f" {node['status']}"
-            if node.get("current_task"):
-                label += f" — {node['current_task']}"
-            lines.append(prefix + connector + label)
-            child_prefix = prefix + ("    " if is_last else "│   ")
-            for i, child in enumerate(node["children"]):
-                is_last_child = (i == len(node["children"]) - 1)
-                lines.extend(_render_text(child, child_prefix, is_last_child))
-            return lines
-
-        text_lines = _render_text(root, is_last=True)
-        text_tree = "\n".join(text_lines)
+        text_tree = _render_rich_tree(root)
 
     return {"root": root, "ancestors": ancestors, "text_tree": text_tree}
+
+
+def _render_rich_tree(root: dict[str, Any]) -> str:
+    """Render a project-management-style agent tree with work items and locks.
+
+    Output format:
+        hub.99.0 [root] observing...
+        ├── hub.99.0.0 [active] — "service consolidation"
+        │   ├─ ◆ src/services/probe.js [exclusive]
+        │   └─ ◆ routes.js [exclusive] ⚠ owned by hub.99.0.1
+        └── hub.99.0.1 [active] — "route simplification"
+            └─ ◆ routeLoader.js [shared L10-50]
+    """
+    lines: list[str] = []
+    _render_node(root, lines, prefix="", is_root=True)
+    return "\n".join(lines)
+
+
+def _render_node(
+    node: dict[str, Any], lines: list[str],
+    prefix: str = "", is_root: bool = False, is_last: bool = True,
+) -> None:
+    # Agent header line
+    if is_root:
+        connector = ""
+        child_prefix = ""
+    else:
+        connector = "└── " if is_last else "├── "
+        child_prefix = prefix + ("    " if is_last else "│   ")
+
+    aid = node["agent_id"]
+    tag = node.get("graph_agent_id") or node["status"]
+    header = f"{prefix}{connector}{aid} [{tag}]"
+    if node.get("current_task"):
+        header += f' — "{node["current_task"]}"'
+    elif node.get("role"):
+        header += f" — {node['role']}"
+    lines.append(header)
+
+    if is_root:
+        child_prefix = ""
+
+    # Work items: locks held by this agent
+    locks = node.get("locks", [])
+    children = node.get("children", [])
+    detail_items = locks  # items rendered below the header
+    total_sub = len(detail_items) + len(children)
+
+    for i, lk in enumerate(locks):
+        is_last_item = (i == len(locks) - 1) and not children
+        item_connector = "└─ " if is_last_item else "├─ "
+        path = lk["path"]
+        lock_info = lk["type"]
+        if lk.get("region"):
+            lock_info += f" {lk['region']}"
+        line = f"{child_prefix}{item_connector}◆ {path} [{lock_info}]"
+        if lk.get("boundary_warning"):
+            line += f" ⚠ owned by {lk['boundary_warning']}"
+        lines.append(line)
+
+    # Children (sub-agents)
+    for i, child in enumerate(children):
+        is_last_child = (i == len(children) - 1)
+        _render_node(child, lines, child_prefix, is_root=False, is_last=is_last_child)
 
 
 def get_file_agent_map_tool(
