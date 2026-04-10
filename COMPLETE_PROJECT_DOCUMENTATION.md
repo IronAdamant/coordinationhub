@@ -1,7 +1,22 @@
 # CoordinationHub — Complete Project Documentation
 
-**Version:** 0.3.7
+**Version:** 0.3.8
 **Last updated:** 2026-04-11
+
+## v0.3.8 Changelog
+
+### Fixed
+- **SubagentStop status transition** — `handle_subagent_stop` now uses `_resolve_agent_id` to look up the correct `hub.cc.*` child ID from the raw Claude hex ID, then calls `deregister_agent` which sets `status='stopped'`. Previously used `_subagent_id` which generated a wrong sequence-based ID, so deregistration silently failed and all agents stayed "active" permanently.
+- **Background agent double registration** — `handle_subagent_start` now checks `find_agent_by_claude_id` before generating a new child ID. Agents with `run_in_background: true` fire SubagentStart twice with the same Claude hex ID — the second call now heartbeats the existing agent instead of creating a duplicate entry.
+
+### Added
+- **2 new hook tests** — `test_subagent_stop_sets_status_stopped_via_claude_id`, `test_background_agent_dedup`.
+
+### Changed
+- `hooks/claude_code.py`: ~400 LOC → ~428 LOC (SubagentStop rewrite, SubagentStart dedup).
+- Tests: 272 → 274 across 16 files. `test_hooks.py`: 31 → 33.
+
+---
 
 ## v0.3.7 Changelog
 

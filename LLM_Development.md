@@ -1,11 +1,42 @@
 # LLM_Development.md — CoordinationHub
 
-**Version:** 0.3.7
+**Version:** 0.3.8
 **Last updated:** 2026-04-11
 
 ## Change Log
 
 All significant changes to the CoordinationHub project are documented here in reverse chronological order.
+
+---
+
+## 2026-04-11 — v0.3.8 Fix SubagentStop Status Transition & Background Agent Dedup (Review Thirteen)
+
+### Motivation
+
+Review Thirteen tested 15 sub-agents across two parallel waves in RecipeLab. Two bugs surfaced:
+1. All 15 agents remained `status: active` after completing — SubagentStop could not find the correct agent to deregister.
+2. Background agents (`run_in_background: true`) registered twice with the same `claude_agent_id`, creating duplicate entries.
+
+### Bug Fix 1: SubagentStop Status Transition
+
+**Root cause:** `handle_subagent_stop` used `_subagent_id()` to reconstruct the child ID, but this function generates a NEW sequence-based ID (counting existing children) rather than finding the EXISTING registered agent. SubagentStop events carry the raw Claude hex ID in `subagent_id`, not `tool_use_id`, so the derived ID was always wrong.
+
+**Fix:** Replaced `_subagent_id()` call with `_resolve_agent_id()`, which looks up the `hub.cc.*` child ID from the `claude_agent_id` column via `find_agent_by_claude_id`. Falls back to `_subagent_id` derivation only when `_resolve_agent_id` returns the session root (no `subagent_id` in the event).
+
+### Bug Fix 2: Background Agent Double Registration
+
+**Root cause:** `handle_subagent_start` deduplicated by comparing the GENERATED `child_id` against existing agent IDs. Background agents fire SubagentStart twice with the same `claude_agent_id` but different sequence numbers, so the dedup check always failed.
+
+**Fix:** Added early `find_agent_by_claude_id` check before generating a new child ID. If an agent with the same raw Claude hex ID already exists, heartbeat it instead of creating a duplicate.
+
+### Files Changed
+
+- `hooks/claude_code.py`: ~400 LOC → ~428 LOC. `handle_subagent_stop` rewritten to use `_resolve_agent_id`. `handle_subagent_start` adds `find_agent_by_claude_id` dedup.
+- `tests/test_hooks.py`: 31 → 33 tests. New: `test_subagent_stop_sets_status_stopped_via_claude_id`, `test_background_agent_dedup`.
+
+### Counts
+
+- Tests: 272 → 274 across 16 files. `test_hooks.py`: 31 → 33.
 
 ---
 

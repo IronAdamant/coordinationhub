@@ -290,6 +290,70 @@ class TestSubagentLifecycle:
         result = handle_subagent_stop(event_stop)
         assert result is None
 
+    def test_subagent_stop_sets_status_stopped_via_claude_id(self, hook_cwd):
+        """SubagentStop with raw claude hex ID resolves to hub.cc.* and sets status='stopped'."""
+        session_id = "sess-12345678"
+        raw_claude_id = "deadbeef12345abcd"
+
+        handle_session_start(_make_event("SessionStart", cwd=hook_cwd, session_id=session_id))
+        handle_subagent_start(_make_event(
+            "SubagentStart", cwd=hook_cwd, session_id=session_id,
+            tool_input={"subagent_type": "builder", "description": "Build feature"},
+            tool_use_id="toolu_stop123abc",
+            subagent_id=raw_claude_id,
+        ))
+
+        # SubagentStop with only raw claude ID (no tool_use_id) — mirrors production events
+        handle_subagent_stop(_make_event(
+            "SubagentStop", cwd=hook_cwd, session_id=session_id,
+            subagent_id=raw_claude_id,
+        ))
+
+        from coordinationhub.hooks.claude_code import _get_engine
+        engine = _get_engine(hook_cwd)
+        try:
+            agents = engine.list_agents(active_only=False)
+            child = [a for a in agents["agents"]
+                     if a.get("claude_agent_id") == raw_claude_id]
+            assert len(child) == 1
+            assert child[0]["status"] == "stopped"
+        finally:
+            engine.close()
+
+    def test_background_agent_dedup(self, hook_cwd):
+        """run_in_background agents fire SubagentStart twice — second call should heartbeat, not duplicate."""
+        session_id = "sess-12345678"
+        raw_claude_id = "ac366dfcabf01578c"
+
+        handle_session_start(_make_event("SessionStart", cwd=hook_cwd, session_id=session_id))
+
+        # First SubagentStart (launch)
+        handle_subagent_start(_make_event(
+            "SubagentStart", cwd=hook_cwd, session_id=session_id,
+            tool_input={"subagent_type": "agent", "description": "NutritionEnricher"},
+            subagent_id=raw_claude_id,
+        ))
+
+        # Second SubagentStart (background completion notification) — same claude_agent_id
+        handle_subagent_start(_make_event(
+            "SubagentStart", cwd=hook_cwd, session_id=session_id,
+            tool_input={"subagent_type": "agent", "description": "NutritionEnricher"},
+            subagent_id=raw_claude_id,
+        ))
+
+        from coordinationhub.hooks.claude_code import _get_engine
+        engine = _get_engine(hook_cwd)
+        try:
+            agents = engine.list_agents(active_only=False)
+            matches = [a for a in agents["agents"]
+                       if a.get("claude_agent_id") == raw_claude_id]
+            assert len(matches) == 1, (
+                f"Expected 1 agent for {raw_claude_id}, got {len(matches)}: "
+                f"{[m['agent_id'] for m in matches]}"
+            )
+        finally:
+            engine.close()
+
 
 class TestSessionEnd:
     def test_releases_locks_and_deregisters(self, hook_cwd):
