@@ -19,9 +19,9 @@ TOOL_DISPATCH: dict[str, tuple[str, list[str]]] = {
     "get_lineage": ("get_lineage", ["agent_id"]),
     "get_siblings": ("get_siblings", ["agent_id"]),
     # Locking
-    "acquire_lock": ("acquire_lock", ["document_path", "agent_id", "lock_type", "ttl", "force"]),
-    "release_lock": ("release_lock", ["document_path", "agent_id"]),
-    "refresh_lock": ("refresh_lock", ["document_path", "agent_id", "ttl"]),
+    "acquire_lock": ("acquire_lock", ["document_path", "agent_id", "lock_type", "ttl", "force", "region_start", "region_end"]),
+    "release_lock": ("release_lock", ["document_path", "agent_id", "region_start", "region_end"]),
+    "refresh_lock": ("refresh_lock", ["document_path", "agent_id", "ttl", "region_start", "region_end"]),
     "get_lock_status": ("get_lock_status", ["document_path"]),
     "list_locks": ("list_locks", ["agent_id"]),
     "release_agent_locks": ("release_agent_locks", ["agent_id"]),

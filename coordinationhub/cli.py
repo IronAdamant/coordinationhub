@@ -75,17 +75,23 @@ def create_parser() -> argparse.ArgumentParser:
     p.add_argument("--lock-type", default="exclusive", choices=["exclusive", "shared"])
     p.add_argument("--ttl", type=float, default=300.0)
     p.add_argument("--force", action="store_true")
+    p.add_argument("--region-start", type=int, default=None, help="Start line for region lock")
+    p.add_argument("--region-end", type=int, default=None, help="End line for region lock")
 
     # release-lock
     p = sub.add_parser("release-lock", parents=[shared], help="Release a held lock")
     p.add_argument("document_path", help="Path to the document")
     p.add_argument("agent_id", help="Agent releasing the lock")
+    p.add_argument("--region-start", type=int, default=None, help="Start line of region lock to release")
+    p.add_argument("--region-end", type=int, default=None, help="End line of region lock to release")
 
     # refresh-lock
     p = sub.add_parser("refresh-lock", parents=[shared], help="Extend a lock's TTL")
     p.add_argument("document_path", help="Path to the document")
     p.add_argument("agent_id", help="Agent refreshing the lock")
     p.add_argument("--ttl", type=float, default=300.0)
+    p.add_argument("--region-start", type=int, default=None, help="Start line of region lock to refresh")
+    p.add_argument("--region-end", type=int, default=None, help="End line of region lock to refresh")
 
     # lock-status
     p = sub.add_parser("lock-status", parents=[shared], help="Check if a document is locked")

@@ -1,11 +1,43 @@
 # LLM_Development.md — CoordinationHub
 
-**Version:** 0.3.2
+**Version:** 0.3.3
 **Last updated:** 2026-04-10
 
 ## Change Log
 
 All significant changes to the CoordinationHub project are documented here in reverse chronological order.
+
+---
+
+## 2026-04-10 — v0.3.3 Region Locking & CI
+
+### New Features
+
+**CI test workflow:**
+- `.github/workflows/test.yml` runs pytest on push/PR across Python 3.10-3.12.
+
+**DB schema versioning (db.py):**
+- `schema_version` table with `_CURRENT_SCHEMA_VERSION = 2`.
+- Migration runner `_migrate_v1_to_v2` restructures `document_locks` for region locking.
+- `init_schema()` auto-migrates existing databases on startup.
+
+**Region locking (lock_ops.py, core.py, schemas_locking.py):**
+- `document_locks` table changed from `document_path TEXT PRIMARY KEY` to `id INTEGER PRIMARY KEY AUTOINCREMENT` with `region_start INTEGER` and `region_end INTEGER` columns.
+- Multiple locks per file on non-overlapping regions. Shared locks enforced (multiple shared allowed, exclusive blocks all).
+- New functions: `_regions_overlap`, `find_conflicting_locks`, `find_own_lock`.
+- `acquire_lock` uses `BEGIN IMMEDIATE` for thread-safe concurrent locking.
+- All locking tools (`acquire_lock`, `release_lock`, `refresh_lock`, `get_lock_status`, `list_locks`) support `region_start`/`region_end` params.
+- CLI commands `acquire-lock`, `release-lock`, `refresh-lock` have `--region-start`/`--region-end` flags.
+
+**Hook unit tests:**
+- New `tests/test_hooks.py` with 23 tests covering all Claude Code hook handlers.
+
+### Counts
+
+- MCP tools: 29 (unchanged)
+- CLI commands: 30 (unchanged)
+- Tests: 206 → 246 across 15 files (was 14). `test_locking.py`: 21 → 38 tests.
+- `lock_ops.py`: ~119 → ~175 LOC. `db.py`: ~215 → ~275 LOC. `core.py`: ~470 → ~495 LOC.
 
 ---
 

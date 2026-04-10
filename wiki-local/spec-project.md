@@ -1,6 +1,6 @@
 # CoordinationHub — Multi-Agent Swarm Coordination MCP
 
-**Version:** 0.3.1
+**Version:** 0.3.3
 **Language:** Python 3.10+ (stdlib-only core — **zero third-party dependencies**, `mcp` optional for stdio only)
 **Transports:** stdio + HTTP (both, like Stele/Chisel/Trammel)
 
@@ -100,6 +100,7 @@ Files are locked before modification, released after. Locks have:
 - **Owner**: only the agent that acquired it may release it
 - **Force-steal**: override with conflict recording
 - **Shared locks**: for reads; **exclusive locks**: for writes
+- **Region locking**: optional `region_start`/`region_end` for sub-file granularity. Multiple non-overlapping locks per file. Shared locks on overlapping regions are permitted; exclusive locks block all others.
 
 ### Declarative Coordination Graph
 
@@ -144,7 +145,7 @@ trace against 5 metric scorers, and outputs a Markdown report. Metric scorers:
 
 ---
 
-## SQLite Schema (v0.3.1)
+## SQLite Schema (v0.3.3)
 
 ### Tables
 
@@ -172,12 +173,17 @@ trace against 5 metric scorers, and outputs a Markdown report. Metric scorers:
 
 | Column | Type | Description |
 |--------|------|-------------|
-| `document_path` | TEXT PK | Project-relative path |
+| `id` | INTEGER PK | Auto-increment |
+| `document_path` | TEXT NOT NULL | Project-relative path |
 | `locked_by` | TEXT NOT NULL | Agent ID |
 | `locked_at` | REAL NOT NULL | Unix timestamp |
 | `lock_ttl` | REAL DEFAULT 300.0 | Seconds until expiry |
 | `lock_type` | TEXT DEFAULT 'exclusive' | 'shared' or 'exclusive' |
 | `worktree_root` | TEXT | Which worktree |
+| `region_start` | INTEGER | Start of locked region (NULL = whole file) |
+| `region_end` | INTEGER | End of locked region (NULL = whole file) |
+
+Multiple locks per file are allowed for non-overlapping regions. Shared locks on overlapping regions are permitted; exclusive locks block all others on the same region.
 
 #### `lock_conflicts`
 
@@ -238,7 +244,7 @@ trace against 5 metric scorers, and outputs a Markdown report. Metric scorers:
 
 ---
 
-## MCP Tools (29 total — v0.3.2)
+## MCP Tools (29 total — v0.3.3)
 
 ### Identity & Registration
 
@@ -274,12 +280,12 @@ trace against 5 metric scorers, and outputs a Markdown report. Metric scorers:
 ```
 coordinationhub/
   __init__.py          -- __version__, public API
-  core.py              -- CoordinationEngine: all 29 tool methods (~470 LOC)
+  core.py              -- CoordinationEngine: all 29 tool methods (~495 LOC)
   paths.py             -- Project-root detection and path normalization (~47 LOC)
   context.py           -- Context bundle builder for register_agent responses (~98 LOC)
   schemas.py           -- Schema aggregator, re-exports TOOL_SCHEMAS (~31 LOC)
   schemas_identity.py  -- Identity & Registration schemas (~123 LOC)
-  schemas_locking.py   -- Document Locking schemas (~145 LOC)
+  schemas_locking.py   -- Document Locking schemas (~165 LOC)
   schemas_coordination.py -- Coordination Action schemas (~59 LOC)
   schemas_change.py    -- Change Awareness schemas (~77 LOC)
   schemas_audit.py     -- Audit & Status schemas (~43 LOC)
@@ -304,8 +310,8 @@ coordinationhub/
   cli_agents.py        -- Agent identity & lifecycle CLI commands (~205 LOC)
   cli_locks.py         -- Document locking & coordination CLI (~214 LOC)
   cli_vis.py           -- Change awareness, audit, graph & assessment CLI + agent-tree (~346 LOC)
-  db.py                -- SQLite schema, thread-local ConnectionPool (~215 LOC)
-  lock_ops.py          -- Shared lock primitives (~119 LOC)
+  db.py                -- SQLite schema, schema versioning, thread-local ConnectionPool (~275 LOC)
+  lock_ops.py          -- Shared lock primitives + region overlap (~175 LOC)
   conflict_log.py      -- Conflict recording (~53 LOC)
   notifications.py     -- Change notification storage (~115 LOC)
 tests/
@@ -365,6 +371,19 @@ Default port: `9877`
 ---
 
 ## Version History
+
+### 0.3.3 — Region locking & CI (2026-04-10)
+- CI test workflow: `.github/workflows/test.yml` runs pytest on push/PR across Python 3.10-3.12
+- DB schema versioning: `schema_version` table, `_CURRENT_SCHEMA_VERSION = 2`, auto-migration
+- Region locking: `document_locks` restructured with `region_start`/`region_end` columns, shared lock enforcement
+- `acquire_lock` uses `BEGIN IMMEDIATE` for thread-safe concurrent locking
+- Hook unit tests: 23 tests in `test_hooks.py`
+- 246 tests across 15 files (up from 206 across 14)
+
+### 0.3.2 — Review Ten fixes (2026-04-10)
+- `list_locks` tool + CLI command
+- Hook TTL reduced from 600s to 120s, pre-acquire reaping
+- 206 tests across 14 files
 
 ### 0.3.1 — Polish pass (2026-04-07)
 - `spawn_propagation` metric: child agents scored against inherited parent responsibilities
