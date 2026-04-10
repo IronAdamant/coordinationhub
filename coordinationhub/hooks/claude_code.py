@@ -21,7 +21,43 @@ from __future__ import annotations
 import json
 import os
 import sys
+import time
+import traceback
 from pathlib import Path
+
+# ---------------------------------------------------------------------------
+# Error logging — hooks fail open, but errors are recorded for debugging
+# ---------------------------------------------------------------------------
+
+_LOG_MAX_BYTES = 1_048_576  # 1 MB
+
+def _log_error(hook_event: str, exc: Exception) -> None:
+    """Append error to ~/.coordinationhub/hook.log and stderr.
+
+    Truncates the log file when it exceeds 1 MB to prevent unbounded growth.
+    Never raises — logging failures are silently ignored.
+    """
+    try:
+        log_dir = Path.home() / ".coordinationhub"
+        log_dir.mkdir(parents=True, exist_ok=True)
+        log_path = log_dir / "hook.log"
+
+        # Truncate if too large: keep last ~500 lines
+        if log_path.exists() and log_path.stat().st_size > _LOG_MAX_BYTES:
+            lines = log_path.read_text(encoding="utf-8", errors="replace").splitlines()
+            log_path.write_text("\n".join(lines[-500:]) + "\n", encoding="utf-8")
+
+        ts = time.strftime("%Y-%m-%d %H:%M:%S")
+        tb = traceback.format_exception(type(exc), exc, exc.__traceback__)
+        entry = f"[{ts}] {hook_event}: {exc}\n{''.join(tb)}\n"
+
+        with open(log_path, "a", encoding="utf-8") as f:
+            f.write(entry)
+
+        print(f"[CoordinationHub] {hook_event} error: {exc}", file=sys.stderr)
+    except Exception:
+        pass  # logging itself must never crash the hook
+
 
 # ---------------------------------------------------------------------------
 # Engine helpers
@@ -269,15 +305,42 @@ def handle_subagent_stop(event: dict) -> dict | None:
 
 
 def handle_session_end(event: dict) -> dict | None:
-    """Deregister session agent and release all held locks."""
+    """Deregister session agent, release locks, and return session summary."""
     engine = _get_engine(event.get("cwd", "."))
     try:
         agent_id = _session_agent_id(event.get("session_id", ""))
+
+        # Collect summary counts before teardown
+        summary_parts: list[str] = []
+        try:
+            status = engine.status()
+            agents_count = status.get("registered_agents", 0)
+            locks_count = status.get("active_locks", 0)
+            conflicts_count = status.get("recent_conflicts", 0)
+            notifs_count = status.get("pending_notifications", 0)
+            summary_parts = [
+                f"{agents_count} agents tracked",
+                f"{locks_count} locks held",
+                f"{conflicts_count} conflicts",
+                f"{notifs_count} notifications",
+            ]
+        except Exception:
+            pass
+
         try:
             engine.release_agent_locks(agent_id)
             engine.deregister_agent(agent_id)
         except Exception:
             pass
+
+        if summary_parts:
+            summary = ", ".join(summary_parts)
+            return {
+                "hookSpecificOutput": {
+                    "hookEventName": "SessionEnd",
+                    "additionalContext": f"[CoordinationHub] Session summary: {summary}",
+                }
+            }
     finally:
         engine.close()
     return None
@@ -330,8 +393,8 @@ def main() -> None:
 
     except ImportError:
         pass  # coordinationhub not installed — silent no-op
-    except Exception:
-        pass  # never crash the hook — fail open
+    except Exception as exc:
+        _log_error(hook_event or "unknown", exc)
 
 
 if __name__ == "__main__":

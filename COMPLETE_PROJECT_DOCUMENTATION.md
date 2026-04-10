@@ -1,7 +1,27 @@
 # CoordinationHub — Complete Project Documentation
 
-**Version:** 0.3.6
-**Last updated:** 2026-04-10
+**Version:** 0.3.7
+**Last updated:** 2026-04-11
+
+## v0.3.7 Changelog
+
+### Added
+- **`coordinationhub doctor` CLI command** — Validates setup: importability, hooks config in `~/.claude/settings.json`, storage directory, schema version, hook Python interpreter (detects venv trap). Returns structured results with OK/FAIL per check.
+- **`coordinationhub init` CLI command** — One-command setup: creates `.coordinationhub/` directory, initializes DB, writes/merges hook config into `~/.claude/settings.json` using the absolute path to the current Python interpreter (avoids venv trap), then runs doctor checks.
+- **`coordinationhub watch` CLI command** — Live-refresh agent tree with configurable interval (`--interval N`). Displays agent count, lock count, and conflict count in a status bar. Ctrl+C to stop.
+- **Hook error logging** — Errors in `hooks/claude_code.py` are now logged to `~/.coordinationhub/hook.log` with timestamps and tracebacks (max 1 MB, auto-truncated). Also prints to stderr. Hooks still fail open (exit 0).
+- **Session summary on SessionEnd** — `handle_session_end` now returns a summary in `additionalContext`: agents tracked, locks held, conflicts, notifications. Visible in Claude Code's status line at session close.
+- **`cli_setup.py` module** (~348 LOC) — Contains `cmd_doctor`, `cmd_init`, `cmd_watch`, `run_doctor()`, `_merge_hooks()`, `_fill_hook_command()`.
+- **`test_setup.py`** — 8 tests covering doctor checks, hook merge logic, idempotency, and Python path injection.
+- **3 new hook tests** — Error logging (log file creation, never raises), session summary (returns counts).
+
+### Changed
+- `hooks/claude_code.py`: ~330 LOC → ~400 LOC (error logging, session summary).
+- `cli.py`: ~237 LOC → ~267 LOC (3 new subparsers + dispatch entries).
+- `cli_commands.py`: ~44 LOC → ~51 LOC (re-exports from cli_setup).
+- CLI commands: 31 → 34. Tests: 261 → 272 across 16 files (was 15).
+
+---
 
 ## v0.3.6 Changelog
 
@@ -155,7 +175,8 @@
 | `coordinationhub/conflict_log.py` | Conflict recording and querying (~52 LOC) | lock_ops |
 | `coordinationhub/notifications.py` | Change notification storage and retrieval (~94 LOC) | db |
 | `coordinationhub/hooks/__init__.py` | Hooks package init | — |
-| `coordinationhub/hooks/claude_code.py` | Claude Code hook: auto-locking, notifications, agent ID mapping, Stele/Trammel bridge (~330 LOC) | core |
+| `coordinationhub/cli_setup.py` | CLI: doctor, init, watch commands (~348 LOC) | cli_utils, core, paths, db |
+| `coordinationhub/hooks/claude_code.py` | Claude Code hook: auto-locking, notifications, agent ID mapping, error logging, session summary, Stele/Trammel bridge (~400 LOC) | core |
 | `tests/conftest.py` | pytest fixtures: `engine`, `registered_agent`, `two_agents` | core |
 | `tests/test_agent_lifecycle.py` | Agent lifecycle tests (21 tests) | conftest |
 | `tests/test_locking.py` | Lock acquisition, release, refresh, status, list, reap, region locking (38 tests) | conftest |
@@ -170,11 +191,12 @@
 | `tests/test_cli.py` | CLI argument parser and subcommand dispatch (11 tests) | conftest, core |
 | `tests/test_concurrent.py` | Concurrent stress tests: locks, registration, notifications (8 tests) | conftest |
 | `tests/test_scenario.py` | End-to-end multi-agent lifecycle workflows (6 tests) | conftest |
-| `tests/test_hooks.py` | Claude Code hook handler tests (28 tests) | conftest, hooks |
+| `tests/test_hooks.py` | Claude Code hook handler tests (31 tests) | conftest, hooks |
+| `tests/test_setup.py` | Doctor, init, hook merge tests (8 tests) | cli_setup |
 | `pyproject.toml` | Package config, dependencies, entry points | — |
 | `.claude/settings.json` | Claude Code hooks: auto-lock, notify, Stele/Trammel bridge | — |
 
-**Total: 261 tests across 15 test files.**
+**Total: 272 tests across 16 test files.**
 
 ---
 
@@ -211,8 +233,9 @@ coordinationhub/
   assessment.py       — Suite loading, run_assessment, report, storage (~241 LOC)
   mcp_server.py       — HTTP MCP server (ThreadedHTTPServer, stdlib only, ~275 LOC)
   mcp_stdio.py        — Stdio MCP server (requires optional mcp package, ~175 LOC)
-  cli.py              — argparse CLI parser + lazy dispatch (~237 LOC)
-  cli_commands.py     — Re-exports all CLI handlers (~44 LOC)
+  cli_setup.py        — CLI: doctor, init, watch commands (~348 LOC)
+  cli.py              — argparse CLI parser + lazy dispatch (~267 LOC)
+  cli_commands.py     — Re-exports all CLI handlers (~51 LOC)
   cli_utils.py        — Shared CLI helpers: print_json, engine_from_args, close (~30 LOC)
   cli_agents.py       — Agent identity & lifecycle CLI commands (~180 LOC)
   cli_locks.py        — Document locking & coordination CLI commands (~210 LOC)
@@ -222,8 +245,8 @@ coordinationhub/
   conflict_log.py     — Conflict recording and querying (~52 LOC)
   notifications.py    — Change notification storage and retrieval (~94 LOC)
   hooks/
-    claude_code.py    — Claude Code hook: auto-locking, notifications, Stele/Trammel bridge (~310 LOC)
-  tests/              — 246 tests across 15 test files
+    claude_code.py    — Claude Code hook: auto-locking, notifications, agent ID mapping, error logging, session summary (~400 LOC)
+  tests/              — 272 tests across 16 test files
 ```
 
 **Module design principles:**
@@ -564,7 +587,10 @@ After running an assessment, `suggested_refinements` lists:
 
 ---
 
-## CLI Subcommands (31 total)
+## CLI Subcommands (34 total)
+
+### Setup & Diagnostics
+`init`, `doctor`, `watch`
 
 ### Server
 `serve`, `serve-mcp`
@@ -630,7 +656,7 @@ Air-gapped install: `pip install coordinationhub --no-deps`.
 
 ```bash
 python -m pytest tests/ -v
-# 261 tests across 15 test files
+# 272 tests across 16 test files
 ```
 
 ---

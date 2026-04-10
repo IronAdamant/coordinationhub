@@ -38,7 +38,8 @@ coordinationhub/
   assessment.py       — Suite loading, run_assessment, Markdown report, SQLite storage (~241 LOC)
   mcp_server.py       — HTTP MCP server (ThreadedHTTPServer, stdlib only, ~275 LOC)
   mcp_stdio.py        — Stdio MCP server (optional mcp package required, ~175 LOC)
-  cli.py              — argparse CLI parser + lazy dispatch (~237 LOC)
+  cli_setup.py        — CLI: doctor, init, watch commands (~348 LOC)
+  cli.py              — argparse CLI parser + lazy dispatch (~267 LOC)
   cli_commands.py     — Re-exports all CLI handlers from domain sub-modules (~44 LOC)
   cli_utils.py        — Shared CLI helpers: print_json, engine_from_args, close (~30 LOC)
   cli_agents.py       — Agent identity & lifecycle CLI commands (~180 LOC)
@@ -53,7 +54,7 @@ coordinationhub/
   notifications.py     — Change notification storage and retrieval (~94 LOC)
   hooks/
     __init__.py
-    claude_code.py    — Claude Code hook: auto-locking, notifications, agent ID mapping, Stele/Trammel bridge (~330 LOC)
+    claude_code.py    — Claude Code hook: auto-locking, notifications, agent ID mapping, Stele/Trammel bridge (~400 LOC)
   tests/              — pytest suite (256 tests, 15 test files)
 ```
 
@@ -86,7 +87,7 @@ coordinationhub/
 - **Claude Code agent ID mapping**: `agents.claude_agent_id` stores the raw hex ID that Claude Code assigns to spawned sub-agents. During SubagentStart, the hook stores this mapping. During PreToolUse/PostToolUse, `_resolve_agent_id` looks up the mapping to return the `hub.cc.*` child ID instead of the raw hex — preventing ghost agent duplication and hierarchy disconnection.
 - **`broadcast` message/action params removed**: The `message` and `action` positional params were removed (they were never stored). The `document_path` optional param remains — when provided, it is used to check for lock conflicts among acknowledged siblings and is not persisted.
 
-## 30 MCP Tools
+## 30 MCP Tools + 3 Setup Commands
 
 Identity: `register_agent`, `heartbeat`, `deregister_agent`, `list_agents`, `get_lineage`, `get_siblings`
 Locking: `acquire_lock`, `release_lock`, `refresh_lock`, `get_lock_status`, `list_locks`, `release_agent_locks`, `reap_expired_locks`, `reap_stale_agents`
@@ -100,6 +101,10 @@ Graph & Visibility (0.3.1): `load_coordination_spec`, `validate_graph`, `scan_pr
 ## Dev Commands
 
 ```bash
+# Setup & diagnostics
+coordinationhub init              # configure hooks, create DB
+coordinationhub doctor            # validate setup
+
 # HTTP server (stdlib only)
 coordinationhub serve --port 9877
 
@@ -112,6 +117,7 @@ coordinationhub status
 coordinationhub register <agent_id> --parent-id <parent>
 coordinationhub acquire-lock <path> <agent_id>
 coordinationhub get-conflicts
+coordinationhub watch             # live agent tree refresh
 ```
 
 ## Integration Notes
@@ -151,7 +157,7 @@ To disable hooks temporarily, add `"disableAllHooks": true` to `~/.claude/settin
 
 ```bash
 python -m pytest tests/ -v
-# 261 tests across 15 test files:
+# 272 tests across 16 test files:
 #   test_agent_lifecycle.py  — 21 tests
 #   test_locking.py          — 38 tests
 #   test_notifications.py    — 8 tests
@@ -165,7 +171,8 @@ python -m pytest tests/ -v
 #   test_cli.py              — 11 tests (argparse parser, subcommand dispatch)
 #   test_concurrent.py       — 8 tests (threading: locks, registration, notifications)
 #   test_scenario.py         — 6 tests (end-to-end multi-agent lifecycle workflows)
-#   test_hooks.py            — 28 tests (Claude Code hook handlers, agent ID mapping)
+#   test_hooks.py            — 31 tests (Claude Code hook handlers, agent ID mapping, session summary)
+#   test_setup.py            — 8 tests (doctor, init, hook merge)
 ```
 
 Always run the test suite before and after changes.

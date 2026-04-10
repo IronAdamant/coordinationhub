@@ -44,3 +44,8 @@ from .cli_vis import (
     cmd_assess,
     cmd_agent_tree,
 )
+from .cli_setup import (
+    cmd_doctor,
+    cmd_init,
+    cmd_watch,
+)
