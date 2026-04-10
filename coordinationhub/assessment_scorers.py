@@ -27,22 +27,29 @@ COORDINATION_PRIMITIVES = frozenset({
 # containing any of the mapped keywords (case-insensitive).
 _EVENT_RESPONSIBILITY_MAP: dict[frozenset[str], tuple[str, ...]] = {
     frozenset({"file_scan", "modified", "write"}): (
-        "write", "edit", "modify", "implement",
+        "write", "edit", "modify", "implement", "develop", "build",
+        "author", "produce", "create", "code", "fix",
     ),
     frozenset({"acquire_lock", "release_lock", "refresh_lock"}): (
-        "coordinate", "lock",
+        "coordinate", "lock", "manage", "orchestrate", "synchronize",
     ),
     frozenset({"get_notifications", "prune_notifications"}): (
-        "notify", "coordinate",
+        "notify", "coordinate", "monitor", "track", "observe",
     ),
     frozenset({"read", "search", "explore"}): (
-        "read", "review", "explore", "research",
+        "read", "review", "explore", "research", "investigate",
+        "analyze", "examine", "inspect", "audit", "quality",
     ),
     frozenset({"test", "run_tests"}): (
-        "test", "verify", "validate",
+        "test", "verify", "validate", "quality", "qa", "check",
+        "assert", "ensure",
     ),
     frozenset({"plan", "decompose"}): (
-        "plan", "decompose", "design",
+        "plan", "decompose", "design", "architect", "organize",
+        "prioritize", "schedule", "scope",
+    ),
+    frozenset({"deploy", "release", "publish"}): (
+        "deploy", "release", "publish", "ship", "deliver", "pipeline",
     ),
 }
 
@@ -63,6 +70,11 @@ def event_matches_responsibility(
                 if any(kw in resp_lower for kw in keywords):
                     return True
             return False
+    # Unknown event type: fall back to token overlap with responsibility text
+    tokens = set(event_type.lower().replace("_", " ").split())
+    for resp in responsibilities:
+        if tokens & set(resp.lower().split()):
+            return True
     return False
 
 

@@ -129,6 +129,7 @@ _INDEXES = [
     "CREATE INDEX IF NOT EXISTS idx_notif_time ON change_notifications(created_at)",
     "CREATE INDEX IF NOT EXISTS idx_notif_agent ON change_notifications(agent_id)",
     "CREATE INDEX IF NOT EXISTS idx_file_owner_agent ON file_ownership(assigned_agent_id)",
+    "CREATE INDEX IF NOT EXISTS idx_locks_expiry ON document_locks(document_path, locked_at, lock_ttl)",
 ]
 
 
@@ -252,6 +253,8 @@ def _create_connection(db_path: Path) -> sqlite3.Connection:
     conn.execute("PRAGMA synchronous=NORMAL")
     conn.execute("PRAGMA busy_timeout=30000")
     conn.execute("PRAGMA foreign_keys=ON")
+    conn.execute("PRAGMA cache_size=-8000")     # 8MB page cache
+    conn.execute("PRAGMA mmap_size=67108864")   # 64MB memory-mapped I/O
     conn.row_factory = sqlite3.Row
     return conn
 
