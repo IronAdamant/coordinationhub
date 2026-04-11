@@ -23,6 +23,7 @@ _HOOK_CMD_TEMPLATE = "{python} -m coordinationhub.hooks.claude_code"
 
 _HOOKS_CONFIG = {
     "SessionStart": [{"matcher": "", "hooks": [{"type": "command", "command": "", "timeout": 10, "statusMessage": "Registering with CoordinationHub"}]}],
+    "UserPromptSubmit": [{"matcher": "", "hooks": [{"type": "command", "command": "", "timeout": 5, "statusMessage": "Stamping current task"}]}],
     "PreToolUse": [{"matcher": "Write|Edit", "hooks": [{"type": "command", "command": "", "timeout": 5, "statusMessage": "Acquiring file lock"}]}],
     "PostToolUse": [
         {"matcher": "Write|Edit", "hooks": [{"type": "command", "command": "", "timeout": 5}]},
@@ -77,7 +78,7 @@ def _check_hooks_config() -> tuple[bool, str]:
     if not hooks:
         return False, "no hooks configured in settings.json"
 
-    required = {"SessionStart", "PreToolUse", "PostToolUse", "SubagentStart", "SubagentStop", "SessionEnd"}
+    required = {"SessionStart", "UserPromptSubmit", "PreToolUse", "PostToolUse", "SubagentStart", "SubagentStop", "SessionEnd"}
     present = set(hooks.keys()) & required
     missing = required - present
     if missing:

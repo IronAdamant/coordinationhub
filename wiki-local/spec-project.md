@@ -1,6 +1,6 @@
 # CoordinationHub — Multi-Agent Swarm Coordination MCP
 
-**Version:** <!-- GEN:version -->0.4.5<!-- /GEN -->
+**Version:** <!-- GEN:version -->0.4.6<!-- /GEN -->
 **Language:** Python 3.10+ (stdlib-only core — **zero third-party dependencies**, `mcp` optional for stdio only)
 **Transports:** stdio + HTTP (both, like Stele/Chisel/Trammel)
 
@@ -291,7 +291,7 @@ coordinationhub/
   cli_agents.py         — Agent identity and lifecycle CLI commands (~127 LOC)
   cli_commands.py       — CoordinationHub CLI command handlers (~48 LOC)
   cli_locks.py          — Document locking and coordination CLI commands (~158 LOC)
-  cli_setup.py          — CLI commands for setup and diagnostics: doctor, init, watch (~268 LOC)
+  cli_setup.py          — CLI commands for setup and diagnostics: doctor, init, watch (~269 LOC)
   cli_utils.py          — Shared CLI helper functions used by all cli_* sub-modules (~21 LOC)
   cli_vis.py            — Change awareness, audit, graph, and assessment CLI commands (~290 LOC)
   conflict_log.py       — Conflict recording and querying for CoordinationHub (~44 LOC)
@@ -310,11 +310,11 @@ coordinationhub/
   schemas.py            — Tool schemas for CoordinationHub — all 31 MCP tools (~675 LOC)
   hooks/
     __init__.py         — Hooks package — Claude Code integration via stdin/stdout event protocol (~1 LOC)
-    claude_code.py      — CoordinationHub hook for Claude Code (~352 LOC)
+    claude_code.py      — CoordinationHub hook for Claude Code (~378 LOC)
 ```
 <!-- /GEN -->
 
-`tests/` contains <!-- GEN:test-count -->320<!-- /GEN --> tests across 16 files plus `fixtures/claude_code_events/` (hook contract fixtures).
+`tests/` contains <!-- GEN:test-count -->328<!-- /GEN --> tests across 16 files plus `fixtures/claude_code_events/` (hook contract fixtures).
 
 Top-level project files: `pyproject.toml`, `coordination_spec.yaml`/`.json` (example specs), `README.md`, `CLAUDE.md`, `COMPLETE_PROJECT_DOCUMENTATION.md`, `LLM_Development.md`, and `wiki-local/` (this spec, glossary, index).
 
