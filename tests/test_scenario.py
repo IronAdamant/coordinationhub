@@ -470,3 +470,140 @@ class TestHookLevelMultiAgentScenario:
             )
         finally:
             engine.close()
+
+    def test_coordination_graph_and_assessment_pipeline(self, tmp_path):
+        """End-to-end: load a coordination graph during a hook-driven
+        multi-agent session, then run assessment on a trace built from
+        that session's events.
+
+        Closes Review Thirteen gaps 5 (assessment scoring) and 6
+        (coordination graphs): both features existed with unit coverage
+        but had never been exercised together through the real hook
+        entry points. This test proves the full pipeline — spec load,
+        role assignment, hook-driven registrations/writes, trace
+        construction, and assessment scoring — works in one flow.
+        """
+        import json as _json
+
+        from coordinationhub.hooks.claude_code import (
+            handle_session_start, handle_subagent_start, handle_post_write,
+            handle_subagent_stop, _get_engine, _session_agent_id,
+        )
+
+        cwd = self._git_dir(tmp_path)
+        session_id = "sess-pipeline-cafe0001"
+
+        # 1. Drop a coordination spec inside the project root so that
+        #    load_coordination_spec() can auto-discover it.
+        spec_path = tmp_path / "coordination_spec.json"
+        spec_path.write_text(_json.dumps({
+            "agents": [
+                {"id": "planner", "role": "plan",
+                 "responsibilities": ["decompose", "plan"]},
+                {"id": "builder", "role": "implement",
+                 "responsibilities": ["write code", "modify files", "build"]},
+            ],
+            "handoffs": [
+                {"from": "planner", "to": "builder",
+                 "condition": "plan approved"},
+            ],
+            "assessment": {"metrics": [
+                "role_stability", "handoff_latency",
+                "outcome_verifiability", "protocol_adherence",
+                "spawn_propagation",
+            ]},
+        }))
+
+        # 2. SessionStart registers the root agent; then load the graph.
+        handle_session_start(self._session_event(cwd, session_id))
+        engine = _get_engine(cwd)
+        try:
+            load_result = engine.load_coordination_spec(str(spec_path))
+            assert load_result["loaded"] is True
+            assert "planner" in load_result["agents"]
+            assert "builder" in load_result["agents"]
+
+            # 3. Spawn two sub-agents via SubagentStart and have each
+            #    write a file through handle_post_write (drives the hook
+            #    path end-to-end).
+            raw_a = "a" * 17
+            raw_b = "b" * 17
+            handle_subagent_start(self._subagent_start_event(
+                cwd, session_id, raw_a, desc="planner agent"))
+            handle_subagent_start(self._subagent_start_event(
+                cwd, session_id, raw_b, desc="builder agent"))
+
+            file_a = str(tmp_path / "plan.md")
+            file_b = str(tmp_path / "impl.py")
+            handle_post_write(self._write_event(
+                cwd, session_id, raw_a, file_a, pre=False))
+            handle_post_write(self._write_event(
+                cwd, session_id, raw_b, file_b, pre=False))
+
+            # 4. Resolve the hub.cc.* IDs while the agents are still
+            #    active (find_agent_by_claude_id filters by status).
+            hub_a = engine.find_agent_by_claude_id(raw_a)
+            hub_b = engine.find_agent_by_claude_id(raw_b)
+            assert hub_a is not None
+            assert hub_b is not None
+
+            # Deregister both via SubagentStop — must transition to stopped.
+            handle_subagent_stop(self._subagent_stop_event(cwd, session_id, raw_a))
+            handle_subagent_stop(self._subagent_stop_event(cwd, session_id, raw_b))
+
+            # 5. Build a trace from hook-observed state. Each notify_change
+            #    becomes a 'modified' event; each file write adds a matching
+            #    'lock' to make outcome_verifiability non-vacuous. Events
+            #    mirror what assessment_scorers expect.
+            trace = {
+                "trace_id": "pipeline-e2e",
+                "events": [
+                    {"type": "register", "agent_id": hub_a, "graph_id": "planner"},
+                    {"type": "register", "agent_id": hub_b, "graph_id": "builder"},
+                    {"type": "lock", "path": file_a, "agent_id": hub_a},
+                    {"type": "modified", "path": file_a, "agent_id": hub_a},
+                    {"type": "handoff", "from": "planner", "to": "builder",
+                     "condition": "plan approved"},
+                    {"type": "lock", "path": file_b, "agent_id": hub_b},
+                    {"type": "modified", "path": file_b, "agent_id": hub_b},
+                ],
+            }
+            suite_path = tmp_path / "pipeline_suite.json"
+            suite_path.write_text(_json.dumps({
+                "name": "pipeline_e2e",
+                "traces": [trace],
+            }))
+
+            # 6. Run the assessment. This exercises the full runner:
+            #    loading the suite, scoring against the loaded graph,
+            #    and persisting results to SQLite.
+            result = engine.run_assessment(str(suite_path), format="json")
+            assert "error" not in result
+            assert result["graph_loaded"] is True
+            assert result["suite_name"] == "pipeline_e2e"
+            # All five metrics should have been scored.
+            metric_names = set(result["metrics"].keys())
+            expected_metrics = {
+                "role_stability", "handoff_latency", "outcome_verifiability",
+                "protocol_adherence", "spawn_propagation",
+            }
+            assert expected_metrics.issubset(metric_names), (
+                f"Missing metrics: {expected_metrics - metric_names}"
+            )
+            # Overall score is a fraction in [0, 1] and the trace should
+            # produce at least some non-zero coverage given the events.
+            assert 0.0 <= result["overall_score"] <= 1.0
+            assert result["overall_score"] > 0.0, (
+                f"Expected non-zero score, got {result['overall_score']}"
+            )
+
+            # 7. The scored result should have been persisted.
+            with engine._connect() as conn:
+                rows = conn.execute(
+                    "SELECT suite_name, metric FROM assessment_results "
+                    "WHERE suite_name = ?",
+                    ("pipeline_e2e",),
+                ).fetchall()
+            assert len(rows) == len(expected_metrics)
+        finally:
+            engine.close()

@@ -1,7 +1,28 @@
 # CoordinationHub — Complete Project Documentation
 
-**Version:** <!-- GEN:version -->0.4.3<!-- /GEN -->
+**Version:** <!-- GEN:version -->0.4.4<!-- /GEN -->
 **Last updated:** 2026-04-11
+
+## v0.4.4 Changelog — Close Review Thirteen (Assessment + Graph Pipeline Test)
+
+### Context
+
+Review Thirteen flagged six gaps from a 15-sub-agent RecipeLab run. Four were code bugs that had already been closed in earlier releases (SubagentStop status transition in v0.3.8, background dedup in v0.3.8, same-file contention test in v0.4.1, and file-ownership population in v0.4.0). The remaining two — assessment scoring and coordination-graph integration — had unit coverage but had never been exercised together through the real hook entry points.
+
+### Added
+
+- `test_coordination_graph_and_assessment_pipeline` in `tests/test_scenario.py` — end-to-end pipeline test: writes a coordination spec, loads it via `engine.load_coordination_spec`, spawns two sub-agents through `handle_subagent_start`/`handle_post_write`, resolves their `hub.cc.*` IDs via `find_agent_by_claude_id`, deregisters via `handle_subagent_stop`, builds a trace from hook-visible events, runs `engine.run_assessment`, and verifies all five metrics scored + results persisted to `assessment_results`. Closes Review Thirteen gaps 5 and 6 with a single test that fails locally on regression instead of only in a live review.
+
+### Changed
+
+- `pyproject.toml`: 0.4.3 → 0.4.4.
+- Tests: 308 → 309 collected (308 passing + 1 skipped). `test_scenario.py`: 10 → 11.
+
+### Not changed
+
+- `coordinationhub/` source unchanged from v0.4.3. The four code gaps were already closed. The v0.4.4 delta is a scenario-level safety net, not a bug fix.
+
+---
 
 ## v0.4.3 Changelog — Review Fourteen Root Cause
 
@@ -243,7 +264,7 @@ keep it in sync; CI checks for drift on every push.
 | `coordinationhub/schemas.py` | 645 | Tool schemas for CoordinationHub — all 30 MCP tools |
 <!-- /GEN -->
 
-**Total: <!-- GEN:test-count -->308<!-- /GEN --> tests across 16 test files.**
+**Total: <!-- GEN:test-count -->309<!-- /GEN --> tests across 16 test files.**
 
 ---
 
@@ -285,7 +306,7 @@ coordinationhub/
 ```
 <!-- /GEN -->
 
-The `tests/` directory holds <!-- GEN:test-count -->308<!-- /GEN --> tests across 16 files,
+The `tests/` directory holds <!-- GEN:test-count -->309<!-- /GEN --> tests across 16 files,
 plus `tests/fixtures/claude_code_events/` for hook contract fixtures.
 
 **Module design principles:**
@@ -732,7 +753,7 @@ Air-gapped install: `pip install coordinationhub --no-deps`.
 
 ```bash
 python -m pytest tests/ -v
-# <!-- GEN:test-count -->308<!-- /GEN --> tests across 16 test files
+# <!-- GEN:test-count -->309<!-- /GEN --> tests across 16 test files
 ```
 
 ---

@@ -1,6 +1,6 @@
 # CoordinationHub — Multi-Agent Swarm Coordination MCP
 
-**Version:** <!-- GEN:version -->0.4.3<!-- /GEN -->
+**Version:** <!-- GEN:version -->0.4.4<!-- /GEN -->
 **Language:** Python 3.10+ (stdlib-only core — **zero third-party dependencies**, `mcp` optional for stdio only)
 **Transports:** stdio + HTTP (both, like Stele/Chisel/Trammel)
 
@@ -314,7 +314,7 @@ coordinationhub/
 ```
 <!-- /GEN -->
 
-`tests/` contains <!-- GEN:test-count -->308<!-- /GEN --> tests across 16 files plus `fixtures/claude_code_events/` (hook contract fixtures).
+`tests/` contains <!-- GEN:test-count -->309<!-- /GEN --> tests across 16 files plus `fixtures/claude_code_events/` (hook contract fixtures).
 
 Top-level project files: `pyproject.toml`, `coordination_spec.yaml`/`.json` (example specs), `README.md`, `CLAUDE.md`, `COMPLETE_PROJECT_DOCUMENTATION.md`, `LLM_Development.md`, and `wiki-local/` (this spec, glossary, index).
 
