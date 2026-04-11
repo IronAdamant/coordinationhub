@@ -1,0 +1,10 @@
+{
+  "hook_event_name": "PostToolUse",
+  "tool_name": "Write",
+  "session_id": "1bf3797d-a5f2-4c8b-b9d1-3e7f8a2c4d6e",
+  "cwd": "/home/user/project",
+  "tool_input": {
+    "file_path": "/home/user/project/src/app.js",
+    "content": "// generated content"
+  }
+}

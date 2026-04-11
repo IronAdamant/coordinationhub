@@ -125,9 +125,30 @@ def refresh_lock(
 def reap_expired_locks(
     conn: sqlite3.Connection,
     table: str,
+    agent_grace_seconds: float = 0.0,
 ) -> dict[str, int]:
-    """Clear all expired locks. Uses a single atomic DELETE statement."""
+    """Clear expired locks.
+
+    When *agent_grace_seconds* > 0, locks held by agents with a recent
+    heartbeat are implicitly refreshed instead of reaped — the TTL acts
+    as a fallback for crashed agents, not a hard deadline for active
+    ones.  This prevents locks from expiring mid-operation when the
+    model takes longer than the TTL to generate output between
+    PreToolUse and PostToolUse.
+    """
     now = time.time()
+    if agent_grace_seconds > 0:
+        # Implicitly refresh expired locks held by agents with recent heartbeats
+        conn.execute(
+            f"UPDATE {table} SET locked_at = ? "
+            f"WHERE locked_at + lock_ttl < ? "
+            f"AND locked_by IN ("
+            f"  SELECT agent_id FROM agents "
+            f"  WHERE status = 'active' AND last_heartbeat > ?"
+            f")",
+            (now, now, now - agent_grace_seconds),
+        )
+    # Delete remaining expired locks (crashed/stopped agents, or no grace)
     cursor = conn.execute(
         f"DELETE FROM {table} WHERE locked_at + lock_ttl < ?",
         (now,),

@@ -14,26 +14,15 @@ Zero third-party dependencies in core. Works standalone or alongside Stele, Chis
 coordinationhub/
   __init__.py         — Package init, exports CoordinationEngine, CoordinationHubMCPServer
   core.py             — CoordinationEngine: identity, change, audit, graph/visibility methods (~285 LOC)
-  core_locking.py     — LockingMixin: all locking + coordination methods (~260 LOC)
-  _storage.py        — CoordinationStorage: SQLite pool, path resolution, lifecycle (~131 LOC)
+  core_locking.py     — LockingMixin: all locking + coordination methods (~265 LOC)
+  _storage.py         — CoordinationStorage: SQLite pool, path resolution, lifecycle (~131 LOC)
   paths.py            — Project-root detection and path normalization (~47 LOC)
   context.py          — Context bundle builder for register_agent responses (~97 LOC)
-  schemas.py          — Schema aggregator, re-exports TOOL_SCHEMAS (~31 LOC)
-  schemas_identity.py  — Identity & Registration schemas (~123 LOC)
-  schemas_locking.py    — Document Locking schemas (~165 LOC)
-  schemas_coordination.py — Coordination Action schemas (~59 LOC)
-  schemas_change.py     — Change Awareness schemas (~77 LOC)
-  schemas_audit.py     — Audit & Status schemas (~60 LOC)
-  schemas_visibility.py — Graph & Visibility schemas (8 tools, ~156 LOC)
+  schemas.py          — All 30 MCP tool schemas, organized by functional group (~590 LOC, pure data)
   dispatch.py         — Tool dispatch table (~49 LOC)
-  graphs.py           — Graph aggregator: singleton + disk loading + validation (~146 LOC)
-  graph_validate.py   — Pure validation functions (~131 LOC)
-  graph_loader.py     — File loading (YAML/JSON) and spec auto-detection (~49 LOC)
-  graph.py            — CoordinationGraph in-memory object (~66 LOC)
-  visibility.py       — Thin re-export aggregator for scan/agent_status/responsibilities (~15 LOC)
-  scan.py             — File ownership scan, nearest-ancestor assignment (~207 LOC)
+  graphs.py           — Coordination graph: validator, loader, CoordinationGraph, singleton, tools (~330 LOC)
+  scan.py             — File ownership scan, role-based assignment, store_responsibilities (~240 LOC)
   agent_status.py     — Agent status query, file map, rich agent tree with locks/warnings (~290 LOC)
-  responsibilities.py  — Agent role/responsibilities storage from graph (~35 LOC)
   assessment_scorers.py — 5 metric scorers + shared event_matches_responsibility helper (~315 LOC)
   assessment.py       — Suite loading, run_assessment, Markdown report, SQLite storage (~241 LOC)
   mcp_server.py       — HTTP MCP server (ThreadedHTTPServer, stdlib only, ~275 LOC)
@@ -46,28 +35,27 @@ coordinationhub/
   cli_locks.py        — Document locking & coordination CLI commands (~210 LOC)
   cli_vis.py          — Change awareness, audit, graph, assessment CLI + agent-tree (~340 LOC)
   db.py               — SQLite schema (canonical) + schema versioning (v3) + thread-local ConnectionPool (~295 LOC)
-  agent_registry.py   — Thin re-export aggregator for registry_ops/registry_query (~23 LOC)
-  registry_ops.py     — Agent lifecycle ops: register, heartbeat, deregister, find_by_claude_id (~145 LOC)
-  registry_query.py   — Agent registry queries: list, lineage, siblings, reaping (~152 LOC)
-  lock_ops.py         — Shared lock primitives: acquire, release, refresh, region overlap (~175 LOC)
+  agent_registry.py   — Agent lifecycle: register, heartbeat, deregister, find_by_claude_id, list, lineage, siblings, reap_stale (~290 LOC)
+  lock_ops.py         — Shared lock primitives: acquire, release, refresh, region overlap, smart reap (~195 LOC)
   conflict_log.py     — Conflict recording and querying (~52 LOC)
-  notifications.py     — Change notification storage and retrieval (~94 LOC)
+  notifications.py    — Change notification storage and retrieval (~94 LOC)
   hooks/
     __init__.py
-    claude_code.py    — Claude Code hook: auto-locking, notifications, agent ID mapping, Stele/Trammel bridge (~428 LOC)
-  tests/              — pytest suite (256 tests, 15 test files)
+    claude_code.py    — Claude Code hook: auto-locking, ownership claim, Stele/Trammel bridge, event capture (~450 LOC)
+  tests/              — pytest suite (290 tests, 16 test files)
+  tests/fixtures/claude_code_events/ — Contract test fixtures for hook event shapes
 ```
 
 ## Module Design
 
-- **Zero internal deps in sub-modules**: `agent_registry.py`, `lock_ops.py`, `conflict_log.py`, `notifications.py`, `visibility.py` all receive `connect: ConnectFn` from the caller. They have no internal imports from each other.
+- **Zero internal deps in sub-modules**: `agent_registry.py`, `lock_ops.py`, `conflict_log.py`, `notifications.py`, `scan.py`, `agent_status.py` all receive `connect: ConnectFn` from the caller. They have no internal imports from each other.
 - **LockingMixin in `core_locking.py`**: All locking and coordination methods (`acquire_lock`, `release_lock`, `refresh_lock`, `get_lock_status`, `list_locks`, `release_agent_locks`, `reap_expired_locks`, `reap_stale_agents`, `broadcast`, `wait_for_locks`) live in `LockingMixin`. `CoordinationEngine` inherits from `LockingMixin`, keeping `core.py` focused on identity, change awareness, audit, and graph/visibility.
 - **Storage layer isolated in `_storage.py`**: `CoordinationStorage` owns the SQLite pool, path resolution, and schema init. Both `core.py` and CLI entry points depend on it.
 - **Canonical schemas in `db.py` only**: All table definitions and indexes live in `db.py._SCHEMAS` and `db.py._INDEXES`. Sub-modules do not define their own schemas — `init_schema()` creates everything.
 - **Thread-local connection pool**: `db.py` provides a `ConnectionPool` that gives each thread its own reused SQLite connection. WAL mode enabled, 30s busy timeout.
 - **Thread-safe ID generation**: `_storage.py` uses `threading.Lock` + in-memory sequence counters to guarantee unique agent IDs even under concurrent `generate_agent_id()` calls.
 - **CLI helpers consolidated**: `cli_utils.py` provides `print_json`, `engine_from_args`, and `close` shared by all `cli_*.py` modules.
-- **Dispatch separation**: `schemas.py` (schemas only) and `dispatch.py` (dispatch table) are separate modules shared by both HTTP and stdio servers.
+- **Dispatch separation**: `schemas.py` (all 30 tool schemas as pure data) and `dispatch.py` (dispatch table) are separate modules shared by both HTTP and stdio servers.
 - **Project root detection**: `detect_project_root()` in `paths.py` walks up from CWD looking for `.git`. Used by `CoordinationEngine.__init__`.
 
 ## Key Design Decisions
@@ -87,6 +75,9 @@ coordinationhub/
 - **Claude Code agent ID mapping**: `agents.claude_agent_id` stores the raw hex ID that Claude Code assigns to spawned sub-agents. During SubagentStart, the hook stores this mapping. During PreToolUse/PostToolUse, `_resolve_agent_id` looks up the mapping to return the `hub.cc.*` child ID instead of the raw hex — preventing ghost agent duplication and hierarchy disconnection.
 - **SubagentStop resolves via claude_agent_id**: `handle_subagent_stop` uses `_resolve_agent_id` (not `_subagent_id`) to find the correct `hub.cc.*` child ID from the raw Claude hex ID. This ensures `deregister_agent` sets `status='stopped'` on the correct agent record. Falls back to `_subagent_id` derivation if no mapping exists.
 - **Background agent dedup**: `handle_subagent_start` checks `find_agent_by_claude_id` before generating a new child ID. If an agent with the same `claude_agent_id` already exists (e.g., `run_in_background` agents that fire SubagentStart twice), the existing agent is heartbeated instead of creating a duplicate.
+- **Smart lock reap**: `reap_expired_locks(agent_grace_seconds=N)` implicitly refreshes expired locks held by agents with a recent heartbeat — the TTL is a fallback for crashed agents, not a hard deadline. The hook passes `agent_grace_seconds=120.0` before every acquire, preventing locks from expiring mid-operation when the model takes longer than the TTL between PreToolUse and PostToolUse.
+- **First-write-wins file ownership**: `handle_post_write` calls `engine.claim_file_ownership(path, agent_id)` using `INSERT OR IGNORE` — the first agent to write a file becomes its owner. The `scan_project` tool remains as a bulk-reassign mechanism for graph-role-based ownership.
+- **Contract test fixtures**: `tests/fixtures/claude_code_events/*.json` capture the minimum event shape each hook handler depends on. The hook's `COORDINATIONHUB_CAPTURE_EVENTS=1` env var saves real events to `~/.coordinationhub/event_snapshots/` for updating fixtures.
 - **`broadcast` message/action params removed**: The `message` and `action` positional params were removed (they were never stored). The `document_path` optional param remains — when provided, it is used to check for lock conflicts among acknowledged siblings and is not persisted.
 
 ## 30 MCP Tools + 3 Setup Commands
@@ -159,9 +150,9 @@ To disable hooks temporarily, add `"disableAllHooks": true` to `~/.claude/settin
 
 ```bash
 python -m pytest tests/ -v
-# 274 tests across 16 test files:
+# 290 tests across 16 test files:
 #   test_agent_lifecycle.py  — 21 tests
-#   test_locking.py          — 38 tests
+#   test_locking.py          — 40 tests (includes smart reap)
 #   test_notifications.py    — 8 tests
 #   test_conflicts.py        — 16 tests
 #   test_coordination.py     — 7 tests
@@ -173,7 +164,7 @@ python -m pytest tests/ -v
 #   test_cli.py              — 11 tests (argparse parser, subcommand dispatch)
 #   test_concurrent.py       — 8 tests (threading: locks, registration, notifications)
 #   test_scenario.py         — 6 tests (end-to-end multi-agent lifecycle workflows)
-#   test_hooks.py            — 33 tests (Claude Code hook handlers, agent ID mapping, session summary)
+#   test_hooks.py            — 47 tests (hook handlers, agent ID mapping, file ownership, event contract)
 #   test_setup.py            — 8 tests (doctor, init, hook merge)
 ```
 

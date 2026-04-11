@@ -20,7 +20,8 @@ from . import conflict_log as _cl
 from . import notifications as _cn
 from . import lock_ops as _lo
 from . import graphs as _g
-from . import visibility as _v
+from . import agent_status as _v
+from . import scan as _scan
 from . import assessment as _assess
 from ._storage import CoordinationStorage
 from .context import build_context_bundle
@@ -100,7 +101,7 @@ class CoordinationEngine(LockingMixin):
             if graph:
                 agent_def = graph.agent(graph_agent_id)
                 if agent_def:
-                    _v.store_responsibilities(
+                    _scan.store_responsibilities(
                         self._connect,
                         agent_id,
                         graph_agent_id,
@@ -149,6 +150,21 @@ class CoordinationEngine(LockingMixin):
         return _cn.notify_change(
             self._connect, norm_path, change_type, agent_id, str(self._storage.project_root),
         )
+
+    def claim_file_ownership(self, document_path: str, agent_id: str) -> None:
+        """Assign file ownership on first write (INSERT OR IGNORE).
+
+        Subsequent writes by other agents do not overwrite.  The
+        ``scan_project`` tool can reassign based on graph roles later.
+        """
+        norm_path = normalize_path(document_path, self._storage.project_root)
+        with self._connect() as conn:
+            conn.execute(
+                "INSERT OR IGNORE INTO file_ownership "
+                "(document_path, assigned_agent_id, assigned_at, last_claimed_by) "
+                "VALUES (?, ?, ?, ?)",
+                (norm_path, agent_id, time.time(), agent_id),
+            )
 
     def get_notifications(
         self, since: float | None = None, exclude_agent: str | None = None, limit: int = 100,
@@ -240,7 +256,7 @@ class CoordinationEngine(LockingMixin):
         if extensions is not None and not extensions:
             return {"scanned": 0, "owned": 0, "error": "extensions list cannot be empty"}
         graph = _g.get_graph()
-        return _v.scan_project_tool(self._connect, self._storage.project_root, worktree_root, extensions, graph)
+        return _scan.scan_project_tool(self._connect, self._storage.project_root, worktree_root, extensions, graph)
 
     def get_agent_status(self, agent_id: str) -> dict[str, Any]:
         return _v.get_agent_status_tool(self._connect, agent_id, self.get_lineage)

@@ -210,9 +210,12 @@ class LockingMixin:
             result = _lo.release_agent_locks(conn, "document_locks", agent_id, delete=True)
         return result
 
-    def reap_expired_locks(self) -> dict[str, Any]:
+    def reap_expired_locks(self, agent_grace_seconds: float = 0.0) -> dict[str, Any]:
         with self._connect() as conn:
-            result = _lo.reap_expired_locks(conn, "document_locks")
+            result = _lo.reap_expired_locks(
+                conn, "document_locks",
+                agent_grace_seconds=agent_grace_seconds,
+            )
         return result
 
     def reap_stale_agents(self, timeout: float = 600.0) -> dict[str, Any]:

@@ -268,6 +268,53 @@ class TestPostWrite:
         result = handle_post_write(event)
         assert result is None
 
+    def test_post_write_claims_file_ownership(self, hook_cwd):
+        """First write to a file populates file_ownership table."""
+        handle_session_start(_make_event("SessionStart", cwd=hook_cwd))
+        handle_post_write(_make_event(
+            "PostToolUse", tool_name="Write", cwd=hook_cwd,
+            tool_input={"file_path": "/tmp/test_ownership.py"}))
+
+        from coordinationhub.hooks.claude_code import _get_engine
+        engine = _get_engine(hook_cwd)
+        try:
+            with engine._connect() as conn:
+                row = conn.execute(
+                    "SELECT assigned_agent_id FROM file_ownership WHERE document_path LIKE '%test_ownership%'"
+                ).fetchone()
+                assert row is not None, "file_ownership should be populated"
+                assert row["assigned_agent_id"].startswith("hub.cc.")
+        finally:
+            engine.close()
+
+    def test_file_ownership_first_write_wins(self, hook_cwd):
+        """Second agent writing same file does not overwrite ownership."""
+        session_a = "sess-aaaa11111111"
+        session_b = "sess-bbbb22222222"
+        handle_session_start(_make_event("SessionStart", cwd=hook_cwd, session_id=session_a))
+        handle_session_start(_make_event("SessionStart", cwd=hook_cwd, session_id=session_b))
+
+        # Agent A writes first
+        handle_post_write(_make_event(
+            "PostToolUse", tool_name="Write", cwd=hook_cwd, session_id=session_a,
+            tool_input={"file_path": "/tmp/test_fww.py"}))
+        # Agent B writes same file later
+        handle_post_write(_make_event(
+            "PostToolUse", tool_name="Write", cwd=hook_cwd, session_id=session_b,
+            tool_input={"file_path": "/tmp/test_fww.py"}))
+
+        from coordinationhub.hooks.claude_code import _get_engine, _session_agent_id
+        engine = _get_engine(hook_cwd)
+        try:
+            with engine._connect() as conn:
+                row = conn.execute(
+                    "SELECT assigned_agent_id FROM file_ownership WHERE document_path LIKE '%test_fww%'"
+                ).fetchone()
+                assert row is not None
+                assert row["assigned_agent_id"] == _session_agent_id(session_a)
+        finally:
+            engine.close()
+
 
 class TestSubagentLifecycle:
     def test_subagent_start_registers(self, hook_cwd):
@@ -438,3 +485,54 @@ class TestBridges:
                            tool_input={"step_id": "step_1", "plan_id": "plan_abc"})
         result = handle_post_trammel_claim(event)
         assert result is None
+
+
+# ---------------------------------------------------------------------------
+# Contract tests — validate handlers against fixture event shapes
+# ---------------------------------------------------------------------------
+
+_FIXTURE_DIR = Path(__file__).parent / "fixtures" / "claude_code_events"
+
+# Map fixture filename stems to (handler, requires_session_first)
+_FIXTURE_HANDLERS = {
+    "SessionStart": (handle_session_start, False),
+    "PreToolUse_Write": (handle_pre_write, True),
+    "PostToolUse_Write": (handle_post_write, True),
+    "SubagentStart": (handle_subagent_start, True),
+    "SubagentStop": (handle_subagent_stop, True),
+    "SessionEnd": (handle_session_end, True),
+}
+
+
+class TestEventContract:
+    """Validate hook handlers accept the documented event shape without errors.
+
+    Fixtures in tests/fixtures/claude_code_events/ represent the minimum
+    contract CoordinationHub depends on from Claude Code.  Replace these
+    with real captured events (COORDINATIONHUB_CAPTURE_EVENTS=1) to
+    catch schema drift.
+    """
+
+    @pytest.fixture(params=list(_FIXTURE_HANDLERS.keys()))
+    def event_and_handler(self, request, hook_cwd):
+        fixture_path = _FIXTURE_DIR / f"{request.param}.json"
+        if not fixture_path.exists():
+            pytest.skip(f"No fixture for {request.param}")
+        event = json.loads(fixture_path.read_text())
+        event["cwd"] = hook_cwd  # redirect to test dir
+        handler, needs_session = _FIXTURE_HANDLERS[request.param]
+        if needs_session:
+            handle_session_start({"hook_event_name": "SessionStart",
+                                  "session_id": event.get("session_id", ""),
+                                  "cwd": hook_cwd})
+        return event, handler
+
+    def test_required_fields_present(self, event_and_handler):
+        event, _ = event_and_handler
+        assert "hook_event_name" in event
+        assert "session_id" in event
+
+    def test_handler_does_not_crash(self, event_and_handler):
+        """Handler processes the fixture event without raising."""
+        event, handler = event_and_handler
+        handler(event)  # should not raise

@@ -276,6 +276,31 @@ class TestLockReaping:
         result = engine.reap_expired_locks()
         assert result["reaped"] >= 1
 
+    def test_reap_spares_active_agent_locks(self, engine, registered_agent):
+        """Expired locks held by agents with a recent heartbeat are spared."""
+        engine.acquire_lock("/active.txt", registered_agent, ttl=0.01)
+        time.sleep(0.02)
+        # Lock is expired, but agent has a fresh heartbeat
+        engine.heartbeat(registered_agent)
+        result = engine.reap_expired_locks(agent_grace_seconds=120.0)
+        assert result["reaped"] == 0
+        # Lock still exists
+        status = engine.get_lock_status("/active.txt")
+        assert status["locked"] is True
+
+    def test_reap_removes_crashed_agent_locks(self, engine, registered_agent):
+        """Expired locks from agents with stale heartbeats are reaped normally."""
+        engine.acquire_lock("/stale.txt", registered_agent, ttl=0.01)
+        time.sleep(0.02)
+        # Simulate stale agent: set heartbeat far in the past
+        with engine._connect() as conn:
+            conn.execute(
+                "UPDATE agents SET last_heartbeat = 0 WHERE agent_id = ?",
+                (registered_agent,),
+            )
+        result = engine.reap_expired_locks(agent_grace_seconds=120.0)
+        assert result["reaped"] >= 1
+
     def test_release_agent_locks(self, engine, two_agents):
         engine.acquire_lock("/a.txt", two_agents["child"])
         engine.acquire_lock("/b.txt", two_agents["child"])
