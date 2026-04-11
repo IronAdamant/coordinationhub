@@ -90,6 +90,17 @@ _SCHEMAS = {
             updated_at      REAL NOT NULL
         )
     """,
+    "pending_subagent_tasks": """
+        CREATE TABLE IF NOT EXISTS pending_subagent_tasks (
+            tool_use_id    TEXT PRIMARY KEY,
+            session_id     TEXT NOT NULL,
+            subagent_type  TEXT NOT NULL,
+            description    TEXT,
+            prompt         TEXT,
+            created_at     REAL NOT NULL,
+            consumed_at    REAL
+        )
+    """,
     "file_ownership": """
         CREATE TABLE IF NOT EXISTS file_ownership (
             document_path     TEXT PRIMARY KEY,
@@ -125,6 +136,7 @@ _INDEXES = [
     "CREATE INDEX IF NOT EXISTS idx_file_owner_agent ON file_ownership(assigned_agent_id)",
     "CREATE INDEX IF NOT EXISTS idx_locks_expiry ON document_locks(document_path, locked_at, lock_ttl)",
     "CREATE INDEX IF NOT EXISTS idx_agents_claude_id ON agents(claude_agent_id)",
+    "CREATE INDEX IF NOT EXISTS idx_pending_subagent_session_type ON pending_subagent_tasks(session_id, subagent_type, consumed_at)",
 ]
 
 

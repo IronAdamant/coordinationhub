@@ -12,11 +12,13 @@ from unittest.mock import patch
 from coordinationhub.hooks.claude_code import (
     _session_agent_id,
     _subagent_id,
+    _subagent_type,
     _resolve_agent_id,
     _log_error,
     handle_session_start,
     handle_user_prompt_submit,
     handle_pre_write,
+    handle_pre_agent,
     handle_post_write,
     handle_subagent_start,
     handle_subagent_stop,
@@ -207,6 +209,169 @@ class TestSessionStart:
         event = _make_event("SessionStart", cwd=hook_cwd)
         handle_session_start(event)
         handle_session_start(event)  # should not raise
+
+
+class TestPreAgentAndSubagentShape:
+    """End-to-end tests for the PreToolUse[Agent] → SubagentStart chain.
+
+    Real Claude Code SubagentStart events don't carry the task
+    description — only the preceding PreToolUse[Agent] event does. The
+    hook stashes the description in ``pending_subagent_tasks`` on
+    PreToolUse and pops it on SubagentStart. These tests validate the
+    real event shape (discovered via live capture 2026-04-11) and the
+    FIFO correlation between the two events.
+    """
+
+    def _current_task(self, hook_cwd, claude_id):
+        from coordinationhub.hooks.claude_code import _get_engine
+        engine = _get_engine(hook_cwd)
+        try:
+            with engine._connect() as conn:
+                row = conn.execute(
+                    "SELECT a.agent_id, ar.current_task "
+                    "FROM agents a "
+                    "LEFT JOIN agent_responsibilities ar ON a.agent_id = ar.agent_id "
+                    "WHERE a.claude_agent_id = ?",
+                    (claude_id,),
+                ).fetchone()
+                if row is None:
+                    return None, None
+                return row["agent_id"], row["current_task"]
+        finally:
+            engine.close()
+
+    def _pre_agent_event(self, cwd, session_id, tool_use_id, description,
+                         subagent_type="Explore"):
+        return {
+            "hook_event_name": "PreToolUse",
+            "tool_name": "Agent",
+            "session_id": session_id,
+            "cwd": cwd,
+            "tool_use_id": tool_use_id,
+            "tool_input": {
+                "description": description,
+                "prompt": "whatever",
+                "subagent_type": subagent_type,
+            },
+        }
+
+    def _real_start_event(self, cwd, session_id, claude_id, agent_type="Explore"):
+        """Real Claude Code SubagentStart shape: agent_id + agent_type top-level."""
+        return {
+            "hook_event_name": "SubagentStart",
+            "session_id": session_id,
+            "cwd": cwd,
+            "agent_id": claude_id,
+            "agent_type": agent_type,
+        }
+
+    def test_pre_agent_stashes_description_for_subagent_start(self, hook_cwd):
+        """PreToolUse[Agent] description is applied when the matching
+        SubagentStart fires."""
+        session_id = "sess-pre-agent001"
+        handle_session_start(_make_event("SessionStart", cwd=hook_cwd, session_id=session_id))
+
+        handle_pre_agent(self._pre_agent_event(
+            hook_cwd, session_id, "toolu_abc123", "Find the login bug",
+        ))
+        handle_subagent_start(self._real_start_event(
+            hook_cwd, session_id, "c" * 17,
+        ))
+
+        agent_id, task = self._current_task(hook_cwd, "c" * 17)
+        assert agent_id is not None
+        assert task == "Find the login bug"
+        # Sub-agent ID uses the real agent_type, not the default "agent"
+        assert ".Explore." in agent_id, f"expected .Explore. in {agent_id}"
+
+    def test_subagent_start_without_pre_agent_leaves_task_null(self, hook_cwd):
+        """If SubagentStart fires with no matching pending task, current_task
+        is left unset (graceful, no crash)."""
+        session_id = "sess-no-pre0001"
+        handle_session_start(_make_event("SessionStart", cwd=hook_cwd, session_id=session_id))
+
+        handle_subagent_start(self._real_start_event(
+            hook_cwd, session_id, "d" * 17,
+        ))
+
+        agent_id, task = self._current_task(hook_cwd, "d" * 17)
+        assert agent_id is not None
+        assert task is None or task == ""
+
+    def test_fifo_ordering_two_spawns_same_type(self, hook_cwd):
+        """Two PreToolUse[Agent] events followed by two SubagentStarts of
+        the same type → first SubagentStart gets first description."""
+        session_id = "sess-fifo-00001"
+        handle_session_start(_make_event("SessionStart", cwd=hook_cwd, session_id=session_id))
+
+        handle_pre_agent(self._pre_agent_event(
+            hook_cwd, session_id, "toolu_first", "FIRST task",
+        ))
+        handle_pre_agent(self._pre_agent_event(
+            hook_cwd, session_id, "toolu_second", "SECOND task",
+        ))
+        handle_subagent_start(self._real_start_event(
+            hook_cwd, session_id, "e" * 17,
+        ))
+        handle_subagent_start(self._real_start_event(
+            hook_cwd, session_id, "f" * 17,
+        ))
+
+        _, task_e = self._current_task(hook_cwd, "e" * 17)
+        _, task_f = self._current_task(hook_cwd, "f" * 17)
+        assert task_e == "FIRST task"
+        assert task_f == "SECOND task"
+
+    def test_pending_task_bucketed_by_subagent_type(self, hook_cwd):
+        """Explore and Plan sub-agents don't consume each other's pending tasks."""
+        session_id = "sess-bucket00001"
+        handle_session_start(_make_event("SessionStart", cwd=hook_cwd, session_id=session_id))
+
+        handle_pre_agent(self._pre_agent_event(
+            hook_cwd, session_id, "toolu_expl", "explore task", subagent_type="Explore",
+        ))
+        handle_pre_agent(self._pre_agent_event(
+            hook_cwd, session_id, "toolu_plan", "plan task", subagent_type="Plan",
+        ))
+        # Spawn Plan FIRST — should get "plan task", not the earlier "explore task"
+        handle_subagent_start(self._real_start_event(
+            hook_cwd, session_id, "1" * 17, agent_type="Plan",
+        ))
+        handle_subagent_start(self._real_start_event(
+            hook_cwd, session_id, "2" * 17, agent_type="Explore",
+        ))
+
+        _, task_plan = self._current_task(hook_cwd, "1" * 17)
+        _, task_expl = self._current_task(hook_cwd, "2" * 17)
+        assert task_plan == "plan task"
+        assert task_expl == "explore task"
+
+    def test_subagent_id_uses_real_agent_type(self, hook_cwd):
+        """The generated hub.cc.*.X.N ID uses the real agent_type, not 'agent'."""
+        session_id = "sess-idtype00001"
+        handle_session_start(_make_event("SessionStart", cwd=hook_cwd, session_id=session_id))
+
+        handle_subagent_start(self._real_start_event(
+            hook_cwd, session_id, "9" * 17, agent_type="general-purpose",
+        ))
+
+        agent_id, _ = self._current_task(hook_cwd, "9" * 17)
+        assert agent_id is not None
+        assert ".general-purpose." in agent_id, f"expected agent_type in id, got {agent_id}"
+
+    def test_subagent_type_helper_prefers_real_shape(self):
+        """_subagent_type reads top-level agent_type, falls back to tool_input.subagent_type."""
+        # Real shape
+        assert _subagent_type({"agent_type": "Explore"}) == "Explore"
+        # Legacy shape
+        assert _subagent_type({"tool_input": {"subagent_type": "Plan"}}) == "Plan"
+        # Both — prefer real
+        assert _subagent_type({
+            "agent_type": "Explore",
+            "tool_input": {"subagent_type": "Plan"},
+        }) == "Explore"
+        # Neither — default
+        assert _subagent_type({}) == "agent"
 
 
 class TestUserPromptSubmit:
@@ -624,7 +789,12 @@ _FIXTURE_HANDLERS = {
     ),
     "SubagentStart": (
         handle_subagent_start, True,
-        ["hook_event_name", "session_id", "subagent_id", "tool_input.subagent_type"],
+        ["hook_event_name", "session_id", "agent_id", "agent_type"],
+    ),
+    "PreToolUse_Agent": (
+        handle_pre_agent, True,
+        ["hook_event_name", "session_id", "tool_name", "tool_use_id",
+         "tool_input.description", "tool_input.subagent_type"],
     ),
     "SubagentStop": (
         handle_subagent_stop, True,
@@ -685,15 +855,24 @@ class TestEventContract:
         handler(event)  # should not raise
 
     def test_subagent_id_is_hex_string(self):
-        """SubagentStart fixture's subagent_id must match Claude Code's hex format."""
+        """SubagentStart fixture's agent_id must match Claude Code's hex format.
+
+        Real Claude Code SubagentStart events carry the raw hex ID under
+        ``agent_id`` (top-level), not ``subagent_id``. Validated via live
+        event capture on 2026-04-11.
+        """
         fixture = _FIXTURE_DIR / "SubagentStart.json"
         if not fixture.exists():
             pytest.skip("No fixture")
         event = json.loads(fixture.read_text())
-        subagent_id = event.get("subagent_id", "")
-        assert len(subagent_id) >= 16, "Claude Code subagent IDs are long hex strings"
-        assert all(c in "0123456789abcdef" for c in subagent_id), (
-            f"Expected hex characters in subagent_id, got {subagent_id!r}"
+        agent_id = event.get("agent_id", "")
+        assert len(agent_id) >= 16, "Claude Code agent IDs are long hex strings"
+        assert all(c in "0123456789abcdef" for c in agent_id), (
+            f"Expected hex characters in agent_id, got {agent_id!r}"
+        )
+        # Real events carry agent_type at the top level, not tool_input.subagent_type.
+        assert event.get("agent_type"), (
+            "SubagentStart fixture must include top-level 'agent_type'"
         )
 
 

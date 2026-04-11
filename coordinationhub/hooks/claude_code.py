@@ -8,13 +8,14 @@ Reads hook event JSON from stdin, outputs decision JSON to stdout.
 Fails gracefully (exit 0) if coordinationhub is not importable.
 
 Events handled:
-  SessionStart     → register session root agent
-  UserPromptSubmit → stamp root agent's current_task with the prompt
-  PreToolUse       → acquire file lock before Write/Edit
-  PostToolUse      → notify change after Write/Edit; Stele/Trammel bridge
-  SubagentStart    → register child agent for spawned subagent
-  SubagentStop     → deregister child agent
-  SessionEnd       → release all locks, deregister agent
+  SessionStart         → register session root agent
+  UserPromptSubmit     → stamp root agent's current_task with the prompt
+  PreToolUse Write|Edit→ acquire file lock
+  PreToolUse Agent     → stash sub-agent description for the following SubagentStart
+  PostToolUse          → notify change after Write/Edit; Stele/Trammel bridge
+  SubagentStart        → register child agent, consume pending task for current_task
+  SubagentStop         → deregister child agent
+  SessionEnd           → release all locks, deregister agent
 """
 
 from __future__ import annotations
@@ -100,15 +101,31 @@ def _session_agent_id(session_id: str) -> str:
     return f"hub.cc.{short}"
 
 
+def _subagent_type(event: dict) -> str:
+    """Return the sub-agent type from a SubagentStart event.
+
+    Real Claude Code events carry ``agent_type`` at the top level
+    (e.g. ``"Explore"``, ``"Plan"``, ``"general-purpose"``). Older
+    test fixtures used ``tool_input.subagent_type``; we accept either
+    so tests stay passable during the transition. Defaults to
+    ``"agent"`` only if neither is present.
+    """
+    return (
+        event.get("agent_type")
+        or event.get("tool_input", {}).get("subagent_type")
+        or "agent"
+    )
+
+
 def _subagent_id(parent_id: str, event: dict, engine=None) -> str:
     """Deterministic child agent ID for a spawned subagent.
 
-    Uses tool_use_id when provided by Claude Code.  Falls back to a
-    sequence number derived from existing children of *parent_id* so
-    that concurrent SubagentStart events still produce unique IDs.
+    Uses tool_use_id when provided (legacy test fixtures). Real Claude
+    Code SubagentStart events don't carry tool_use_id, so the fallback
+    derives a sequence number from existing children of *parent_id*
+    with the same agent type.
     """
-    tool_input = event.get("tool_input", {})
-    agent_type = tool_input.get("subagent_type", "agent")
+    agent_type = _subagent_type(event)
     tool_use_id = event.get("tool_use_id", "")
     if tool_use_id:
         return f"{parent_id}.{agent_type}.{tool_use_id[:6]}"
@@ -196,6 +213,43 @@ def handle_user_prompt_submit(event: dict) -> dict | None:
         agent_id = _session_agent_id(event.get("session_id", ""))
         _ensure_registered(engine, agent_id)
         engine.update_agent_status(agent_id, current_task=summary)
+    finally:
+        engine.close()
+    return None
+
+
+def handle_pre_agent(event: dict) -> dict | None:
+    """Stash the sub-agent's task description for the next SubagentStart.
+
+    Claude Code fires ``PreToolUse`` with ``tool_name == "Agent"``
+    right before spawning a sub-agent. The event carries
+    ``tool_input.description``, ``tool_input.prompt``, and
+    ``tool_input.subagent_type`` — everything needed to populate the
+    child's ``current_task`` column. But the ``SubagentStart`` event
+    that follows carries *none* of those fields, so we stash them here
+    keyed by (``session_id``, ``subagent_type``) and pop on SubagentStart.
+    """
+    tool_input = event.get("tool_input", {})
+    tool_use_id = event.get("tool_use_id", "")
+    subagent_type = tool_input.get("subagent_type", "")
+    description = tool_input.get("description", "") or ""
+    prompt = tool_input.get("prompt", "") or ""
+    session_id = event.get("session_id", "")
+
+    if not tool_use_id or not subagent_type:
+        return None  # nothing we can correlate on
+
+    engine = _get_engine(event.get("cwd", "."))
+    try:
+        from coordinationhub.pending_tasks import stash_pending_task
+        stash_pending_task(
+            engine._connect,
+            tool_use_id=tool_use_id,
+            session_id=session_id,
+            subagent_type=subagent_type,
+            description=description,
+            prompt=prompt,
+        )
     finally:
         engine.close()
     return None
@@ -323,31 +377,55 @@ def handle_post_trammel_claim(event: dict) -> dict | None:
 def handle_subagent_start(event: dict) -> dict | None:
     """Register child agent when Claude Code spawns a subagent.
 
-    Stores the raw Claude Code hex ID (``subagent_id`` / ``agent_id``
-    from the event) as ``claude_agent_id`` on the child record so that
-    subsequent PreToolUse/PostToolUse hooks can map it back.
+    Real Claude Code SubagentStart events carry only ``agent_id`` (raw
+    hex), ``agent_type`` (e.g. ``"Explore"``), ``session_id``, and
+    ``cwd`` — no ``tool_input``, no description, no ``tool_use_id``.
+    The task description comes from the *preceding* ``PreToolUse``
+    event with ``tool_name == "Agent"``, which ``handle_pre_agent``
+    stashed in the ``pending_subagent_tasks`` table.
+
+    Stores the raw Claude Code hex ID (``agent_id`` from the event,
+    falling back to ``subagent_id`` for legacy fixtures) as
+    ``claude_agent_id`` on the child record so that subsequent
+    PreToolUse/PostToolUse hooks can map it back.
 
     Deduplicates by ``claude_agent_id`` — background agents
     (``run_in_background: true``) fire SubagentStart twice with the
     same hex ID but would otherwise get two different sequence numbers.
     """
+    from coordinationhub.pending_tasks import consume_pending_task
+
     engine = _get_engine(event.get("cwd", "."))
     try:
-        parent_id = _session_agent_id(event.get("session_id", ""))
+        session_id = event.get("session_id", "")
+        parent_id = _session_agent_id(session_id)
         _ensure_registered(engine, parent_id)
 
-        # Capture the raw Claude Code hex ID for later lookup
-        raw_claude_id = event.get("subagent_id") or event.get("agent_id")
+        # Real events use ``agent_id``; legacy fixtures use ``subagent_id``.
+        raw_claude_id = event.get("agent_id") or event.get("subagent_id")
+        subagent_type = _subagent_type(event)
+
+        # Pop the pending task stashed by handle_pre_agent (if any).
+        # We consume regardless of dedup so a re-fired SubagentStart for
+        # a background agent picks up the same task the first run got.
+        pending = consume_pending_task(
+            engine._connect, session_id, subagent_type,
+        )
+        pending_desc = (pending or {}).get("description") or ""
+
+        # Legacy fallback: some unit-test fixtures still put the
+        # description in ``tool_input.description`` (fake shape). Use
+        # that if no pending task was found.
+        if not pending_desc:
+            pending_desc = event.get("tool_input", {}).get("description", "") or ""
 
         # Dedup: if an agent with this claude_agent_id already exists, heartbeat it
         if raw_claude_id:
             existing = engine.find_agent_by_claude_id(raw_claude_id)
             if existing:
                 engine.heartbeat(existing)
-                tool_input = event.get("tool_input", {})
-                desc = tool_input.get("description", "")
-                if desc:
-                    engine.update_agent_status(existing, current_task=desc)
+                if pending_desc:
+                    engine.update_agent_status(existing, current_task=pending_desc)
                 return None
 
         child_id = _subagent_id(parent_id, event, engine=engine)
@@ -363,10 +441,8 @@ def handle_subagent_start(event: dict) -> dict | None:
                 claude_agent_id=raw_claude_id,
             )
 
-        tool_input = event.get("tool_input", {})
-        desc = tool_input.get("description", "")
-        if desc:
-            engine.update_agent_status(child_id, current_task=desc)
+        if pending_desc:
+            engine.update_agent_status(child_id, current_task=pending_desc)
     finally:
         engine.close()
     return None
@@ -471,6 +547,9 @@ def main() -> None:
 
         elif hook_event == "PreToolUse" and tool_name in ("Write", "Edit"):
             result = handle_pre_write(event)
+
+        elif hook_event == "PreToolUse" and tool_name == "Agent":
+            result = handle_pre_agent(event)
 
         elif hook_event == "PostToolUse":
             if tool_name in ("Write", "Edit"):
