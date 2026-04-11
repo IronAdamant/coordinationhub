@@ -1,11 +1,130 @@
 # LLM_Development.md — CoordinationHub
 
-**Version:** 0.4.0
+**Version:** <!-- GEN:version -->0.4.2<!-- /GEN -->
 **Last updated:** 2026-04-11
 
 ## Change Log
 
 All significant changes to the CoordinationHub project are documented here in reverse chronological order.
+
+---
+
+## 2026-04-11 — v0.4.2 Auto-Generated Doc Sections
+
+### Motivation
+
+Documentation drift was compounding: file inventory tables, directory trees, test counts, and tool counts appeared in 5 docs and needed manual updating on every change. Three times in this session I caught drift after-the-fact.
+
+### Added
+
+**`scripts/gen_docs.py`** — stdlib-only script (~230 LOC) that scans `coordinationhub/` and rewrites marker blocks in target docs. Six generators:
+- `file-inventory` — Markdown table with path, LOC, and module docstring first-line
+- `directory-tree` — ASCII tree grouped by directory with per-file LOC
+- `mcp-tools` — Table of all MCP tools with descriptions (auto-extracted from `TOOL_SCHEMAS`)
+- `test-count` — Integer count from `pytest --collect-only`
+- `tool-count` — Integer count from `len(TOOL_SCHEMAS)`
+- `version` — Version string from `pyproject.toml`
+
+Modes:
+- `python scripts/gen_docs.py` — rewrite in place
+- `python scripts/gen_docs.py --check` — exit 1 on drift (CI mode)
+
+**CI drift check** in `.github/workflows/test.yml` — runs `gen_docs.py --check` and fails the build if any doc is out of date.
+
+### Marker conventions
+
+Block markers for multi-line content:
+```markdown
+<!-- GEN:file-inventory -->
+| Path | LOC | Purpose |
+|------|-----|---------|
+| `coordinationhub/__init__.py` | 14 | CoordinationHub — multi-agent swarm coordination MCP server |
+| `coordinationhub/_storage.py` | 101 | Storage backend for CoordinationHub — SQLite pool, path resolution, lifecycle |
+| `coordinationhub/agent_registry.py` | 231 | Agent lifecycle: register, heartbeat, deregister, lineage management |
+| `coordinationhub/agent_status.py` | 262 | Agent status and file-map query helpers for CoordinationHub |
+| `coordinationhub/assessment.py` | 187 | Assessment runner for CoordinationHub coordination test suites |
+| `coordinationhub/assessment_scorers.py` | 237 | Assessment metric scorers for CoordinationHub |
+| `coordinationhub/cli.py` | 169 | CoordinationHub CLI — command-line interface for all 30 coordination tool methods |
+| `coordinationhub/cli_agents.py` | 124 | Agent identity and lifecycle CLI commands |
+| `coordinationhub/cli_commands.py` | 47 | CoordinationHub CLI command handlers |
+| `coordinationhub/cli_locks.py` | 158 | Document locking and coordination CLI commands |
+| `coordinationhub/cli_setup.py` | 268 | CLI commands for setup and diagnostics: doctor, init, watch |
+| `coordinationhub/cli_utils.py` | 21 | Shared CLI helper functions used by all cli_* sub-modules |
+| `coordinationhub/cli_vis.py` | 265 | Change awareness, audit, graph, and assessment CLI commands |
+| `coordinationhub/conflict_log.py` | 44 | Conflict recording and querying for CoordinationHub |
+| `coordinationhub/context.py` | 88 | Context bundle builder for CoordinationHub agent registration responses |
+| `coordinationhub/core.py` | 238 | CoordinationEngine — core business logic for CoordinationHub |
+| `coordinationhub/core_locking.py` | 269 | Locking and coordination methods for CoordinationEngine |
+| `coordinationhub/db.py` | 239 | SQLite schema, migrations, and connection pool for CoordinationHub |
+| `coordinationhub/dispatch.py` | 37 | Tool dispatch table for CoordinationHub |
+| `coordinationhub/graphs.py` | 256 | Declarative coordination graph: loader, validator, in-memory representation |
+| `coordinationhub/hooks/__init__.py` | 1 | Hooks package — Claude Code integration via stdin/stdout event protocol |
+| `coordinationhub/hooks/claude_code.py` | 352 | CoordinationHub hook for Claude Code |
+| `coordinationhub/lock_ops.py` | 191 | Shared lock primitives used by both local locks and coordination locks |
+| `coordinationhub/mcp_server.py` | 209 | HTTP-based MCP server for CoordinationHub — zero external dependencies |
+| `coordinationhub/mcp_stdio.py` | 142 | Stdio-based MCP server for CoordinationHub using the ``mcp`` Python package |
+| `coordinationhub/notifications.py` | 81 | Change notification storage and retrieval for CoordinationHub |
+| `coordinationhub/paths.py` | 38 | Path normalization and project-root detection utilities |
+| `coordinationhub/scan.py` | 198 | File ownership scan for CoordinationHub |
+| `coordinationhub/schemas.py` | 645 | Tool schemas for CoordinationHub — all 30 MCP tools |
+<!-- /GEN -->
+```
+
+Inline markers for single values (render invisibly in Markdown):
+```markdown
+This project has <!-- GEN:test-count -->298<!-- /GEN --> tests.
+```
+
+Unknown marker names raise an error during rewrite (catches typos).
+
+### What stays human
+
+- README.md prose, quickstart, feature pitch — hand-maintained
+- CLAUDE.md "Module Design" and "Key Design Decisions" narrative sections
+- LLM_Development.md changelog entries
+- All "why" discussions, trade-off notes, and examples
+
+### Files changed
+
+- New: `scripts/gen_docs.py`
+- Modified: `.github/workflows/test.yml` (added drift check), all 5 doc targets (markers added), `coordinationhub/hooks/__init__.py` (added docstring so auto-gen shows summary)
+
+### Counts
+
+- Version: 0.4.1 → 0.4.2
+- Tests: unchanged (298 collected, 297 passing + 1 skipped)
+
+---
+
+## 2026-04-11 — v0.4.1 Close Validation Gap: Hook-Level Integration Tests, Contract Test Hardening
+
+### Motivation
+
+Post-v0.4.0 assessment identified three weak points: contract tests were still synthetic (never validated against real events), `reap_expired_locks` had misleading semantics after the smart-reap addition, and the fundamental validation gap (unit tests vs. real concurrent agents) remained unaddressed.
+
+### Fixed
+
+**Hook-level integration test (`tests/test_scenario.py`):** New `TestHookLevelMultiAgentScenario` class (4 tests) drives the real Claude Code hook handlers in end-to-end concurrent workflows:
+- `test_wave_of_subagents_full_lifecycle` — 11 sub-agents register, write, stop with full attribution (mirrors Review Thirteen batch 2)
+- `test_concurrent_contention_on_same_file` — two hook handlers race on same file via threading; exactly one wins
+- `test_smart_reap_survives_long_model_call` — verifies smart reap refreshes instead of deleting when agent has recent heartbeat
+- `test_crashed_agent_locks_reaped` — verifies smart reap still deletes locks held by stale agents
+
+**Contract tests strengthened (`tests/test_hooks.py`):**
+- Per-event-type required-field checks via dotted-path (`tool_input.file_path`, `tool_input.subagent_type`)
+- Hex-format assertion on `SubagentStart.subagent_id` (Claude Code hex string format)
+- New `TestEventCapture` class (2 tests) validates `_save_event_snapshot` writes real files and fails open on I/O errors
+
+**`reap_expired_locks` semantics clarified (`coordinationhub/core_locking.py`):** Engine method now carries a docstring explicitly noting that `agent_grace_seconds > 0` refreshes instead of deleting. Name not changed (would break MCP tool contract and require schema migration for cosmetic fix).
+
+### Audit finding (no code change)
+
+**`hooks/claude_code.py` at ~450 LOC is not a structural problem.** Every function in the file was audited: 1 error logger, 1 event-capture helper, 5 shared helpers, 8 event handlers, 1 dispatch. No dead code, clear section headers. Splitting would create artificial file boundaries that v0.4.0 explicitly removed. Flag withdrawn.
+
+### Counts
+
+- Tests: 290 → 297 (+7: 4 integration, 2 capture, 1 contract format)
+- Version: 0.4.0 → 0.4.1
 
 ---
 

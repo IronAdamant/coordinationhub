@@ -1,0 +1,293 @@
+#!/usr/bin/env python3
+"""Regenerate machine-owned sections in CoordinationHub docs.
+
+Scans the source tree and rewrites content between marker comments in
+target docs. Pure stdlib, zero third-party deps (consistent with the
+rest of the project).
+
+Usage:
+    python scripts/gen_docs.py          # rewrite docs in place
+    python scripts/gen_docs.py --check  # exit 1 if any doc would change
+
+Marker conventions:
+
+    Block content (tables, trees — content on its own lines):
+        <!-- GEN:section-name -->
+        ...generated content...
+        <!-- /GEN -->
+
+    Inline values (counts, version strings — content on same line):
+        <!-- GEN:test-count -->297<!-- /GEN -->
+
+The script is idempotent. Running twice produces the same output.
+Unknown marker names raise an error to catch typos.
+
+Available generators:
+    file-inventory    Full table of source files with LOC and summaries.
+    directory-tree    ASCII directory listing with per-file LOC.
+    mcp-tools         Table of all MCP tools with descriptions.
+    test-count        Integer test count from pytest --collect-only.
+    tool-count        Integer count from len(TOOL_SCHEMAS).
+    version           Version string from pyproject.toml.
+"""
+
+from __future__ import annotations
+
+import argparse
+import ast
+import re
+import subprocess
+import sys
+import tomllib
+from pathlib import Path
+
+REPO_ROOT = Path(__file__).resolve().parent.parent
+PKG_DIR = REPO_ROOT / "coordinationhub"
+
+
+# ------------------------------------------------------------------ #
+# Source scanners
+# ------------------------------------------------------------------ #
+
+def count_loc(path: Path) -> int:
+    """Count non-blank, non-comment lines."""
+    loc = 0
+    for line in path.read_text(encoding="utf-8").splitlines():
+        stripped = line.strip()
+        if stripped and not stripped.startswith("#"):
+            loc += 1
+    return loc
+
+
+def module_docstring(path: Path) -> str:
+    """Return the first line of the module docstring, or ''."""
+    try:
+        tree = ast.parse(path.read_text(encoding="utf-8"))
+    except SyntaxError:
+        return ""
+    doc = ast.get_docstring(tree)
+    if not doc:
+        return ""
+    return doc.strip().split("\n")[0].rstrip(".")
+
+
+def scan_package() -> list[dict]:
+    """Return sorted list of {path, loc, summary} for each .py in coordinationhub/."""
+    entries: list[dict] = []
+    for path in sorted(PKG_DIR.rglob("*.py")):
+        rel = path.relative_to(REPO_ROOT)
+        if "__pycache__" in rel.parts:
+            continue
+        entries.append({
+            "path": str(rel),
+            "loc": count_loc(path),
+            "summary": module_docstring(path),
+        })
+    return entries
+
+
+def get_version() -> str:
+    with (REPO_ROOT / "pyproject.toml").open("rb") as f:
+        return tomllib.load(f)["project"]["version"]
+
+
+def get_test_count() -> int:
+    """Run pytest --collect-only -q and parse the summary line."""
+    result = subprocess.run(
+        ["python", "-m", "pytest", "--collect-only", "-q", "tests/"],
+        cwd=str(REPO_ROOT), capture_output=True, text=True,
+    )
+    for line in reversed(result.stdout.strip().splitlines()):
+        m = re.search(r"(\d+)\s+tests?\s+collected", line)
+        if m:
+            return int(m.group(1))
+        # Newer pytest: "297 tests collected in 0.42s" — already matched
+        # Fallback: bare "297 tests" line
+        m2 = re.match(r"^(\d+)\s+tests?$", line.strip())
+        if m2:
+            return int(m2.group(1))
+    return 0
+
+
+def _import_schemas():
+    """Import coordinationhub.schemas without polluting the path permanently."""
+    sys.path.insert(0, str(REPO_ROOT))
+    try:
+        from coordinationhub.schemas import TOOL_SCHEMAS
+        return TOOL_SCHEMAS
+    finally:
+        sys.path.pop(0)
+
+
+def get_tool_count() -> int:
+    return len(_import_schemas())
+
+
+def get_mcp_tools() -> list[tuple[str, str]]:
+    """Return [(name, first-sentence description), ...] for all MCP tools."""
+    schemas = _import_schemas()
+    out: list[tuple[str, str]] = []
+    for name, spec in schemas.items():
+        desc = spec.get("description", "").strip()
+        # First sentence, capped at 120 chars to keep tables readable
+        first = desc.split(". ")[0].rstrip(".")
+        if len(first) > 120:
+            first = first[:117] + "..."
+        out.append((name, first))
+    return out
+
+
+# ------------------------------------------------------------------ #
+# Renderers
+# ------------------------------------------------------------------ #
+
+def _escape_pipe(s: str) -> str:
+    return s.replace("|", "\\|")
+
+
+def render_file_inventory(entries: list[dict]) -> str:
+    lines = ["| Path | LOC | Purpose |", "|------|-----|---------|"]
+    for e in entries:
+        summary = _escape_pipe(e["summary"] or "—")
+        lines.append(f"| `{e['path']}` | {e['loc']} | {summary} |")
+    return "\n".join(lines)
+
+
+def render_directory_tree(entries: list[dict]) -> str:
+    """ASCII tree grouped by directory under coordinationhub/."""
+    lines = ["```", "coordinationhub/"]
+    by_dir: dict[str, list[dict]] = {}
+    for e in entries:
+        parts = Path(e["path"]).parts
+        if len(parts) == 2:  # coordinationhub/xxx.py
+            dir_key = ""
+        else:
+            dir_key = "/".join(parts[1:-1])
+        by_dir.setdefault(dir_key, []).append(e)
+
+    # Top-level files, sorted by name
+    for e in sorted(by_dir.get("", []), key=lambda x: Path(x["path"]).name):
+        name = Path(e["path"]).name
+        summary = e["summary"] or ""
+        pad = max(1, 22 - len(name))
+        lines.append(f"  {name}{' ' * pad}— {summary} (~{e['loc']} LOC)")
+
+    # Subdirectories
+    for dir_key in sorted(k for k in by_dir if k):
+        lines.append(f"  {dir_key}/")
+        for e in sorted(by_dir[dir_key], key=lambda x: Path(x["path"]).name):
+            name = Path(e["path"]).name
+            summary = e["summary"] or ""
+            pad = max(1, 20 - len(name))
+            lines.append(f"    {name}{' ' * pad}— {summary} (~{e['loc']} LOC)")
+
+    lines.append("```")
+    return "\n".join(lines)
+
+
+def render_mcp_tools(tools: list[tuple[str, str]]) -> str:
+    lines = ["| Tool | Description |", "|------|-------------|"]
+    for name, desc in tools:
+        lines.append(f"| `{name}` | {_escape_pipe(desc)} |")
+    return "\n".join(lines)
+
+
+# ------------------------------------------------------------------ #
+# Marker-based rewriter
+# ------------------------------------------------------------------ #
+
+# Inline markers have no newline between open and content:
+#   <!-- GEN:test-count -->297<!-- /GEN -->
+# Block markers have newlines and multi-line content:
+#   <!-- GEN:file-inventory -->
+#   | Path | LOC | ... |
+#   <!-- /GEN -->
+
+BLOCK_RE = re.compile(
+    r"<!-- GEN:(?P<name>[\w-]+) -->(?P<body>.*?)<!-- /GEN -->",
+    re.DOTALL,
+)
+
+
+def rewrite_markers(text: str, generators: dict[str, str], source: str) -> str:
+    """Replace every <!-- GEN:name --> block with the generator's output."""
+
+    def replace(match: re.Match) -> str:
+        name = match.group("name")
+        if name not in generators:
+            raise KeyError(f"{source}: unknown GEN marker {name!r}")
+        content = generators[name]
+        old_body = match.group("body")
+        # Detect inline vs block by whether old body spans multiple lines
+        if "\n" in old_body:
+            return f"<!-- GEN:{name} -->\n{content}\n<!-- /GEN -->"
+        return f"<!-- GEN:{name} -->{content}<!-- /GEN -->"
+
+    return BLOCK_RE.sub(replace, text)
+
+
+# ------------------------------------------------------------------ #
+# Driver
+# ------------------------------------------------------------------ #
+
+DOC_TARGETS = [
+    "README.md",
+    "CLAUDE.md",
+    "COMPLETE_PROJECT_DOCUMENTATION.md",
+    "LLM_Development.md",
+    "wiki-local/spec-project.md",
+]
+
+
+def build_generators() -> dict[str, str]:
+    entries = scan_package()
+    return {
+        "file-inventory": render_file_inventory(entries),
+        "directory-tree": render_directory_tree(entries),
+        "mcp-tools": render_mcp_tools(get_mcp_tools()),
+        "test-count": str(get_test_count()),
+        "tool-count": str(get_tool_count()),
+        "version": get_version(),
+    }
+
+
+def main() -> int:
+    ap = argparse.ArgumentParser(
+        description="Regenerate machine-owned doc sections."
+    )
+    ap.add_argument("--check", action="store_true",
+                    help="Exit 1 if any doc would change, don't write.")
+    args = ap.parse_args()
+
+    generators = build_generators()
+
+    any_drift = False
+    for rel in DOC_TARGETS:
+        path = REPO_ROOT / rel
+        if not path.exists():
+            print(f"skip (missing): {rel}")
+            continue
+        old = path.read_text(encoding="utf-8")
+        new = rewrite_markers(old, generators, source=rel)
+        if old != new:
+            any_drift = True
+            if args.check:
+                print(f"DRIFT: {rel}")
+            else:
+                path.write_text(new, encoding="utf-8")
+                print(f"updated: {rel}")
+        else:
+            if not args.check:
+                print(f"clean:   {rel}")
+
+    if args.check and any_drift:
+        print(
+            "\nDoc drift detected. Run 'python scripts/gen_docs.py' to regenerate.",
+            file=sys.stderr,
+        )
+        return 1
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())
