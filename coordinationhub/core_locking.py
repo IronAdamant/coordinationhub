@@ -211,6 +211,20 @@ class LockingMixin:
         return result
 
     def reap_expired_locks(self, agent_grace_seconds: float = 0.0) -> dict[str, Any]:
+        """Clear expired locks.
+
+        The name is historical — this is more accurately "reconcile expired
+        locks."  When *agent_grace_seconds* > 0 (the hook calls with 120.0),
+        expired locks held by agents with a recent heartbeat are
+        **implicitly refreshed** instead of deleted.  The TTL acts as a
+        fallback for crashed agents, not a hard deadline for active ones.
+
+        With ``agent_grace_seconds=0`` (the default, used by the MCP tool),
+        behavior is strict: all expired locks are deleted.
+
+        Returns ``{"reaped": N}`` where N is the count of locks actually
+        deleted (not refreshed).
+        """
         with self._connect() as conn:
             result = _lo.reap_expired_locks(
                 conn, "document_locks",

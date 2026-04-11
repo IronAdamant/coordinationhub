@@ -493,15 +493,49 @@ class TestBridges:
 
 _FIXTURE_DIR = Path(__file__).parent / "fixtures" / "claude_code_events"
 
-# Map fixture filename stems to (handler, requires_session_first)
+# Map fixture filename stem → (handler, needs_session_first, required_fields)
+#
+# ``required_fields`` documents the minimum event shape each handler reads.
+# Each entry is a dot-path into the event dict (e.g. "tool_input.file_path"
+# means ``event["tool_input"]["file_path"]`` must exist and be non-empty).
+# These assertions catch schema drift if Claude Code renames or removes
+# fields the handlers depend on.
 _FIXTURE_HANDLERS = {
-    "SessionStart": (handle_session_start, False),
-    "PreToolUse_Write": (handle_pre_write, True),
-    "PostToolUse_Write": (handle_post_write, True),
-    "SubagentStart": (handle_subagent_start, True),
-    "SubagentStop": (handle_subagent_stop, True),
-    "SessionEnd": (handle_session_end, True),
+    "SessionStart": (
+        handle_session_start, False,
+        ["hook_event_name", "session_id"],
+    ),
+    "PreToolUse_Write": (
+        handle_pre_write, True,
+        ["hook_event_name", "session_id", "tool_name", "tool_input.file_path"],
+    ),
+    "PostToolUse_Write": (
+        handle_post_write, True,
+        ["hook_event_name", "session_id", "tool_name", "tool_input.file_path"],
+    ),
+    "SubagentStart": (
+        handle_subagent_start, True,
+        ["hook_event_name", "session_id", "subagent_id", "tool_input.subagent_type"],
+    ),
+    "SubagentStop": (
+        handle_subagent_stop, True,
+        ["hook_event_name", "session_id", "subagent_id"],
+    ),
+    "SessionEnd": (
+        handle_session_end, True,
+        ["hook_event_name", "session_id"],
+    ),
 }
+
+
+def _get_dotted(d: dict, path: str):
+    """Walk a dotted path through a nested dict.  Returns None if missing."""
+    cur = d
+    for part in path.split("."):
+        if not isinstance(cur, dict):
+            return None
+        cur = cur.get(part)
+    return cur
 
 
 class TestEventContract:
@@ -520,19 +554,66 @@ class TestEventContract:
             pytest.skip(f"No fixture for {request.param}")
         event = json.loads(fixture_path.read_text())
         event["cwd"] = hook_cwd  # redirect to test dir
-        handler, needs_session = _FIXTURE_HANDLERS[request.param]
+        handler, needs_session, required = _FIXTURE_HANDLERS[request.param]
         if needs_session:
             handle_session_start({"hook_event_name": "SessionStart",
                                   "session_id": event.get("session_id", ""),
                                   "cwd": hook_cwd})
-        return event, handler
+        return event, handler, required
 
     def test_required_fields_present(self, event_and_handler):
-        event, _ = event_and_handler
-        assert "hook_event_name" in event
-        assert "session_id" in event
+        """Every field the handler reads must be present in the fixture."""
+        event, _, required = event_and_handler
+        for field_path in required:
+            value = _get_dotted(event, field_path)
+            assert value not in (None, ""), (
+                f"Required field {field_path!r} missing or empty in fixture"
+            )
 
     def test_handler_does_not_crash(self, event_and_handler):
         """Handler processes the fixture event without raising."""
-        event, handler = event_and_handler
+        event, handler, _ = event_and_handler
         handler(event)  # should not raise
+
+    def test_subagent_id_is_hex_string(self):
+        """SubagentStart fixture's subagent_id must match Claude Code's hex format."""
+        fixture = _FIXTURE_DIR / "SubagentStart.json"
+        if not fixture.exists():
+            pytest.skip("No fixture")
+        event = json.loads(fixture.read_text())
+        subagent_id = event.get("subagent_id", "")
+        assert len(subagent_id) >= 16, "Claude Code subagent IDs are long hex strings"
+        assert all(c in "0123456789abcdef" for c in subagent_id), (
+            f"Expected hex characters in subagent_id, got {subagent_id!r}"
+        )
+
+
+class TestEventCapture:
+    """Tests for the COORDINATIONHUB_CAPTURE_EVENTS=1 snapshot mechanism."""
+
+    def test_save_event_snapshot_writes_file(self, tmp_path, monkeypatch):
+        """_save_event_snapshot writes a JSON file under ~/.coordinationhub/event_snapshots/."""
+        monkeypatch.setenv("HOME", str(tmp_path))
+        # The function uses Path.home() which reads HOME
+        from coordinationhub.hooks.claude_code import _save_event_snapshot
+        event = {
+            "hook_event_name": "PreToolUse",
+            "tool_name": "Write",
+            "session_id": "sess-test",
+            "tool_input": {"file_path": "/tmp/test.py"},
+        }
+        _save_event_snapshot(event)
+        snap_dir = tmp_path / ".coordinationhub" / "event_snapshots"
+        assert snap_dir.exists()
+        files = list(snap_dir.glob("PreToolUse_Write_*.json"))
+        assert len(files) == 1
+        captured = json.loads(files[0].read_text())
+        assert captured["hook_event_name"] == "PreToolUse"
+        assert captured["tool_input"]["file_path"] == "/tmp/test.py"
+
+    def test_save_event_snapshot_never_raises(self, monkeypatch):
+        """Capture failure must never crash the hook."""
+        from coordinationhub.hooks.claude_code import _save_event_snapshot
+        # Point HOME at a non-writable location — should silently no-op
+        monkeypatch.setenv("HOME", "/nonexistent/readonly/path")
+        _save_event_snapshot({"hook_event_name": "Test"})  # should not raise

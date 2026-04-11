@@ -3,10 +3,16 @@
 End-to-end tests that simulate realistic multi-agent workflows:
 parent spawns children, they coordinate via locks, one dies,
 orphaning cascades, survivors continue.
+
+``TestHookLevelMultiAgentScenario`` exercises the real Claude Code hook
+handlers (not the engine API directly) in a concurrent setting,
+reproducing the kind of workflow Review Thirteen surfaced — the
+validation gap between unit tests and real multi-agent load.
 """
 
 from __future__ import annotations
 
+import threading
 import time
 
 import pytest
@@ -201,3 +207,266 @@ class TestFullLifecycleScenario:
 
         remaining = engine.get_notifications(limit=50)
         assert len(remaining["notifications"]) == 5
+
+
+class TestHookLevelMultiAgentScenario:
+    """End-to-end tests using the real Claude Code hook handlers.
+
+    These tests drive the hooks the way Claude Code would — calling
+    ``handle_session_start``, ``handle_subagent_start``, ``handle_pre_write``,
+    ``handle_post_write``, ``handle_subagent_stop`` with realistic event
+    dicts. They exercise the complete v0.4.0 feature set together: smart
+    reap with grace period, TTL refresh on PostToolUse, first-write-wins
+    file ownership, SubagentStop status transitions, and cross-agent
+    contention resolution.
+
+    This closes the gap between unit tests (which test individual
+    primitives) and RecipeLab production reviews (which surface real
+    multi-agent bugs). The scenarios are modeled on Review Thirteen.
+    """
+
+    @staticmethod
+    def _git_dir(tmp_path):
+        """Create a project-root-looking directory."""
+        (tmp_path / ".git").mkdir(exist_ok=True)
+        return str(tmp_path)
+
+    @staticmethod
+    def _session_event(cwd, session_id):
+        return {"hook_event_name": "SessionStart",
+                "session_id": session_id, "cwd": cwd}
+
+    @staticmethod
+    def _subagent_start_event(cwd, session_id, raw_id, desc="worker"):
+        return {
+            "hook_event_name": "SubagentStart",
+            "session_id": session_id, "cwd": cwd,
+            "subagent_id": raw_id,
+            "tool_input": {"subagent_type": "agent", "description": desc},
+        }
+
+    @staticmethod
+    def _subagent_stop_event(cwd, session_id, raw_id):
+        return {
+            "hook_event_name": "SubagentStop",
+            "session_id": session_id, "cwd": cwd,
+            "subagent_id": raw_id,
+        }
+
+    @staticmethod
+    def _write_event(cwd, session_id, raw_id, file_path, pre=True):
+        return {
+            "hook_event_name": "PreToolUse" if pre else "PostToolUse",
+            "tool_name": "Write", "session_id": session_id, "cwd": cwd,
+            "subagent_id": raw_id,
+            "tool_input": {"file_path": file_path},
+        }
+
+    def test_wave_of_subagents_full_lifecycle(self, tmp_path):
+        """11 sub-agents registered, each writes a unique file, all deregister cleanly.
+
+        Mirrors Review Thirteen's batch 2: 4 enrichers + 5 feature builders
+        + 2 misc, each writing to a separate file in the same directory.
+        Verifies that all register, write successfully, get attributed
+        notifications, claim file ownership, and transition to 'stopped'.
+        """
+        from coordinationhub.hooks.claude_code import (
+            handle_session_start, handle_subagent_start, handle_subagent_stop,
+            handle_pre_write, handle_post_write, _get_engine,
+        )
+
+        cwd = self._git_dir(tmp_path)
+        session_id = "sess-wave-1234abcd"
+        handle_session_start(self._session_event(cwd, session_id))
+
+        n = 11
+        raw_ids = [f"{'a' if i < 10 else 'b'}{i:016x}" for i in range(n)]
+
+        # Register all sub-agents
+        for i, raw_id in enumerate(raw_ids):
+            handle_subagent_start(self._subagent_start_event(
+                cwd, session_id, raw_id, desc=f"builder_{i}"))
+
+        # Each sub-agent writes its own file
+        for i, raw_id in enumerate(raw_ids):
+            file_path = str(tmp_path / f"src/feature_{i}.py")
+            handle_pre_write(self._write_event(cwd, session_id, raw_id, file_path))
+            handle_post_write(self._write_event(
+                cwd, session_id, raw_id, file_path, pre=False))
+
+        # Stop all sub-agents
+        for raw_id in raw_ids:
+            handle_subagent_stop(self._subagent_stop_event(cwd, session_id, raw_id))
+
+        # Verify end state
+        engine = _get_engine(cwd)
+        try:
+            # 1. All sub-agents registered with parent hierarchy
+            agents = engine.list_agents(active_only=False)
+            hub_ids = [a for a in agents["agents"]
+                       if a.get("claude_agent_id") in raw_ids]
+            assert len(hub_ids) == n, f"Expected {n} sub-agents, got {len(hub_ids)}"
+
+            # 2. All sub-agents transitioned to 'stopped' via SubagentStop
+            stopped = [a for a in hub_ids if a["status"] == "stopped"]
+            assert len(stopped) == n, (
+                f"Expected all {n} stopped, got {len(stopped)}: "
+                f"{[(a['agent_id'], a['status']) for a in hub_ids]}"
+            )
+
+            # 3. Each sub-agent's write was attributed via change notification
+            notifs = engine.get_notifications(limit=50)
+            write_notifs = [n for n in notifs["notifications"]
+                            if n["change_type"] == "modified"]
+            assert len(write_notifs) == n, (
+                f"Expected {n} write notifications, got {len(write_notifs)}"
+            )
+
+            # 4. File ownership was claimed for every file
+            with engine._connect() as conn:
+                rows = conn.execute(
+                    "SELECT assigned_agent_id FROM file_ownership "
+                    "WHERE document_path LIKE '%feature_%'"
+                ).fetchall()
+            assert len(rows) == n, f"Expected {n} ownership rows, got {len(rows)}"
+            # Each owner should be a hub.cc.* ID (not a raw hex)
+            for row in rows:
+                assert row["assigned_agent_id"].startswith("hub.cc."), (
+                    f"Ownership should use hub.cc.* ID, got {row['assigned_agent_id']}"
+                )
+        finally:
+            engine.close()
+
+    def test_concurrent_contention_on_same_file(self, tmp_path):
+        """Two sub-agents race to lock the same file — exactly one wins.
+
+        This is the test Review Thirteen flagged as missing: actual
+        concurrent contention on a shared file, verified via the hook
+        handlers (not the engine API directly).
+        """
+        from coordinationhub.hooks.claude_code import (
+            handle_session_start, handle_subagent_start, handle_pre_write,
+            _get_engine,
+        )
+
+        cwd = self._git_dir(tmp_path)
+        session_id = "sess-race-5678efgh"
+        handle_session_start(self._session_event(cwd, session_id))
+
+        raw_a = "a" * 17
+        raw_b = "b" * 17
+        handle_subagent_start(self._subagent_start_event(cwd, session_id, raw_a, "agent_A"))
+        handle_subagent_start(self._subagent_start_event(cwd, session_id, raw_b, "agent_B"))
+
+        shared_file = str(tmp_path / "shared_state.py")
+        results = {}
+        errors = []
+
+        def attempt_lock(raw_id, key):
+            try:
+                result = handle_pre_write(self._write_event(
+                    cwd, session_id, raw_id, shared_file))
+                results[key] = result
+            except Exception as exc:
+                errors.append(exc)
+
+        t_a = threading.Thread(target=attempt_lock, args=(raw_a, "a"))
+        t_b = threading.Thread(target=attempt_lock, args=(raw_b, "b"))
+        t_a.start()
+        t_b.start()
+        t_a.join(timeout=5)
+        t_b.join(timeout=5)
+
+        assert not errors, f"Errors during concurrent lock attempt: {errors}"
+
+        # Exactly one got 'allow', the other got 'deny'
+        decisions = [results[k]["hookSpecificOutput"]["permissionDecision"]
+                     for k in ("a", "b")]
+        assert sorted(decisions) == ["allow", "deny"], (
+            f"Expected one allow + one deny, got {decisions}"
+        )
+
+    def test_smart_reap_survives_long_model_call(self, tmp_path):
+        """Simulate a slow model call: lock acquired, then expires, but agent is
+        still active — smart reap should refresh it, not delete it.
+
+        This is the Review Thirteen scenario: a lock with short TTL
+        expires between PreToolUse and PostToolUse, but the owning agent
+        has a recent heartbeat so the lock should survive.
+        """
+        from coordinationhub.hooks.claude_code import (
+            handle_session_start, handle_pre_write, _get_engine,
+        )
+
+        cwd = self._git_dir(tmp_path)
+        session_id = "sess-slow-9abc0def"
+        handle_session_start(self._session_event(cwd, session_id))
+
+        # Acquire with normal hook TTL (300s), then artificially expire
+        file_path = str(tmp_path / "slow_file.py")
+        handle_pre_write({
+            "hook_event_name": "PreToolUse", "tool_name": "Write",
+            "session_id": session_id, "cwd": cwd,
+            "tool_input": {"file_path": file_path},
+        })
+
+        engine = _get_engine(cwd)
+        try:
+            # Force the lock to be 'expired' by rewriting locked_at into the past
+            with engine._connect() as conn:
+                conn.execute(
+                    "UPDATE document_locks SET locked_at = ?, lock_ttl = ?",
+                    (time.time() - 1000, 1.0),
+                )
+            # Refresh the owning agent's heartbeat
+            from coordinationhub.hooks.claude_code import _session_agent_id
+            root_id = _session_agent_id(session_id)
+            engine.heartbeat(root_id)
+
+            # Smart reap (as the hook calls it) should spare and refresh
+            reaped = engine.reap_expired_locks(agent_grace_seconds=120.0)
+            assert reaped["reaped"] == 0, "Active-agent lock should be spared"
+
+            # Lock is now effectively live again (locked_at refreshed to now)
+            status = engine.get_lock_status(file_path)
+            assert status["locked"] is True
+        finally:
+            engine.close()
+
+    def test_crashed_agent_locks_reaped(self, tmp_path):
+        """Crashed agents (stale heartbeats) get their expired locks reaped,
+        even with agent_grace_seconds set."""
+        from coordinationhub.hooks.claude_code import (
+            handle_session_start, handle_pre_write, _get_engine,
+            _session_agent_id,
+        )
+
+        cwd = self._git_dir(tmp_path)
+        session_id = "sess-crash-1122aabb"
+        handle_session_start(self._session_event(cwd, session_id))
+        handle_pre_write({
+            "hook_event_name": "PreToolUse", "tool_name": "Write",
+            "session_id": session_id, "cwd": cwd,
+            "tool_input": {"file_path": str(tmp_path / "crashed.py")},
+        })
+
+        engine = _get_engine(cwd)
+        try:
+            # Simulate crash: lock expired AND agent heartbeat stale
+            root_id = _session_agent_id(session_id)
+            with engine._connect() as conn:
+                conn.execute(
+                    "UPDATE document_locks SET locked_at = ?, lock_ttl = ?",
+                    (time.time() - 1000, 1.0),
+                )
+                conn.execute(
+                    "UPDATE agents SET last_heartbeat = 0 WHERE agent_id = ?",
+                    (root_id,),
+                )
+
+            reaped = engine.reap_expired_locks(agent_grace_seconds=120.0)
+            assert reaped["reaped"] == 1, (
+                "Crashed-agent locks should be reaped even with grace period"
+            )
+        finally:
+            engine.close()
