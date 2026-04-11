@@ -33,5 +33,8 @@ jobs:
           fi
           echo "Version consistent: $PYPROJECT_VER"
 
+      - name: Check doc generation is up to date
+        run: python scripts/gen_docs.py --check
+
       - name: Run tests
         run: python -m pytest tests/ -q --tb=short

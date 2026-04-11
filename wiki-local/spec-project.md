@@ -1,6 +1,6 @@
 # CoordinationHub — Multi-Agent Swarm Coordination MCP
 
-**Version:** 0.4.0
+**Version:** <!-- GEN:version -->0.4.2<!-- /GEN -->
 **Language:** Python 3.10+ (stdlib-only core — **zero third-party dependencies**, `mcp` optional for stdio only)
 **Transports:** stdio + HTTP (both, like Stele/Chisel/Trammel)
 
@@ -276,70 +276,47 @@ Multiple locks per file are allowed for non-overlapping regions. Shared locks on
 
 ---
 
-## Project Layout (v0.4.0)
+## Project Layout
 
+<!-- GEN:directory-tree -->
 ```
 coordinationhub/
-  __init__.py          -- __version__, public API
-  core.py              -- CoordinationEngine: identity, change, audit, graph/visibility, claim_file_ownership (~285 LOC)
-  core_locking.py      -- LockingMixin: all locking + coordination methods, smart reap passthrough (~265 LOC)
-  paths.py             -- Project-root detection and path normalization (~47 LOC)
-  context.py           -- Context bundle builder for register_agent responses (~97 LOC)
-  schemas.py           -- All 30 MCP tool schemas, grouped by function (~590 LOC, pure data)
-  dispatch.py          -- Tool dispatch table (~49 LOC)
-  graphs.py            -- Coordination graph: validator, loader, CoordinationGraph, singleton, tool impls (~330 LOC)
-  scan.py              -- File ownership scan, graph-role-aware, store_responsibilities (~240 LOC)
-  agent_status.py      -- Agent status query, file map, rich agent tree with locks/warnings (~290 LOC)
-  agent_registry.py    -- Agent lifecycle: register, heartbeat, deregister, find_by_claude_id, list, lineage, siblings, reap_stale (~290 LOC)
-  assessment_scorers.py -- 5 metric scorers + event_matches_responsibility (~315 LOC)
-  assessment.py        -- Suite loading, run_assessment, report, storage (~241 LOC)
-  mcp_server.py        -- HTTP MCP server (ThreadedHTTPServer, stdlib only)
-  mcp_stdio.py         -- Stdio MCP server (requires optional mcp package)
-  cli.py               -- argparse CLI parser + lazy dispatch (~267 LOC)
-  cli_commands.py      -- Re-exports all CLI handlers (~51 LOC)
-  cli_setup.py         -- CLI: doctor, init, watch commands (~348 LOC)
-  cli_agents.py        -- Agent identity & lifecycle CLI commands (~180 LOC)
-  cli_locks.py         -- Document locking & coordination CLI (~210 LOC)
-  cli_vis.py           -- Change awareness, audit, graph & assessment CLI + agent-tree (~340 LOC)
-  db.py                -- SQLite schema, schema versioning (v3), perf pragmas, thread-local ConnectionPool (~295 LOC)
-  lock_ops.py          -- Shared lock primitives + smart reap with grace period + region overlap (~195 LOC)
-  conflict_log.py      -- Conflict recording (~52 LOC)
-  notifications.py     -- Change notification storage (~94 LOC)
-  _storage.py          -- CoordinationStorage: SQLite pool, path resolution, thread-safe ID gen (~131 LOC)
-  cli_utils.py         -- Shared CLI helpers: print_json, engine_from_args, close (~30 LOC)
+  __init__.py           — CoordinationHub — multi-agent swarm coordination MCP server (~14 LOC)
+  _storage.py           — Storage backend for CoordinationHub — SQLite pool, path resolution, lifecycle (~101 LOC)
+  agent_registry.py     — Agent lifecycle: register, heartbeat, deregister, lineage management (~231 LOC)
+  agent_status.py       — Agent status and file-map query helpers for CoordinationHub (~262 LOC)
+  assessment.py         — Assessment runner for CoordinationHub coordination test suites (~187 LOC)
+  assessment_scorers.py — Assessment metric scorers for CoordinationHub (~237 LOC)
+  cli.py                — CoordinationHub CLI — command-line interface for all 30 coordination tool methods (~169 LOC)
+  cli_agents.py         — Agent identity and lifecycle CLI commands (~124 LOC)
+  cli_commands.py       — CoordinationHub CLI command handlers (~47 LOC)
+  cli_locks.py          — Document locking and coordination CLI commands (~158 LOC)
+  cli_setup.py          — CLI commands for setup and diagnostics: doctor, init, watch (~268 LOC)
+  cli_utils.py          — Shared CLI helper functions used by all cli_* sub-modules (~21 LOC)
+  cli_vis.py            — Change awareness, audit, graph, and assessment CLI commands (~265 LOC)
+  conflict_log.py       — Conflict recording and querying for CoordinationHub (~44 LOC)
+  context.py            — Context bundle builder for CoordinationHub agent registration responses (~88 LOC)
+  core.py               — CoordinationEngine — core business logic for CoordinationHub (~238 LOC)
+  core_locking.py       — Locking and coordination methods for CoordinationEngine (~269 LOC)
+  db.py                 — SQLite schema, migrations, and connection pool for CoordinationHub (~239 LOC)
+  dispatch.py           — Tool dispatch table for CoordinationHub (~37 LOC)
+  graphs.py             — Declarative coordination graph: loader, validator, in-memory representation (~256 LOC)
+  lock_ops.py           — Shared lock primitives used by both local locks and coordination locks (~191 LOC)
+  mcp_server.py         — HTTP-based MCP server for CoordinationHub — zero external dependencies (~209 LOC)
+  mcp_stdio.py          — Stdio-based MCP server for CoordinationHub using the ``mcp`` Python package (~142 LOC)
+  notifications.py      — Change notification storage and retrieval for CoordinationHub (~81 LOC)
+  paths.py              — Path normalization and project-root detection utilities (~38 LOC)
+  scan.py               — File ownership scan for CoordinationHub (~198 LOC)
+  schemas.py            — Tool schemas for CoordinationHub — all 30 MCP tools (~645 LOC)
   hooks/
-    __init__.py        -- Hooks package init
-    claude_code.py     -- Claude Code hook: auto-locking (TTL=300s), ownership claim, PostToolUse refresh, event capture, Stele/Trammel bridge (~450 LOC)
-tests/
-  conftest.py
-  fixtures/claude_code_events/  -- Hook event contract fixtures (6 event types)
-  test_agent_lifecycle.py
-  test_locking.py
-  test_notifications.py
-  test_conflicts.py
-  test_coordination.py
-  test_visibility.py
-  test_graphs.py
-  test_assessment.py
-  test_integration.py
-  test_core.py
-  test_cli.py
-  test_concurrent.py
-  test_scenario.py
-  test_hooks.py
-  test_setup.py
-pyproject.toml
-coordination_spec.yaml   -- Example spec (YAML)
-coordination_spec.json    -- Example spec (JSON)
-README.md
-CLAUDE.md
-COMPLETE_PROJECT_DOCUMENTATION.md
-LLM_Development.md
-wiki-local/
-  spec-project.md
-  glossary.md
-  index.md
+    __init__.py         — Hooks package — Claude Code integration via stdin/stdout event protocol (~1 LOC)
+    claude_code.py      — CoordinationHub hook for Claude Code (~352 LOC)
 ```
+<!-- /GEN -->
+
+`tests/` contains <!-- GEN:test-count -->298<!-- /GEN --> tests across 16 files plus `fixtures/claude_code_events/` (hook contract fixtures).
+
+Top-level project files: `pyproject.toml`, `coordination_spec.yaml`/`.json` (example specs), `README.md`, `CLAUDE.md`, `COMPLETE_PROJECT_DOCUMENTATION.md`, `LLM_Development.md`, and `wiki-local/` (this spec, glossary, index).
 
 ---
 
