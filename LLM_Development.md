@@ -9,56 +9,64 @@ All significant changes to the CoordinationHub project are documented here in re
 
 ---
 
-## 2026-04-11 — v0.4.3 Review Fourteen Fixes
+## 2026-04-11 — v0.4.3 Review Fourteen Root Cause
 
-### Motivation
+### Investigation
 
-Review Fourteen (conducted on RecipeLab_alt, 2026-04-11) surfaced three
-load-bearing bugs that surfaced only under real multi-agent swarm usage:
+Review Fourteen (conducted on RecipeLab_alt, 2026-04-11) reported three
+symptoms on a live swarm test:
 
-1. **`agent-tree` errored with `no such column: region_start`** on a DB in
-   the wild. Root cause was a buggy earlier `init_schema` path that
-   stamped `schema_version=3` without actually running the v1→v2 migration,
-   leaving `document_locks` at the v1 shape forever.
-2. **Parallel `general-purpose` sub-agent writes to the same file did not
-   contend** — both writes succeeded, the second overwrote the first, and
-   no conflict was recorded. The sub-agents never appeared in the agent
-   registry because Claude Code did not fire `SubagentStart` for that
-   sub-agent type; the PreToolUse/PostToolUse handlers then attributed
-   everything to the session parent.
-3. **`list-agents` and `dashboard` rendered the same DB differently** —
-   list-agents showed `active (STALE)` while dashboard showed `[stopped]`
-   because only one of them implicitly reaped stale agents.
+1. `agent-tree` errored with `no such column: region_start`.
+2. Parallel general-purpose sub-agent writes to the same file silently
+   overwrote each other; neither sub-agent appeared in the CoordinationHub
+   registry. The reviewer concluded SubagentStart was not firing for
+   general-purpose sub-agents (only for Explore).
+3. `list-agents` and `dashboard` disagreed on agent status.
+
+The initial fix assumed symptom (2) was a Claude Code hook-coverage gap
+and added an `auto_register` fallback in `_resolve_agent_id`. Post-fix
+investigation invalidated that assumption:
+
+* `~/.coordinationhub/hook.log` showed **SubagentStart and SubagentStop
+  events firing for general-purpose sub-agents** on 2026-04-11 — they
+  just crashed inside `register_agent` with `table agents has no column
+  named claude_agent_id`. Earlier the same day, 300+ PreToolUse calls
+  had crashed with `no such column: region_start`. Every hook call had
+  been silently failing for hours.
+* The DB was in a "stuck-version" state: `schema_version=3` stamped by
+  an earlier buggy `init_schema` path that ran a no-op fresh-install
+  branch on existing tables, then recorded the version. The actual
+  v1→v2 and v2→v3 migrations never ran, so tables stayed at v1 while
+  the recorded version advanced.
+* A live test after the DB fix (spawning a general-purpose sub-agent
+  from Claude Code) registered correctly as `hub.cc.{session}.agent.0`
+  with `claude_agent_id` populated and `parent_id` linked. Proving
+  SubagentStart fires for every sub-agent type.
+
+All three symptoms were downstream of the DB bug. The `auto_register`
+fallback was reverted — it was solving a problem that didn't exist.
 
 ### Fixed
 
-**`db.py init_schema` is now fully idempotent and self-healing.** Every
+**`db.py init_schema` is now idempotent and self-healing.** Every
 call:
 
 1. Creates `schema_version` if missing.
-2. Runs `CREATE TABLE IF NOT EXISTS` for every table in the latest shape
-   (no-op on existing tables, adds any missing tables for legacy DBs).
+2. Runs `CREATE TABLE IF NOT EXISTS` for every table in the latest
+   shape (no-op on existing tables, adds any missing tables for
+   legacy DBs).
 3. Runs **every** migration in version order unconditionally — each
    migration checks `PRAGMA table_info` and skips work already applied,
-   so stuck DBs that were stamped at v3 but still shaped like v1 get
-   their `document_locks` restructured and `agents.claude_agent_id`
-   added on the next call.
+   so stuck DBs stamped at v3 but still shaped like v1 get their
+   `document_locks` restructured and `agents.claude_agent_id` added
+   on the next call.
 4. Creates all indexes after migrations, so index DDL always references
    the latest column set.
 5. Overwrites `schema_version` with `_CURRENT_SCHEMA_VERSION`.
 
-**`hooks/claude_code.py` auto-registers unmapped sub-agents.**
-`_resolve_agent_id(event, engine, auto_register=True)` now creates a
-`{session_parent}.auto.{hex[:6]}` child when PreToolUse/PostToolUse
-arrives with a raw Claude hex ID that has no existing
-`claude_agent_id` mapping. The child is linked to the session root
-and the raw ID is stored as `claude_agent_id`, so subsequent events
-resolve via `find_agent_by_claude_id`. `_looks_like_raw_claude_id`
-guards against reshaping IDs that are already `hub.*`. Applied to
-`handle_pre_write`, `handle_post_write`, `handle_post_stele_index`,
-and `handle_post_trammel_claim`. `handle_subagent_stop` deliberately
-keeps `auto_register=False` — stop events should not create new
-agents.
+This is the root-cause fix. Once hooks stop crashing, sub-agent
+registration, lock acquisition, file ownership, and SubagentStop all
+work without further intervention.
 
 **`cmd_list_agents` and `cmd_dashboard` both call `reap_stale_agents`
 before querying** so their output converges on the same DB state.
@@ -71,27 +79,20 @@ dashboard (or vice versa) depending on which command last ran.
 - `tests/test_db_migration.py` — 7 tests for legacy, stuck-version, and
   fresh-install schema paths. Includes the exact broken DB state found
   in the project (`schema_version=3` with `document_locks` in v1 shape).
-- `TestAutoRegisterUnmappedSubagent` in `tests/test_hooks.py` — 5 tests
-  covering parent linkage, file-ownership attribution to the child,
-  idempotency across multiple tool calls, the parallel-write
-  contention case from Review Fourteen Experiment 3, and the guard
-  that prevents reshaping `hub.*` IDs.
 - `TestListAgentsDashboardConsistency` in `tests/test_cli.py` — 3 tests
   that seed a stale agent, run each CLI command, and verify the DB is
   left in the same state.
 
-### Not fixed (intentional)
+### Reverted from the intermediate fix
 
-Review Fourteen's finding that `general-purpose` sub-agents skip
-`SubagentStart` entirely is a Claude Code behavior we cannot change
-from the hook side. The auto-register fix absorbs the consequences so
-file locks, change notifications, and ownership land on the correct
-child. `SubagentStop` still will not fire for those sub-agents; they
-remain `active` in the DB until `reap_stale_agents` runs.
+An earlier iteration of this commit added `_looks_like_raw_claude_id`,
+an `auto_register` parameter to `_resolve_agent_id`, and 5 tests in
+`TestAutoRegisterUnmappedSubagent`. All of it was removed once the DB
+fix turned out to be sufficient. The hook file matches v0.4.2 exactly.
 
 ### Test Count
 
-297 → 313 tests (+16). All passing.
+297 → 308 tests (+11, across 17 files). All passing.
 
 ---
 
@@ -145,7 +146,7 @@ Block markers for multi-line content:
 | `coordinationhub/dispatch.py` | 37 | Tool dispatch table for CoordinationHub |
 | `coordinationhub/graphs.py` | 256 | Declarative coordination graph: loader, validator, in-memory representation |
 | `coordinationhub/hooks/__init__.py` | 1 | Hooks package — Claude Code integration via stdin/stdout event protocol |
-| `coordinationhub/hooks/claude_code.py` | 383 | CoordinationHub hook for Claude Code |
+| `coordinationhub/hooks/claude_code.py` | 352 | CoordinationHub hook for Claude Code |
 | `coordinationhub/lock_ops.py` | 191 | Shared lock primitives used by both local locks and coordination locks |
 | `coordinationhub/mcp_server.py` | 209 | HTTP-based MCP server for CoordinationHub — zero external dependencies |
 | `coordinationhub/mcp_stdio.py` | 142 | Stdio-based MCP server for CoordinationHub using the ``mcp`` Python package |
@@ -158,7 +159,7 @@ Block markers for multi-line content:
 
 Inline markers for single values (render invisibly in Markdown):
 ```markdown
-This project has <!-- GEN:test-count -->313<!-- /GEN --> tests.
+This project has <!-- GEN:test-count -->308<!-- /GEN --> tests.
 ```
 
 Unknown marker names raise an error during rewrite (catches typos).

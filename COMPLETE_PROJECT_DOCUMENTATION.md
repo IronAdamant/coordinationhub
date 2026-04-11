@@ -3,23 +3,29 @@
 **Version:** <!-- GEN:version -->0.4.3<!-- /GEN -->
 **Last updated:** 2026-04-11
 
-## v0.4.3 Changelog — Review Fourteen Fixes
+## v0.4.3 Changelog — Review Fourteen Root Cause
+
+### Investigation
+
+Review Fourteen reported three symptoms on a live swarm test: `agent-tree` errored with `no such column: region_start`, general-purpose sub-agents appeared not to land in the registry (parallel writes to the same file overwrote each other without contention), and `list-agents` vs `dashboard` disagreed on status. The reviewer inferred Claude Code was selectively firing `SubagentStart` for Explore but not general-purpose sub-agents.
+
+Post-fix investigation disproved that inference. `~/.coordinationhub/hook.log` showed SubagentStart and SubagentStop events firing for general-purpose sub-agents during the Review Fourteen window — they just crashed inside `register_agent` with `table agents has no column named claude_agent_id`, and earlier the same day 300+ PreToolUse events had crashed with `no such column: region_start`. Every hook call was silently failing because the DB was in a "stuck-version" state: `schema_version=3` had been stamped by an earlier buggy init_schema path, but the v1→v2 and v2→v3 migrations had never actually executed, leaving tables at their v1 shape. A live test after the DB fix (spawning a general-purpose sub-agent from Claude Code) registered correctly as `hub.cc.{session}.agent.0` with the claude_agent_id mapping populated and parent linked — confirming SubagentStart does fire for all sub-agent types. The symptoms were all downstream of the DB bug.
 
 ### Fixed
-- **`init_schema` is now idempotent and self-healing.** Earlier code stamped `schema_version` in a fresh-install branch that was a no-op on existing tables; a DB discovered in Review Fourteen had `schema_version=3` but `document_locks` still in v1 shape. `init_schema` now always runs every migration in version order (each is idempotent via `PRAGMA table_info` checks) and creates indexes after migrations. Legacy DBs, partially migrated DBs, and DBs with bogus version stamps all converge on the latest schema.
-- **General-purpose sub-agents now land in the hierarchy.** `_resolve_agent_id(auto_register=True)` creates a `{session_parent}.auto.{hex[:6]}` child when PreToolUse/PostToolUse arrives with a raw Claude hex ID that has no `claude_agent_id` mapping, recording the raw ID on the child so subsequent events resolve normally. File ownership, lock attribution, and change notifications now land on the correct sub-agent instead of the session root. Parallel writes from two sub-agents to the same file are now correctly denied by the second PreToolUse.
+- **`init_schema` is now idempotent and self-healing.** Earlier code stamped `schema_version` in a fresh-install branch that was a no-op on existing tables, producing "stuck-version" DBs where the recorded version advanced but the underlying tables stayed at v1. `init_schema` now always runs every migration in version order (each is idempotent via `PRAGMA table_info` checks) and creates indexes after migrations. Legacy DBs, partially migrated DBs, and DBs with bogus version stamps all converge on the latest schema. This is the root-cause fix for Review Fourteen — once the hook stops crashing, sub-agent registration, lock acquisition, file ownership, and SubagentStop all work on their own.
 - **`list-agents` and `dashboard` output now agrees.** Both CLI commands call `reap_stale_agents` before querying so a stale active-in-DB agent is reaped once, and both commands render it as stopped thereafter.
 
 ### Added
 - `tests/test_db_migration.py` — 7 tests covering pre-v0.3.3 legacy DBs, stuck-version DBs (the exact broken state found in the project), and fresh installs.
-- 5 `TestAutoRegisterUnmappedSubagent` tests in `test_hooks.py` — parent linkage, file ownership to the child, idempotency across tool calls, parallel-write contention, and the `hub.*` passthrough guard.
 - 3 `TestListAgentsDashboardConsistency` tests in `test_cli.py` — stale-agent seeding + cross-command consistency.
 
 ### Changed
-- `coordinationhub/db.py`: `init_schema` rewritten to run all migrations unconditionally.
-- `coordinationhub/hooks/claude_code.py`: `_resolve_agent_id` gained `auto_register` parameter; `_looks_like_raw_claude_id` helper added; all Post/PreToolUse handlers pass `auto_register=True`.
+- `coordinationhub/db.py`: `init_schema` rewritten to run all migrations unconditionally and create indexes after migrations.
 - `coordinationhub/cli_agents.py`, `coordinationhub/cli_vis.py`: auto-reap before list/dashboard output.
-- Tests: 297 → 313 across 17 files.
+- Tests: 297 → 308 across 17 files.
+
+### Not changed (explicitly)
+- **Hooks/claude_code.py is unchanged from v0.4.2.** An earlier iteration of this commit added an `auto_register` fallback to `_resolve_agent_id` that would create a `{parent}.auto.{hex[:6]}` child when a sub-agent's SubagentStart appeared to have been skipped. Empirical testing showed SubagentStart fires for every sub-agent type — the apparent skip was the hook crashing on the stuck-version DB. The fallback was removed to avoid designing for a hypothetical scenario.
 
 ---
 
@@ -227,7 +233,7 @@ keep it in sync; CI checks for drift on every push.
 | `coordinationhub/dispatch.py` | 37 | Tool dispatch table for CoordinationHub |
 | `coordinationhub/graphs.py` | 256 | Declarative coordination graph: loader, validator, in-memory representation |
 | `coordinationhub/hooks/__init__.py` | 1 | Hooks package — Claude Code integration via stdin/stdout event protocol |
-| `coordinationhub/hooks/claude_code.py` | 383 | CoordinationHub hook for Claude Code |
+| `coordinationhub/hooks/claude_code.py` | 352 | CoordinationHub hook for Claude Code |
 | `coordinationhub/lock_ops.py` | 191 | Shared lock primitives used by both local locks and coordination locks |
 | `coordinationhub/mcp_server.py` | 209 | HTTP-based MCP server for CoordinationHub — zero external dependencies |
 | `coordinationhub/mcp_stdio.py` | 142 | Stdio-based MCP server for CoordinationHub using the ``mcp`` Python package |
@@ -237,7 +243,7 @@ keep it in sync; CI checks for drift on every push.
 | `coordinationhub/schemas.py` | 645 | Tool schemas for CoordinationHub — all 30 MCP tools |
 <!-- /GEN -->
 
-**Total: <!-- GEN:test-count -->313<!-- /GEN --> tests across 16 test files.**
+**Total: <!-- GEN:test-count -->308<!-- /GEN --> tests across 16 test files.**
 
 ---
 
@@ -275,11 +281,11 @@ coordinationhub/
   schemas.py            — Tool schemas for CoordinationHub — all 30 MCP tools (~645 LOC)
   hooks/
     __init__.py         — Hooks package — Claude Code integration via stdin/stdout event protocol (~1 LOC)
-    claude_code.py      — CoordinationHub hook for Claude Code (~383 LOC)
+    claude_code.py      — CoordinationHub hook for Claude Code (~352 LOC)
 ```
 <!-- /GEN -->
 
-The `tests/` directory holds <!-- GEN:test-count -->313<!-- /GEN --> tests across 16 files,
+The `tests/` directory holds <!-- GEN:test-count -->308<!-- /GEN --> tests across 16 files,
 plus `tests/fixtures/claude_code_events/` for hook contract fixtures.
 
 **Module design principles:**
@@ -726,7 +732,7 @@ Air-gapped install: `pip install coordinationhub --no-deps`.
 
 ```bash
 python -m pytest tests/ -v
-# <!-- GEN:test-count -->313<!-- /GEN --> tests across 16 test files
+# <!-- GEN:test-count -->308<!-- /GEN --> tests across 16 test files
 ```
 
 ---
