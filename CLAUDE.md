@@ -23,7 +23,7 @@ coordinationhub/
   cli_agents.py         — Agent identity and lifecycle CLI commands (~127 LOC)
   cli_commands.py       — CoordinationHub CLI command handlers (~48 LOC)
   cli_locks.py          — Document locking and coordination CLI commands (~158 LOC)
-  cli_setup.py          — CLI commands for setup and diagnostics: doctor, init, watch (~268 LOC)
+  cli_setup.py          — CLI commands for setup and diagnostics: doctor, init, watch (~269 LOC)
   cli_utils.py          — Shared CLI helper functions used by all cli_* sub-modules (~21 LOC)
   cli_vis.py            — Change awareness, audit, graph, and assessment CLI commands (~290 LOC)
   conflict_log.py       — Conflict recording and querying for CoordinationHub (~44 LOC)
@@ -42,11 +42,11 @@ coordinationhub/
   schemas.py            — Tool schemas for CoordinationHub — all 31 MCP tools (~675 LOC)
   hooks/
     __init__.py         — Hooks package — Claude Code integration via stdin/stdout event protocol (~1 LOC)
-    claude_code.py      — CoordinationHub hook for Claude Code (~352 LOC)
+    claude_code.py      — CoordinationHub hook for Claude Code (~378 LOC)
 ```
 <!-- /GEN -->
 
-The `tests/` directory contains the pytest suite (<!-- GEN:test-count -->320<!-- /GEN --> tests across 16 files), including `tests/fixtures/claude_code_events/` contract fixtures.
+The `tests/` directory contains the pytest suite (<!-- GEN:test-count -->328<!-- /GEN --> tests across 16 files), including `tests/fixtures/claude_code_events/` contract fixtures.
 
 ## Module Design
 
@@ -131,6 +131,7 @@ coordinationhub watch             # live agent tree refresh
 Project-level hooks in `.claude/settings.json` wire CoordinationHub into Claude Code sessions automatically:
 
 - **SessionStart**: Registers a root agent (`hub.cc.{session_id}`)
+- **UserPromptSubmit**: Stamps the root agent's `current_task` with the user's prompt (truncated to 120 chars, whitespace collapsed). Symmetric with sub-agents, whose `current_task` is populated from the Agent tool's `description` during SubagentStart. Without this hook, `coordinationhub watch` and `get_agent_tree` show the root agent as task-less even while it holds locks.
 - **PreToolUse Write/Edit**: Acquires a file lock before writes; denies if another agent holds it
 - **PostToolUse Write/Edit**: Fires `notify_change` after successful writes
 - **SubagentStart/SubagentStop**: Registers/deregisters child agents for spawned subagents
@@ -153,7 +154,7 @@ To disable hooks temporarily, add `"disableAllHooks": true` to `~/.claude/settin
 
 ```bash
 python -m pytest tests/ -v
-# <!-- GEN:test-count -->320<!-- /GEN --> tests across 16 test files:
+# <!-- GEN:test-count -->328<!-- /GEN --> tests across 16 test files:
 #   test_agent_lifecycle.py  — 21 tests
 #   test_locking.py          — 40 tests (includes smart reap)
 #   test_notifications.py    — 8 tests
@@ -167,7 +168,7 @@ python -m pytest tests/ -v
 #   test_cli.py              — 14 tests (parser, list-agents/dashboard consistency)
 #   test_concurrent.py       — 8 tests (threading: locks, registration, notifications)
 #   test_scenario.py         — 13 tests (end-to-end multi-agent + live session assessment)
-#   test_hooks.py            — 50 tests (hook handlers, agent ID mapping, file ownership, event contract)
+#   test_hooks.py            — 58 tests (hook handlers, agent ID mapping, file ownership, event contract, UserPromptSubmit)
 #   test_setup.py            — 8 tests (doctor, init, hook merge)
 #   test_db_migration.py     — 7 tests (legacy DB, stuck-version recovery, fresh install)
 ```

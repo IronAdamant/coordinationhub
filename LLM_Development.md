@@ -1,11 +1,59 @@
 # LLM_Development.md — CoordinationHub
 
-**Version:** <!-- GEN:version -->0.4.5<!-- /GEN -->
+**Version:** <!-- GEN:version -->0.4.6<!-- /GEN -->
 **Last updated:** 2026-04-11
 
 ## Change Log
 
 All significant changes to the CoordinationHub project are documented here in reverse chronological order.
+
+---
+
+## 2026-04-11 — v0.4.6 UserPromptSubmit Hook — Root Agent Task Visibility
+
+### Motivation
+
+After v0.4.5 shipped the live-session assessment runner, an audit question surfaced: does the main Claude Code agent actually show *what it's working on* in `get_agent_tree` / `coordinationhub watch`? The answer was no. Sub-agents had their `current_task` column populated automatically by `handle_subagent_start` from the Agent tool's `description` field, but the root session agent had no equivalent path. Its task column stayed `NULL` even while it held file locks and fired `notify_change` events. A user running `coordinationhub watch` in a sidecar terminal would see "the root agent exists and is touching these files" but not "here's what the user asked it to do."
+
+The fix is a new `UserPromptSubmit` hook. Claude Code fires this event every time the user submits a prompt, with the prompt text in the event JSON. A handler that stamps the root agent's `current_task` from the prompt makes the two paths symmetric: sub-agents get their task from the Agent spawn description, the root agent gets its task from the user prompt.
+
+This is passive and automatic — no behavioral dependency on me remembering to call `update_agent_status`. Just install the hook once and every future session populates itself.
+
+### Added
+
+**`handle_user_prompt_submit(event)` in `hooks/claude_code.py`**:
+
+- Reads `event["prompt"]`, strips whitespace, and bails on empty/missing prompts (so the hook stays a no-op if Claude Code ever sends an empty submit event or changes the field name).
+- Truncates to 120 characters with an ellipsis suffix to keep the agent tree rendering compact.
+- Collapses multi-line whitespace so multi-line prompts render as a single line in `text_tree` output.
+- Resolves the root agent via `_session_agent_id(session_id)`, calls `_ensure_registered` (so the hook self-heals if SessionStart was somehow missed), then `engine.update_agent_status(agent_id, current_task=summary)`.
+- Wired into `main()` dispatch between SessionStart and PreToolUse.
+
+**`_HOOKS_CONFIG["UserPromptSubmit"]` entry in `cli_setup.py`**:
+
+- New matcher block with `statusMessage: "Stamping current task"`. Picked up by `coordinationhub init` via the existing `_merge_hooks` path, so re-running `init` installs the new hook into `~/.claude/settings.json` without clobbering other hooks.
+- `_check_hooks_config()` (the doctor check) now includes `UserPromptSubmit` in its required set, so setups missing the hook show up as FAIL in `coordinationhub doctor`.
+
+**Contract fixture `tests/fixtures/claude_code_events/UserPromptSubmit.json`** with the minimum shape the handler reads: `hook_event_name`, `session_id`, `cwd`, `prompt`. Picked up by the parametrized `TestEventContract` class, which now runs two additional invocations per test (required-fields check + handler-does-not-crash).
+
+**6 new functional tests** in `test_hooks.py::TestUserPromptSubmit`:
+- `test_sets_current_task_from_prompt` — happy path, verifies `current_task` equals the prompt text
+- `test_truncates_long_prompts` — 500-char prompt → truncated with `...` suffix, ≤120 chars
+- `test_collapses_multiline_whitespace` — multi-line prompt renders as a single line
+- `test_empty_prompt_is_noop` — empty/whitespace prompt does not overwrite the previous task
+- `test_latest_prompt_overwrites_previous` — second prompt replaces the first
+- `test_registers_root_when_session_start_missed` — hook self-heals if SessionStart didn't fire
+
+### Note on existing sessions
+
+Claude Code reads `~/.claude/settings.json` at session start. Running `coordinationhub init` installs the hook into the on-disk config but does not retroactively add it to sessions that are already open. The session this commit was authored in showed `current_task: null` for the root agent because the session predated the hook. New sessions (and any existing session that restarts) will populate on the first user prompt.
+
+### Counts
+
+- Version: 0.4.5 → 0.4.6
+- Tests: 320 → 328 collected (327 passing + 1 skipped). `test_hooks.py`: 50 → 58 (+6 functional + 2 parametrized contract invocations for the new fixture).
+- Source LOC: `hooks/claude_code.py` 352 → 378 (+26 for the new handler). `cli_setup.py` 268 → 269 (+1 for the hook config entry).
+- Hook events handled: 6 → 7.
 
 ---
 
@@ -230,7 +278,7 @@ Block markers for multi-line content:
 | `coordinationhub/cli_agents.py` | 127 | Agent identity and lifecycle CLI commands |
 | `coordinationhub/cli_commands.py` | 48 | CoordinationHub CLI command handlers |
 | `coordinationhub/cli_locks.py` | 158 | Document locking and coordination CLI commands |
-| `coordinationhub/cli_setup.py` | 268 | CLI commands for setup and diagnostics: doctor, init, watch |
+| `coordinationhub/cli_setup.py` | 269 | CLI commands for setup and diagnostics: doctor, init, watch |
 | `coordinationhub/cli_utils.py` | 21 | Shared CLI helper functions used by all cli_* sub-modules |
 | `coordinationhub/cli_vis.py` | 290 | Change awareness, audit, graph, and assessment CLI commands |
 | `coordinationhub/conflict_log.py` | 44 | Conflict recording and querying for CoordinationHub |
@@ -241,7 +289,7 @@ Block markers for multi-line content:
 | `coordinationhub/dispatch.py` | 38 | Tool dispatch table for CoordinationHub |
 | `coordinationhub/graphs.py` | 256 | Declarative coordination graph: loader, validator, in-memory representation |
 | `coordinationhub/hooks/__init__.py` | 1 | Hooks package — Claude Code integration via stdin/stdout event protocol |
-| `coordinationhub/hooks/claude_code.py` | 352 | CoordinationHub hook for Claude Code |
+| `coordinationhub/hooks/claude_code.py` | 378 | CoordinationHub hook for Claude Code |
 | `coordinationhub/lock_ops.py` | 191 | Shared lock primitives used by both local locks and coordination locks |
 | `coordinationhub/mcp_server.py` | 209 | HTTP-based MCP server for CoordinationHub — zero external dependencies |
 | `coordinationhub/mcp_stdio.py` | 142 | Stdio-based MCP server for CoordinationHub using the ``mcp`` Python package |
@@ -254,7 +302,7 @@ Block markers for multi-line content:
 
 Inline markers for single values (render invisibly in Markdown):
 ```markdown
-This project has <!-- GEN:test-count -->320<!-- /GEN --> tests.
+This project has <!-- GEN:test-count -->328<!-- /GEN --> tests.
 ```
 
 Unknown marker names raise an error during rewrite (catches typos).

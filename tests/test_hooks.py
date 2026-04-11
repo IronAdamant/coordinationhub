@@ -15,6 +15,7 @@ from coordinationhub.hooks.claude_code import (
     _resolve_agent_id,
     _log_error,
     handle_session_start,
+    handle_user_prompt_submit,
     handle_pre_write,
     handle_post_write,
     handle_subagent_start,
@@ -206,6 +207,110 @@ class TestSessionStart:
         event = _make_event("SessionStart", cwd=hook_cwd)
         handle_session_start(event)
         handle_session_start(event)  # should not raise
+
+
+class TestUserPromptSubmit:
+    """UserPromptSubmit stamps the root agent's current_task with the prompt."""
+
+    def _current_task(self, hook_cwd, agent_id):
+        from coordinationhub.hooks.claude_code import _get_engine
+        engine = _get_engine(hook_cwd)
+        try:
+            with engine._connect() as conn:
+                row = conn.execute(
+                    "SELECT current_task FROM agent_responsibilities WHERE agent_id = ?",
+                    (agent_id,),
+                ).fetchone()
+                return row["current_task"] if row else None
+        finally:
+            engine.close()
+
+    def test_sets_current_task_from_prompt(self, hook_cwd):
+        session_id = "sess-prompt00001"
+        handle_session_start(_make_event("SessionStart", cwd=hook_cwd, session_id=session_id))
+
+        prompt = "Fix the login bug in auth.py"
+        handle_user_prompt_submit(_make_event(
+            "UserPromptSubmit", cwd=hook_cwd, session_id=session_id, prompt=prompt,
+        ))
+
+        task = self._current_task(hook_cwd, _session_agent_id(session_id))
+        assert task == prompt
+
+    def test_truncates_long_prompts(self, hook_cwd):
+        session_id = "sess-prompt00002"
+        handle_session_start(_make_event("SessionStart", cwd=hook_cwd, session_id=session_id))
+
+        long_prompt = "x" * 500
+        handle_user_prompt_submit(_make_event(
+            "UserPromptSubmit", cwd=hook_cwd, session_id=session_id, prompt=long_prompt,
+        ))
+
+        task = self._current_task(hook_cwd, _session_agent_id(session_id))
+        assert len(task) <= 120
+        assert task.endswith("...")
+
+    def test_collapses_multiline_whitespace(self, hook_cwd):
+        """Multi-line prompts render as a single line in the agent tree."""
+        session_id = "sess-prompt00003"
+        handle_session_start(_make_event("SessionStart", cwd=hook_cwd, session_id=session_id))
+
+        handle_user_prompt_submit(_make_event(
+            "UserPromptSubmit", cwd=hook_cwd, session_id=session_id,
+            prompt="line one\n\n  line two\n\nline three",
+        ))
+
+        task = self._current_task(hook_cwd, _session_agent_id(session_id))
+        assert "\n" not in task
+        assert task == "line one line two line three"
+
+    def test_empty_prompt_is_noop(self, hook_cwd):
+        """Empty/whitespace prompts leave current_task unchanged."""
+        session_id = "sess-prompt00004"
+        handle_session_start(_make_event("SessionStart", cwd=hook_cwd, session_id=session_id))
+
+        # Seed a known task first
+        handle_user_prompt_submit(_make_event(
+            "UserPromptSubmit", cwd=hook_cwd, session_id=session_id,
+            prompt="initial",
+        ))
+        # Empty prompt should not overwrite
+        handle_user_prompt_submit(_make_event(
+            "UserPromptSubmit", cwd=hook_cwd, session_id=session_id, prompt="   ",
+        ))
+
+        task = self._current_task(hook_cwd, _session_agent_id(session_id))
+        assert task == "initial"
+
+    def test_latest_prompt_overwrites_previous(self, hook_cwd):
+        """A new prompt replaces the root agent's current_task."""
+        session_id = "sess-prompt00005"
+        handle_session_start(_make_event("SessionStart", cwd=hook_cwd, session_id=session_id))
+
+        handle_user_prompt_submit(_make_event(
+            "UserPromptSubmit", cwd=hook_cwd, session_id=session_id,
+            prompt="first thing",
+        ))
+        handle_user_prompt_submit(_make_event(
+            "UserPromptSubmit", cwd=hook_cwd, session_id=session_id,
+            prompt="second thing",
+        ))
+
+        task = self._current_task(hook_cwd, _session_agent_id(session_id))
+        assert task == "second thing"
+
+    def test_registers_root_when_session_start_missed(self, hook_cwd):
+        """If UserPromptSubmit fires without a prior SessionStart, the handler
+        still registers the root agent rather than silently dropping the task."""
+        session_id = "sess-prompt00006"
+        # No SessionStart — go straight to UserPromptSubmit
+        handle_user_prompt_submit(_make_event(
+            "UserPromptSubmit", cwd=hook_cwd, session_id=session_id,
+            prompt="ad-hoc prompt",
+        ))
+
+        task = self._current_task(hook_cwd, _session_agent_id(session_id))
+        assert task == "ad-hoc prompt"
 
 
 class TestPreWrite:
@@ -504,6 +609,10 @@ _FIXTURE_HANDLERS = {
     "SessionStart": (
         handle_session_start, False,
         ["hook_event_name", "session_id"],
+    ),
+    "UserPromptSubmit": (
+        handle_user_prompt_submit, True,
+        ["hook_event_name", "session_id", "prompt"],
     ),
     "PreToolUse_Write": (
         handle_pre_write, True,

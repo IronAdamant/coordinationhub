@@ -1,0 +1,6 @@
+{
+  "hook_event_name": "UserPromptSubmit",
+  "session_id": "1bf3797d-a5f2-4c8b-b9d1-3e7f8a2c4d6e",
+  "cwd": "/home/user/project",
+  "prompt": "Refactor the lock-acquisition path so smart-reap runs before every acquire."
+}

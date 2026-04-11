@@ -1,7 +1,34 @@
 # CoordinationHub — Complete Project Documentation
 
-**Version:** <!-- GEN:version -->0.4.5<!-- /GEN -->
+**Version:** <!-- GEN:version -->0.4.6<!-- /GEN -->
 **Last updated:** 2026-04-11
+
+## v0.4.6 Changelog — UserPromptSubmit Hook (Root Agent Task Visibility)
+
+### Motivation
+
+Sub-agents already had their `current_task` populated automatically (via `handle_subagent_start` reading the Agent tool's `description` field), but the root session agent had no equivalent path. A user running `coordinationhub watch` saw locks and notifications from the root agent but no narrative of what it was working on. Making the `watch` view actually useful for "who's doing what" requires the root agent's task column to be populated automatically, with no behavioral dependency.
+
+Claude Code fires `UserPromptSubmit` on every user prompt and includes the prompt text in the event JSON. A hook handler that stamps the root agent's `current_task` from the prompt makes the two code paths symmetric and leaves the full agent tree self-documenting.
+
+### Added
+
+- **`handle_user_prompt_submit` in `hooks/claude_code.py`** — resolves the root agent via `_session_agent_id`, calls `_ensure_registered` (self-heals if SessionStart was missed), truncates the prompt to 120 chars with an ellipsis suffix, collapses multi-line whitespace, and calls `engine.update_agent_status(agent_id, current_task=summary)`. No-ops on empty/missing prompts. Wired into `main()` dispatch.
+- **`_HOOKS_CONFIG["UserPromptSubmit"]` in `cli_setup.py`** — new default matcher block with `statusMessage: "Stamping current task"`. `coordinationhub init` merges it into `~/.claude/settings.json` via the existing `_merge_hooks` path without clobbering user hooks. `_check_hooks_config` now requires `UserPromptSubmit` in its check set, so `coordinationhub doctor` flags setups missing the hook.
+- **`tests/fixtures/claude_code_events/UserPromptSubmit.json`** — contract fixture with the minimum shape (`hook_event_name`, `session_id`, `cwd`, `prompt`). Picked up automatically by the parametrized `TestEventContract` class.
+- **6 new functional tests** in `TestUserPromptSubmit`: happy path, long-prompt truncation, multi-line whitespace collapse, empty-prompt no-op, latest-prompt-wins, self-heal when SessionStart was missed.
+
+### Note for existing sessions
+
+Claude Code reads `~/.claude/settings.json` at session start. Running `coordinationhub init` installs the hook into the on-disk config but does not retroactively attach it to sessions already open. New sessions populate on first prompt.
+
+### Counts
+
+- Tests: 320 → 328 collected (327 passing + 1 skipped). `test_hooks.py`: 50 → 58.
+- Hook events handled: 6 → 7.
+- `hooks/claude_code.py`: 352 → 378 LOC.
+
+---
 
 ## v0.4.5 Changelog — Live-Session Assessment + Dead-Table Cleanup
 
@@ -277,7 +304,7 @@ keep it in sync; CI checks for drift on every push.
 | `coordinationhub/cli_agents.py` | 127 | Agent identity and lifecycle CLI commands |
 | `coordinationhub/cli_commands.py` | 48 | CoordinationHub CLI command handlers |
 | `coordinationhub/cli_locks.py` | 158 | Document locking and coordination CLI commands |
-| `coordinationhub/cli_setup.py` | 268 | CLI commands for setup and diagnostics: doctor, init, watch |
+| `coordinationhub/cli_setup.py` | 269 | CLI commands for setup and diagnostics: doctor, init, watch |
 | `coordinationhub/cli_utils.py` | 21 | Shared CLI helper functions used by all cli_* sub-modules |
 | `coordinationhub/cli_vis.py` | 290 | Change awareness, audit, graph, and assessment CLI commands |
 | `coordinationhub/conflict_log.py` | 44 | Conflict recording and querying for CoordinationHub |
@@ -288,7 +315,7 @@ keep it in sync; CI checks for drift on every push.
 | `coordinationhub/dispatch.py` | 38 | Tool dispatch table for CoordinationHub |
 | `coordinationhub/graphs.py` | 256 | Declarative coordination graph: loader, validator, in-memory representation |
 | `coordinationhub/hooks/__init__.py` | 1 | Hooks package — Claude Code integration via stdin/stdout event protocol |
-| `coordinationhub/hooks/claude_code.py` | 352 | CoordinationHub hook for Claude Code |
+| `coordinationhub/hooks/claude_code.py` | 378 | CoordinationHub hook for Claude Code |
 | `coordinationhub/lock_ops.py` | 191 | Shared lock primitives used by both local locks and coordination locks |
 | `coordinationhub/mcp_server.py` | 209 | HTTP-based MCP server for CoordinationHub — zero external dependencies |
 | `coordinationhub/mcp_stdio.py` | 142 | Stdio-based MCP server for CoordinationHub using the ``mcp`` Python package |
@@ -298,7 +325,7 @@ keep it in sync; CI checks for drift on every push.
 | `coordinationhub/schemas.py` | 675 | Tool schemas for CoordinationHub — all 31 MCP tools |
 <!-- /GEN -->
 
-**Total: <!-- GEN:test-count -->320<!-- /GEN --> tests across 16 test files.**
+**Total: <!-- GEN:test-count -->328<!-- /GEN --> tests across 16 test files.**
 
 ---
 
@@ -317,7 +344,7 @@ coordinationhub/
   cli_agents.py         — Agent identity and lifecycle CLI commands (~127 LOC)
   cli_commands.py       — CoordinationHub CLI command handlers (~48 LOC)
   cli_locks.py          — Document locking and coordination CLI commands (~158 LOC)
-  cli_setup.py          — CLI commands for setup and diagnostics: doctor, init, watch (~268 LOC)
+  cli_setup.py          — CLI commands for setup and diagnostics: doctor, init, watch (~269 LOC)
   cli_utils.py          — Shared CLI helper functions used by all cli_* sub-modules (~21 LOC)
   cli_vis.py            — Change awareness, audit, graph, and assessment CLI commands (~290 LOC)
   conflict_log.py       — Conflict recording and querying for CoordinationHub (~44 LOC)
@@ -336,11 +363,11 @@ coordinationhub/
   schemas.py            — Tool schemas for CoordinationHub — all 31 MCP tools (~675 LOC)
   hooks/
     __init__.py         — Hooks package — Claude Code integration via stdin/stdout event protocol (~1 LOC)
-    claude_code.py      — CoordinationHub hook for Claude Code (~352 LOC)
+    claude_code.py      — CoordinationHub hook for Claude Code (~378 LOC)
 ```
 <!-- /GEN -->
 
-The `tests/` directory holds <!-- GEN:test-count -->320<!-- /GEN --> tests across 16 files,
+The `tests/` directory holds <!-- GEN:test-count -->328<!-- /GEN --> tests across 16 files,
 plus `tests/fixtures/claude_code_events/` for hook contract fixtures.
 
 **Module design principles:**
@@ -788,7 +815,7 @@ Air-gapped install: `pip install coordinationhub --no-deps`.
 
 ```bash
 python -m pytest tests/ -v
-# <!-- GEN:test-count -->320<!-- /GEN --> tests across 16 test files
+# <!-- GEN:test-count -->328<!-- /GEN --> tests across 16 test files
 ```
 
 ---

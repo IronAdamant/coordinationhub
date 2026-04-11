@@ -9,6 +9,7 @@ Fails gracefully (exit 0) if coordinationhub is not importable.
 
 Events handled:
   SessionStart     → register session root agent
+  UserPromptSubmit → stamp root agent's current_task with the prompt
   PreToolUse       → acquire file lock before Write/Edit
   PostToolUse      → notify change after Write/Edit; Stele/Trammel bridge
   SubagentStart    → register child agent for spawned subagent
@@ -165,6 +166,36 @@ def handle_session_start(event: dict) -> dict | None:
     try:
         agent_id = _session_agent_id(event.get("session_id", ""))
         _ensure_registered(engine, agent_id)
+    finally:
+        engine.close()
+    return None
+
+
+def handle_user_prompt_submit(event: dict) -> dict | None:
+    """Stamp the root session agent's ``current_task`` with the latest prompt.
+
+    Makes the root agent show "what the user just asked me to do" in
+    ``get_agent_tree`` and ``coordinationhub watch`` — symmetric with
+    sub-agents, whose ``current_task`` is populated from the Agent
+    tool's ``description`` during SubagentStart. Without this hook, the
+    root agent's task column stays empty even though locks and writes
+    are fully tracked.
+
+    The prompt is truncated to keep the agent tree compact.
+    """
+    prompt = (event.get("prompt") or "").strip()
+    if not prompt:
+        return None
+
+    summary = prompt if len(prompt) <= 120 else prompt[:117] + "..."
+    # Collapse whitespace so multi-line prompts render cleanly in the tree.
+    summary = " ".join(summary.split())
+
+    engine = _get_engine(event.get("cwd", "."))
+    try:
+        agent_id = _session_agent_id(event.get("session_id", ""))
+        _ensure_registered(engine, agent_id)
+        engine.update_agent_status(agent_id, current_task=summary)
     finally:
         engine.close()
     return None
@@ -434,6 +465,9 @@ def main() -> None:
 
         if hook_event == "SessionStart":
             result = handle_session_start(event)
+
+        elif hook_event == "UserPromptSubmit":
+            result = handle_user_prompt_submit(event)
 
         elif hook_event == "PreToolUse" and tool_name in ("Write", "Edit"):
             result = handle_pre_write(event)
