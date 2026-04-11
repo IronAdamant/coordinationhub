@@ -310,11 +310,11 @@ coordinationhub/
   schemas.py            — Tool schemas for CoordinationHub — all 30 MCP tools (~645 LOC)
   hooks/
     __init__.py         — Hooks package — Claude Code integration via stdin/stdout event protocol (~1 LOC)
-    claude_code.py      — CoordinationHub hook for Claude Code (~383 LOC)
+    claude_code.py      — CoordinationHub hook for Claude Code (~352 LOC)
 ```
 <!-- /GEN -->
 
-`tests/` contains <!-- GEN:test-count -->313<!-- /GEN --> tests across 16 files plus `fixtures/claude_code_events/` (hook contract fixtures).
+`tests/` contains <!-- GEN:test-count -->308<!-- /GEN --> tests across 16 files plus `fixtures/claude_code_events/` (hook contract fixtures).
 
 Top-level project files: `pyproject.toml`, `coordination_spec.yaml`/`.json` (example specs), `README.md`, `CLAUDE.md`, `COMPLETE_PROJECT_DOCUMENTATION.md`, `LLM_Development.md`, and `wiki-local/` (this spec, glossary, index).
 
