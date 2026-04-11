@@ -9,7 +9,6 @@ from pathlib import Path
 
 from coordinationhub.core import CoordinationEngine
 from coordinationhub import graphs as _g
-from coordinationhub import visibility as _v
 
 
 class TestRegisterAgentWithGraph:

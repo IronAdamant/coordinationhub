@@ -63,6 +63,26 @@ def _log_error(hook_event: str, exc: Exception) -> None:
 # Engine helpers
 # ---------------------------------------------------------------------------
 
+def _save_event_snapshot(event: dict) -> None:
+    """Save raw hook event JSON for contract test fixtures.
+
+    Activated by ``COORDINATIONHUB_CAPTURE_EVENTS=1``.  Writes to
+    ``~/.coordinationhub/event_snapshots/<event_type>_<timestamp>.json``.
+    """
+    try:
+        snap_dir = Path.home() / ".coordinationhub" / "event_snapshots"
+        snap_dir.mkdir(parents=True, exist_ok=True)
+        hook_name = event.get("hook_event_name", "unknown")
+        tool_name = event.get("tool_name", "")
+        tag = f"{hook_name}_{tool_name}" if tool_name else hook_name
+        ts = time.strftime("%Y%m%d_%H%M%S")
+        path = snap_dir / f"{tag}_{ts}.json"
+        with open(path, "w", encoding="utf-8") as f:
+            json.dump(event, f, indent=2, default=str)
+    except Exception:
+        pass  # capture must never crash the hook
+
+
 def _get_engine(cwd: str):
     """Create a CoordinationEngine rooted at the project directory."""
     from coordinationhub.core import CoordinationEngine
@@ -163,10 +183,12 @@ def handle_pre_write(event: dict) -> dict | None:
         _ensure_registered(engine, agent_id)
 
         # Reap expired locks before attempting acquire — prevents stale locks
-        # from completed agents blocking new work (Review Ten finding #1)
-        engine.reap_expired_locks()
+        # from completed agents blocking new work (Review Ten finding #1).
+        # Grace period: spare locks held by agents with recent heartbeats,
+        # preventing expiry during long model calls (Review Thirteen finding).
+        engine.reap_expired_locks(agent_grace_seconds=120.0)
 
-        result = engine.acquire_lock(file_path, agent_id, ttl=120.0)
+        result = engine.acquire_lock(file_path, agent_id, ttl=300.0)
         if result.get("acquired"):
             return {
                 "hookSpecificOutput": {
@@ -195,7 +217,12 @@ def handle_pre_write(event: dict) -> dict | None:
 
 
 def handle_post_write(event: dict) -> dict | None:
-    """Fire change notification after Write/Edit completes."""
+    """Fire change notification and refresh lock after Write/Edit completes.
+
+    The lock refresh extends the TTL after the tool completes, preventing
+    expiry when the model takes longer than the TTL between PreToolUse
+    and PostToolUse.
+    """
     tool_input = event.get("tool_input", {})
     file_path = tool_input.get("file_path")
     if not file_path:
@@ -205,6 +232,15 @@ def handle_post_write(event: dict) -> dict | None:
     try:
         agent_id = _resolve_agent_id(event, engine=engine)
         engine.notify_change(file_path, "modified", agent_id)
+        # First-write-wins file ownership
+        try:
+            engine.claim_file_ownership(file_path, agent_id)
+        except Exception:
+            pass  # ownership tracking is best-effort
+        try:
+            engine.refresh_lock(file_path, agent_id, ttl=300.0)
+        except Exception:
+            pass  # lock may have been released already
     finally:
         engine.close()
     return None
@@ -385,6 +421,10 @@ def main() -> None:
         event = json.loads(raw)
     except (json.JSONDecodeError, OSError):
         return  # graceful no-op
+
+    # Optional: capture raw events for contract test fixtures
+    if os.environ.get("COORDINATIONHUB_CAPTURE_EVENTS"):
+        _save_event_snapshot(event)
 
     hook_event = event.get("hook_event_name", "")
     tool_name = event.get("tool_name", "")

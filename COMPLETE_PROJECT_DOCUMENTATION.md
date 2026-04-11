@@ -1,7 +1,38 @@
 # CoordinationHub — Complete Project Documentation
 
-**Version:** 0.3.8
+**Version:** 0.4.0
 **Last updated:** 2026-04-11
+
+## v0.4.0 Changelog
+
+### Architecture
+- **Module consolidation — 13 files deleted.** Re-export aggregators and artificial 500-LOC splits collapsed into domain modules:
+  - `registry_ops.py` + `registry_query.py` → `agent_registry.py` (~290 LOC)
+  - 6 `schemas_*.py` → single `schemas.py` (~590 LOC, pure data grouped by function)
+  - `graph.py` + `graph_validate.py` + `graph_loader.py` → `graphs.py` (~330 LOC)
+  - `responsibilities.py` → merged into `scan.py`; `visibility.py` (re-export) removed, `core.py` imports `agent_status` + `scan` directly
+  - Net: 42 → 29 Python files in `coordinationhub/`.
+
+### Fixed
+- **TTL locks no longer expire mid-operation.** `reap_expired_locks(agent_grace_seconds=N)` implicitly refreshes expired locks held by agents with a recent heartbeat. Hook PreToolUse passes `agent_grace_seconds=120.0`; hook TTL bumped from 120s to 300s; hook PostToolUse refreshes the lock after `notify_change`.
+- **`file_ownership` table now populated automatically.** New `CoordinationEngine.claim_file_ownership(path, agent_id)` method uses `INSERT OR IGNORE`. Hook PostToolUse calls it on every write — first agent to write a file becomes its owner. Boundary warnings, agent-tree ownership labels, and file-agent maps now have real data.
+- **`graphs.py` missing `Any` import** — worked at runtime only because of `from __future__ import annotations`. Fixed during consolidation.
+
+### Added
+- **Version consistency CI check** (`.github/workflows/test.yml`) — fails the build if `pyproject.toml` and `__init__.py` versions don't match.
+- **Contract test fixtures** (`tests/fixtures/claude_code_events/*.json`) — minimum event shape each hook handler depends on. `COORDINATIONHUB_CAPTURE_EVENTS=1` env var saves real events to `~/.coordinationhub/event_snapshots/` for updating fixtures.
+- **`TestEventContract` class** — 12 tests that validate required fields and run each handler against its fixture.
+- **2 file ownership tests** — `test_post_write_claims_file_ownership`, `test_file_ownership_first_write_wins`.
+- **2 smart reap tests** — `test_reap_spares_active_agent_locks`, `test_reap_removes_crashed_agent_locks`.
+
+### Changed
+- `lock_ops.py`: ~175 LOC → ~195 LOC (smart reap with grace period).
+- `core_locking.py`: ~260 LOC → ~265 LOC (grace period passthrough).
+- `hooks/claude_code.py`: ~428 LOC → ~450 LOC (TTL bump, ownership claim, event capture, PostToolUse refresh).
+- `core.py`: `claim_file_ownership` method added; `visibility` import removed.
+- Tests: 274 → 290 across 16 files. `test_hooks.py`: 33 → 47. `test_locking.py`: 38 → 40.
+
+---
 
 ## v0.3.8 Changelog
 

@@ -1,11 +1,68 @@
 # LLM_Development.md — CoordinationHub
 
-**Version:** 0.3.8
+**Version:** 0.4.0
 **Last updated:** 2026-04-11
 
 ## Change Log
 
 All significant changes to the CoordinationHub project are documented here in reverse chronological order.
+
+---
+
+## 2026-04-11 — v0.4.0 Architectural Cleanup: Consolidation, Smart Reap, File Ownership, Contract Tests
+
+### Motivation
+
+Post-Review-Thirteen assessment identified 5 architectural issues:
+1. **Module count too high** — 13 files existed solely as re-export aggregators or artificial splits driven by the 500 LOC rule.
+2. **Version numbering drift** — `__init__.py` and `pyproject.toml` fell out of sync across releases.
+3. **No integration tests against real Claude Code events** — synthetic event dicts didn't validate the actual hook contract.
+4. **TTL locks expired mid-operation** — 120s TTL was too short for slow model calls, with no refresh mechanism.
+5. **File ownership table was dead** — populated only by manual `scan_project` calls, never by hooks.
+
+### Changes
+
+**Module consolidation (13 files deleted):**
+- `registry_ops.py` + `registry_query.py` → merged into `agent_registry.py` (~290 LOC)
+- 6 `schemas_*.py` files → merged into `schemas.py` (~590 LOC, pure data with group headers)
+- `graph.py` + `graph_validate.py` + `graph_loader.py` → merged into `graphs.py` (~330 LOC; also fixes missing `Any` import)
+- `responsibilities.py` → inlined into `scan.py`; `visibility.py` (pure re-export) removed, `core.py` imports `agent_status` and `scan` directly
+- Net: 42 → 29 Python files in `coordinationhub/`. No external consumers depended on the deleted files.
+
+**Version consistency CI check:**
+- Added step to `.github/workflows/test.yml` that extracts version from both `pyproject.toml` and `__init__.py` and fails if they differ.
+
+**Smart lock reaping (`lock_ops.py`, `core_locking.py`, `hooks/claude_code.py`):**
+- `reap_expired_locks(agent_grace_seconds=N)` implicitly refreshes expired locks held by agents with a recent heartbeat instead of deleting them. The TTL becomes a fallback for crashed agents, not a hard deadline.
+- Hook PreToolUse now passes `agent_grace_seconds=120.0` to `reap_expired_locks`.
+- Hook PreToolUse bumps acquired TTL from 120s to 300s.
+- Hook PostToolUse refreshes the lock with TTL=300s after `notify_change` (best-effort, fail-open).
+
+**First-write-wins file ownership (`core.py`, `hooks/claude_code.py`):**
+- New `CoordinationEngine.claim_file_ownership(path, agent_id)` method does `INSERT OR IGNORE` into `file_ownership`.
+- Hook PostToolUse now calls it after `notify_change` — first agent to write a file becomes its owner.
+- Populates the previously-dead `file_ownership` table on every sub-agent write.
+- Boundary-crossing warnings, agent-tree ownership labels, and file-agent maps now have real data.
+
+**Contract tests (`hooks/claude_code.py`, `tests/fixtures/claude_code_events/`, `tests/test_hooks.py`):**
+- New `_save_event_snapshot()` helper activated by `COORDINATIONHUB_CAPTURE_EVENTS=1` env var. Writes raw events to `~/.coordinationhub/event_snapshots/`.
+- New `tests/fixtures/claude_code_events/*.json` fixtures for 6 event types (SessionStart, PreToolUse_Write, PostToolUse_Write, SubagentStart, SubagentStop, SessionEnd).
+- New `TestEventContract` class with 12 tests — validates required fields and that each handler accepts its fixture without raising.
+
+### Files Changed
+
+- Deleted: `registry_ops.py`, `registry_query.py`, `visibility.py`, `responsibilities.py`, `graph.py`, `graph_validate.py`, `graph_loader.py`, 6× `schemas_*.py`.
+- Consolidated: `agent_registry.py` (~290 LOC), `schemas.py` (~590 LOC), `graphs.py` (~330 LOC), `scan.py` (~240 LOC).
+- Modified: `lock_ops.py` (smart reap), `core_locking.py` (grace period passthrough), `core.py` (import updates + `claim_file_ownership`), `hooks/claude_code.py` (TTL + ownership + capture + refresh).
+- New: 6 fixture JSON files, `TestEventContract` class.
+- Tests: 274 → 290. `test_hooks.py`: 33 → 47 (12 contract + 2 ownership). `test_locking.py`: 38 → 40 (2 smart reap).
+- CI: `.github/workflows/test.yml` adds version consistency check.
+
+### Counts
+
+- Python files in `coordinationhub/`: 42 → 29.
+- Tests: 274 → 290 across 16 files.
+- Version: 0.3.8 → 0.4.0 (minor bump for architectural work, not just bug fixes).
 
 ---
 

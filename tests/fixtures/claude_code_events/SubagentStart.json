@@ -1,0 +1,10 @@
+{
+  "hook_event_name": "SubagentStart",
+  "session_id": "1bf3797d-a5f2-4c8b-b9d1-3e7f8a2c4d6e",
+  "cwd": "/home/user/project",
+  "subagent_id": "a537efcb034928888",
+  "tool_input": {
+    "subagent_type": "agent",
+    "description": "Build feature module"
+  }
+}
