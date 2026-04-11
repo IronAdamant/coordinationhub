@@ -1,11 +1,124 @@
 # LLM_Development.md — CoordinationHub
 
-**Version:** <!-- GEN:version -->0.4.6<!-- /GEN -->
+**Version:** <!-- GEN:version -->0.4.7<!-- /GEN -->
 **Last updated:** 2026-04-11
 
 ## Change Log
 
 All significant changes to the CoordinationHub project are documented here in reverse chronological order.
+
+---
+
+## 2026-04-11 — v0.4.7 Sub-agent Task Correlation (Fake Fixture → Real Event Shape)
+
+### Motivation
+
+Trying to demonstrate v0.4.6's sub-agent task visibility live surfaced three related bugs, all from the same root cause. When asked "what does the task ID look like when assigned to a sub-agent?" I queried the DB and found every sub-agent's `current_task` column was NULL, and every sub-agent ID had the same `.agent.N` suffix regardless of whether it was an Explore, Plan, or general-purpose agent. Event capture (`COORDINATIONHUB_CAPTURE_EVENTS=1`) on two separate sub-agent spawns confirmed the problem: our test fixture for `SubagentStart.json` carried a fabricated event shape that real Claude Code events never match.
+
+**Real `SubagentStart` event (captured live 2026-04-11):**
+```json
+{
+  "hook_event_name": "SubagentStart",
+  "session_id": "046b7ee2-26a2-4925-a861-fed6f766072a",
+  "cwd": "/home/aron/Documents/coding_projects/CoordinationHub",
+  "agent_id": "abb48821c843ed534",
+  "agent_type": "Explore",
+  "transcript_path": "..."
+}
+```
+
+**Fake fixture we had been shipping since v0.3.7:**
+```json
+{
+  "hook_event_name": "SubagentStart",
+  "session_id": "...",
+  "subagent_id": "a537efcb034928888",
+  "tool_input": {
+    "subagent_type": "agent",
+    "description": "Build feature module"
+  }
+}
+```
+
+Real events use `agent_id` + `agent_type` at the top level. Our fixture invented `subagent_id` + `tool_input.subagent_type` + `tool_input.description`. Three symptoms from one root:
+
+| Bug | Root cause | Production impact |
+|---|---|---|
+| A | `_subagent_id` read `tool_input.subagent_type` (absent) and fell through to the default `"agent"` | All sub-agent IDs collapsed to `.agent.N`; no type discrimination between Explore/Plan/general-purpose |
+| B | `handle_subagent_start` read `tool_input.description` (absent) | Sub-agent `current_task` was always NULL despite a description being passed |
+| C | `SubagentStart.json` contract fixture fabricated the shape | Tests passed against a reality-fiction gap; contract check was vacuous |
+
+The description *does* exist in the preceding `PreToolUse` event for `tool_name == "Agent"` — that event carries `tool_input.description`, `tool_input.prompt`, `tool_input.subagent_type`, and `tool_use_id`. But `handle_subagent_start` never saw those fields because the events are separate hook invocations.
+
+v0.4.6's claim of "symmetry between root and sub-agent task visibility" was therefore half-true: root agents worked (v0.4.6's `UserPromptSubmit` handler), sub-agents didn't.
+
+### Added
+
+**`pending_subagent_tasks` table and `coordinationhub/pending_tasks.py` module** — a tiny FIFO queue for correlating the two events.
+
+- Schema: `(tool_use_id PRIMARY KEY, session_id, subagent_type, description, prompt, created_at, consumed_at)` in `db.py._SCHEMAS`.
+- Index on `(session_id, subagent_type, consumed_at)` for fast FIFO lookup.
+- `stash_pending_task(connect, tool_use_id, session_id, subagent_type, description, prompt)` — called by `PreToolUse[Agent]`. Also prunes rows older than 10 minutes on every insert so orphaned rows (Agent tool calls that error before SubagentStart) don't accumulate.
+- `consume_pending_task(connect, session_id, subagent_type)` — pops the oldest unconsumed row for the bucket. Returns `None` if nothing is pending.
+- `prune_consumed_pending_tasks(connect, max_age_seconds)` — housekeeping for consumed rows.
+- Zero internal dependencies; same pattern as `notifications.py` and `conflict_log.py`.
+
+**`handle_pre_agent(event)` in `hooks/claude_code.py`** — reads `tool_input.description`, `tool_input.prompt`, `tool_input.subagent_type`, and `tool_use_id` from the event and calls `stash_pending_task`. No-ops if either `tool_use_id` or `subagent_type` is missing (nothing to correlate on). Wired into `main()` dispatch alongside the existing `PreToolUse[Write|Edit]` handler.
+
+**`Agent` matcher in `_HOOKS_CONFIG["PreToolUse"]`** in `cli_setup.py` — default hook config now registers both `Write|Edit` and `Agent` for PreToolUse. `coordinationhub init` merges the new matcher into `~/.claude/settings.json` via the existing `_merge_hooks` path without clobbering user hooks.
+
+**`_subagent_type(event)` helper** — reads top-level `agent_type` (real shape) with fallback to `tool_input.subagent_type` (legacy fixtures). Used by both `_subagent_id` and `handle_subagent_start` so the agent type is consistent across ID generation and pending-task lookup.
+
+**Fixed fixtures:**
+- `tests/fixtures/claude_code_events/SubagentStart.json` — rewritten to real shape with `agent_id` and `agent_type` at the top level, `transcript_path` included, no `tool_input`. The fixture is now a real-capture reference, not a fabrication.
+- `tests/fixtures/claude_code_events/PreToolUse_Agent.json` — new fixture for `handle_pre_agent` with the real `tool_input.description` / `.prompt` / `.subagent_type` + `tool_use_id`. Picked up automatically by the parametrized `TestEventContract` class.
+
+**Fixed contract test:**
+- `test_subagent_id_is_hex_string` now reads `event["agent_id"]` instead of `event["subagent_id"]` and additionally asserts that `agent_type` is present at the top level.
+- `_FIXTURE_HANDLERS` entry for `SubagentStart` now requires `["hook_event_name", "session_id", "agent_id", "agent_type"]`.
+- New `PreToolUse_Agent` entry requires `["hook_event_name", "session_id", "tool_name", "tool_use_id", "tool_input.description", "tool_input.subagent_type"]`.
+
+**6 new functional tests** in `TestPreAgentAndSubagentShape`:
+- `test_pre_agent_stashes_description_for_subagent_start` — happy path, asserts `current_task` is set and the generated sub-agent ID contains `.Explore.` (real type, not default `.agent.`).
+- `test_subagent_start_without_pre_agent_leaves_task_null` — graceful no-op when no pending task exists (unit-test-style isolated SubagentStart).
+- `test_fifo_ordering_two_spawns_same_type` — two PreToolUse[Agent] → two SubagentStart → first-in first-out.
+- `test_pending_task_bucketed_by_subagent_type` — Explore and Plan don't consume each other's pending tasks even when interleaved.
+- `test_subagent_id_uses_real_agent_type` — verifies `hub.cc.*.general-purpose.N` instead of `hub.cc.*.agent.N`.
+- `test_subagent_type_helper_prefers_real_shape` — unit test for `_subagent_type` with real/legacy/both/neither inputs.
+
+### Changed
+
+- `handle_subagent_start` rewritten to read `agent_id` first (real shape) with `subagent_id` fallback (legacy), call `consume_pending_task` for the description, and fall back to `event["tool_input"]["description"]` only if no pending task exists (keeps legacy unit-test fixtures passable during transition).
+- `main()` dispatch adds a new branch: `hook_event == "PreToolUse" and tool_name == "Agent"` → `handle_pre_agent`.
+- The new `_subagent_type` helper is exported so tests can verify it directly; `_subagent_id` delegates to it.
+
+### Live validation
+
+After `coordinationhub init` and spawning an Explore agent with `description="LIVE-TEST-validate-v047-fix"`:
+
+```
+agent_id                        status    current_task
+------------------------------  --------  ---------------------------
+hub.cc.046b7ee2-26a.Explore.0   stopped   LIVE-TEST-validate-v047-fix
+hub.cc.046b7ee2-26a.agent.3     stopped
+hub.cc.046b7ee2-26a.agent.2     stopped
+hub.cc.046b7ee2-26a.agent.1     stopped
+hub.cc.046b7ee2-26a.agent.0     stopped
+```
+
+The last four rows are pre-fix sub-agents from earlier in the session — all typed `.agent.` with null tasks. The first row is post-fix — typed `.Explore.` with the real description. Same DB, same Claude Code session, same project. The fix lands cleanly on a live swarm.
+
+### Why this escaped earlier reviews
+
+The test suite's `TestEventContract` *was* meant to catch exactly this kind of drift — the docstring in `test_hooks.py` even says "Replace these with real captured events (COORDINATIONHUB_CAPTURE_EVENTS=1) to catch schema drift." Nobody ever used the capture mechanism on the `SubagentStart` fixture. The fixture was written to an imagined shape when the hook was first added (v0.3.7 adoption-friction fixes), tests were built against the fixture, and the "contract" check has been a self-referential loop for months. CLAUDE.md now carries a warning in the "Contract test fixtures" key-design-decision to never write fixtures without live capture.
+
+### Counts
+
+- Version: 0.4.6 → 0.4.7
+- Tests: 328 → 336 collected (335 passing + 1 skipped). `test_hooks.py`: 58 → 66 (+6 functional + 2 parametrized contract invocations for the new fixture).
+- Source LOC: `coordinationhub/pending_tasks.py` NEW (~105 LOC). `hooks/claude_code.py`: 378 → 438 LOC. `cli_setup.py`: 269 → 272 LOC. `db.py`: 243 → 255 LOC.
+- Hook events handled: 7 → 8 (`PreToolUse[Agent]` added).
+- MCP tools: unchanged at 31.
 
 ---
 
@@ -278,23 +391,24 @@ Block markers for multi-line content:
 | `coordinationhub/cli_agents.py` | 127 | Agent identity and lifecycle CLI commands |
 | `coordinationhub/cli_commands.py` | 48 | CoordinationHub CLI command handlers |
 | `coordinationhub/cli_locks.py` | 158 | Document locking and coordination CLI commands |
-| `coordinationhub/cli_setup.py` | 269 | CLI commands for setup and diagnostics: doctor, init, watch |
+| `coordinationhub/cli_setup.py` | 272 | CLI commands for setup and diagnostics: doctor, init, watch |
 | `coordinationhub/cli_utils.py` | 21 | Shared CLI helper functions used by all cli_* sub-modules |
 | `coordinationhub/cli_vis.py` | 290 | Change awareness, audit, graph, and assessment CLI commands |
 | `coordinationhub/conflict_log.py` | 44 | Conflict recording and querying for CoordinationHub |
 | `coordinationhub/context.py` | 88 | Context bundle builder for CoordinationHub agent registration responses |
 | `coordinationhub/core.py` | 280 | CoordinationEngine — core business logic for CoordinationHub |
 | `coordinationhub/core_locking.py` | 269 | Locking and coordination methods for CoordinationEngine |
-| `coordinationhub/db.py` | 243 | SQLite schema, migrations, and connection pool for CoordinationHub |
+| `coordinationhub/db.py` | 255 | SQLite schema, migrations, and connection pool for CoordinationHub |
 | `coordinationhub/dispatch.py` | 38 | Tool dispatch table for CoordinationHub |
 | `coordinationhub/graphs.py` | 256 | Declarative coordination graph: loader, validator, in-memory representation |
 | `coordinationhub/hooks/__init__.py` | 1 | Hooks package — Claude Code integration via stdin/stdout event protocol |
-| `coordinationhub/hooks/claude_code.py` | 378 | CoordinationHub hook for Claude Code |
+| `coordinationhub/hooks/claude_code.py` | 438 | CoordinationHub hook for Claude Code |
 | `coordinationhub/lock_ops.py` | 191 | Shared lock primitives used by both local locks and coordination locks |
 | `coordinationhub/mcp_server.py` | 209 | HTTP-based MCP server for CoordinationHub — zero external dependencies |
 | `coordinationhub/mcp_stdio.py` | 142 | Stdio-based MCP server for CoordinationHub using the ``mcp`` Python package |
 | `coordinationhub/notifications.py` | 81 | Change notification storage and retrieval for CoordinationHub |
 | `coordinationhub/paths.py` | 38 | Path normalization and project-root detection utilities |
+| `coordinationhub/pending_tasks.py` | 105 | Pending sub-agent task storage for CoordinationHub |
 | `coordinationhub/scan.py` | 198 | File ownership scan for CoordinationHub |
 | `coordinationhub/schemas.py` | 675 | Tool schemas for CoordinationHub — all 31 MCP tools |
 <!-- /GEN -->
@@ -302,7 +416,7 @@ Block markers for multi-line content:
 
 Inline markers for single values (render invisibly in Markdown):
 ```markdown
-This project has <!-- GEN:test-count -->328<!-- /GEN --> tests.
+This project has <!-- GEN:test-count -->336<!-- /GEN --> tests.
 ```
 
 Unknown marker names raise an error during rewrite (catches typos).

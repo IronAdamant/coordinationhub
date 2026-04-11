@@ -23,14 +23,14 @@ coordinationhub/
   cli_agents.py         — Agent identity and lifecycle CLI commands (~127 LOC)
   cli_commands.py       — CoordinationHub CLI command handlers (~48 LOC)
   cli_locks.py          — Document locking and coordination CLI commands (~158 LOC)
-  cli_setup.py          — CLI commands for setup and diagnostics: doctor, init, watch (~269 LOC)
+  cli_setup.py          — CLI commands for setup and diagnostics: doctor, init, watch (~272 LOC)
   cli_utils.py          — Shared CLI helper functions used by all cli_* sub-modules (~21 LOC)
   cli_vis.py            — Change awareness, audit, graph, and assessment CLI commands (~290 LOC)
   conflict_log.py       — Conflict recording and querying for CoordinationHub (~44 LOC)
   context.py            — Context bundle builder for CoordinationHub agent registration responses (~88 LOC)
   core.py               — CoordinationEngine — core business logic for CoordinationHub (~280 LOC)
   core_locking.py       — Locking and coordination methods for CoordinationEngine (~269 LOC)
-  db.py                 — SQLite schema, migrations, and connection pool for CoordinationHub (~243 LOC)
+  db.py                 — SQLite schema, migrations, and connection pool for CoordinationHub (~255 LOC)
   dispatch.py           — Tool dispatch table for CoordinationHub (~38 LOC)
   graphs.py             — Declarative coordination graph: loader, validator, in-memory representation (~256 LOC)
   lock_ops.py           — Shared lock primitives used by both local locks and coordination locks (~191 LOC)
@@ -38,15 +38,16 @@ coordinationhub/
   mcp_stdio.py          — Stdio-based MCP server for CoordinationHub using the ``mcp`` Python package (~142 LOC)
   notifications.py      — Change notification storage and retrieval for CoordinationHub (~81 LOC)
   paths.py              — Path normalization and project-root detection utilities (~38 LOC)
+  pending_tasks.py      — Pending sub-agent task storage for CoordinationHub (~105 LOC)
   scan.py               — File ownership scan for CoordinationHub (~198 LOC)
   schemas.py            — Tool schemas for CoordinationHub — all 31 MCP tools (~675 LOC)
   hooks/
     __init__.py         — Hooks package — Claude Code integration via stdin/stdout event protocol (~1 LOC)
-    claude_code.py      — CoordinationHub hook for Claude Code (~378 LOC)
+    claude_code.py      — CoordinationHub hook for Claude Code (~438 LOC)
 ```
 <!-- /GEN -->
 
-The `tests/` directory contains the pytest suite (<!-- GEN:test-count -->328<!-- /GEN --> tests across 16 files), including `tests/fixtures/claude_code_events/` contract fixtures.
+The `tests/` directory contains the pytest suite (<!-- GEN:test-count -->336<!-- /GEN --> tests across 16 files), including `tests/fixtures/claude_code_events/` contract fixtures.
 
 ## Module Design
 
@@ -80,7 +81,8 @@ The `tests/` directory contains the pytest suite (<!-- GEN:test-count -->328<!--
 - **Background agent dedup**: `handle_subagent_start` checks `find_agent_by_claude_id` before generating a new child ID. If an agent with the same `claude_agent_id` already exists (e.g., `run_in_background` agents that fire SubagentStart twice), the existing agent is heartbeated instead of creating a duplicate.
 - **Smart lock reap**: `reap_expired_locks(agent_grace_seconds=N)` implicitly refreshes expired locks held by agents with a recent heartbeat — the TTL is a fallback for crashed agents, not a hard deadline. The hook passes `agent_grace_seconds=120.0` before every acquire, preventing locks from expiring mid-operation when the model takes longer than the TTL between PreToolUse and PostToolUse.
 - **First-write-wins file ownership**: `handle_post_write` calls `engine.claim_file_ownership(path, agent_id)` using `INSERT OR IGNORE` — the first agent to write a file becomes its owner. The `scan_project` tool remains as a bulk-reassign mechanism for graph-role-based ownership.
-- **Contract test fixtures**: `tests/fixtures/claude_code_events/*.json` capture the minimum event shape each hook handler depends on. The hook's `COORDINATIONHUB_CAPTURE_EVENTS=1` env var saves real events to `~/.coordinationhub/event_snapshots/` for updating fixtures.
+- **Contract test fixtures**: `tests/fixtures/claude_code_events/*.json` capture the minimum event shape each hook handler depends on. The hook's `COORDINATIONHUB_CAPTURE_EVENTS=1` env var saves real events to `~/.coordinationhub/event_snapshots/` for updating fixtures. **Never write fixtures without live capture** — v0.4.6 and earlier carried a fabricated `SubagentStart` fixture (`subagent_id` + `tool_input.subagent_type` + `tool_input.description`) that silently broke sub-agent `current_task` tracking for months. Real events use `agent_id` and `agent_type` at the top level with no `tool_input` at all.
+- **Sub-agent task correlation (PreToolUse[Agent] → SubagentStart)**: Claude Code's `SubagentStart` event carries only `agent_id` (raw hex), `agent_type`, `session_id`, and `cwd` — no description, no `tool_use_id`. The description lives only in the preceding `PreToolUse` event with `tool_name == "Agent"`. `handle_pre_agent` stashes `(tool_use_id, session_id, subagent_type, description, prompt)` in `pending_subagent_tasks`; the following `handle_subagent_start` pops the oldest unconsumed row for `(session_id, subagent_type)` and applies the description as `current_task`. FIFO correlation works because Claude Code fires the two events in order. Bucketing by `subagent_type` means parallel spawns of different types (Explore + Plan) don't collide. Stale rows are reaped automatically after 10 minutes.
 - **`broadcast` message/action params removed**: The `message` and `action` positional params were removed (they were never stored). The `document_path` optional param remains — when provided, it is used to check for lock conflicts among acknowledged siblings and is not persisted.
 
 ## <!-- GEN:tool-count -->31<!-- /GEN --> MCP Tools + 3 Setup Commands
@@ -131,10 +133,11 @@ coordinationhub watch             # live agent tree refresh
 Project-level hooks in `.claude/settings.json` wire CoordinationHub into Claude Code sessions automatically:
 
 - **SessionStart**: Registers a root agent (`hub.cc.{session_id}`)
-- **UserPromptSubmit**: Stamps the root agent's `current_task` with the user's prompt (truncated to 120 chars, whitespace collapsed). Symmetric with sub-agents, whose `current_task` is populated from the Agent tool's `description` during SubagentStart. Without this hook, `coordinationhub watch` and `get_agent_tree` show the root agent as task-less even while it holds locks.
+- **UserPromptSubmit**: Stamps the root agent's `current_task` with the user's prompt (truncated to 120 chars, whitespace collapsed). Without this hook, `coordinationhub watch` and `get_agent_tree` show the root agent as task-less even while it holds locks.
 - **PreToolUse Write/Edit**: Acquires a file lock before writes; denies if another agent holds it
+- **PreToolUse Agent**: Stashes the sub-agent's `description`, `prompt`, and `subagent_type` in `pending_subagent_tasks` keyed by `tool_use_id`. The following `SubagentStart` consumes it. See the "Sub-agent task correlation" design note below.
 - **PostToolUse Write/Edit**: Fires `notify_change` after successful writes
-- **SubagentStart/SubagentStop**: Registers/deregisters child agents for spawned subagents
+- **SubagentStart/SubagentStop**: Registers/deregisters child agents for spawned subagents. SubagentStart consumes the pending task stashed by the preceding `PreToolUse[Agent]` and applies the description as the child's `current_task`. Symmetric with the root agent, whose `current_task` is populated from `UserPromptSubmit`.
 - **SessionEnd**: Releases all locks and deregisters the session agent
 
 **Stele bridge**: PostToolUse on `mcp__stele-context__index` fires `notify_change` with type `"indexed"`.
@@ -154,7 +157,7 @@ To disable hooks temporarily, add `"disableAllHooks": true` to `~/.claude/settin
 
 ```bash
 python -m pytest tests/ -v
-# <!-- GEN:test-count -->328<!-- /GEN --> tests across 16 test files:
+# <!-- GEN:test-count -->336<!-- /GEN --> tests across 16 test files:
 #   test_agent_lifecycle.py  — 21 tests
 #   test_locking.py          — 40 tests (includes smart reap)
 #   test_notifications.py    — 8 tests
@@ -168,7 +171,7 @@ python -m pytest tests/ -v
 #   test_cli.py              — 14 tests (parser, list-agents/dashboard consistency)
 #   test_concurrent.py       — 8 tests (threading: locks, registration, notifications)
 #   test_scenario.py         — 13 tests (end-to-end multi-agent + live session assessment)
-#   test_hooks.py            — 58 tests (hook handlers, agent ID mapping, file ownership, event contract, UserPromptSubmit)
+#   test_hooks.py            — 66 tests (hook handlers, agent ID mapping, file ownership, event contract, UserPromptSubmit, PreToolUse[Agent] correlation)
 #   test_setup.py            — 8 tests (doctor, init, hook merge)
 #   test_db_migration.py     — 7 tests (legacy DB, stuck-version recovery, fresh install)
 ```

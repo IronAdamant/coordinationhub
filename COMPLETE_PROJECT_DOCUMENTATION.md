@@ -1,7 +1,63 @@
 # CoordinationHub — Complete Project Documentation
 
-**Version:** <!-- GEN:version -->0.4.6<!-- /GEN -->
+**Version:** <!-- GEN:version -->0.4.7<!-- /GEN -->
 **Last updated:** 2026-04-11
+
+## v0.4.7 Changelog — Sub-agent Task Correlation (Real Event Shape)
+
+### Motivation
+
+Trying to demonstrate v0.4.6's sub-agent task visibility live surfaced that the v0.4.6 changelog's premise was false. The claim that "sub-agents already had their current_task populated automatically via `handle_subagent_start` reading the Agent tool's description field" was wrong in production — it was only true in our fabricated test fixture. Event capture on two separate sub-agent spawns confirmed: real Claude Code `SubagentStart` events carry `agent_id` and `agent_type` at the top level with no `tool_input` key at all. The description is only present in the *preceding* `PreToolUse` event with `tool_name == "Agent"`.
+
+Three symptoms from one root cause (fabricated fixture):
+
+| Bug | Root cause | Production impact |
+|---|---|---|
+| A | `_subagent_id` read `tool_input.subagent_type` (absent) and defaulted to `"agent"` | All sub-agents collapsed to `.agent.N` in ID; Explore, Plan, general-purpose indistinguishable |
+| B | `handle_subagent_start` read `tool_input.description` (absent) | Sub-agent `current_task` was always NULL despite description being passed |
+| C | `SubagentStart.json` contract fixture fabricated the event shape | Contract tests passed against a reality-fiction gap |
+
+### Added
+
+- **`pending_subagent_tasks` table** in `db.py._SCHEMAS` — keyed by `tool_use_id` with `(session_id, subagent_type, description, prompt, created_at, consumed_at)`. Index on `(session_id, subagent_type, consumed_at)` for FIFO lookup.
+- **`coordinationhub/pending_tasks.py`** (~105 LOC) — new zero-internal-deps module with `stash_pending_task`, `consume_pending_task`, `prune_consumed_pending_tasks`. Same pattern as `notifications.py` and `conflict_log.py`.
+- **`handle_pre_agent` in `hooks/claude_code.py`** — new handler for `PreToolUse[Agent]`. Reads `tool_input.description`, `tool_input.prompt`, `tool_input.subagent_type`, `tool_use_id` and calls `stash_pending_task`. No-ops if tool_use_id or subagent_type is missing.
+- **`_subagent_type` helper** — reads top-level `agent_type` (real shape) with fallback to `tool_input.subagent_type` (legacy). Used by both `_subagent_id` and `handle_subagent_start`.
+- **`Agent` matcher in `_HOOKS_CONFIG["PreToolUse"]`** so `coordinationhub init` installs the hook for Agent tool calls.
+- **Fixed fixture `SubagentStart.json`** — rewritten to real captured shape (`agent_id`, `agent_type` top-level, no `tool_input`).
+- **New fixture `PreToolUse_Agent.json`** for the new handler.
+- **6 new functional tests** in `TestPreAgentAndSubagentShape` covering: PreToolUse[Agent] → SubagentStart happy path, no-pending-task graceful no-op, FIFO ordering within a subagent_type, bucketing across types (Explore + Plan don't collide), real agent_type appearing in generated hub IDs, `_subagent_type` helper unit test.
+
+### Changed
+
+- **`handle_subagent_start`** reads `agent_id` first with `subagent_id` fallback, calls `consume_pending_task(session_id, subagent_type)` to get the description instead of reading the nonexistent `tool_input.description`. Falls back to `event.tool_input.description` only if no pending task exists (keeps legacy unit-test fixtures passable during transition).
+- **`main()` dispatch** branches on `tool_name == "Agent"` → `handle_pre_agent`.
+- **`test_subagent_id_is_hex_string`** now reads `agent_id` (real field) and additionally asserts `agent_type` is present at the top level.
+- **`_FIXTURE_HANDLERS["SubagentStart"]`** now requires `[hook_event_name, session_id, agent_id, agent_type]`.
+
+### Live validation
+
+After `coordinationhub init` and spawning an Explore agent with `description="LIVE-TEST-validate-v047-fix"`, sub-agents in the project DB:
+```
+hub.cc.046b7ee2-26a.Explore.0   stopped   LIVE-TEST-validate-v047-fix   ← post-fix
+hub.cc.046b7ee2-26a.agent.3     stopped                                 ← pre-fix
+hub.cc.046b7ee2-26a.agent.2     stopped                                 ← pre-fix
+hub.cc.046b7ee2-26a.agent.1     stopped                                 ← pre-fix
+hub.cc.046b7ee2-26a.agent.0     stopped                                 ← pre-fix
+```
+Same session, same DB, same Claude Code instance. The post-fix row carries the real `Explore` agent type in its ID and a populated `current_task` column.
+
+### Why this escaped earlier reviews
+
+The test suite's `TestEventContract` was meant to catch exactly this kind of drift — the docstring even says "Replace these with real captured events to catch schema drift." The `COORDINATIONHUB_CAPTURE_EVENTS=1` mechanism was added in v0.4.0 but nobody used it on `SubagentStart`. The fixture was written to an imagined shape in v0.3.7 when the subagent hook was first added, tests were built against the fixture, and the contract check became a self-referential loop. CLAUDE.md now carries a warning in the Key Design Decisions section: **never write fixtures without live capture**.
+
+### Counts
+
+- Tests: 328 → 336 collected (335 passing + 1 skipped). `test_hooks.py`: 58 → 66.
+- Source: new `pending_tasks.py` (~105 LOC), `hooks/claude_code.py` 378 → 438 LOC, `cli_setup.py` 269 → 272 LOC, `db.py` 243 → 255 LOC.
+- Hook events handled: 7 → 8 (`PreToolUse[Agent]` added).
+
+---
 
 ## v0.4.6 Changelog — UserPromptSubmit Hook (Root Agent Task Visibility)
 
@@ -304,28 +360,29 @@ keep it in sync; CI checks for drift on every push.
 | `coordinationhub/cli_agents.py` | 127 | Agent identity and lifecycle CLI commands |
 | `coordinationhub/cli_commands.py` | 48 | CoordinationHub CLI command handlers |
 | `coordinationhub/cli_locks.py` | 158 | Document locking and coordination CLI commands |
-| `coordinationhub/cli_setup.py` | 269 | CLI commands for setup and diagnostics: doctor, init, watch |
+| `coordinationhub/cli_setup.py` | 272 | CLI commands for setup and diagnostics: doctor, init, watch |
 | `coordinationhub/cli_utils.py` | 21 | Shared CLI helper functions used by all cli_* sub-modules |
 | `coordinationhub/cli_vis.py` | 290 | Change awareness, audit, graph, and assessment CLI commands |
 | `coordinationhub/conflict_log.py` | 44 | Conflict recording and querying for CoordinationHub |
 | `coordinationhub/context.py` | 88 | Context bundle builder for CoordinationHub agent registration responses |
 | `coordinationhub/core.py` | 280 | CoordinationEngine — core business logic for CoordinationHub |
 | `coordinationhub/core_locking.py` | 269 | Locking and coordination methods for CoordinationEngine |
-| `coordinationhub/db.py` | 243 | SQLite schema, migrations, and connection pool for CoordinationHub |
+| `coordinationhub/db.py` | 255 | SQLite schema, migrations, and connection pool for CoordinationHub |
 | `coordinationhub/dispatch.py` | 38 | Tool dispatch table for CoordinationHub |
 | `coordinationhub/graphs.py` | 256 | Declarative coordination graph: loader, validator, in-memory representation |
 | `coordinationhub/hooks/__init__.py` | 1 | Hooks package — Claude Code integration via stdin/stdout event protocol |
-| `coordinationhub/hooks/claude_code.py` | 378 | CoordinationHub hook for Claude Code |
+| `coordinationhub/hooks/claude_code.py` | 438 | CoordinationHub hook for Claude Code |
 | `coordinationhub/lock_ops.py` | 191 | Shared lock primitives used by both local locks and coordination locks |
 | `coordinationhub/mcp_server.py` | 209 | HTTP-based MCP server for CoordinationHub — zero external dependencies |
 | `coordinationhub/mcp_stdio.py` | 142 | Stdio-based MCP server for CoordinationHub using the ``mcp`` Python package |
 | `coordinationhub/notifications.py` | 81 | Change notification storage and retrieval for CoordinationHub |
 | `coordinationhub/paths.py` | 38 | Path normalization and project-root detection utilities |
+| `coordinationhub/pending_tasks.py` | 105 | Pending sub-agent task storage for CoordinationHub |
 | `coordinationhub/scan.py` | 198 | File ownership scan for CoordinationHub |
 | `coordinationhub/schemas.py` | 675 | Tool schemas for CoordinationHub — all 31 MCP tools |
 <!-- /GEN -->
 
-**Total: <!-- GEN:test-count -->328<!-- /GEN --> tests across 16 test files.**
+**Total: <!-- GEN:test-count -->336<!-- /GEN --> tests across 16 test files.**
 
 ---
 
@@ -344,14 +401,14 @@ coordinationhub/
   cli_agents.py         — Agent identity and lifecycle CLI commands (~127 LOC)
   cli_commands.py       — CoordinationHub CLI command handlers (~48 LOC)
   cli_locks.py          — Document locking and coordination CLI commands (~158 LOC)
-  cli_setup.py          — CLI commands for setup and diagnostics: doctor, init, watch (~269 LOC)
+  cli_setup.py          — CLI commands for setup and diagnostics: doctor, init, watch (~272 LOC)
   cli_utils.py          — Shared CLI helper functions used by all cli_* sub-modules (~21 LOC)
   cli_vis.py            — Change awareness, audit, graph, and assessment CLI commands (~290 LOC)
   conflict_log.py       — Conflict recording and querying for CoordinationHub (~44 LOC)
   context.py            — Context bundle builder for CoordinationHub agent registration responses (~88 LOC)
   core.py               — CoordinationEngine — core business logic for CoordinationHub (~280 LOC)
   core_locking.py       — Locking and coordination methods for CoordinationEngine (~269 LOC)
-  db.py                 — SQLite schema, migrations, and connection pool for CoordinationHub (~243 LOC)
+  db.py                 — SQLite schema, migrations, and connection pool for CoordinationHub (~255 LOC)
   dispatch.py           — Tool dispatch table for CoordinationHub (~38 LOC)
   graphs.py             — Declarative coordination graph: loader, validator, in-memory representation (~256 LOC)
   lock_ops.py           — Shared lock primitives used by both local locks and coordination locks (~191 LOC)
@@ -359,15 +416,16 @@ coordinationhub/
   mcp_stdio.py          — Stdio-based MCP server for CoordinationHub using the ``mcp`` Python package (~142 LOC)
   notifications.py      — Change notification storage and retrieval for CoordinationHub (~81 LOC)
   paths.py              — Path normalization and project-root detection utilities (~38 LOC)
+  pending_tasks.py      — Pending sub-agent task storage for CoordinationHub (~105 LOC)
   scan.py               — File ownership scan for CoordinationHub (~198 LOC)
   schemas.py            — Tool schemas for CoordinationHub — all 31 MCP tools (~675 LOC)
   hooks/
     __init__.py         — Hooks package — Claude Code integration via stdin/stdout event protocol (~1 LOC)
-    claude_code.py      — CoordinationHub hook for Claude Code (~378 LOC)
+    claude_code.py      — CoordinationHub hook for Claude Code (~438 LOC)
 ```
 <!-- /GEN -->
 
-The `tests/` directory holds <!-- GEN:test-count -->328<!-- /GEN --> tests across 16 files,
+The `tests/` directory holds <!-- GEN:test-count -->336<!-- /GEN --> tests across 16 files,
 plus `tests/fixtures/claude_code_events/` for hook contract fixtures.
 
 **Module design principles:**
@@ -815,7 +873,7 @@ Air-gapped install: `pip install coordinationhub --no-deps`.
 
 ```bash
 python -m pytest tests/ -v
-# <!-- GEN:test-count -->328<!-- /GEN --> tests across 16 test files
+# <!-- GEN:test-count -->336<!-- /GEN --> tests across 16 test files
 ```
 
 ---
