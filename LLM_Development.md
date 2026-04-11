@@ -1,11 +1,54 @@
 # LLM_Development.md — CoordinationHub
 
-**Version:** <!-- GEN:version -->0.4.3<!-- /GEN -->
+**Version:** <!-- GEN:version -->0.4.4<!-- /GEN -->
 **Last updated:** 2026-04-11
 
 ## Change Log
 
 All significant changes to the CoordinationHub project are documented here in reverse chronological order.
+
+---
+
+## 2026-04-11 — v0.4.4 Close Review Thirteen (Assessment + Coordination Graph Pipeline Test)
+
+### Context
+
+Review Thirteen (2026-04-11, RecipeLab, 15 sub-agents across two parallel waves) flagged six gaps. Four were code bugs that had already been fixed in earlier releases; two were untested feature-integration paths that only had unit coverage:
+
+| # | Gap | Closed by | Status at v0.4.3 |
+|---|-----|-----------|------------------|
+| 1 | SubagentStop did not transition agents to `stopped` | v0.3.8 (`_resolve_agent_id` in `handle_subagent_stop`) | Code + `test_subagent_stop_sets_status_stopped_via_claude_id` |
+| 2 | `run_in_background` agents registered twice | v0.3.8 (`find_agent_by_claude_id` dedup in `handle_subagent_start`) | Code + `test_background_agent_dedup` |
+| 3 | No same-file lock contention test | v0.4.1 (`test_concurrent_contention_on_same_file` in `test_scenario.py`) | Test |
+| 4 | `file_ownership` table not populated | v0.4.0 (`handle_post_write` → `claim_file_ownership`) | Code + `test_file_ownership_first_write_wins` + `test_wave_of_subagents_full_lifecycle` |
+| 5 | Assessment scoring never exercised end-to-end | v0.4.4 (`test_coordination_graph_and_assessment_pipeline`) | Covered this release |
+| 6 | Coordination graph integration never exercised end-to-end | v0.4.4 (same test) | Covered this release |
+
+Gaps 5 and 6 had comprehensive unit coverage (`test_assessment.py` × 24, `test_graphs.py` × 22, `test_visibility.py` graph loading × multiple), but no single scenario test walked the entire pipeline — load a spec, drive sub-agent activity through the real hook entry points, resolve `hub.cc.*` IDs for the resulting agents, then feed a trace through `run_assessment` with results persisted to SQLite.
+
+### Added
+
+**`test_coordination_graph_and_assessment_pipeline`** in `tests/test_scenario.py`:
+
+1. Writes a two-agent `coordination_spec.json` (planner + builder with a handoff) into the project root.
+2. Fires `handle_session_start`, then calls `engine.load_coordination_spec(spec_path)` — asserts `loaded=True` and both agents appear in the returned manifest.
+3. Spawns two sub-agents via `handle_subagent_start`, has each call `handle_post_write` on a unique file — exercises the full hook path including `claim_file_ownership`.
+4. Resolves the `hub.cc.*` IDs via `find_agent_by_claude_id` **before** deregistering (the lookup filters by `status = 'active'`).
+5. Deregisters both via `handle_subagent_stop`.
+6. Builds a trace suite mirroring the session (`register`, `lock`, `modified`, `handoff` events) and calls `engine.run_assessment(suite_path, format="json")`.
+7. Asserts the result has `graph_loaded=True`, all five metrics scored, overall score in (0, 1], and that `assessment_results` rows were persisted (one per metric).
+
+This is a single test, but it traverses: `load_coordination_spec` → hook handlers → `find_agent_by_claude_id` → `run_assessment` → `store_assessment_results`. Any regression in that pipeline will now fail locally instead of only showing up in a live RecipeLab review.
+
+### Files Changed
+
+- `tests/test_scenario.py`: +1 test (`TestHookLevelMultiAgentScenario` now has 6 tests, up from 5).
+- `pyproject.toml`: 0.4.3 → 0.4.4.
+
+### Counts
+
+- Tests: 308 → 309 collected (308 passing + 1 skipped).
+- Files: unchanged.
 
 ---
 
@@ -159,7 +202,7 @@ Block markers for multi-line content:
 
 Inline markers for single values (render invisibly in Markdown):
 ```markdown
-This project has <!-- GEN:test-count -->308<!-- /GEN --> tests.
+This project has <!-- GEN:test-count -->309<!-- /GEN --> tests.
 ```
 
 Unknown marker names raise an error during rewrite (catches typos).
