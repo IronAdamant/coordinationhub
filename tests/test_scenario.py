@@ -607,3 +607,122 @@ class TestHookLevelMultiAgentScenario:
             assert len(rows) == len(expected_metrics)
         finally:
             engine.close()
+
+    def test_assess_current_session_from_live_db(self, tmp_path):
+        """End-to-end: load a coordination graph, run multi-agent hooks,
+        then call engine.assess_current_session() with no hand-built suite.
+
+        This is the capability v0.4.4's pipeline test still required a
+        manually-constructed trace for. With build_trace_from_db + the
+        assess_current_session engine method (added in v0.4.5), a user
+        can score a live session in a single call — no JSON suite file,
+        no manual event construction.
+        """
+        import json as _json
+
+        from coordinationhub.hooks.claude_code import (
+            handle_session_start, handle_subagent_start, handle_post_write,
+            handle_subagent_stop, _get_engine,
+        )
+
+        cwd = self._git_dir(tmp_path)
+        session_id = "sess-live-feed0002"
+
+        # Write + load the spec
+        spec_path = tmp_path / "coordination_spec.json"
+        spec_path.write_text(_json.dumps({
+            "agents": [
+                {"id": "planner", "role": "plan",
+                 "responsibilities": ["decompose", "plan"]},
+                {"id": "builder", "role": "implement",
+                 "responsibilities": ["write code", "modify files", "build"]},
+            ],
+            "handoffs": [
+                {"from": "planner", "to": "builder",
+                 "condition": "plan approved"},
+            ],
+            "assessment": {"metrics": [
+                "role_stability", "handoff_latency",
+                "outcome_verifiability", "protocol_adherence",
+                "spawn_propagation",
+            ]},
+        }))
+
+        handle_session_start(self._session_event(cwd, session_id))
+        engine = _get_engine(cwd)
+        try:
+            engine.load_coordination_spec(str(spec_path))
+
+            # Drive a multi-agent session
+            raw_a = "c" * 17
+            raw_b = "d" * 17
+            handle_subagent_start(self._subagent_start_event(
+                cwd, session_id, raw_a, desc="planner agent"))
+            handle_subagent_start(self._subagent_start_event(
+                cwd, session_id, raw_b, desc="builder agent"))
+
+            handle_post_write(self._write_event(
+                cwd, session_id, raw_a, str(tmp_path / "plan.md"), pre=False))
+            handle_post_write(self._write_event(
+                cwd, session_id, raw_b, str(tmp_path / "impl.py"), pre=False))
+            handle_post_write(self._write_event(
+                cwd, session_id, raw_b, str(tmp_path / "impl2.py"), pre=False))
+
+            # Tag the live sub-agents with explicit graph roles so the
+            # synthesized trace carries role information into scoring.
+            hub_a = engine.find_agent_by_claude_id(raw_a)
+            hub_b = engine.find_agent_by_claude_id(raw_b)
+            engine.register_agent(hub_a, graph_agent_id="planner")
+            engine.register_agent(hub_b, graph_agent_id="builder")
+
+            handle_subagent_stop(self._subagent_stop_event(cwd, session_id, raw_a))
+            handle_subagent_stop(self._subagent_stop_event(cwd, session_id, raw_b))
+
+            # Score the live session — no suite file, no manual trace.
+            result = engine.assess_current_session(format="json", scope="all")
+            assert "error" not in result, f"Got error: {result.get('error')}"
+            assert result["graph_loaded"] is True
+
+            # All five metrics computed
+            metric_names = set(result["metrics"].keys())
+            assert metric_names == {
+                "role_stability", "handoff_latency", "outcome_verifiability",
+                "protocol_adherence", "spawn_propagation",
+            }
+
+            # outcome_verifiability should be meaningful because the
+            # converter synthesized lock→modified→unlock triples from
+            # the 3 write notifications.
+            assert result["metrics"]["outcome_verifiability"] > 0.0
+
+            # Persisted to assessment_results
+            with engine._connect() as conn:
+                rows = conn.execute(
+                    "SELECT metric FROM assessment_results "
+                    "WHERE suite_name = 'live_session'"
+                ).fetchall()
+            assert len(rows) == 5
+        finally:
+            engine.close()
+
+    def test_assess_current_session_without_graph_returns_error(self, tmp_path):
+        """Without a loaded coordination graph, assess_current_session returns
+        a clear error rather than producing vacuous scores."""
+        from coordinationhub.hooks.claude_code import (
+            handle_session_start, _get_engine,
+        )
+        from coordinationhub import graphs as _graphs
+
+        # Module-level graph state may be set by an earlier test in the suite.
+        _graphs.clear_graph()
+
+        cwd = self._git_dir(tmp_path)
+        session_id = "sess-no-graph-00000001"
+        handle_session_start(self._session_event(cwd, session_id))
+        engine = _get_engine(cwd)
+        try:
+            result = engine.assess_current_session(format="json")
+            assert "error" in result
+            assert "graph" in result["error"].lower()
+        finally:
+            engine.close()

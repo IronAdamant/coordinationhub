@@ -333,3 +333,162 @@ class TestLoadSuite:
         bad_file.write_text("not json {{{")
         with pytest.raises(json.JSONDecodeError):
             load_suite(bad_file)
+
+
+class TestBuildTraceFromDB:
+    """Tests for build_trace_from_db / build_suite_from_db (live-session trace synthesis)."""
+
+    def test_empty_db_returns_empty_trace(self, engine):
+        from coordinationhub.assessment import build_trace_from_db
+        trace = build_trace_from_db(engine._connect, trace_id="empty")
+        assert trace["trace_id"] == "empty"
+        assert trace["events"] == []
+
+    def test_single_agent_no_writes(self, engine):
+        """A registered agent with no writes produces exactly one register event."""
+        from coordinationhub.assessment import build_trace_from_db
+        aid = engine.generate_agent_id()
+        engine.register_agent(aid)
+
+        trace = build_trace_from_db(engine._connect)
+        register_events = [e for e in trace["events"] if e["type"] == "register"]
+        assert len(register_events) == 1
+        assert register_events[0]["agent_id"] == aid
+        # No graph loaded, no graph_id set
+        assert "graph_id" not in register_events[0]
+
+    def test_register_event_includes_graph_id_and_parent(self, engine, tmp_path):
+        """Register events carry graph_id (when agent_responsibilities matches)
+        and parent_id (when agents has a parent)."""
+        import json as _json
+        from coordinationhub.assessment import build_trace_from_db
+
+        # Load a spec so that registrations with matching agent_ids get roles
+        spec = tmp_path / "coordination_spec.json"
+        spec.write_text(_json.dumps({
+            "agents": [
+                {"id": "planner", "role": "plan",
+                 "responsibilities": ["plan", "decompose"]},
+                {"id": "builder", "role": "implement",
+                 "responsibilities": ["write code", "modify files"]},
+            ],
+            "handoffs": [{"from": "planner", "to": "builder",
+                          "condition": "always"}],
+        }))
+        engine.load_coordination_spec(str(spec))
+        # Register with explicit graph_agent_id so agent_responsibilities is populated
+        engine.register_agent("planner", graph_agent_id="planner")
+        engine.register_agent("builder", parent_id="planner",
+                              graph_agent_id="builder")
+
+        trace = build_trace_from_db(engine._connect)
+        by_id = {e["agent_id"]: e for e in trace["events"]
+                 if e["type"] == "register"}
+        assert by_id["planner"].get("graph_id") == "planner"
+        assert by_id["builder"].get("graph_id") == "builder"
+        assert by_id["builder"].get("parent_id") == "planner"
+
+    def test_change_notifications_become_lock_modified_unlock_triples(self, engine):
+        """Each 'modified' change_notification emits a lock → modified → unlock
+        triple in chronological order."""
+        from coordinationhub.assessment import build_trace_from_db
+
+        aid = engine.generate_agent_id()
+        engine.register_agent(aid)
+        engine.notify_change("/src/a.py", "modified", aid)
+        engine.notify_change("/src/b.py", "modified", aid)
+
+        trace = build_trace_from_db(engine._connect)
+        non_register = [e for e in trace["events"] if e["type"] != "register"]
+        # 2 writes × 3 events (lock, modified, unlock) = 6
+        assert len(non_register) == 6
+
+        # First triple: a.py lock → modified → unlock
+        triple_a = [e for e in non_register if e.get("path") == "/src/a.py"]
+        assert [e["type"] for e in triple_a] == ["lock", "modified", "unlock"]
+        assert all(e["agent_id"] == aid for e in triple_a)
+
+    def test_indexed_change_type_is_ignored(self, engine):
+        """Only 'modified' notifications produce lock/modify events."""
+        from coordinationhub.assessment import build_trace_from_db
+
+        aid = engine.generate_agent_id()
+        engine.register_agent(aid)
+        engine.notify_change("/src/a.py", "indexed", aid)
+
+        trace = build_trace_from_db(engine._connect)
+        non_register = [e for e in trace["events"] if e["type"] != "register"]
+        assert non_register == []
+
+    def test_handoff_events_from_lineage_with_distinct_roles(self, engine, tmp_path):
+        """A lineage row where parent and child have different graph roles emits
+        a handoff event."""
+        import json as _json
+        from coordinationhub.assessment import build_trace_from_db
+
+        spec = tmp_path / "coordination_spec.json"
+        spec.write_text(_json.dumps({
+            "agents": [
+                {"id": "planner", "role": "plan", "responsibilities": ["plan"]},
+                {"id": "builder", "role": "build", "responsibilities": ["build"]},
+            ],
+            "handoffs": [{"from": "planner", "to": "builder", "condition": "ready"}],
+        }))
+        engine.load_coordination_spec(str(spec))
+
+        engine.register_agent("planner", graph_agent_id="planner")
+        engine.register_agent("builder", parent_id="planner",
+                              graph_agent_id="builder")
+
+        trace = build_trace_from_db(engine._connect)
+        handoffs = [e for e in trace["events"] if e["type"] == "handoff"]
+        assert len(handoffs) == 1
+        assert handoffs[0]["from"] == "planner"
+        assert handoffs[0]["to"] == "builder"
+
+    def test_no_handoff_when_parent_and_child_share_role(self, engine, tmp_path):
+        """Children with the same graph role as their parent do not emit handoff events."""
+        import json as _json
+        from coordinationhub.assessment import build_trace_from_db
+
+        spec = tmp_path / "coordination_spec.json"
+        spec.write_text(_json.dumps({
+            "agents": [
+                {"id": "builder", "role": "build", "responsibilities": ["build"]},
+            ],
+            "handoffs": [],
+        }))
+        engine.load_coordination_spec(str(spec))
+
+        engine.register_agent("builder", graph_agent_id="builder")
+        engine.register_agent("builder.child", parent_id="builder",
+                              graph_agent_id="builder")
+
+        trace = build_trace_from_db(engine._connect)
+        handoffs = [e for e in trace["events"] if e["type"] == "handoff"]
+        assert handoffs == []
+
+    def test_worktree_root_filter_excludes_other_projects(self, engine):
+        """Filtering by worktree_root excludes agents and notifications from
+        other projects living in the same DB."""
+        from coordinationhub.assessment import build_trace_from_db
+
+        # Register one agent in each worktree
+        engine.register_agent("agent.in_a", worktree_root="/project/a")
+        engine.register_agent("agent.in_b", worktree_root="/project/b")
+
+        trace = build_trace_from_db(engine._connect,
+                                    worktree_root="/project/a")
+        agent_ids = {e["agent_id"] for e in trace["events"]
+                     if e["type"] == "register"}
+        assert agent_ids == {"agent.in_a"}
+
+    def test_build_suite_wraps_trace(self, engine):
+        """build_suite_from_db returns a suite dict containing exactly one trace."""
+        from coordinationhub.assessment import build_suite_from_db
+
+        engine.register_agent("hub.1.0")
+        suite = build_suite_from_db(engine._connect, suite_name="my_suite")
+        assert suite["name"] == "my_suite"
+        assert len(suite["traces"]) == 1
+        assert suite["traces"][0]["trace_id"] == "my_suite"

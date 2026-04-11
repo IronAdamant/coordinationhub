@@ -22,7 +22,7 @@ EXPECTED_COMMANDS = {
     "reap-expired-locks", "reap-stale-agents", "broadcast", "wait-for-locks",
     "notify-change", "get-notifications", "prune-notifications", "get-conflicts", "contention-hotspots",
     "load-spec", "validate-spec", "scan-project", "dashboard",
-    "agent-status", "assess", "agent-tree",
+    "agent-status", "assess", "assess-session", "agent-tree",
     "doctor", "init", "watch",
 }
 

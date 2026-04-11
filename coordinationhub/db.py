@@ -79,13 +79,6 @@ _SCHEMAS = {
             created_at    REAL NOT NULL
         )
     """,
-    "coordination_context": """
-        CREATE TABLE IF NOT EXISTS coordination_context (
-            key         TEXT PRIMARY KEY,
-            value       TEXT,
-            updated_at  REAL NOT NULL
-        )
-    """,
     "agent_responsibilities": """
         CREATE TABLE IF NOT EXISTS agent_responsibilities (
             agent_id        TEXT PRIMARY KEY,

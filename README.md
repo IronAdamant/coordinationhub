@@ -123,7 +123,7 @@ Every agent gets a unique ID. Files are locked by agent ID. The root agent (your
 
 Agents don't message each other directly. Instead they communicate through the shared database: lock a file, write to it, notify that it changed, release the lock. Other agents poll for notifications to see what happened.
 
-## MCP Tools (<!-- GEN:tool-count -->30<!-- /GEN -->)
+## MCP Tools (<!-- GEN:tool-count -->31<!-- /GEN -->)
 
 | Category | Tools |
 |----------|-------|
@@ -132,7 +132,7 @@ Agents don't message each other directly. Instead they communicate through the s
 | **Coordination** | `broadcast`, `wait_for_locks` |
 | **Changes** | `notify_change`, `get_notifications`, `prune_notifications` |
 | **Audit** | `get_conflicts`, `get_contention_hotspots`, `status` |
-| **Visibility** | `load_coordination_spec`, `validate_graph`, `scan_project`, `get_agent_status`, `get_file_agent_map`, `update_agent_status`, `run_assessment`, [`get_agent_tree`](#agent-tree-view) |
+| **Visibility** | `load_coordination_spec`, `validate_graph`, `scan_project`, `get_agent_status`, `get_file_agent_map`, `update_agent_status`, `run_assessment`, `assess_current_session`, [`get_agent_tree`](#agent-tree-view) |
 
 ## CLI Commands (34)
 
@@ -183,7 +183,8 @@ coordinationhub get-conflicts
 coordinationhub load-spec
 coordinationhub validate-spec
 coordinationhub scan-project
-coordinationhub assess --suite <file>
+coordinationhub assess --suite <file>          # score a hand-authored trace suite
+coordinationhub assess-session                 # score the current live session (no suite file needed)
 ```
 
 ## Agent ID Format
@@ -218,7 +219,7 @@ coordinationhub/
   cli.py              — CLI parser + dispatch
   cli_setup.py        — doctor, init, watch commands
   hooks/claude_code.py — Claude Code session hooks
-  tests/              — <!-- GEN:test-count -->309<!-- /GEN --> tests across 16 files
+  tests/              — <!-- GEN:test-count -->320<!-- /GEN --> tests across 16 files
 ```
 
 ## Zero-Dependency Guarantee

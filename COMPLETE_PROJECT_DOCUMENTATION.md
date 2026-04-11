@@ -1,7 +1,41 @@
 # CoordinationHub — Complete Project Documentation
 
-**Version:** <!-- GEN:version -->0.4.4<!-- /GEN -->
+**Version:** <!-- GEN:version -->0.4.5<!-- /GEN -->
 **Last updated:** 2026-04-11
+
+## v0.4.5 Changelog — Live-Session Assessment + Dead-Table Cleanup
+
+### Motivation
+
+Post-v0.4.4 audit surfaced two real issues. First, `run_assessment` was a use-case orphan: the scorers, MCP tool, and CLI subcommand all existed, but no suite JSON files existed anywhere in the repo, nothing called `run_assessment` automatically, and the v0.4.4 pipeline test had to hand-author a trace to exercise the feature end-to-end. The assessment runner was a complete implementation missing one piece — "how do you get from a live session to a scoreable trace?" Second, `coordination_context` was a dead table: defined in the v0.2.0 initial commit, never read or written, only referenced in a test that asserted its existence.
+
+(`load_coordination_spec` and the graph system were audited at the same time and confirmed actively used — every engine start auto-loads the spec, populating `agent_responsibilities` which feeds `get_agent_tree`, `scan_project`, and context bundles.)
+
+### Added
+
+- **`build_trace_from_db(connect, trace_id, worktree_root)` in `assessment.py`** — synthesizes an assessment trace from live DB state. Reads `agents` LEFT JOIN `agent_responsibilities` for register events (with `graph_id` and `parent_id`), `change_notifications` where `change_type='modified'` for synthetic `lock → modified → unlock` triples, and `lineage` where parent and child have distinct graph roles for `handoff` events. Events sorted by timestamp; internal sort keys stripped before return.
+- **`build_suite_from_db`** — one-call wrapper returning a `{name, traces: [...]}` dict.
+- **`CoordinationEngine.assess_current_session(format, graph_agent_id, scope)`** — scores the live session. Refuses with a structured error if no coordination graph is loaded. `scope="project"` (default) filters to the engine's worktree; `scope="all"` scores every agent in the DB.
+- **`assess_current_session` MCP tool** — new dispatch entry, schema, and `coordinationhub assess-session` CLI subcommand. MCP tool count 30 → 31.
+- **9 new converter unit tests** in `test_assessment.py::TestBuildTraceFromDB` covering empty DB, single agents, graph_id/parent_id propagation, lock/modify triples, `indexed` changes being ignored, handoffs from lineage, same-role suppression, worktree filter, and suite wrapping.
+- **2 new scenario tests** in `test_scenario.py`: `test_assess_current_session_from_live_db` (end-to-end hook-driven session → `assess_current_session` with no hand-built suite) and `test_assess_current_session_without_graph_returns_error` (no-graph error path).
+
+### Removed
+
+- `coordination_context` table removed from `db.py._SCHEMAS`. Existing DBs keep the empty table — no drop migration (a dropped table in a migration is harder to reason about than an ignored empty one). `test_db_migration.py` updated accordingly.
+
+### Fixed
+
+- `coordinationhub/__init__.py` `__version__` had stayed at `0.4.3` through v0.4.4 — a drift the CI version-consistency check catches. Now synced to `0.4.5`.
+- `test_get_tools_returns_all_30_tools` and `test_status_via_http` hardcoded the tool count at 30. Replaced with `len(TOOL_DISPATCH)` so they track the dispatch table.
+
+### Counts
+
+- Tests: 309 → 320 collected (319 passing + 1 skipped). `test_assessment.py`: 24 → 33. `test_scenario.py`: 11 → 13.
+- MCP tools: 30 → 31.
+- CLI subcommands: 34 → 35.
+
+---
 
 ## v0.4.4 Changelog — Close Review Thirteen (Assessment + Graph Pipeline Test)
 
@@ -237,21 +271,21 @@ keep it in sync; CI checks for drift on every push.
 | `coordinationhub/_storage.py` | 101 | Storage backend for CoordinationHub — SQLite pool, path resolution, lifecycle |
 | `coordinationhub/agent_registry.py` | 231 | Agent lifecycle: register, heartbeat, deregister, lineage management |
 | `coordinationhub/agent_status.py` | 262 | Agent status and file-map query helpers for CoordinationHub |
-| `coordinationhub/assessment.py` | 187 | Assessment runner for CoordinationHub coordination test suites |
+| `coordinationhub/assessment.py` | 322 | Assessment runner for CoordinationHub coordination test suites |
 | `coordinationhub/assessment_scorers.py` | 237 | Assessment metric scorers for CoordinationHub |
-| `coordinationhub/cli.py` | 169 | CoordinationHub CLI — command-line interface for all 30 coordination tool methods |
+| `coordinationhub/cli.py` | 182 | CoordinationHub CLI — command-line interface for all 31 coordination tool methods |
 | `coordinationhub/cli_agents.py` | 127 | Agent identity and lifecycle CLI commands |
-| `coordinationhub/cli_commands.py` | 47 | CoordinationHub CLI command handlers |
+| `coordinationhub/cli_commands.py` | 48 | CoordinationHub CLI command handlers |
 | `coordinationhub/cli_locks.py` | 158 | Document locking and coordination CLI commands |
 | `coordinationhub/cli_setup.py` | 268 | CLI commands for setup and diagnostics: doctor, init, watch |
 | `coordinationhub/cli_utils.py` | 21 | Shared CLI helper functions used by all cli_* sub-modules |
-| `coordinationhub/cli_vis.py` | 266 | Change awareness, audit, graph, and assessment CLI commands |
+| `coordinationhub/cli_vis.py` | 290 | Change awareness, audit, graph, and assessment CLI commands |
 | `coordinationhub/conflict_log.py` | 44 | Conflict recording and querying for CoordinationHub |
 | `coordinationhub/context.py` | 88 | Context bundle builder for CoordinationHub agent registration responses |
-| `coordinationhub/core.py` | 238 | CoordinationEngine — core business logic for CoordinationHub |
+| `coordinationhub/core.py` | 280 | CoordinationEngine — core business logic for CoordinationHub |
 | `coordinationhub/core_locking.py` | 269 | Locking and coordination methods for CoordinationEngine |
-| `coordinationhub/db.py` | 250 | SQLite schema, migrations, and connection pool for CoordinationHub |
-| `coordinationhub/dispatch.py` | 37 | Tool dispatch table for CoordinationHub |
+| `coordinationhub/db.py` | 243 | SQLite schema, migrations, and connection pool for CoordinationHub |
+| `coordinationhub/dispatch.py` | 38 | Tool dispatch table for CoordinationHub |
 | `coordinationhub/graphs.py` | 256 | Declarative coordination graph: loader, validator, in-memory representation |
 | `coordinationhub/hooks/__init__.py` | 1 | Hooks package — Claude Code integration via stdin/stdout event protocol |
 | `coordinationhub/hooks/claude_code.py` | 352 | CoordinationHub hook for Claude Code |
@@ -261,10 +295,10 @@ keep it in sync; CI checks for drift on every push.
 | `coordinationhub/notifications.py` | 81 | Change notification storage and retrieval for CoordinationHub |
 | `coordinationhub/paths.py` | 38 | Path normalization and project-root detection utilities |
 | `coordinationhub/scan.py` | 198 | File ownership scan for CoordinationHub |
-| `coordinationhub/schemas.py` | 645 | Tool schemas for CoordinationHub — all 30 MCP tools |
+| `coordinationhub/schemas.py` | 675 | Tool schemas for CoordinationHub — all 31 MCP tools |
 <!-- /GEN -->
 
-**Total: <!-- GEN:test-count -->309<!-- /GEN --> tests across 16 test files.**
+**Total: <!-- GEN:test-count -->320<!-- /GEN --> tests across 16 test files.**
 
 ---
 
@@ -277,21 +311,21 @@ coordinationhub/
   _storage.py           — Storage backend for CoordinationHub — SQLite pool, path resolution, lifecycle (~101 LOC)
   agent_registry.py     — Agent lifecycle: register, heartbeat, deregister, lineage management (~231 LOC)
   agent_status.py       — Agent status and file-map query helpers for CoordinationHub (~262 LOC)
-  assessment.py         — Assessment runner for CoordinationHub coordination test suites (~187 LOC)
+  assessment.py         — Assessment runner for CoordinationHub coordination test suites (~322 LOC)
   assessment_scorers.py — Assessment metric scorers for CoordinationHub (~237 LOC)
-  cli.py                — CoordinationHub CLI — command-line interface for all 30 coordination tool methods (~169 LOC)
+  cli.py                — CoordinationHub CLI — command-line interface for all 31 coordination tool methods (~182 LOC)
   cli_agents.py         — Agent identity and lifecycle CLI commands (~127 LOC)
-  cli_commands.py       — CoordinationHub CLI command handlers (~47 LOC)
+  cli_commands.py       — CoordinationHub CLI command handlers (~48 LOC)
   cli_locks.py          — Document locking and coordination CLI commands (~158 LOC)
   cli_setup.py          — CLI commands for setup and diagnostics: doctor, init, watch (~268 LOC)
   cli_utils.py          — Shared CLI helper functions used by all cli_* sub-modules (~21 LOC)
-  cli_vis.py            — Change awareness, audit, graph, and assessment CLI commands (~266 LOC)
+  cli_vis.py            — Change awareness, audit, graph, and assessment CLI commands (~290 LOC)
   conflict_log.py       — Conflict recording and querying for CoordinationHub (~44 LOC)
   context.py            — Context bundle builder for CoordinationHub agent registration responses (~88 LOC)
-  core.py               — CoordinationEngine — core business logic for CoordinationHub (~238 LOC)
+  core.py               — CoordinationEngine — core business logic for CoordinationHub (~280 LOC)
   core_locking.py       — Locking and coordination methods for CoordinationEngine (~269 LOC)
-  db.py                 — SQLite schema, migrations, and connection pool for CoordinationHub (~250 LOC)
-  dispatch.py           — Tool dispatch table for CoordinationHub (~37 LOC)
+  db.py                 — SQLite schema, migrations, and connection pool for CoordinationHub (~243 LOC)
+  dispatch.py           — Tool dispatch table for CoordinationHub (~38 LOC)
   graphs.py             — Declarative coordination graph: loader, validator, in-memory representation (~256 LOC)
   lock_ops.py           — Shared lock primitives used by both local locks and coordination locks (~191 LOC)
   mcp_server.py         — HTTP-based MCP server for CoordinationHub — zero external dependencies (~209 LOC)
@@ -299,14 +333,14 @@ coordinationhub/
   notifications.py      — Change notification storage and retrieval for CoordinationHub (~81 LOC)
   paths.py              — Path normalization and project-root detection utilities (~38 LOC)
   scan.py               — File ownership scan for CoordinationHub (~198 LOC)
-  schemas.py            — Tool schemas for CoordinationHub — all 30 MCP tools (~645 LOC)
+  schemas.py            — Tool schemas for CoordinationHub — all 31 MCP tools (~675 LOC)
   hooks/
     __init__.py         — Hooks package — Claude Code integration via stdin/stdout event protocol (~1 LOC)
     claude_code.py      — CoordinationHub hook for Claude Code (~352 LOC)
 ```
 <!-- /GEN -->
 
-The `tests/` directory holds <!-- GEN:test-count -->309<!-- /GEN --> tests across 16 files,
+The `tests/` directory holds <!-- GEN:test-count -->320<!-- /GEN --> tests across 16 files,
 plus `tests/fixtures/claude_code_events/` for hook contract fixtures.
 
 **Module design principles:**
@@ -542,7 +576,7 @@ CREATE TABLE assessment_results (
 
 ---
 
-## MCP Tools (<!-- GEN:tool-count -->30<!-- /GEN --> total)
+## MCP Tools (<!-- GEN:tool-count -->31<!-- /GEN --> total)
 
 Full list auto-generated from `coordinationhub/schemas.py`:
 
@@ -578,6 +612,7 @@ Full list auto-generated from `coordinationhub/schemas.py`:
 | `get_file_agent_map` | Get a map of all tracked files to their assigned Agent ID and responsibility summary |
 | `update_agent_status` | Update the current task description for an agent |
 | `run_assessment` | Run an assessment suite against the loaded coordination graph |
+| `assess_current_session` | Score the current live session against the loaded coordination graph |
 | `get_agent_tree` | Get the hierarchical agent tree with live work status |
 <!-- /GEN -->
 
@@ -753,7 +788,7 @@ Air-gapped install: `pip install coordinationhub --no-deps`.
 
 ```bash
 python -m pytest tests/ -v
-# <!-- GEN:test-count -->309<!-- /GEN --> tests across 16 test files
+# <!-- GEN:test-count -->320<!-- /GEN --> tests across 16 test files
 ```
 
 ---

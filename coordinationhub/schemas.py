@@ -1,4 +1,4 @@
-"""Tool schemas for CoordinationHub — all 30 MCP tools.
+"""Tool schemas for CoordinationHub — all 31 MCP tools.
 
 Organized by functional group for navigation.  These are pure data
 declarations with no logic.
@@ -652,6 +652,36 @@ TOOL_SCHEMAS_VISIBILITY: dict[str, dict] = {
                 },
             },
             "required": ["suite_path"],
+        },
+    },
+    "assess_current_session": {
+        "description": (
+            "Score the current live session against the loaded coordination graph. "
+            "Synthesizes an assessment trace from DB state (agents, change "
+            "notifications, lineage) — no hand-authored suite file required. "
+            "Requires a coordination graph to be loaded first via "
+            "load_coordination_spec. Scores all 5 metrics, stores results in "
+            "assessment_results, and returns a Markdown or JSON report."
+        ),
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "format": {
+                    "type": "string",
+                    "description": "Output format: 'markdown' (default) or 'json'",
+                    "default": "markdown",
+                },
+                "graph_agent_id": {
+                    "type": "string",
+                    "description": "Optional: filter traces to those involving this graph agent role",
+                    "default": None,
+                },
+                "scope": {
+                    "type": "string",
+                    "description": "'project' (default) restricts to the current worktree; 'all' scores every agent in the DB",
+                    "default": "project",
+                },
+            },
         },
     },
     "get_agent_tree": {
