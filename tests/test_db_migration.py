@@ -195,7 +195,7 @@ class TestFreshInstall:
         }
         required = {
             "agents", "lineage", "document_locks", "lock_conflicts",
-            "change_notifications", "coordination_context",
+            "change_notifications",
             "agent_responsibilities", "file_ownership", "assessment_results",
             "schema_version",
         }

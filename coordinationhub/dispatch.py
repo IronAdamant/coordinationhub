@@ -48,4 +48,5 @@ TOOL_DISPATCH: dict[str, tuple[str, list[str]]] = {
     "update_agent_status": ("update_agent_status", ["agent_id", "current_task"]),
     "get_agent_tree": ("get_agent_tree", ["agent_id"]),
     "run_assessment": ("run_assessment", ["suite_path", "format", "graph_agent_id"]),
+    "assess_current_session": ("assess_current_session", ["format", "graph_agent_id", "scope"]),
 }

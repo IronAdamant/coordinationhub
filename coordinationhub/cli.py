@@ -1,4 +1,4 @@
-"""CoordinationHub CLI — command-line interface for all 30 coordination tool methods.
+"""CoordinationHub CLI — command-line interface for all 31 coordination tool methods.
 
 Delegates to cli_commands.py for all command handlers.
 """
@@ -191,6 +191,20 @@ def create_parser() -> argparse.ArgumentParser:
     p.add_argument("--graph-agent-id", dest="graph_agent_id", default=None,
                    help="Filter traces to this graph agent role (e.g. planner, executor)")
 
+    # assess-session
+    p = sub.add_parser(
+        "assess-session", parents=[shared],
+        help="Score the current live session (no suite file needed)",
+    )
+    p.add_argument("--format", default="markdown", choices=["markdown", "json"],
+                   help="Output format (default: markdown)")
+    p.add_argument("--output", default=None,
+                   help="Write report to file instead of stdout")
+    p.add_argument("--graph-agent-id", dest="graph_agent_id", default=None,
+                   help="Filter traces to this graph agent role")
+    p.add_argument("--scope", default="project", choices=["project", "all"],
+                   help="'project' (default) limits to current worktree; 'all' scores every agent")
+
     # doctor
     sub.add_parser("doctor", parents=[shared], help="Validate CoordinationHub setup and diagnose issues")
 
@@ -224,6 +238,7 @@ _COMMANDS = {
     "load-spec": "cmd_load_spec", "validate-spec": "cmd_validate_spec",
     "scan-project": "cmd_scan_project", "dashboard": "cmd_dashboard",
     "agent-status": "cmd_agent_status", "assess": "cmd_assess",
+    "assess-session": "cmd_assess_session",
     "agent-tree": "cmd_agent_tree",
     "doctor": "cmd_doctor",
     "init": "cmd_init",

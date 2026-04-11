@@ -1,11 +1,63 @@
 # LLM_Development.md — CoordinationHub
 
-**Version:** <!-- GEN:version -->0.4.4<!-- /GEN -->
+**Version:** <!-- GEN:version -->0.4.5<!-- /GEN -->
 **Last updated:** 2026-04-11
 
 ## Change Log
 
 All significant changes to the CoordinationHub project are documented here in reverse chronological order.
+
+---
+
+## 2026-04-11 — v0.4.5 Live-Session Assessment + Dead-Table Cleanup
+
+### Motivation
+
+Post-v0.4.4 audit surfaced two real issues (and correctly discarded one false alarm):
+
+1. **`run_assessment` had no production consumer.** The engine method, 5 metric scorers, 33 unit tests, MCP tool schema, and `coordinationhub assess --suite <file>` CLI command all existed and worked. But no suite JSON files existed anywhere in the repo, nothing called `run_assessment` automatically, and using it required a user to hand-author a trace suite describing a session after the fact. The v0.4.4 pipeline test had to manually construct a trace to exercise the scorers. The feature was a complete implementation missing exactly one piece: "how do you get from a live session to a scoreable trace?"
+2. **`coordination_context` table was dead.** Defined in `db.py._SCHEMAS` since the v0.2.0 initial commit (`git log -S"coordination_context"` returns one result — that commit). Zero reads, zero writes, ever. The only reference outside `db.py` was `test_db_migration.py` asserting the table exists on a fresh DB — a test enforcing the deadness rather than exercising a live use.
+
+`load_coordination_spec` and the graph system were audited at the same time and confirmed to be actively used: `CoordinationEngine.start()` auto-loads the spec on every engine creation (which every hook call triggers), the loaded graph populates `agent_responsibilities` via `_populate_agent_responsibilities_from_graph`, and that table feeds `get_agent_tree`, `scan_project` responsibility inheritance, context bundles, and boundary warnings. Not dead — the opposite of dead.
+
+### Added
+
+**`build_trace_from_db(connect, trace_id, worktree_root=None)` in `assessment.py`** — synthesizes an assessment trace from live DB state. Reads three tables:
+
+- **`agents`** LEFT JOIN `agent_responsibilities` → `register` events carrying `agent_id`, `graph_id` (when a role is mapped), and `parent_id`.
+- **`change_notifications`** where `change_type='modified'` → synthetic `lock → modified → unlock` triples so `score_outcome_verifiability` has data to work with. Hooks never emit explicit unlock events, so the converter fabricates them from the fact that each write completed. Microsecond offsets keep the triple in-order even when merged with register events that share a timestamp.
+- **`lineage`** where parent and child have distinct graph roles → `handoff` events. Children that inherit the same role as their parent are correctly suppressed.
+
+Events are sorted by timestamp with internal `_ts` sort keys stripped before return, so the output only contains fields documented in the scorer interface.
+
+**`build_suite_from_db(connect, suite_name, worktree_root=None)`** — one-call wrapper that returns `{"name": ..., "traces": [<one trace>]}`.
+
+**`CoordinationEngine.assess_current_session(format, graph_agent_id, scope)`** — scores the live session. Refuses with a clear error if no coordination graph is loaded (rather than returning vacuous-1.0 scores). `scope="project"` (default) filters to the engine's worktree; `scope="all"` scores every agent in the DB.
+
+**`assess_current_session` MCP tool** — new dispatch entry, schema, and `assess-session` CLI subcommand with `--format`, `--graph-agent-id`, `--scope`, and `--output` flags. Tool count 30 → 31.
+
+### Removed
+
+- `coordination_context` table removed from `db.py._SCHEMAS`. Existing DBs keep the empty table (no drop migration — it would be pure churn, and a dropped table in a migration is harder to reason about than a lingering empty one). `test_db_migration.py` updated to no longer assert its existence.
+
+### Added Tests
+
+- **9 new unit tests** in `test_assessment.py::TestBuildTraceFromDB` — empty DB, single agent with no writes, graph_id + parent_id propagation, lock/modified/unlock triples, `indexed` change type is ignored, handoffs from lineage with distinct roles, no handoffs for same-role children, worktree_root filter, suite wrapping.
+- **2 new scenario tests** in `test_scenario.py::TestHookLevelMultiAgentScenario`:
+  - `test_assess_current_session_from_live_db` — drives multi-agent hooks, tags sub-agents with graph roles, then calls `assess_current_session` with no hand-built suite. Asserts all 5 metrics scored, `outcome_verifiability > 0` (the synthesized lock/modify pairs are not vacuous), and results persisted.
+  - `test_assess_current_session_without_graph_returns_error` — verifies the no-graph path returns a structured error instead of silent 1.0s.
+
+### Fixed (incidental)
+
+- `coordinationhub/__init__.py` `__version__` had stayed at `0.4.3` through v0.4.4 (the CI version-consistency check caught this). Now synced to `0.4.5`.
+- Two integration tests (`test_get_tools_returns_all_30_tools`, `test_status_via_http`) hardcoded the tool count at 30. Replaced with `len(TOOL_DISPATCH)` so they track the dispatch table automatically.
+
+### Counts
+
+- Version: 0.4.4 → 0.4.5
+- Tests: 309 → 320 collected (319 passing + 1 skipped). `test_assessment.py`: 24 → 33. `test_scenario.py`: 11 → 13.
+- MCP tools: 30 → 31 (`assess_current_session` added).
+- CLI subcommands: 34 → 35 (`assess-session` added).
 
 ---
 
@@ -172,21 +224,21 @@ Block markers for multi-line content:
 | `coordinationhub/_storage.py` | 101 | Storage backend for CoordinationHub — SQLite pool, path resolution, lifecycle |
 | `coordinationhub/agent_registry.py` | 231 | Agent lifecycle: register, heartbeat, deregister, lineage management |
 | `coordinationhub/agent_status.py` | 262 | Agent status and file-map query helpers for CoordinationHub |
-| `coordinationhub/assessment.py` | 187 | Assessment runner for CoordinationHub coordination test suites |
+| `coordinationhub/assessment.py` | 322 | Assessment runner for CoordinationHub coordination test suites |
 | `coordinationhub/assessment_scorers.py` | 237 | Assessment metric scorers for CoordinationHub |
-| `coordinationhub/cli.py` | 169 | CoordinationHub CLI — command-line interface for all 30 coordination tool methods |
+| `coordinationhub/cli.py` | 182 | CoordinationHub CLI — command-line interface for all 31 coordination tool methods |
 | `coordinationhub/cli_agents.py` | 127 | Agent identity and lifecycle CLI commands |
-| `coordinationhub/cli_commands.py` | 47 | CoordinationHub CLI command handlers |
+| `coordinationhub/cli_commands.py` | 48 | CoordinationHub CLI command handlers |
 | `coordinationhub/cli_locks.py` | 158 | Document locking and coordination CLI commands |
 | `coordinationhub/cli_setup.py` | 268 | CLI commands for setup and diagnostics: doctor, init, watch |
 | `coordinationhub/cli_utils.py` | 21 | Shared CLI helper functions used by all cli_* sub-modules |
-| `coordinationhub/cli_vis.py` | 266 | Change awareness, audit, graph, and assessment CLI commands |
+| `coordinationhub/cli_vis.py` | 290 | Change awareness, audit, graph, and assessment CLI commands |
 | `coordinationhub/conflict_log.py` | 44 | Conflict recording and querying for CoordinationHub |
 | `coordinationhub/context.py` | 88 | Context bundle builder for CoordinationHub agent registration responses |
-| `coordinationhub/core.py` | 238 | CoordinationEngine — core business logic for CoordinationHub |
+| `coordinationhub/core.py` | 280 | CoordinationEngine — core business logic for CoordinationHub |
 | `coordinationhub/core_locking.py` | 269 | Locking and coordination methods for CoordinationEngine |
-| `coordinationhub/db.py` | 250 | SQLite schema, migrations, and connection pool for CoordinationHub |
-| `coordinationhub/dispatch.py` | 37 | Tool dispatch table for CoordinationHub |
+| `coordinationhub/db.py` | 243 | SQLite schema, migrations, and connection pool for CoordinationHub |
+| `coordinationhub/dispatch.py` | 38 | Tool dispatch table for CoordinationHub |
 | `coordinationhub/graphs.py` | 256 | Declarative coordination graph: loader, validator, in-memory representation |
 | `coordinationhub/hooks/__init__.py` | 1 | Hooks package — Claude Code integration via stdin/stdout event protocol |
 | `coordinationhub/hooks/claude_code.py` | 352 | CoordinationHub hook for Claude Code |
@@ -196,13 +248,13 @@ Block markers for multi-line content:
 | `coordinationhub/notifications.py` | 81 | Change notification storage and retrieval for CoordinationHub |
 | `coordinationhub/paths.py` | 38 | Path normalization and project-root detection utilities |
 | `coordinationhub/scan.py` | 198 | File ownership scan for CoordinationHub |
-| `coordinationhub/schemas.py` | 645 | Tool schemas for CoordinationHub — all 30 MCP tools |
+| `coordinationhub/schemas.py` | 675 | Tool schemas for CoordinationHub — all 31 MCP tools |
 <!-- /GEN -->
 ```
 
 Inline markers for single values (render invisibly in Markdown):
 ```markdown
-This project has <!-- GEN:test-count -->309<!-- /GEN --> tests.
+This project has <!-- GEN:test-count -->320<!-- /GEN --> tests.
 ```
 
 Unknown marker names raise an error during rewrite (catches typos).

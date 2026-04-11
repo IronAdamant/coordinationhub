@@ -17,21 +17,21 @@ coordinationhub/
   _storage.py           — Storage backend for CoordinationHub — SQLite pool, path resolution, lifecycle (~101 LOC)
   agent_registry.py     — Agent lifecycle: register, heartbeat, deregister, lineage management (~231 LOC)
   agent_status.py       — Agent status and file-map query helpers for CoordinationHub (~262 LOC)
-  assessment.py         — Assessment runner for CoordinationHub coordination test suites (~187 LOC)
+  assessment.py         — Assessment runner for CoordinationHub coordination test suites (~322 LOC)
   assessment_scorers.py — Assessment metric scorers for CoordinationHub (~237 LOC)
-  cli.py                — CoordinationHub CLI — command-line interface for all 30 coordination tool methods (~169 LOC)
+  cli.py                — CoordinationHub CLI — command-line interface for all 31 coordination tool methods (~182 LOC)
   cli_agents.py         — Agent identity and lifecycle CLI commands (~127 LOC)
-  cli_commands.py       — CoordinationHub CLI command handlers (~47 LOC)
+  cli_commands.py       — CoordinationHub CLI command handlers (~48 LOC)
   cli_locks.py          — Document locking and coordination CLI commands (~158 LOC)
   cli_setup.py          — CLI commands for setup and diagnostics: doctor, init, watch (~268 LOC)
   cli_utils.py          — Shared CLI helper functions used by all cli_* sub-modules (~21 LOC)
-  cli_vis.py            — Change awareness, audit, graph, and assessment CLI commands (~266 LOC)
+  cli_vis.py            — Change awareness, audit, graph, and assessment CLI commands (~290 LOC)
   conflict_log.py       — Conflict recording and querying for CoordinationHub (~44 LOC)
   context.py            — Context bundle builder for CoordinationHub agent registration responses (~88 LOC)
-  core.py               — CoordinationEngine — core business logic for CoordinationHub (~238 LOC)
+  core.py               — CoordinationEngine — core business logic for CoordinationHub (~280 LOC)
   core_locking.py       — Locking and coordination methods for CoordinationEngine (~269 LOC)
-  db.py                 — SQLite schema, migrations, and connection pool for CoordinationHub (~250 LOC)
-  dispatch.py           — Tool dispatch table for CoordinationHub (~37 LOC)
+  db.py                 — SQLite schema, migrations, and connection pool for CoordinationHub (~243 LOC)
+  dispatch.py           — Tool dispatch table for CoordinationHub (~38 LOC)
   graphs.py             — Declarative coordination graph: loader, validator, in-memory representation (~256 LOC)
   lock_ops.py           — Shared lock primitives used by both local locks and coordination locks (~191 LOC)
   mcp_server.py         — HTTP-based MCP server for CoordinationHub — zero external dependencies (~209 LOC)
@@ -39,14 +39,14 @@ coordinationhub/
   notifications.py      — Change notification storage and retrieval for CoordinationHub (~81 LOC)
   paths.py              — Path normalization and project-root detection utilities (~38 LOC)
   scan.py               — File ownership scan for CoordinationHub (~198 LOC)
-  schemas.py            — Tool schemas for CoordinationHub — all 30 MCP tools (~645 LOC)
+  schemas.py            — Tool schemas for CoordinationHub — all 31 MCP tools (~675 LOC)
   hooks/
     __init__.py         — Hooks package — Claude Code integration via stdin/stdout event protocol (~1 LOC)
     claude_code.py      — CoordinationHub hook for Claude Code (~352 LOC)
 ```
 <!-- /GEN -->
 
-The `tests/` directory contains the pytest suite (<!-- GEN:test-count -->309<!-- /GEN --> tests across 16 files), including `tests/fixtures/claude_code_events/` contract fixtures.
+The `tests/` directory contains the pytest suite (<!-- GEN:test-count -->320<!-- /GEN --> tests across 16 files), including `tests/fixtures/claude_code_events/` contract fixtures.
 
 ## Module Design
 
@@ -83,16 +83,16 @@ The `tests/` directory contains the pytest suite (<!-- GEN:test-count -->309<!--
 - **Contract test fixtures**: `tests/fixtures/claude_code_events/*.json` capture the minimum event shape each hook handler depends on. The hook's `COORDINATIONHUB_CAPTURE_EVENTS=1` env var saves real events to `~/.coordinationhub/event_snapshots/` for updating fixtures.
 - **`broadcast` message/action params removed**: The `message` and `action` positional params were removed (they were never stored). The `document_path` optional param remains — when provided, it is used to check for lock conflicts among acknowledged siblings and is not persisted.
 
-## <!-- GEN:tool-count -->30<!-- /GEN --> MCP Tools + 3 Setup Commands
+## <!-- GEN:tool-count -->31<!-- /GEN --> MCP Tools + 3 Setup Commands
 
 Identity: `register_agent`, `heartbeat`, `deregister_agent`, `list_agents`, `get_lineage`, `get_siblings`
 Locking: `acquire_lock`, `release_lock`, `refresh_lock`, `get_lock_status`, `list_locks`, `release_agent_locks`, `reap_expired_locks`, `reap_stale_agents`
 Coordination: `broadcast`, `wait_for_locks`
 Change: `notify_change`, `get_notifications`, `prune_notifications`
 Audit: `get_conflicts`, `get_contention_hotspots`, `status`
-Graph & Visibility (0.3.1): `load_coordination_spec`, `validate_graph`, `scan_project`, `get_agent_status`, `get_file_agent_map`, `update_agent_status`, `run_assessment`, `get_agent_tree`
+Graph & Visibility (0.3.1): `load_coordination_spec`, `validate_graph`, `scan_project`, `get_agent_status`, `get_file_agent_map`, `update_agent_status`, `run_assessment`, `assess_current_session`, `get_agent_tree`
 
-**Tool count is dynamic** — `status()` returns `len(TOOL_DISPATCH)` (currently 30), not a hardcoded number.
+**Tool count is dynamic** — `status()` returns `len(TOOL_DISPATCH)` (currently 31), not a hardcoded number.
 
 ## Dev Commands
 
@@ -153,7 +153,7 @@ To disable hooks temporarily, add `"disableAllHooks": true` to `~/.claude/settin
 
 ```bash
 python -m pytest tests/ -v
-# <!-- GEN:test-count -->309<!-- /GEN --> tests across 16 test files:
+# <!-- GEN:test-count -->320<!-- /GEN --> tests across 16 test files:
 #   test_agent_lifecycle.py  — 21 tests
 #   test_locking.py          — 40 tests (includes smart reap)
 #   test_notifications.py    — 8 tests
@@ -161,12 +161,12 @@ python -m pytest tests/ -v
 #   test_coordination.py     — 7 tests
 #   test_visibility.py       — 30 tests
 #   test_graphs.py           — 22 tests
-#   test_assessment.py       — 24 tests
+#   test_assessment.py       — 33 tests (includes 9 DB→trace converter tests)
 #   test_integration.py      — 15 tests (HTTP transport)
 #   test_core.py             — 28 tests (graph delegation, path utils, agent ID)
 #   test_cli.py              — 14 tests (parser, list-agents/dashboard consistency)
 #   test_concurrent.py       — 8 tests (threading: locks, registration, notifications)
-#   test_scenario.py         — 11 tests (end-to-end multi-agent + graph/assessment pipeline)
+#   test_scenario.py         — 13 tests (end-to-end multi-agent + live session assessment)
 #   test_hooks.py            — 50 tests (hook handlers, agent ID mapping, file ownership, event contract)
 #   test_setup.py            — 8 tests (doctor, init, hook merge)
 #   test_db_migration.py     — 7 tests (legacy DB, stuck-version recovery, fresh install)

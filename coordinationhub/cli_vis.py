@@ -348,3 +348,33 @@ def cmd_assess(args):
                 _print_json(result)
     finally:
         _close(engine)
+
+
+# ------------------------------------------------------------------ #
+# assess-session
+# ------------------------------------------------------------------ #
+
+def cmd_assess_session(args):
+    engine = _engine_from_args(args)
+    try:
+        result = engine.assess_current_session(
+            format=args.format,
+            graph_agent_id=getattr(args, "graph_agent_id", None),
+            scope=getattr(args, "scope", "project"),
+        )
+        if "error" in result:
+            print(f"Error: {result['error']}", file=sys.stderr)
+            return
+        if args.output:
+            Path(args.output).write_text(
+                result.get("report", json.dumps(result, indent=2)),
+                encoding="utf-8",
+            )
+            print(f"Report written to {args.output}")
+        else:
+            if result.get("report"):
+                print(result["report"])
+            else:
+                _print_json(result)
+    finally:
+        _close(engine)

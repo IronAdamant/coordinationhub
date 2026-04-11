@@ -42,6 +42,7 @@ from .cli_vis import (
     cmd_dashboard,
     cmd_agent_status,
     cmd_assess,
+    cmd_assess_session,
     cmd_agent_tree,
 )
 from .cli_setup import (

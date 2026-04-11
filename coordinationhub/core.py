@@ -292,6 +292,51 @@ class CoordinationEngine(LockingMixin):
         report = _assess.format_markdown_report(result)
         return {"report": report, "scores": result}
 
+    def assess_current_session(
+        self,
+        format: str = "markdown",
+        graph_agent_id: str | None = None,
+        scope: str = "project",
+    ) -> dict[str, Any]:
+        """Build a trace from current DB state and run assessment.
+
+        Unlike ``run_assessment``, which requires a hand-authored suite
+        JSON, this reads live hook-recorded state (agents, change
+        notifications, lineage) and synthesizes a trace suite via
+        ``build_suite_from_db``. Scores are persisted and returned.
+
+        Args:
+            format: ``"markdown"`` (default) returns {report, scores};
+                ``"json"`` returns the raw scoring result.
+            graph_agent_id: optional filter to restrict scoring to
+                traces where at least one register event uses this role.
+            scope: ``"project"`` (default) filters to the engine's
+                worktree root; ``"all"`` includes every agent in the DB.
+        """
+        graph = _g.get_graph()
+        if graph is None:
+            return {"error": "No coordination graph loaded — "
+                             "call load_coordination_spec first"}
+        worktree_root = (
+            str(self._storage.project_root)
+            if scope == "project" and self._storage.project_root
+            else None
+        )
+        suite = _assess.build_suite_from_db(
+            self._connect,
+            suite_name="live_session",
+            worktree_root=worktree_root,
+        )
+        with self._connect() as conn:
+            result = _assess.run_assessment(
+                suite, graph, graph_agent_id=graph_agent_id,
+            )
+            _assess.store_assessment_results(conn, result)
+        if format == "json":
+            return result
+        report = _assess.format_markdown_report(result)
+        return {"report": report, "scores": result}
+
     # ------------------------------------------------------------------ #
     # Context bundle helper
     # ------------------------------------------------------------------ #
