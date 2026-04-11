@@ -124,7 +124,14 @@ def cmd_deregister(args):
 def cmd_list_agents(args):
     engine = _engine_from_args(args)
     try:
-        result = engine.list_agents(active_only=not args.include_stale, stale_timeout=args.stale_timeout)
+        # Auto-reap stale agents so displayed status matches DB state.  This
+        # eliminates the "active (STALE)" vs "[stopped]" inconsistency
+        # between list-agents and dashboard reported in Review Fourteen:
+        # once a stale agent is reaped, both commands render it as stopped.
+        engine.reap_stale_agents(timeout=args.stale_timeout)
+        result = engine.list_agents(
+            active_only=not args.include_stale, stale_timeout=args.stale_timeout,
+        )
         agents = result.get("agents", [])
         if args.json_output:
             _print_json(result)

@@ -2,8 +2,17 @@
 
 from __future__ import annotations
 
+import io
+import tempfile
+import time
+from contextlib import redirect_stdout
+from types import SimpleNamespace
+
 import pytest
 from coordinationhub.cli import create_parser, _COMMANDS
+from coordinationhub.cli_agents import cmd_list_agents
+from coordinationhub.cli_vis import cmd_dashboard
+from coordinationhub.core import CoordinationEngine
 
 
 EXPECTED_COMMANDS = {
@@ -144,3 +153,122 @@ class TestCreateParser:
         ])
         assert args.extensions == [".py", ".md"]
         assert args.worktree_root == "/src"
+
+
+class TestListAgentsDashboardConsistency:
+    """Review Fourteen: list-agents showed 'active (STALE)' while dashboard
+    showed '[stopped]' for the same underlying situation.  Both CLIs now
+    auto-reap stale agents so their output converges.
+    """
+
+    def _stale_engine(self, tmpdir):
+        eng = CoordinationEngine(storage_dir=tmpdir)
+        eng.start()
+        eng.register_agent("hub.live")
+        eng.register_agent("hub.stale")
+        # Backdate the stale agent's heartbeat well beyond the default timeout
+        with eng._connect() as conn:
+            conn.execute(
+                "UPDATE agents SET last_heartbeat = ? WHERE agent_id = ?",
+                (time.time() - 9999.0, "hub.stale"),
+            )
+        return eng
+
+    def _args(self, **kwargs):
+        defaults = {
+            "json_output": False,
+            "storage_dir": None,
+            "project_root": None,
+            "namespace": "hub",
+            "include_stale": True,
+            "stale_timeout": 600.0,
+            "minimal": True,
+            "agent_id": None,
+        }
+        defaults.update(kwargs)
+        return SimpleNamespace(**defaults)
+
+    def test_list_agents_auto_reaps_stale(self):
+        """After cmd_list_agents runs, the stale agent is marked 'stopped' in the DB."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            eng = self._stale_engine(tmpdir)
+            try:
+                # Inject a pre-built engine into cmd_list_agents by monkey-patching
+                # _engine_from_args with a closure. Simpler: let cmd_list_agents
+                # construct its own engine pointing at the same storage_dir.
+                eng.close()
+
+                args = self._args(storage_dir=tmpdir)
+                buf = io.StringIO()
+                with redirect_stdout(buf):
+                    cmd_list_agents(args)
+
+                # Reopen and confirm the stale agent was reaped to 'stopped'
+                eng2 = CoordinationEngine(storage_dir=tmpdir)
+                eng2.start()
+                try:
+                    agents = {
+                        a["agent_id"]: a
+                        for a in eng2.list_agents(active_only=False)["agents"]
+                    }
+                    assert agents["hub.stale"]["status"] == "stopped", (
+                        "list-agents should have auto-reaped the stale agent"
+                    )
+                    assert agents["hub.live"]["status"] == "active"
+                finally:
+                    eng2.close()
+            finally:
+                # Defensive close in case of early failure
+                try:
+                    eng.close()
+                except Exception:
+                    pass
+
+    def test_dashboard_auto_reaps_stale(self):
+        """cmd_dashboard must also reap stale agents so its output matches list-agents."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            eng = self._stale_engine(tmpdir)
+            eng.close()
+
+            args = self._args(storage_dir=tmpdir, include_stale=False)
+            buf = io.StringIO()
+            with redirect_stdout(buf):
+                cmd_dashboard(args)
+
+            eng2 = CoordinationEngine(storage_dir=tmpdir)
+            eng2.start()
+            try:
+                agents = {
+                    a["agent_id"]: a
+                    for a in eng2.list_agents(active_only=False)["agents"]
+                }
+                assert agents["hub.stale"]["status"] == "stopped"
+                assert agents["hub.live"]["status"] == "active"
+            finally:
+                eng2.close()
+
+    def test_list_agents_and_dashboard_agree_after_run(self):
+        """Running either command leaves the DB in the state the other expects."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            eng = self._stale_engine(tmpdir)
+            eng.close()
+
+            # list-agents first
+            args = self._args(storage_dir=tmpdir, include_stale=True)
+            with redirect_stdout(io.StringIO()):
+                cmd_list_agents(args)
+
+            # Then dashboard — must see the same reaped state without raising
+            with redirect_stdout(io.StringIO()):
+                cmd_dashboard(args)
+
+            eng2 = CoordinationEngine(storage_dir=tmpdir)
+            eng2.start()
+            try:
+                statuses = {
+                    a["agent_id"]: a["status"]
+                    for a in eng2.list_agents(active_only=False)["agents"]
+                }
+                assert statuses == {"hub.live": "active", "hub.stale": "stopped"}
+            finally:
+                eng2.close()

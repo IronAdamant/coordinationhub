@@ -20,17 +20,17 @@ coordinationhub/
   assessment.py         — Assessment runner for CoordinationHub coordination test suites (~187 LOC)
   assessment_scorers.py — Assessment metric scorers for CoordinationHub (~237 LOC)
   cli.py                — CoordinationHub CLI — command-line interface for all 30 coordination tool methods (~169 LOC)
-  cli_agents.py         — Agent identity and lifecycle CLI commands (~124 LOC)
+  cli_agents.py         — Agent identity and lifecycle CLI commands (~127 LOC)
   cli_commands.py       — CoordinationHub CLI command handlers (~47 LOC)
   cli_locks.py          — Document locking and coordination CLI commands (~158 LOC)
   cli_setup.py          — CLI commands for setup and diagnostics: doctor, init, watch (~268 LOC)
   cli_utils.py          — Shared CLI helper functions used by all cli_* sub-modules (~21 LOC)
-  cli_vis.py            — Change awareness, audit, graph, and assessment CLI commands (~265 LOC)
+  cli_vis.py            — Change awareness, audit, graph, and assessment CLI commands (~266 LOC)
   conflict_log.py       — Conflict recording and querying for CoordinationHub (~44 LOC)
   context.py            — Context bundle builder for CoordinationHub agent registration responses (~88 LOC)
   core.py               — CoordinationEngine — core business logic for CoordinationHub (~238 LOC)
   core_locking.py       — Locking and coordination methods for CoordinationEngine (~269 LOC)
-  db.py                 — SQLite schema, migrations, and connection pool for CoordinationHub (~239 LOC)
+  db.py                 — SQLite schema, migrations, and connection pool for CoordinationHub (~250 LOC)
   dispatch.py           — Tool dispatch table for CoordinationHub (~37 LOC)
   graphs.py             — Declarative coordination graph: loader, validator, in-memory representation (~256 LOC)
   lock_ops.py           — Shared lock primitives used by both local locks and coordination locks (~191 LOC)
@@ -42,11 +42,11 @@ coordinationhub/
   schemas.py            — Tool schemas for CoordinationHub — all 30 MCP tools (~645 LOC)
   hooks/
     __init__.py         — Hooks package — Claude Code integration via stdin/stdout event protocol (~1 LOC)
-    claude_code.py      — CoordinationHub hook for Claude Code (~352 LOC)
+    claude_code.py      — CoordinationHub hook for Claude Code (~383 LOC)
 ```
 <!-- /GEN -->
 
-The `tests/` directory contains the pytest suite (<!-- GEN:test-count -->298<!-- /GEN --> tests across 16 files), including `tests/fixtures/claude_code_events/` contract fixtures.
+The `tests/` directory contains the pytest suite (<!-- GEN:test-count -->313<!-- /GEN --> tests across 16 files), including `tests/fixtures/claude_code_events/` contract fixtures.
 
 ## Module Design
 
@@ -73,7 +73,9 @@ The `tests/` directory contains the pytest suite (<!-- GEN:test-count -->298<!--
 - **Coordination URL in context bundle**: Parent agents embed `coordination_url` string. Override via `COORDINATIONHUB_COORDINATION_URL` environment variable.
 - **SQLite WAL mode**: `PRAGMA wal_checkpoint(TRUNCATE)` on engine close ensures no unbounded WAL growth.
 - **Region locking**: `document_locks` uses `id INTEGER PRIMARY KEY AUTOINCREMENT` with `region_start INTEGER` and `region_end INTEGER` columns, allowing multiple locks per file on non-overlapping regions. Shared locks (multiple readers) are enforced — multiple shared locks on the same region are allowed, but an exclusive lock blocks all others. `_regions_overlap()`, `find_conflicting_locks()`, and `find_own_lock()` in `lock_ops.py` handle overlap detection. `acquire_lock` uses `BEGIN IMMEDIATE` for thread-safe concurrent locking.
-- **DB schema versioning**: `db.py` tracks `schema_version` table with `_CURRENT_SCHEMA_VERSION = 3`. `init_schema()` auto-migrates through v1→v2 (document_locks restructure) and v2→v3 (agents.claude_agent_id column). Migration runner preserves existing data.
+- **DB schema versioning**: `db.py` tracks `schema_version` table with `_CURRENT_SCHEMA_VERSION = 3`. `init_schema()` auto-migrates through v1→v2 (document_locks restructure) and v2→v3 (agents.claude_agent_id column). Migration runner preserves existing data. **Every call runs every migration in order** — each one is idempotent via `PRAGMA table_info` checks, so DBs stamped with a version number by buggy earlier init_schema code paths still get their tables repaired. Indexes are created after migrations so they always reference the latest column set.
+- **Auto-registered sub-agents**: When PreToolUse/PostToolUse fires with a raw Claude hex ID that has no `claude_agent_id` mapping (e.g., `general-purpose` sub-agents that skip SubagentStart), `_resolve_agent_id(auto_register=True)` creates a `{session_parent}.auto.{hex[:6]}` child linked to the session root and records the raw ID as `claude_agent_id`. This closes the Review Fourteen coverage gap where parallel sub-agent writes landed on the parent and never contended. The `_looks_like_raw_claude_id` guard skips IDs that already look like `hub.*` so explicit agent IDs pass through unchanged.
+- **CLI auto-reap**: `cmd_list_agents` and `cmd_dashboard` both call `reap_stale_agents(timeout=...)` before querying so their output converges on the same state — Review Fourteen found them drifting when one reaped and the other did not.
 - **Claude Code agent ID mapping**: `agents.claude_agent_id` stores the raw hex ID that Claude Code assigns to spawned sub-agents. During SubagentStart, the hook stores this mapping. During PreToolUse/PostToolUse, `_resolve_agent_id` looks up the mapping to return the `hub.cc.*` child ID instead of the raw hex — preventing ghost agent duplication and hierarchy disconnection.
 - **SubagentStop resolves via claude_agent_id**: `handle_subagent_stop` uses `_resolve_agent_id` (not `_subagent_id`) to find the correct `hub.cc.*` child ID from the raw Claude hex ID. This ensures `deregister_agent` sets `status='stopped'` on the correct agent record. Falls back to `_subagent_id` derivation if no mapping exists.
 - **Background agent dedup**: `handle_subagent_start` checks `find_agent_by_claude_id` before generating a new child ID. If an agent with the same `claude_agent_id` already exists (e.g., `run_in_background` agents that fire SubagentStart twice), the existing agent is heartbeated instead of creating a duplicate.
@@ -152,7 +154,7 @@ To disable hooks temporarily, add `"disableAllHooks": true` to `~/.claude/settin
 
 ```bash
 python -m pytest tests/ -v
-# <!-- GEN:test-count -->298<!-- /GEN --> tests across 16 test files:
+# <!-- GEN:test-count -->313<!-- /GEN --> tests across 17 test files:
 #   test_agent_lifecycle.py  — 21 tests
 #   test_locking.py          — 40 tests (includes smart reap)
 #   test_notifications.py    — 8 tests
@@ -163,11 +165,12 @@ python -m pytest tests/ -v
 #   test_assessment.py       — 24 tests
 #   test_integration.py      — 15 tests (HTTP transport)
 #   test_core.py             — 28 tests (graph delegation, path utils, agent ID)
-#   test_cli.py              — 11 tests (argparse parser, subcommand dispatch)
+#   test_cli.py              — 14 tests (parser, list-agents/dashboard consistency)
 #   test_concurrent.py       — 8 tests (threading: locks, registration, notifications)
-#   test_scenario.py         — 6 tests (end-to-end multi-agent lifecycle workflows)
-#   test_hooks.py            — 47 tests (hook handlers, agent ID mapping, file ownership, event contract)
+#   test_scenario.py         — 10 tests (end-to-end multi-agent lifecycle workflows)
+#   test_hooks.py            — 55 tests (hook handlers, auto-registered sub-agents, event contract)
 #   test_setup.py            — 8 tests (doctor, init, hook merge)
+#   test_db_migration.py     — 7 tests (legacy DB, stuck-version recovery, fresh install)
 ```
 
 Always run the test suite before and after changes.

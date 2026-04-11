@@ -1,7 +1,27 @@
 # CoordinationHub — Complete Project Documentation
 
-**Version:** <!-- GEN:version -->0.4.2<!-- /GEN -->
+**Version:** <!-- GEN:version -->0.4.3<!-- /GEN -->
 **Last updated:** 2026-04-11
+
+## v0.4.3 Changelog — Review Fourteen Fixes
+
+### Fixed
+- **`init_schema` is now idempotent and self-healing.** Earlier code stamped `schema_version` in a fresh-install branch that was a no-op on existing tables; a DB discovered in Review Fourteen had `schema_version=3` but `document_locks` still in v1 shape. `init_schema` now always runs every migration in version order (each is idempotent via `PRAGMA table_info` checks) and creates indexes after migrations. Legacy DBs, partially migrated DBs, and DBs with bogus version stamps all converge on the latest schema.
+- **General-purpose sub-agents now land in the hierarchy.** `_resolve_agent_id(auto_register=True)` creates a `{session_parent}.auto.{hex[:6]}` child when PreToolUse/PostToolUse arrives with a raw Claude hex ID that has no `claude_agent_id` mapping, recording the raw ID on the child so subsequent events resolve normally. File ownership, lock attribution, and change notifications now land on the correct sub-agent instead of the session root. Parallel writes from two sub-agents to the same file are now correctly denied by the second PreToolUse.
+- **`list-agents` and `dashboard` output now agrees.** Both CLI commands call `reap_stale_agents` before querying so a stale active-in-DB agent is reaped once, and both commands render it as stopped thereafter.
+
+### Added
+- `tests/test_db_migration.py` — 7 tests covering pre-v0.3.3 legacy DBs, stuck-version DBs (the exact broken state found in the project), and fresh installs.
+- 5 `TestAutoRegisterUnmappedSubagent` tests in `test_hooks.py` — parent linkage, file ownership to the child, idempotency across tool calls, parallel-write contention, and the `hub.*` passthrough guard.
+- 3 `TestListAgentsDashboardConsistency` tests in `test_cli.py` — stale-agent seeding + cross-command consistency.
+
+### Changed
+- `coordinationhub/db.py`: `init_schema` rewritten to run all migrations unconditionally.
+- `coordinationhub/hooks/claude_code.py`: `_resolve_agent_id` gained `auto_register` parameter; `_looks_like_raw_claude_id` helper added; all Post/PreToolUse handlers pass `auto_register=True`.
+- `coordinationhub/cli_agents.py`, `coordinationhub/cli_vis.py`: auto-reap before list/dashboard output.
+- Tests: 297 → 313 across 17 files.
+
+---
 
 ## v0.4.0 Changelog
 
@@ -193,21 +213,21 @@ keep it in sync; CI checks for drift on every push.
 | `coordinationhub/assessment.py` | 187 | Assessment runner for CoordinationHub coordination test suites |
 | `coordinationhub/assessment_scorers.py` | 237 | Assessment metric scorers for CoordinationHub |
 | `coordinationhub/cli.py` | 169 | CoordinationHub CLI — command-line interface for all 30 coordination tool methods |
-| `coordinationhub/cli_agents.py` | 124 | Agent identity and lifecycle CLI commands |
+| `coordinationhub/cli_agents.py` | 127 | Agent identity and lifecycle CLI commands |
 | `coordinationhub/cli_commands.py` | 47 | CoordinationHub CLI command handlers |
 | `coordinationhub/cli_locks.py` | 158 | Document locking and coordination CLI commands |
 | `coordinationhub/cli_setup.py` | 268 | CLI commands for setup and diagnostics: doctor, init, watch |
 | `coordinationhub/cli_utils.py` | 21 | Shared CLI helper functions used by all cli_* sub-modules |
-| `coordinationhub/cli_vis.py` | 265 | Change awareness, audit, graph, and assessment CLI commands |
+| `coordinationhub/cli_vis.py` | 266 | Change awareness, audit, graph, and assessment CLI commands |
 | `coordinationhub/conflict_log.py` | 44 | Conflict recording and querying for CoordinationHub |
 | `coordinationhub/context.py` | 88 | Context bundle builder for CoordinationHub agent registration responses |
 | `coordinationhub/core.py` | 238 | CoordinationEngine — core business logic for CoordinationHub |
 | `coordinationhub/core_locking.py` | 269 | Locking and coordination methods for CoordinationEngine |
-| `coordinationhub/db.py` | 239 | SQLite schema, migrations, and connection pool for CoordinationHub |
+| `coordinationhub/db.py` | 250 | SQLite schema, migrations, and connection pool for CoordinationHub |
 | `coordinationhub/dispatch.py` | 37 | Tool dispatch table for CoordinationHub |
 | `coordinationhub/graphs.py` | 256 | Declarative coordination graph: loader, validator, in-memory representation |
 | `coordinationhub/hooks/__init__.py` | 1 | Hooks package — Claude Code integration via stdin/stdout event protocol |
-| `coordinationhub/hooks/claude_code.py` | 352 | CoordinationHub hook for Claude Code |
+| `coordinationhub/hooks/claude_code.py` | 383 | CoordinationHub hook for Claude Code |
 | `coordinationhub/lock_ops.py` | 191 | Shared lock primitives used by both local locks and coordination locks |
 | `coordinationhub/mcp_server.py` | 209 | HTTP-based MCP server for CoordinationHub — zero external dependencies |
 | `coordinationhub/mcp_stdio.py` | 142 | Stdio-based MCP server for CoordinationHub using the ``mcp`` Python package |
@@ -217,7 +237,7 @@ keep it in sync; CI checks for drift on every push.
 | `coordinationhub/schemas.py` | 645 | Tool schemas for CoordinationHub — all 30 MCP tools |
 <!-- /GEN -->
 
-**Total: <!-- GEN:test-count -->298<!-- /GEN --> tests across 16 test files.**
+**Total: <!-- GEN:test-count -->313<!-- /GEN --> tests across 16 test files.**
 
 ---
 
@@ -233,17 +253,17 @@ coordinationhub/
   assessment.py         — Assessment runner for CoordinationHub coordination test suites (~187 LOC)
   assessment_scorers.py — Assessment metric scorers for CoordinationHub (~237 LOC)
   cli.py                — CoordinationHub CLI — command-line interface for all 30 coordination tool methods (~169 LOC)
-  cli_agents.py         — Agent identity and lifecycle CLI commands (~124 LOC)
+  cli_agents.py         — Agent identity and lifecycle CLI commands (~127 LOC)
   cli_commands.py       — CoordinationHub CLI command handlers (~47 LOC)
   cli_locks.py          — Document locking and coordination CLI commands (~158 LOC)
   cli_setup.py          — CLI commands for setup and diagnostics: doctor, init, watch (~268 LOC)
   cli_utils.py          — Shared CLI helper functions used by all cli_* sub-modules (~21 LOC)
-  cli_vis.py            — Change awareness, audit, graph, and assessment CLI commands (~265 LOC)
+  cli_vis.py            — Change awareness, audit, graph, and assessment CLI commands (~266 LOC)
   conflict_log.py       — Conflict recording and querying for CoordinationHub (~44 LOC)
   context.py            — Context bundle builder for CoordinationHub agent registration responses (~88 LOC)
   core.py               — CoordinationEngine — core business logic for CoordinationHub (~238 LOC)
   core_locking.py       — Locking and coordination methods for CoordinationEngine (~269 LOC)
-  db.py                 — SQLite schema, migrations, and connection pool for CoordinationHub (~239 LOC)
+  db.py                 — SQLite schema, migrations, and connection pool for CoordinationHub (~250 LOC)
   dispatch.py           — Tool dispatch table for CoordinationHub (~37 LOC)
   graphs.py             — Declarative coordination graph: loader, validator, in-memory representation (~256 LOC)
   lock_ops.py           — Shared lock primitives used by both local locks and coordination locks (~191 LOC)
@@ -255,11 +275,11 @@ coordinationhub/
   schemas.py            — Tool schemas for CoordinationHub — all 30 MCP tools (~645 LOC)
   hooks/
     __init__.py         — Hooks package — Claude Code integration via stdin/stdout event protocol (~1 LOC)
-    claude_code.py      — CoordinationHub hook for Claude Code (~352 LOC)
+    claude_code.py      — CoordinationHub hook for Claude Code (~383 LOC)
 ```
 <!-- /GEN -->
 
-The `tests/` directory holds <!-- GEN:test-count -->298<!-- /GEN --> tests across 16 files,
+The `tests/` directory holds <!-- GEN:test-count -->313<!-- /GEN --> tests across 16 files,
 plus `tests/fixtures/claude_code_events/` for hook contract fixtures.
 
 **Module design principles:**
@@ -706,7 +726,7 @@ Air-gapped install: `pip install coordinationhub --no-deps`.
 
 ```bash
 python -m pytest tests/ -v
-# <!-- GEN:test-count -->298<!-- /GEN --> tests across 16 test files
+# <!-- GEN:test-count -->313<!-- /GEN --> tests across 16 test files
 ```
 
 ---

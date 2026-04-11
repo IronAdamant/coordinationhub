@@ -193,7 +193,23 @@ _MIGRATIONS = {
 
 
 def init_schema(conn: sqlite3.Connection) -> None:
-    """Create all tables and indexes if they don't exist. Run pending migrations."""
+    """Create all tables and indexes if they don't exist. Run pending migrations.
+
+    The recorded ``schema_version`` is advisory — each migration also
+    checks actual table shapes via ``PRAGMA table_info`` and no-ops if
+    already applied.  This tolerates DBs stamped by buggy older
+    init_schema implementations that recorded a version without
+    actually running the migrations.  On every ``init_schema`` call we:
+
+    1. Ensure ``schema_version`` exists.
+    2. Run ``CREATE TABLE IF NOT EXISTS`` for every table — fresh DBs
+       get the latest shape, existing DBs are untouched.
+    3. Unconditionally run every migration in version order — each one
+       is idempotent, so this catches DBs where the version was stamped
+       but the migration code never actually ran.
+    4. Create all indexes (idempotent) against the now-current shape.
+    5. Record ``_CURRENT_SCHEMA_VERSION``.
+    """
     # Create version tracking table first
     conn.execute("""
         CREATE TABLE IF NOT EXISTS schema_version (
@@ -202,21 +218,30 @@ def init_schema(conn: sqlite3.Connection) -> None:
         )
     """)
 
+    # Always create any tables that don't yet exist.  For fresh installs this
+    # is everything; for legacy DBs it covers tables added after v1 (lineage,
+    # lock_conflicts, change_notifications, file_ownership, etc.) that the
+    # migrations do not create.  ``CREATE TABLE IF NOT EXISTS`` is a no-op
+    # for tables that already exist with a different shape — those are
+    # handled by the migration runner below.
+    for sql in _SCHEMAS.values():
+        conn.execute(sql)
+
+    # Always run every migration in order — each one is idempotent (checks
+    # ``PRAGMA table_info`` and skips work that is already applied).  This
+    # catches DBs stamped with a version number by earlier buggy code
+    # paths without the underlying migration actually running.
+    for ver in sorted(_MIGRATIONS.keys()):
+        _MIGRATIONS[ver](conn)
+
+    # Indexes are idempotent (``CREATE INDEX IF NOT EXISTS``) and reference
+    # columns from the latest schema, so they must run AFTER any pending
+    # migration has added those columns.
+    for idx_sql in _INDEXES:
+        conn.execute(idx_sql)
+
+    # Record current version — overwrites any stale/wrong earlier value.
     current = _get_schema_version(conn)
-
-    if current == 0:
-        # Fresh install — create everything from scratch
-        for sql in _SCHEMAS.values():
-            conn.execute(sql)
-        for idx_sql in _INDEXES:
-            conn.execute(idx_sql)
-    else:
-        # Existing DB — run pending migrations
-        for ver in sorted(_MIGRATIONS.keys()):
-            if ver > current:
-                _MIGRATIONS[ver](conn)
-
-    # Record current version if not already recorded
     if current < _CURRENT_SCHEMA_VERSION:
         import time
         conn.execute(
