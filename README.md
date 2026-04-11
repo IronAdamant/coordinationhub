@@ -218,7 +218,7 @@ coordinationhub/
   cli.py              — CLI parser + dispatch
   cli_setup.py        — doctor, init, watch commands
   hooks/claude_code.py — Claude Code session hooks
-  tests/              — <!-- GEN:test-count -->298<!-- /GEN --> tests across 16 files
+  tests/              — <!-- GEN:test-count -->313<!-- /GEN --> tests across 16 files
 ```
 
 ## Zero-Dependency Guarantee

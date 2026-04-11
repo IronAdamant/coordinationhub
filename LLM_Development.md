@@ -1,11 +1,97 @@
 # LLM_Development.md — CoordinationHub
 
-**Version:** <!-- GEN:version -->0.4.2<!-- /GEN -->
+**Version:** <!-- GEN:version -->0.4.3<!-- /GEN -->
 **Last updated:** 2026-04-11
 
 ## Change Log
 
 All significant changes to the CoordinationHub project are documented here in reverse chronological order.
+
+---
+
+## 2026-04-11 — v0.4.3 Review Fourteen Fixes
+
+### Motivation
+
+Review Fourteen (conducted on RecipeLab_alt, 2026-04-11) surfaced three
+load-bearing bugs that surfaced only under real multi-agent swarm usage:
+
+1. **`agent-tree` errored with `no such column: region_start`** on a DB in
+   the wild. Root cause was a buggy earlier `init_schema` path that
+   stamped `schema_version=3` without actually running the v1→v2 migration,
+   leaving `document_locks` at the v1 shape forever.
+2. **Parallel `general-purpose` sub-agent writes to the same file did not
+   contend** — both writes succeeded, the second overwrote the first, and
+   no conflict was recorded. The sub-agents never appeared in the agent
+   registry because Claude Code did not fire `SubagentStart` for that
+   sub-agent type; the PreToolUse/PostToolUse handlers then attributed
+   everything to the session parent.
+3. **`list-agents` and `dashboard` rendered the same DB differently** —
+   list-agents showed `active (STALE)` while dashboard showed `[stopped]`
+   because only one of them implicitly reaped stale agents.
+
+### Fixed
+
+**`db.py init_schema` is now fully idempotent and self-healing.** Every
+call:
+
+1. Creates `schema_version` if missing.
+2. Runs `CREATE TABLE IF NOT EXISTS` for every table in the latest shape
+   (no-op on existing tables, adds any missing tables for legacy DBs).
+3. Runs **every** migration in version order unconditionally — each
+   migration checks `PRAGMA table_info` and skips work already applied,
+   so stuck DBs that were stamped at v3 but still shaped like v1 get
+   their `document_locks` restructured and `agents.claude_agent_id`
+   added on the next call.
+4. Creates all indexes after migrations, so index DDL always references
+   the latest column set.
+5. Overwrites `schema_version` with `_CURRENT_SCHEMA_VERSION`.
+
+**`hooks/claude_code.py` auto-registers unmapped sub-agents.**
+`_resolve_agent_id(event, engine, auto_register=True)` now creates a
+`{session_parent}.auto.{hex[:6]}` child when PreToolUse/PostToolUse
+arrives with a raw Claude hex ID that has no existing
+`claude_agent_id` mapping. The child is linked to the session root
+and the raw ID is stored as `claude_agent_id`, so subsequent events
+resolve via `find_agent_by_claude_id`. `_looks_like_raw_claude_id`
+guards against reshaping IDs that are already `hub.*`. Applied to
+`handle_pre_write`, `handle_post_write`, `handle_post_stele_index`,
+and `handle_post_trammel_claim`. `handle_subagent_stop` deliberately
+keeps `auto_register=False` — stop events should not create new
+agents.
+
+**`cmd_list_agents` and `cmd_dashboard` both call `reap_stale_agents`
+before querying** so their output converges on the same DB state.
+Previously a stale agent with `status='active'` and an old heartbeat
+would render as `active (STALE)` in list-agents but `[stopped]` in
+dashboard (or vice versa) depending on which command last ran.
+
+### Added
+
+- `tests/test_db_migration.py` — 7 tests for legacy, stuck-version, and
+  fresh-install schema paths. Includes the exact broken DB state found
+  in the project (`schema_version=3` with `document_locks` in v1 shape).
+- `TestAutoRegisterUnmappedSubagent` in `tests/test_hooks.py` — 5 tests
+  covering parent linkage, file-ownership attribution to the child,
+  idempotency across multiple tool calls, the parallel-write
+  contention case from Review Fourteen Experiment 3, and the guard
+  that prevents reshaping `hub.*` IDs.
+- `TestListAgentsDashboardConsistency` in `tests/test_cli.py` — 3 tests
+  that seed a stale agent, run each CLI command, and verify the DB is
+  left in the same state.
+
+### Not fixed (intentional)
+
+Review Fourteen's finding that `general-purpose` sub-agents skip
+`SubagentStart` entirely is a Claude Code behavior we cannot change
+from the hook side. The auto-register fix absorbs the consequences so
+file locks, change notifications, and ownership land on the correct
+child. `SubagentStop` still will not fire for those sub-agents; they
+remain `active` in the DB until `reap_stale_agents` runs.
+
+### Test Count
+
+297 → 313 tests (+16). All passing.
 
 ---
 
@@ -45,21 +131,21 @@ Block markers for multi-line content:
 | `coordinationhub/assessment.py` | 187 | Assessment runner for CoordinationHub coordination test suites |
 | `coordinationhub/assessment_scorers.py` | 237 | Assessment metric scorers for CoordinationHub |
 | `coordinationhub/cli.py` | 169 | CoordinationHub CLI — command-line interface for all 30 coordination tool methods |
-| `coordinationhub/cli_agents.py` | 124 | Agent identity and lifecycle CLI commands |
+| `coordinationhub/cli_agents.py` | 127 | Agent identity and lifecycle CLI commands |
 | `coordinationhub/cli_commands.py` | 47 | CoordinationHub CLI command handlers |
 | `coordinationhub/cli_locks.py` | 158 | Document locking and coordination CLI commands |
 | `coordinationhub/cli_setup.py` | 268 | CLI commands for setup and diagnostics: doctor, init, watch |
 | `coordinationhub/cli_utils.py` | 21 | Shared CLI helper functions used by all cli_* sub-modules |
-| `coordinationhub/cli_vis.py` | 265 | Change awareness, audit, graph, and assessment CLI commands |
+| `coordinationhub/cli_vis.py` | 266 | Change awareness, audit, graph, and assessment CLI commands |
 | `coordinationhub/conflict_log.py` | 44 | Conflict recording and querying for CoordinationHub |
 | `coordinationhub/context.py` | 88 | Context bundle builder for CoordinationHub agent registration responses |
 | `coordinationhub/core.py` | 238 | CoordinationEngine — core business logic for CoordinationHub |
 | `coordinationhub/core_locking.py` | 269 | Locking and coordination methods for CoordinationEngine |
-| `coordinationhub/db.py` | 239 | SQLite schema, migrations, and connection pool for CoordinationHub |
+| `coordinationhub/db.py` | 250 | SQLite schema, migrations, and connection pool for CoordinationHub |
 | `coordinationhub/dispatch.py` | 37 | Tool dispatch table for CoordinationHub |
 | `coordinationhub/graphs.py` | 256 | Declarative coordination graph: loader, validator, in-memory representation |
 | `coordinationhub/hooks/__init__.py` | 1 | Hooks package — Claude Code integration via stdin/stdout event protocol |
-| `coordinationhub/hooks/claude_code.py` | 352 | CoordinationHub hook for Claude Code |
+| `coordinationhub/hooks/claude_code.py` | 383 | CoordinationHub hook for Claude Code |
 | `coordinationhub/lock_ops.py` | 191 | Shared lock primitives used by both local locks and coordination locks |
 | `coordinationhub/mcp_server.py` | 209 | HTTP-based MCP server for CoordinationHub — zero external dependencies |
 | `coordinationhub/mcp_stdio.py` | 142 | Stdio-based MCP server for CoordinationHub using the ``mcp`` Python package |
@@ -72,7 +158,7 @@ Block markers for multi-line content:
 
 Inline markers for single values (render invisibly in Markdown):
 ```markdown
-This project has <!-- GEN:test-count -->298<!-- /GEN --> tests.
+This project has <!-- GEN:test-count -->313<!-- /GEN --> tests.
 ```
 
 Unknown marker names raise an error during rewrite (catches typos).

@@ -182,6 +182,10 @@ def cmd_scan_project(args):
 def cmd_dashboard(args):
     engine = _engine_from_args(args)
     try:
+        # Auto-reap stale agents so the dashboard matches list-agents output.
+        # Review Fourteen found the two CLIs drifted when one called
+        # reap_stale_agents and the other did not.
+        engine.reap_stale_agents(timeout=600.0)
         status = engine.status()
         agents_result = engine.list_agents(active_only=False)
         agents = agents_result.get("agents", [])
