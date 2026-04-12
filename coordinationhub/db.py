@@ -120,6 +120,15 @@ _SCHEMAS = {
             run_at          REAL NOT NULL
         )
     """,
+    "descendant_registry": """
+        CREATE TABLE IF NOT EXISTS descendant_registry (
+            ancestor_id   TEXT NOT NULL,
+            descendant_id TEXT NOT NULL,
+            depth         INTEGER NOT NULL DEFAULT 1,
+            registered_at REAL NOT NULL,
+            PRIMARY KEY (ancestor_id, descendant_id)
+        )
+    """,
 }
 
 _INDEXES = [
@@ -137,10 +146,11 @@ _INDEXES = [
     "CREATE INDEX IF NOT EXISTS idx_locks_expiry ON document_locks(document_path, locked_at, lock_ttl)",
     "CREATE INDEX IF NOT EXISTS idx_agents_claude_id ON agents(claude_agent_id)",
     "CREATE INDEX IF NOT EXISTS idx_pending_subagent_session_type ON pending_subagent_tasks(session_id, subagent_type, consumed_at)",
+    "CREATE INDEX IF NOT EXISTS idx_descendant_ancestor ON descendant_registry(ancestor_id)",
 ]
 
 
-_CURRENT_SCHEMA_VERSION = 3
+_CURRENT_SCHEMA_VERSION = 4
 
 
 def _get_schema_version(conn: sqlite3.Connection) -> int:
@@ -194,6 +204,7 @@ def _migrate_v2_to_v3(conn: sqlite3.Connection) -> None:
 _MIGRATIONS = {
     2: _migrate_v1_to_v2,
     3: _migrate_v2_to_v3,
+    4: lambda conn: None,  # descendant_registry added via CREATE TABLE IF NOT EXISTS
 }
 
 
