@@ -24,6 +24,7 @@ EXPECTED_COMMANDS = {
     "load-spec", "validate-spec", "scan-project", "dashboard",
     "agent-status", "assess", "assess-session", "agent-tree",
     "doctor", "init", "watch",
+    "await-agent", "send-message", "get-messages", "mark-messages-read",
 }
 
 

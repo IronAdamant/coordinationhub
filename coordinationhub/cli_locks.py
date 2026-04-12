@@ -34,6 +34,8 @@ def cmd_acquire_lock(args):
         result = engine.acquire_lock(
             args.document_path, args.agent_id, args.lock_type, args.ttl, args.force,
             region_start=args.region_start, region_end=args.region_end,
+            retry=args.retry, max_retries=args.max_retries,
+            backoff_ms=args.backoff_ms, timeout_ms=args.timeout_ms,
         )
         if args.json_output:
             _print_json(result)
@@ -219,5 +221,89 @@ def cmd_wait_for_locks(args):
         else:
             print(f"Released: {result.get('released') or '(none)'}")
             print(f"Timed out: {result.get('timed_out') or '(none)'}")
+    finally:
+        _close(engine)
+
+
+# ------------------------------------------------------------------ #
+# await-agent
+# ------------------------------------------------------------------ #
+
+def cmd_await_agent(args):
+    engine = _engine_from_args(args)
+    try:
+        result = engine.await_agent(args.agent_id, timeout_s=args.timeout)
+        if args.json_output:
+            _print_json(result)
+        else:
+            print(f"Agent: {args.agent_id}")
+            print(f"  Status: {result.get('status')}")
+            if result.get('awaited'):
+                print(f"  Waited: {result.get('waited_s', 0):.1f}s")
+            else:
+                print(f"  Timeout: {result.get('timeout_s')}s")
+    finally:
+        _close(engine)
+
+
+# ------------------------------------------------------------------ #
+# send-message
+# ------------------------------------------------------------------ #
+
+def cmd_send_message(args):
+    engine = _engine_from_args(args)
+    try:
+        result = engine.send_message(
+            args.from_agent_id, args.to_agent_id, args.message_type,
+            payload=getattr(args, 'payload', None),
+        )
+        if args.json_output:
+            _print_json(result)
+        else:
+            print(f"MESSAGE SENT to {args.to_agent_id}")
+            print(f"  From: {args.from_agent_id}")
+            print(f"  Type: {args.message_type}")
+    finally:
+        _close(engine)
+
+
+# ------------------------------------------------------------------ #
+# get-messages
+# ------------------------------------------------------------------ #
+
+def cmd_get_messages(args):
+    engine = _engine_from_args(args)
+    try:
+        result = engine.get_messages(
+            args.agent_id,
+            unread_only=getattr(args, 'unread_only', False),
+            limit=getattr(args, 'limit', 50),
+        )
+        if args.json_output:
+            _print_json(result)
+        else:
+            messages = result.get('messages', [])
+            print(f"Messages for {args.agent_id}: {len(messages)}")
+            for msg in messages:
+                print(f"  From: {msg['from_agent_id']} | Type: {msg['message_type']} | Read: {msg.get('read_at') is not None}")
+    finally:
+        _close(engine)
+
+
+# ------------------------------------------------------------------ #
+# mark-messages-read
+# ------------------------------------------------------------------ #
+
+def cmd_mark_messages_read(args):
+    engine = _engine_from_args(args)
+    try:
+        result = engine.mark_messages_read(
+            args.agent_id,
+            message_ids=getattr(args, 'message_ids', None),
+        )
+        if args.json_output:
+            _print_json(result)
+        else:
+            print(f"Marked {result.get('marked_read', 0)} message(s) as read for {args.agent_id}")
     finally:
         _close(engine)

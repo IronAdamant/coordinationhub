@@ -31,66 +31,136 @@ class LockingMixin:
         self, document_path: str, agent_id: str,
         lock_type: str = "exclusive", ttl: float = DEFAULT_TTL, force: bool = False,
         region_start: int | None = None, region_end: int | None = None,
+        retry: bool = False, max_retries: int = 5, backoff_ms: float = 100.0, timeout_ms: float = 5000.0,
     ) -> dict[str, Any]:
-        now = time.time()
+        """Acquire a lock with optional retry and exponential backoff.
+
+        Args:
+            retry: If True, retry on lock contention with exponential backoff.
+            max_retries: Maximum number of retries (default 5).
+            backoff_ms: Starting backoff in milliseconds (default 100ms).
+            timeout_ms: Total timeout in milliseconds (default 5000ms).
+        """
         norm_path = normalize_path(document_path, self._storage.project_root)
         worktree = str(self._storage.project_root)
-        conn = self._connect()
-        conn.execute("BEGIN IMMEDIATE")
-        try:
-            own = _lo.find_own_lock(conn, "document_locks", norm_path, agent_id, region_start, region_end)
-            if own is not None:
+        start_time = time.time()
+        attempt = 0
+        current_backoff_ms = backoff_ms
+
+        while True:
+            now = time.time()
+            conn = self._connect()
+            conn.execute("BEGIN IMMEDIATE")
+            try:
+                own = _lo.find_own_lock(conn, "document_locks", norm_path, agent_id, region_start, region_end)
+                if own is not None:
+                    conn.execute(
+                        "UPDATE document_locks SET locked_at = ?, lock_ttl = ?, lock_type = ? WHERE id = ?",
+                        (now, ttl, lock_type, own["id"]),
+                    )
+                    conn.execute("COMMIT")
+                    return {"acquired": True, "document_path": norm_path, "locked_by": agent_id,
+                            "expires_at": now + ttl, "region_start": region_start, "region_end": region_end,
+                            "attempts": attempt + 1}
+
+                conflicts = _lo.find_conflicting_locks(
+                    conn, "document_locks", norm_path, agent_id, lock_type, region_start, region_end,
+                )
+                if conflicts and not force:
+                    conn.execute("COMMIT")
+                    first = conflicts[0]
+                    result = {
+                        "acquired": False, "locked_by": first["locked_by"],
+                        "locked_at": first["locked_at"], "expires_at": first["locked_at"] + first["lock_ttl"],
+                        "worktree": first["worktree_root"],
+                        "conflicts": [{"locked_by": c["locked_by"], "region_start": c["region_start"],
+                                       "region_end": c["region_end"]} for c in conflicts],
+                        "attempt": attempt + 1,
+                    }
+
+                    # Retry logic
+                    if retry and attempt < max_retries:
+                        elapsed_ms = (time.time() - start_time) * 1000
+                        if elapsed_ms + current_backoff_ms <= timeout_ms:
+                            conn.close()
+                            time.sleep(current_backoff_ms / 1000.0)
+                            current_backoff_ms *= 2  # Exponential backoff
+                            attempt += 1
+                            continue
+                    return result
+                if conflicts and force:
+                    for c in conflicts:
+                        _cl.record_conflict(self._connect, norm_path, c["locked_by"], agent_id,
+                                            "lock_stolen", resolution="force_overwritten")
+                        conn.execute("DELETE FROM document_locks WHERE id = ?", (c["id"],))
+
                 conn.execute(
-                    "UPDATE document_locks SET locked_at = ?, lock_ttl = ?, lock_type = ? WHERE id = ?",
-                    (now, ttl, lock_type, own["id"]),
+                    "INSERT INTO document_locks (document_path, locked_by, locked_at, lock_ttl, "
+                    "lock_type, region_start, region_end, worktree_root) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                    (norm_path, agent_id, now, ttl, lock_type, region_start, region_end, worktree),
                 )
                 conn.execute("COMMIT")
-                return {"acquired": True, "document_path": norm_path, "locked_by": agent_id,
-                        "expires_at": now + ttl, "region_start": region_start, "region_end": region_end}
 
-            conflicts = _lo.find_conflicting_locks(
-                conn, "document_locks", norm_path, agent_id, lock_type, region_start, region_end,
-            )
-            if conflicts and not force:
-                conn.execute("COMMIT")
-                first = conflicts[0]
-                return {
-                    "acquired": False, "locked_by": first["locked_by"],
-                    "locked_at": first["locked_at"], "expires_at": first["locked_at"] + first["lock_ttl"],
-                    "worktree": first["worktree_root"],
-                    "conflicts": [{"locked_by": c["locked_by"], "region_start": c["region_start"],
-                                   "region_end": c["region_end"]} for c in conflicts],
-                }
-            if conflicts and force:
-                for c in conflicts:
-                    _cl.record_conflict(self._connect, norm_path, c["locked_by"], agent_id,
-                                        "lock_stolen", resolution="force_overwritten")
-                    conn.execute("DELETE FROM document_locks WHERE id = ?", (c["id"],))
+                # Check scope enforcement before committing the lock
+                scope_result = self._check_scope_violation(conn, norm_path, agent_id)
+                if scope_result is not None:
+                    conn.execute("ROLLBACK")
+                    return {
+                        "acquired": False,
+                        "error": "scope_violation",
+                        "scope_violation": scope_result,
+                        "attempts": attempt + 1,
+                    }
+                # Check file_ownership for boundary crossing (warning only)
+                ownership_warning = self._check_ownership_boundary(conn, norm_path, agent_id)
+                result = {"acquired": True, "document_path": norm_path, "locked_by": agent_id,
+                          "expires_at": now + ttl, "region_start": region_start, "region_end": region_end,
+                          "attempts": attempt + 1}
+                if ownership_warning:
+                    result["ownership_warning"] = ownership_warning
+                return result
+            except Exception:
+                conn.execute("ROLLBACK")
+                raise
 
-            conn.execute(
-                "INSERT INTO document_locks (document_path, locked_by, locked_at, lock_ttl, "
-                "lock_type, region_start, region_end, worktree_root) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
-                (norm_path, agent_id, now, ttl, lock_type, region_start, region_end, worktree),
-            )
-            conn.execute("COMMIT")
+    def _check_scope_violation(
+        self, conn, norm_path: str, agent_id: str,
+    ) -> dict[str, Any] | None:
+        """Check if agent's declared scope covers the file path.
 
-            # Check file_ownership for boundary crossing
-            ownership_warning = self._check_ownership_boundary(conn, norm_path, agent_id)
-            result = {"acquired": True, "document_path": norm_path, "locked_by": agent_id,
-                      "expires_at": now + ttl, "region_start": region_start, "region_end": region_end}
-            if ownership_warning:
-                result["ownership_warning"] = ownership_warning
-            return result
-        except Exception:
-            conn.execute("ROLLBACK")
-            raise
+        If the agent has a scope and the path is outside it, returns a
+        scope_violation dict to deny the lock. Returns None if scope is
+        satisfied or agent has no scope.
+        """
+        row = conn.execute(
+            "SELECT scope FROM agent_responsibilities WHERE agent_id = ?",
+            (agent_id,),
+        ).fetchone()
+        if row is None or not row["scope"]:
+            return None
+        import json
+        try:
+            scope_paths = json.loads(row["scope"])
+        except (json.JSONDecodeError, TypeError):
+            return None
+        if not scope_paths:
+            return None
+        # Check if norm_path starts with any scope prefix
+        for scope_prefix in scope_paths:
+            if norm_path.startswith(scope_prefix) or norm_path == scope_prefix.rstrip("/"):
+                return None
+        return {
+            "declared_scope": scope_paths,
+            "attempted_path": norm_path,
+            "message": f"Agent {agent_id} declared scope {scope_paths} but attempted to lock {norm_path}",
+        }
 
     def _check_ownership_boundary(
         self, conn, norm_path: str, agent_id: str,
     ) -> dict[str, Any] | None:
         """Check if agent is locking a file owned by another agent.
 
-        If so, record a boundary_crossing conflict and notification.
+        Records a boundary_crossing conflict and notification (warning only).
         Returns warning dict or None.
         """
         row = conn.execute(

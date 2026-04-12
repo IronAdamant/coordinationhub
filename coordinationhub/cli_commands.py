@@ -29,6 +29,10 @@ from .cli_locks import (
     cmd_reap_stale_agents,
     cmd_broadcast,
     cmd_wait_for_locks,
+    cmd_await_agent,
+    cmd_send_message,
+    cmd_get_messages,
+    cmd_mark_messages_read,
 )
 from .cli_vis import (
     cmd_notify_change,

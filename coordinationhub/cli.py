@@ -1,4 +1,4 @@
-"""CoordinationHub CLI — command-line interface for all 31 coordination tool methods.
+"""CoordinationHub CLI — command-line interface for all 35 coordination tool methods.
 
 Delegates to cli_commands.py for all command handlers.
 """
@@ -77,6 +77,10 @@ def create_parser() -> argparse.ArgumentParser:
     p.add_argument("--force", action="store_true")
     p.add_argument("--region-start", type=int, default=None, help="Start line for region lock")
     p.add_argument("--region-end", type=int, default=None, help="End line for region lock")
+    p.add_argument("--retry", action="store_true", help="Retry with exponential backoff on contention")
+    p.add_argument("--max-retries", type=int, default=5, help="Maximum retry attempts (default: 5)")
+    p.add_argument("--backoff-ms", type=float, default=100.0, help="Starting backoff in ms (default: 100)")
+    p.add_argument("--timeout-ms", type=float, default=5000.0, help="Total timeout in ms (default: 5000)")
 
     # release-lock
     p = sub.add_parser("release-lock", parents=[shared], help="Release a held lock")
@@ -216,6 +220,29 @@ def create_parser() -> argparse.ArgumentParser:
     p.add_argument("agent_id", nargs="?", default=None, help="Root agent (default: oldest root)")
     p.add_argument("--interval", type=int, default=5, help="Refresh interval in seconds (default: 5)")
 
+    # await-agent
+    p = sub.add_parser("await-agent", parents=[shared], help="Wait for an agent to complete")
+    p.add_argument("agent_id", help="Agent to wait for")
+    p.add_argument("--timeout", type=float, default=60.0, help="Timeout in seconds (default: 60)")
+
+    # send-message
+    p = sub.add_parser("send-message", parents=[shared], help="Send a message to another agent")
+    p.add_argument("from_agent_id", help="Agent sending the message")
+    p.add_argument("to_agent_id", help="Agent to receive the message")
+    p.add_argument("message_type", help="Message type (e.g. query, response)")
+    p.add_argument("--payload", default=None, help="JSON payload")
+
+    # get-messages
+    p = sub.add_parser("get-messages", parents=[shared], help="Get messages for an agent")
+    p.add_argument("agent_id", help="Agent to get messages for")
+    p.add_argument("--unread-only", action="store_true", help="Only return unread messages")
+    p.add_argument("--limit", type=int, default=50, help="Maximum messages to return (default: 50)")
+
+    # mark-messages-read
+    p = sub.add_parser("mark-messages-read", parents=[shared], help="Mark messages as read")
+    p.add_argument("agent_id", help="Agent marking messages as read")
+    p.add_argument("--message-ids", type=int, nargs="+", default=None, help="Specific message IDs to mark")
+
     return parser
 
 
@@ -243,6 +270,10 @@ _COMMANDS = {
     "doctor": "cmd_doctor",
     "init": "cmd_init",
     "watch": "cmd_watch",
+    "await-agent": "cmd_await_agent",
+    "send-message": "cmd_send_message",
+    "get-messages": "cmd_get_messages",
+    "mark-messages-read": "cmd_mark_messages_read",
 }
 
 

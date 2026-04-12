@@ -12,10 +12,12 @@ from typing import Any, Callable
 def update_agent_status_tool(
     connect: Callable[[], Any],
     agent_id: str,
-    current_task: str,
+    current_task: str | None = None,
+    scope: list[str] | None = None,
 ) -> dict[str, Any]:
-    """Tool implementation: update current_task for an agent."""
+    """Tool implementation: update current_task and/or scope for an agent."""
     import time as _time
+    import json as _json
     now = _time.time()
     with connect() as conn:
         row = conn.execute(
@@ -23,14 +25,24 @@ def update_agent_status_tool(
         ).fetchone()
         if row is None:
             return {"updated": False, "error": f"Agent not found: {agent_id}"}
-        conn.execute("""
-            INSERT INTO agent_responsibilities (agent_id, current_task, updated_at)
-            VALUES (?, ?, ?)
-            ON CONFLICT(agent_id) DO UPDATE SET
-                current_task = excluded.current_task,
-                updated_at = excluded.updated_at
-        """, (agent_id, current_task, now))
-    return {"updated": True, "agent_id": agent_id, "current_task": current_task}
+        if current_task is not None:
+            conn.execute("""
+                INSERT INTO agent_responsibilities (agent_id, current_task, updated_at)
+                VALUES (?, ?, ?)
+                ON CONFLICT(agent_id) DO UPDATE SET
+                    current_task = excluded.current_task,
+                    updated_at = excluded.updated_at
+            """, (agent_id, current_task, now))
+        if scope is not None:
+            scope_json = _json.dumps(scope)
+            conn.execute("""
+                INSERT INTO agent_responsibilities (agent_id, scope, updated_at)
+                VALUES (?, ?, ?)
+                ON CONFLICT(agent_id) DO UPDATE SET
+                    scope = excluded.scope,
+                    updated_at = excluded.updated_at
+            """, (agent_id, scope_json, now))
+    return {"updated": True, "agent_id": agent_id}
 
 
 def get_agent_status_tool(
