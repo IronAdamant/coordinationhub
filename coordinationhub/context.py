@@ -26,6 +26,7 @@ def build_context_bundle(
     graph_getter: Callable[[], Any],
     list_agents_fn: Callable[[Callable[[], Any], bool, float], list[dict[str, Any]]],
     default_port: int = DEFAULT_PORT,
+    descendants_fn: Callable[[], list[dict[str, Any]]] | None = None,
 ) -> dict[str, Any]:
     """Assemble and return a context bundle for *agent_id*.
 
@@ -94,4 +95,6 @@ def build_context_bundle(
         bundle["current_task"] = resp.get("current_task")
     if owned_files:
         bundle["owned_files"] = [f["document_path"] for f in owned_files]
+    if descendants_fn is not None:
+        bundle["descendants_status"] = descendants_fn()
     return bundle

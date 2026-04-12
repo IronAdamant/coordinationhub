@@ -350,4 +350,5 @@ class CoordinationEngine(LockingMixin):
             graph_getter=_g.get_graph,
             list_agents_fn=_ar.list_agents,
             default_port=self.DEFAULT_PORT,
+            descendants_fn=lambda: _ar.get_descendants_status(self._connect, agent_id),
         )

@@ -1,6 +1,6 @@
 # CoordinationHub — Multi-Agent Swarm Coordination MCP
 
-**Version:** <!-- GEN:version -->0.4.7<!-- /GEN -->
+**Version:** <!-- GEN:version -->0.4.9<!-- /GEN -->
 **Language:** Python 3.10+ (stdlib-only core — **zero third-party dependencies**, `mcp` optional for stdio only)
 **Transports:** stdio + HTTP (both, like Stele/Chisel/Trammel)
 
@@ -283,7 +283,7 @@ Multiple locks per file are allowed for non-overlapping regions. Shared locks on
 coordinationhub/
   __init__.py           — CoordinationHub — multi-agent swarm coordination MCP server (~14 LOC)
   _storage.py           — Storage backend for CoordinationHub — SQLite pool, path resolution, lifecycle (~101 LOC)
-  agent_registry.py     — Agent lifecycle: register, heartbeat, deregister, lineage management (~231 LOC)
+  agent_registry.py     — Agent lifecycle: register, heartbeat, deregister, lineage management (~292 LOC)
   agent_status.py       — Agent status and file-map query helpers for CoordinationHub (~262 LOC)
   assessment.py         — Assessment runner for CoordinationHub coordination test suites (~322 LOC)
   assessment_scorers.py — Assessment metric scorers for CoordinationHub (~237 LOC)
@@ -295,10 +295,10 @@ coordinationhub/
   cli_utils.py          — Shared CLI helper functions used by all cli_* sub-modules (~21 LOC)
   cli_vis.py            — Change awareness, audit, graph, and assessment CLI commands (~290 LOC)
   conflict_log.py       — Conflict recording and querying for CoordinationHub (~44 LOC)
-  context.py            — Context bundle builder for CoordinationHub agent registration responses (~88 LOC)
-  core.py               — CoordinationEngine — core business logic for CoordinationHub (~280 LOC)
+  context.py            — Context bundle builder for CoordinationHub agent registration responses (~91 LOC)
+  core.py               — CoordinationEngine — core business logic for CoordinationHub (~281 LOC)
   core_locking.py       — Locking and coordination methods for CoordinationEngine (~269 LOC)
-  db.py                 — SQLite schema, migrations, and connection pool for CoordinationHub (~255 LOC)
+  db.py                 — SQLite schema, migrations, and connection pool for CoordinationHub (~266 LOC)
   dispatch.py           — Tool dispatch table for CoordinationHub (~38 LOC)
   graphs.py             — Declarative coordination graph: loader, validator, in-memory representation (~256 LOC)
   lock_ops.py           — Shared lock primitives used by both local locks and coordination locks (~191 LOC)
@@ -315,7 +315,7 @@ coordinationhub/
 ```
 <!-- /GEN -->
 
-`tests/` contains <!-- GEN:test-count -->336<!-- /GEN --> tests across 16 files plus `fixtures/claude_code_events/` (hook contract fixtures).
+`tests/` contains <!-- GEN:test-count -->341<!-- /GEN --> tests across 16 files plus `fixtures/claude_code_events/` (hook contract fixtures).
 
 Top-level project files: `pyproject.toml`, `coordination_spec.yaml`/`.json` (example specs), `README.md`, `CLAUDE.md`, `COMPLETE_PROJECT_DOCUMENTATION.md`, `LLM_Development.md`, and `wiki-local/` (this spec, glossary, index).
 

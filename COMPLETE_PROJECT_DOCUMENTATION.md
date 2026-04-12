@@ -1,6 +1,6 @@
 # CoordinationHub — Complete Project Documentation
 
-**Version:** <!-- GEN:version -->0.4.7<!-- /GEN -->
+**Version:** <!-- GEN:version -->0.4.9<!-- /GEN -->
 **Last updated:** 2026-04-12
 
 ## v0.4.8 Changelog — Lock Release on PostToolUse (Findings Phase 9 Fix)
@@ -371,7 +371,7 @@ keep it in sync; CI checks for drift on every push.
 |------|-----|---------|
 | `coordinationhub/__init__.py` | 14 | CoordinationHub — multi-agent swarm coordination MCP server |
 | `coordinationhub/_storage.py` | 101 | Storage backend for CoordinationHub — SQLite pool, path resolution, lifecycle |
-| `coordinationhub/agent_registry.py` | 231 | Agent lifecycle: register, heartbeat, deregister, lineage management |
+| `coordinationhub/agent_registry.py` | 292 | Agent lifecycle: register, heartbeat, deregister, lineage management |
 | `coordinationhub/agent_status.py` | 262 | Agent status and file-map query helpers for CoordinationHub |
 | `coordinationhub/assessment.py` | 322 | Assessment runner for CoordinationHub coordination test suites |
 | `coordinationhub/assessment_scorers.py` | 237 | Assessment metric scorers for CoordinationHub |
@@ -383,10 +383,10 @@ keep it in sync; CI checks for drift on every push.
 | `coordinationhub/cli_utils.py` | 21 | Shared CLI helper functions used by all cli_* sub-modules |
 | `coordinationhub/cli_vis.py` | 290 | Change awareness, audit, graph, and assessment CLI commands |
 | `coordinationhub/conflict_log.py` | 44 | Conflict recording and querying for CoordinationHub |
-| `coordinationhub/context.py` | 88 | Context bundle builder for CoordinationHub agent registration responses |
-| `coordinationhub/core.py` | 280 | CoordinationEngine — core business logic for CoordinationHub |
+| `coordinationhub/context.py` | 91 | Context bundle builder for CoordinationHub agent registration responses |
+| `coordinationhub/core.py` | 281 | CoordinationEngine — core business logic for CoordinationHub |
 | `coordinationhub/core_locking.py` | 269 | Locking and coordination methods for CoordinationEngine |
-| `coordinationhub/db.py` | 255 | SQLite schema, migrations, and connection pool for CoordinationHub |
+| `coordinationhub/db.py` | 266 | SQLite schema, migrations, and connection pool for CoordinationHub |
 | `coordinationhub/dispatch.py` | 38 | Tool dispatch table for CoordinationHub |
 | `coordinationhub/graphs.py` | 256 | Declarative coordination graph: loader, validator, in-memory representation |
 | `coordinationhub/hooks/__init__.py` | 1 | Hooks package — Claude Code integration via stdin/stdout event protocol |
@@ -401,7 +401,7 @@ keep it in sync; CI checks for drift on every push.
 | `coordinationhub/schemas.py` | 675 | Tool schemas for CoordinationHub — all 31 MCP tools |
 <!-- /GEN -->
 
-**Total: <!-- GEN:test-count -->336<!-- /GEN --> tests across 16 test files.**
+**Total: <!-- GEN:test-count -->341<!-- /GEN --> tests across 16 test files.**
 
 ---
 
@@ -412,7 +412,7 @@ keep it in sync; CI checks for drift on every push.
 coordinationhub/
   __init__.py           — CoordinationHub — multi-agent swarm coordination MCP server (~14 LOC)
   _storage.py           — Storage backend for CoordinationHub — SQLite pool, path resolution, lifecycle (~101 LOC)
-  agent_registry.py     — Agent lifecycle: register, heartbeat, deregister, lineage management (~231 LOC)
+  agent_registry.py     — Agent lifecycle: register, heartbeat, deregister, lineage management (~292 LOC)
   agent_status.py       — Agent status and file-map query helpers for CoordinationHub (~262 LOC)
   assessment.py         — Assessment runner for CoordinationHub coordination test suites (~322 LOC)
   assessment_scorers.py — Assessment metric scorers for CoordinationHub (~237 LOC)
@@ -424,10 +424,10 @@ coordinationhub/
   cli_utils.py          — Shared CLI helper functions used by all cli_* sub-modules (~21 LOC)
   cli_vis.py            — Change awareness, audit, graph, and assessment CLI commands (~290 LOC)
   conflict_log.py       — Conflict recording and querying for CoordinationHub (~44 LOC)
-  context.py            — Context bundle builder for CoordinationHub agent registration responses (~88 LOC)
-  core.py               — CoordinationEngine — core business logic for CoordinationHub (~280 LOC)
+  context.py            — Context bundle builder for CoordinationHub agent registration responses (~91 LOC)
+  core.py               — CoordinationEngine — core business logic for CoordinationHub (~281 LOC)
   core_locking.py       — Locking and coordination methods for CoordinationEngine (~269 LOC)
-  db.py                 — SQLite schema, migrations, and connection pool for CoordinationHub (~255 LOC)
+  db.py                 — SQLite schema, migrations, and connection pool for CoordinationHub (~266 LOC)
   dispatch.py           — Tool dispatch table for CoordinationHub (~38 LOC)
   graphs.py             — Declarative coordination graph: loader, validator, in-memory representation (~256 LOC)
   lock_ops.py           — Shared lock primitives used by both local locks and coordination locks (~191 LOC)
@@ -444,7 +444,7 @@ coordinationhub/
 ```
 <!-- /GEN -->
 
-The `tests/` directory holds <!-- GEN:test-count -->336<!-- /GEN --> tests across 16 files,
+The `tests/` directory holds <!-- GEN:test-count -->341<!-- /GEN --> tests across 16 files,
 plus `tests/fixtures/claude_code_events/` for hook contract fixtures.
 
 **Module design principles:**
@@ -892,7 +892,7 @@ Air-gapped install: `pip install coordinationhub --no-deps`.
 
 ```bash
 python -m pytest tests/ -v
-# <!-- GEN:test-count -->336<!-- /GEN --> tests across 16 test files
+# <!-- GEN:test-count -->341<!-- /GEN --> tests across 16 test files
 ```
 
 ---

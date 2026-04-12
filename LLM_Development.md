@@ -1,11 +1,45 @@
 # LLM_Development.md — CoordinationHub
 
-**Version:** <!-- GEN:version -->0.4.7<!-- /GEN -->
+**Version:** <!-- GEN:version -->0.4.9<!-- /GEN -->
 **Last updated:** 2026-04-12
 
 ## Change Log
 
 All significant changes to the CoordinationHub project are documented here in reverse chronological order.
+
+---
+
+## 2026-04-12 — v0.4.9 Descendant Status in Context Bundle (Multi-Level Hierarchy)
+
+### Motivation
+
+Phase 9 findings and subsequent discussion identified a gap in multi-level agent hierarchies. When an agent spawns a sub-agent, and that sub-agent spawns its own sub-agent (grandchild), the root agent has no efficient way to see what its descendants are doing without making additional API calls. For LLM-based agents, every extra call is a token cost and latency hit. The efficient approach is to embed descendant state in the context bundle returned on every `register_agent` call — no polling, no extra calls.
+
+### Added
+
+**`descendant_registry` table** in `db.py._SCHEMAS` — `(ancestor_id, descendant_id, depth, registered_at)` with primary key on `(ancestor_id, descendant_id)`. Index on `ancestor_id` for fast lookup. Schema version 3 → 4 with no-op migration (table added via `CREATE TABLE IF NOT EXISTS`).
+
+**`_record_descendant_relationship(conn, agent_id, parent_id)` in `agent_registry.py`** — called from `register_agent` when a `parent_id` is present. Walks the ancestor chain upward from the parent, inserting `(ancestor, agent_id)` pairs at each level. Uses `INSERT OR IGNORE` so re-registrations are idempotent. When B registers with parent A → inserts `(A, B)`. When C registers with parent B → inserts `(B, C)` AND `(A, C)` — A immediately knows about its grandchild C.
+
+**`get_descendants_status(connect, ancestor_id)` in `agent_registry.py`** — single JOIN query returning all descendants (all depths) with `depth`, `agent_id`, `status`, `last_heartbeat`, `current_task`. Ordered by depth then agent_id. Includes stopped agents so callers can detect when descendants died.
+
+**`descendants_status` in context bundle (`context.py` → `build_context_bundle`)** — new `descendants_fn` parameter. When provided, calls it and injects the result as `descendants_status` in the bundle. `_context_bundle` in `core.py` passes `descendants_fn=lambda: _ar.get_descendants_status(self._connect, agent_id)` so every `register_agent` response includes live descendant state.
+
+### Design Decisions
+
+- **Write-once, query-many**: `descendant_registry` written only at first registration, not on heartbeats. Keeps writes minimal.
+- **Ancestor walk at registration time**: All ancestors get the relationship recorded immediately. Parent knows about grandchildren from birth, not lazily.
+- **No staleness threshold in response**: `last_heartbeat` is included; staleness is computed by the LLM/client. Hardcoding a threshold would be wrong for some use cases.
+- **Zero new MCP tools**: The feature works through the existing `register_agent` response. No new tool surface.
+- **Depth column reserved for future use**: Enables depth-limiting later (e.g., "only show direct children"). No behavior change initially.
+- **Still zero external dependencies**: Only `sqlite3`, standard library.
+
+### Counts
+
+- Version: 0.4.8 → 0.4.9
+- Schema version: 3 → 4
+- Tests: 335 passing (unchanged)
+- LOC: `db.py` +2 lines; `agent_registry.py` +~55 lines; `context.py` +2 lines; `core.py` +1 line
 
 ---
 
@@ -412,7 +446,7 @@ Block markers for multi-line content:
 |------|-----|---------|
 | `coordinationhub/__init__.py` | 14 | CoordinationHub — multi-agent swarm coordination MCP server |
 | `coordinationhub/_storage.py` | 101 | Storage backend for CoordinationHub — SQLite pool, path resolution, lifecycle |
-| `coordinationhub/agent_registry.py` | 231 | Agent lifecycle: register, heartbeat, deregister, lineage management |
+| `coordinationhub/agent_registry.py` | 292 | Agent lifecycle: register, heartbeat, deregister, lineage management |
 | `coordinationhub/agent_status.py` | 262 | Agent status and file-map query helpers for CoordinationHub |
 | `coordinationhub/assessment.py` | 322 | Assessment runner for CoordinationHub coordination test suites |
 | `coordinationhub/assessment_scorers.py` | 237 | Assessment metric scorers for CoordinationHub |
@@ -424,10 +458,10 @@ Block markers for multi-line content:
 | `coordinationhub/cli_utils.py` | 21 | Shared CLI helper functions used by all cli_* sub-modules |
 | `coordinationhub/cli_vis.py` | 290 | Change awareness, audit, graph, and assessment CLI commands |
 | `coordinationhub/conflict_log.py` | 44 | Conflict recording and querying for CoordinationHub |
-| `coordinationhub/context.py` | 88 | Context bundle builder for CoordinationHub agent registration responses |
-| `coordinationhub/core.py` | 280 | CoordinationEngine — core business logic for CoordinationHub |
+| `coordinationhub/context.py` | 91 | Context bundle builder for CoordinationHub agent registration responses |
+| `coordinationhub/core.py` | 281 | CoordinationEngine — core business logic for CoordinationHub |
 | `coordinationhub/core_locking.py` | 269 | Locking and coordination methods for CoordinationEngine |
-| `coordinationhub/db.py` | 255 | SQLite schema, migrations, and connection pool for CoordinationHub |
+| `coordinationhub/db.py` | 266 | SQLite schema, migrations, and connection pool for CoordinationHub |
 | `coordinationhub/dispatch.py` | 38 | Tool dispatch table for CoordinationHub |
 | `coordinationhub/graphs.py` | 256 | Declarative coordination graph: loader, validator, in-memory representation |
 | `coordinationhub/hooks/__init__.py` | 1 | Hooks package — Claude Code integration via stdin/stdout event protocol |
@@ -445,7 +479,7 @@ Block markers for multi-line content:
 
 Inline markers for single values (render invisibly in Markdown):
 ```markdown
-This project has <!-- GEN:test-count -->336<!-- /GEN --> tests.
+This project has <!-- GEN:test-count -->341<!-- /GEN --> tests.
 ```
 
 Unknown marker names raise an error during rewrite (catches typos).

@@ -15,6 +15,76 @@ from .db import ConnectFn
 
 
 # ------------------------------------------------------------------ #
+# Descendant registry (event-driven descendant tracking)
+# ------------------------------------------------------------------ #
+
+def _record_descendant_relationship(conn, agent_id: str, parent_id: str) -> None:
+    """Walk the ancestor chain and record agent_id as a descendant of each ancestor.
+
+    Called from ``register_agent`` so that every ancestor in the chain
+    immediately knows about the new descendant — no lazy population.
+    Uses ``INSERT OR IGNORE`` so re-registrations are idempotent.
+    """
+    now = time.time()
+    stack = [(parent_id, 1)]  # (ancestor_id, depth)
+    visited = set()
+    while stack:
+        ancestor_id, depth = stack.pop()
+        if ancestor_id in visited:
+            continue
+        visited.add(ancestor_id)
+        conn.execute(
+            """
+            INSERT OR IGNORE INTO descendant_registry
+                (ancestor_id, descendant_id, depth, registered_at)
+            VALUES (?, ?, ?, ?)
+            """,
+            (ancestor_id, agent_id, depth, now),
+        )
+        # Walk up to the next ancestor
+        row = conn.execute(
+            "SELECT parent_id FROM agents WHERE agent_id = ?",
+            (ancestor_id,),
+        ).fetchone()
+        if row and row["parent_id"]:
+            stack.append((row["parent_id"], depth + 1))
+
+
+def get_descendants_status(
+    connect: ConnectFn,
+    ancestor_id: str,
+) -> list[dict[str, Any]]:
+    """Return active descendants of ancestor_id with their status and tasks.
+
+    Includes all depth levels. Returns agents ordered by depth then agent_id.
+    Stops agents are included so callers can detect when descendants died.
+    """
+    with connect() as conn:
+        rows = conn.execute(
+            """
+            SELECT dr.depth, dr.descendant_id, a.status, a.last_heartbeat,
+                   ar.current_task
+            FROM descendant_registry dr
+            JOIN agents a ON a.agent_id = dr.descendant_id
+            LEFT JOIN agent_responsibilities ar ON ar.agent_id = dr.descendant_id
+            WHERE dr.ancestor_id = ?
+            ORDER BY dr.depth ASC, dr.descendant_id ASC
+            """,
+            (ancestor_id,),
+        ).fetchall()
+    return [
+        {
+            "depth": row["depth"],
+            "agent_id": row["descendant_id"],
+            "status": row["status"],
+            "last_heartbeat": row["last_heartbeat"],
+            "current_task": row["current_task"],
+        }
+        for row in rows
+    ]
+
+
+# ------------------------------------------------------------------ #
 # Lifecycle operations
 # ------------------------------------------------------------------ #
 
@@ -51,6 +121,8 @@ def register_agent(
             """,
             (agent_id, parent_id, worktree_root, pid, now, now, claude_agent_id),
         )
+        if parent_id is not None:
+            _record_descendant_relationship(conn, agent_id, parent_id)
     return {"registered": True, "agent_id": agent_id}
 
 

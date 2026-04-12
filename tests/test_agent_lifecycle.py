@@ -180,3 +180,77 @@ class TestReaping:
                 (parent, child),
             ).fetchone()
             assert row is None
+
+
+class TestDescendantRegistry:
+    def test_descendant_registry_records_grandchild(self, engine):
+        """C registers → B → A. A should immediately know about C via descendant_registry."""
+        root = engine.generate_agent_id()
+        engine.register_agent(root)
+        child = engine.generate_agent_id(root)
+        engine.register_agent(child, parent_id=root)
+        grandchild = engine.generate_agent_id(child)
+        engine.register_agent(grandchild, parent_id=child)
+
+        from coordinationhub.agent_registry import get_descendants_status
+        descendants = get_descendants_status(engine._connect, root)
+
+        desc_ids = {d["agent_id"] for d in descendants}
+        assert child in desc_ids
+        assert grandchild in desc_ids
+
+    def test_descendant_registry_depth_ordering(self, engine):
+        """Descendants are ordered by depth (shallowest first)."""
+        root = engine.generate_agent_id()
+        engine.register_agent(root)
+        child = engine.generate_agent_id(root)
+        engine.register_agent(child, parent_id=root)
+        grandchild = engine.generate_agent_id(child)
+        engine.register_agent(grandchild, parent_id=child)
+
+        from coordinationhub.agent_registry import get_descendants_status
+        descendants = get_descendants_status(engine._connect, root)
+
+        assert descendants[0]["depth"] == 1
+        assert descendants[0]["agent_id"] == child
+        assert descendants[1]["depth"] == 2
+        assert descendants[1]["agent_id"] == grandchild
+
+    def test_descendant_registry_includes_stopped(self, engine):
+        """Stopped agents appear in descendants_status so callers can detect deaths."""
+        root = engine.generate_agent_id()
+        engine.register_agent(root)
+        child = engine.generate_agent_id(root)
+        engine.register_agent(child, parent_id=root)
+
+        from coordinationhub.agent_registry import get_descendants_status
+        descendants = get_descendants_status(engine._connect, root)
+        assert all(d["status"] == "active" for d in descendants)
+
+        engine.deregister_agent(child)
+
+        descendants = get_descendants_status(engine._connect, root)
+        child_desc = next(d for d in descendants if d["agent_id"] == child)
+        assert child_desc["status"] == "stopped"
+
+    def test_register_agent_context_bundle_includes_descendants(self, engine):
+        """register_agent response bundle contains descendants_status."""
+        root = engine.generate_agent_id()
+        engine.register_agent(root)
+        child = engine.generate_agent_id(root)
+        engine.register_agent(child, parent_id=root)
+
+        # root re-registers (heartbeat-style) — descendants should be in response
+        result = engine.register_agent(root)
+        assert "descendants_status" in result
+        desc_ids = {d["agent_id"] for d in result["descendants_status"]}
+        assert child in desc_ids
+
+    def test_register_agent_no_descendants_when_none_exist(self, engine):
+        """A root agent with no children gets an empty descendants_status list."""
+        root = engine.generate_agent_id()
+        engine.register_agent(root)
+
+        result = engine.register_agent(root)
+        assert "descendants_status" in result
+        assert result["descendants_status"] == []
