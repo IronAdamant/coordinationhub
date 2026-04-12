@@ -1,11 +1,67 @@
 # LLM_Development.md — CoordinationHub
 
-**Version:** <!-- GEN:version -->0.4.9<!-- /GEN -->
+**Version:** <!-- GEN:version -->0.4.10<!-- /GEN -->
 **Last updated:** 2026-04-12
 
 ## Change Log
 
 All significant changes to the CoordinationHub project are documented here in reverse chronological order.
+
+---
+
+## 2026-04-12 — v0.4.10 Phase 10 Findings: Retry, Scope Enforcement, Messaging, Await
+
+### Motivation
+
+Phase 10 findings (`findings/minimax_review_3/coordinationhub.md`) identified several gaps in CoordinationHub's coordination primitives:
+
+1. **Lock contention is binary** — agents could only succeed or force-steal, no retry with backoff
+2. **Scope enforcement was warning-only** — agents could lock outside their declared scope
+3. **No inter-agent messaging** — only broadcast notifications via polling
+4. **No sequential dependency tracking** — no way to wait for an agent to complete
+
+### Added
+
+**Retry with exponential backoff for `acquire_lock`** (`core_locking.py`):
+- New parameters: `retry`, `max_retries`, `backoff_ms`, `timeout_ms`
+- When `retry=True`, polls with exponential backoff (100ms → 200ms → 400ms → ...) up to max_retries or timeout
+- Returns `attempts` count in response to show how many tries were needed
+
+**Scope enforcement** (`core_locking.py`, `agent_status.py`, `db.py`):
+- New `scope` column in `agent_responsibilities` table (JSON array of path prefixes)
+- `_check_scope_violation()` checks if agent's declared scope covers the file path
+- If scope violated, lock acquisition is **denied** (not just warned) with `error: "scope_violation"`
+- `update_agent_status` tool now accepts optional `scope` parameter
+
+**Agent dependency tracking** (`core.py`):
+- New `await_agent(agent_id, timeout_s)` method
+- Polls agent status until agent is deregistered (completed) or timeout expires
+- Returns `{awaited, agent_id, status, waited_s}` or `{awaited: False, status: "timeout", timeout_s}`
+
+**Inter-agent messaging** (`messages.py`, `core.py`, `db.py`):
+- New `messages` table: `(id, from_agent_id, to_agent_id, message_type, payload_json, created_at, read_at)`
+- New tools: `send_message`, `get_messages`, `mark_messages_read`
+- Supports direct query/response patterns between agents
+
+### Schema Changes
+
+- Version: 4 → 5 (messages table added via `CREATE TABLE IF NOT EXISTS`)
+- Version: 5 → 6 (scope column added to `agent_responsibilities`)
+
+### Design Decisions
+
+- **Retry backoff is multiplicative**: 100ms × 2^n per retry — avoids thundering herd
+- **Scope enforcement is strict**: denied, not warned — prevents accidental boundary crossings
+- **Messaging is fire-and-forget**: no delivery guarantees, polling-based retrieval
+- **await_agent is polling-based**: no native event subscription, simple implementation
+
+### Counts
+
+- Version: 0.4.9 → 0.4.10
+- Schema version: 4 → 6
+- Tests: 340 passing (+5 new tests for CLI commands)
+- New module: `messages.py` (~80 LOC)
+- Tool count: 31 → 35 (+4 new tools)
 
 ---
 

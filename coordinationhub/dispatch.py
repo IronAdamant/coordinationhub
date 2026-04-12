@@ -19,7 +19,7 @@ TOOL_DISPATCH: dict[str, tuple[str, list[str]]] = {
     "get_lineage": ("get_lineage", ["agent_id"]),
     "get_siblings": ("get_siblings", ["agent_id"]),
     # Locking
-    "acquire_lock": ("acquire_lock", ["document_path", "agent_id", "lock_type", "ttl", "force", "region_start", "region_end"]),
+    "acquire_lock": ("acquire_lock", ["document_path", "agent_id", "lock_type", "ttl", "force", "region_start", "region_end", "retry", "max_retries", "backoff_ms", "timeout_ms"]),
     "release_lock": ("release_lock", ["document_path", "agent_id", "region_start", "region_end"]),
     "refresh_lock": ("refresh_lock", ["document_path", "agent_id", "ttl", "region_start", "region_end"]),
     "get_lock_status": ("get_lock_status", ["document_path"]),
@@ -30,6 +30,7 @@ TOOL_DISPATCH: dict[str, tuple[str, list[str]]] = {
     # Coordination
     "broadcast": ("broadcast", ["agent_id", "document_path", "ttl"]),
     "wait_for_locks": ("wait_for_locks", ["document_paths", "agent_id", "timeout_s"]),
+    "await_agent": ("await_agent", ["agent_id", "timeout_s"]),
     # Change awareness
     "notify_change": ("notify_change", ["document_path", "change_type", "agent_id"]),
     "get_notifications": ("get_notifications", ["since", "exclude_agent", "limit"]),
@@ -45,8 +46,12 @@ TOOL_DISPATCH: dict[str, tuple[str, list[str]]] = {
     "scan_project": ("scan_project", ["worktree_root", "extensions"]),
     "get_agent_status": ("get_agent_status", ["agent_id"]),
     "get_file_agent_map": ("get_file_agent_map", ["agent_id"]),
-    "update_agent_status": ("update_agent_status", ["agent_id", "current_task"]),
+    "update_agent_status": ("update_agent_status", ["agent_id", "current_task", "scope"]),
     "get_agent_tree": ("get_agent_tree", ["agent_id"]),
     "run_assessment": ("run_assessment", ["suite_path", "format", "graph_agent_id"]),
     "assess_current_session": ("assess_current_session", ["format", "graph_agent_id", "scope"]),
+    # Messaging
+    "send_message": ("send_message", ["from_agent_id", "to_agent_id", "message_type", "payload"]),
+    "get_messages": ("get_messages", ["agent_id", "unread_only", "limit"]),
+    "mark_messages_read": ("mark_messages_read", ["agent_id", "message_ids"]),
 }

@@ -23,6 +23,7 @@ from . import graphs as _g
 from . import agent_status as _v
 from . import scan as _scan
 from . import assessment as _assess
+from . import messages as _msg
 from ._storage import CoordinationStorage
 from .context import build_context_bundle
 from .core_locking import LockingMixin
@@ -138,6 +139,69 @@ class CoordinationEngine(LockingMixin):
     def find_agent_by_claude_id(self, claude_agent_id: str) -> str | None:
         """Look up a hub.cc.* agent_id by the raw Claude Code hex ID."""
         return _ar.find_agent_by_claude_id(self._connect, claude_agent_id)
+
+    # ------------------------------------------------------------------ #
+    # Agent Dependencies
+    # ------------------------------------------------------------------ #
+
+    def await_agent(self, agent_id: str, timeout_s: float = 60.0) -> dict[str, Any]:
+        """Wait for an agent to deregister (complete its work).
+
+        Polls the agent status until the agent is stopped or timeout expires.
+        Returns the final state.
+        """
+        import time as _time
+        start = _time.time()
+        poll_interval = 2.0
+        while _time.time() - start < timeout_s:
+            with self._connect() as conn:
+                row = conn.execute(
+                    "SELECT status FROM agents WHERE agent_id = ?", (agent_id,)
+                ).fetchone()
+                if row is None or row["status"] == "stopped":
+                    return {
+                        "awaited": True,
+                        "agent_id": agent_id,
+                        "status": row["status"] if row else "not_found",
+                        "waited_s": _time.time() - start,
+                    }
+            remaining = timeout_s - (_time.time() - start)
+            if remaining <= 0:
+                break
+            _time.sleep(min(poll_interval, remaining))
+        return {
+            "awaited": False,
+            "agent_id": agent_id,
+            "status": "timeout",
+            "timeout_s": timeout_s,
+        }
+
+    # ------------------------------------------------------------------ #
+    # Messaging
+    # ------------------------------------------------------------------ #
+
+    def send_message(
+        self,
+        from_agent_id: str,
+        to_agent_id: str,
+        message_type: str,
+        payload: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        """Send a message to another agent."""
+        return _msg.send_message(self._connect, from_agent_id, to_agent_id, message_type, payload)
+
+    def get_messages(
+        self, agent_id: str, unread_only: bool = False, limit: int = 50,
+    ) -> dict[str, Any]:
+        """Get messages for an agent."""
+        messages = _msg.get_messages(self._connect, agent_id, unread_only, limit)
+        return {"messages": messages, "count": len(messages)}
+
+    def mark_messages_read(
+        self, agent_id: str, message_ids: list[int] | None = None,
+    ) -> dict[str, Any]:
+        """Mark messages as read."""
+        return _msg.mark_messages_read(self._connect, agent_id, message_ids)
 
     # ------------------------------------------------------------------ #
     # Change Awareness
@@ -267,8 +331,8 @@ class CoordinationEngine(LockingMixin):
     def get_file_agent_map(self, agent_id: str | None = None) -> dict[str, Any]:
         return _v.get_file_agent_map_tool(self._connect, agent_id)
 
-    def update_agent_status(self, agent_id: str, current_task: str) -> dict[str, Any]:
-        return _v.update_agent_status_tool(self._connect, agent_id, current_task)
+    def update_agent_status(self, agent_id: str, current_task: str | None = None, scope: list[str] | None = None) -> dict[str, Any]:
+        return _v.update_agent_status_tool(self._connect, agent_id, current_task, scope)
 
     def run_assessment(
         self,

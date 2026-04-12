@@ -156,7 +156,8 @@ TOOL_SCHEMAS_LOCKING: dict[str, dict] = {
             "concurrent access; exclusive locks block all other locks on overlapping regions. "
             "If the lock is already held by another agent and not expired, "
             "returns conflict info unless force=True (which steals the lock "
-            "and records a conflict). Use before writing any shared file."
+            "and records a conflict). Use before writing any shared file. "
+            "When retry=True, uses exponential backoff to wait for lock release."
         ),
         "parameters": {
             "type": "object",
@@ -183,6 +184,26 @@ TOOL_SCHEMAS_LOCKING: dict[str, dict] = {
                     "type": "boolean",
                     "description": "Steal the lock if held by another agent",
                     "default": False,
+                },
+                "retry": {
+                    "type": "boolean",
+                    "description": "Retry with exponential backoff on lock contention (default: False)",
+                    "default": False,
+                },
+                "max_retries": {
+                    "type": "integer",
+                    "description": "Maximum retry attempts when retry=True (default: 5)",
+                    "default": 5,
+                },
+                "backoff_ms": {
+                    "type": "number",
+                    "description": "Starting backoff in milliseconds for retry (default: 100)",
+                    "default": 100.0,
+                },
+                "timeout_ms": {
+                    "type": "number",
+                    "description": "Total timeout in milliseconds for retry (default: 5000)",
+                    "default": 5000.0,
                 },
                 **_REGION_PROPS,
             },
@@ -370,6 +391,111 @@ TOOL_SCHEMAS_COORDINATION: dict[str, dict] = {
                 },
             },
             "required": ["document_paths", "agent_id"],
+        },
+    },
+    "await_agent": {
+        "description": (
+            "Wait for an agent to complete (deregister) before proceeding. "
+            "Polls agent status until the agent is stopped or timeout expires. "
+            "Use this to coordinate sequential dependencies between agents."
+        ),
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "agent_id": {
+                    "type": "string",
+                    "description": "Agent to wait for",
+                },
+                "timeout_s": {
+                    "type": "number",
+                    "description": "Maximum seconds to wait (default: 60)",
+                    "default": 60.0,
+                },
+            },
+            "required": ["agent_id"],
+        },
+    },
+}
+
+
+# ------------------------------------------------------------------ #
+# Messaging (3 tools)
+# ------------------------------------------------------------------ #
+
+TOOL_SCHEMAS_MESSAGING: dict[str, dict] = {
+    "send_message": {
+        "description": (
+            "Send a direct message to another agent. "
+            "Messages are stored and can be retrieved via get_messages. "
+            "Use for query/response patterns between agents."
+        ),
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "from_agent_id": {
+                    "type": "string",
+                    "description": "Agent sending the message",
+                },
+                "to_agent_id": {
+                    "type": "string",
+                    "description": "Agent to receive the message",
+                },
+                "message_type": {
+                    "type": "string",
+                    "description": "Type of message (e.g. 'query', 'response', 'notification')",
+                },
+                "payload": {
+                    "type": "object",
+                    "description": "Optional JSON payload with message data",
+                },
+            },
+            "required": ["from_agent_id", "to_agent_id", "message_type"],
+        },
+    },
+    "get_messages": {
+        "description": (
+            "Get messages sent to an agent. "
+            "Returns all messages or only unread ones if unread_only=True."
+        ),
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "agent_id": {
+                    "type": "string",
+                    "description": "Agent to get messages for",
+                },
+                "unread_only": {
+                    "type": "boolean",
+                    "description": "Only return unread messages (default: False)",
+                    "default": False,
+                },
+                "limit": {
+                    "type": "integer",
+                    "description": "Maximum messages to return (default: 50)",
+                    "default": 50,
+                },
+            },
+            "required": ["agent_id"],
+        },
+    },
+    "mark_messages_read": {
+        "description": (
+            "Mark messages as read. If message_ids is not provided, marks all unread messages."
+        ),
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "agent_id": {
+                    "type": "string",
+                    "description": "Agent marking messages as read",
+                },
+                "message_ids": {
+                    "type": "array",
+                    "items": {"type": "integer"},
+                    "description": "Specific message IDs to mark as read (default: all unread)",
+                },
+            },
+            "required": ["agent_id"],
         },
     },
 }
@@ -607,9 +733,10 @@ TOOL_SCHEMAS_VISIBILITY: dict[str, dict] = {
     },
     "update_agent_status": {
         "description": (
-            "Update the current task description for an agent. "
-            "Stored in agent_responsibilities.current_task for visibility. "
-            "Use this so other agents and human developers can see what is in flight."
+            "Update the current task description and/or declared scope for an agent. "
+            "Stored in agent_responsibilities for visibility. "
+            "Scope is a list of path prefixes that define the agent's working domain. "
+            "If an agent declares a scope, lock acquisitions outside that scope are denied."
         ),
         "parameters": {
             "type": "object",
@@ -622,8 +749,13 @@ TOOL_SCHEMAS_VISIBILITY: dict[str, dict] = {
                     "type": "string",
                     "description": "Human-readable description of what this agent is doing",
                 },
+                "scope": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                    "description": "List of path prefixes defining the agent's scope (e.g. ['/src/services/', '/src/models/'])",
+                },
             },
-            "required": ["agent_id", "current_task"],
+            "required": ["agent_id"],
         },
     },
     "run_assessment": {
@@ -717,4 +849,5 @@ TOOL_SCHEMAS: dict[str, dict] = (
     | TOOL_SCHEMAS_CHANGE
     | TOOL_SCHEMAS_AUDIT
     | TOOL_SCHEMAS_VISIBILITY
+    | TOOL_SCHEMAS_MESSAGING
 )

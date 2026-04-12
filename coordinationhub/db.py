@@ -87,6 +87,7 @@ _SCHEMAS = {
             model           TEXT,
             responsibilities TEXT,
             current_task    TEXT,
+            scope           TEXT,
             updated_at      REAL NOT NULL
         )
     """,
@@ -129,6 +130,17 @@ _SCHEMAS = {
             PRIMARY KEY (ancestor_id, descendant_id)
         )
     """,
+    "messages": """
+        CREATE TABLE IF NOT EXISTS messages (
+            id            INTEGER PRIMARY KEY AUTOINCREMENT,
+            from_agent_id TEXT NOT NULL,
+            to_agent_id   TEXT NOT NULL,
+            message_type  TEXT NOT NULL,
+            payload_json  TEXT,
+            created_at    REAL NOT NULL,
+            read_at       REAL
+        )
+    """,
 }
 
 _INDEXES = [
@@ -147,10 +159,12 @@ _INDEXES = [
     "CREATE INDEX IF NOT EXISTS idx_agents_claude_id ON agents(claude_agent_id)",
     "CREATE INDEX IF NOT EXISTS idx_pending_subagent_session_type ON pending_subagent_tasks(session_id, subagent_type, consumed_at)",
     "CREATE INDEX IF NOT EXISTS idx_descendant_ancestor ON descendant_registry(ancestor_id)",
+    "CREATE INDEX IF NOT EXISTS idx_messages_to ON messages(to_agent_id)",
+    "CREATE INDEX IF NOT EXISTS idx_messages_time ON messages(created_at)",
 ]
 
 
-_CURRENT_SCHEMA_VERSION = 4
+_CURRENT_SCHEMA_VERSION = 6
 
 
 def _get_schema_version(conn: sqlite3.Connection) -> int:
@@ -205,6 +219,8 @@ _MIGRATIONS = {
     2: _migrate_v1_to_v2,
     3: _migrate_v2_to_v3,
     4: lambda conn: None,  # descendant_registry added via CREATE TABLE IF NOT EXISTS
+    5: lambda conn: None,  # messages table added via CREATE TABLE IF NOT EXISTS
+    6: lambda conn: None,  # scope column added via CREATE TABLE IF NOT EXISTS
 }
 
 

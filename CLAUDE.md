@@ -85,16 +85,17 @@ The `tests/` directory contains the pytest suite (<!-- GEN:test-count -->341<!--
 - **Sub-agent task correlation (PreToolUse[Agent] → SubagentStart)**: Claude Code's `SubagentStart` event carries only `agent_id` (raw hex), `agent_type`, `session_id`, and `cwd` — no description, no `tool_use_id`. The description lives only in the preceding `PreToolUse` event with `tool_name == "Agent"`. `handle_pre_agent` stashes `(tool_use_id, session_id, subagent_type, description, prompt)` in `pending_subagent_tasks`; the following `handle_subagent_start` pops the oldest unconsumed row for `(session_id, subagent_type)` and applies the description as `current_task`. FIFO correlation works because Claude Code fires the two events in order. Bucketing by `subagent_type` means parallel spawns of different types (Explore + Plan) don't collide. Stale rows are reaped automatically after 10 minutes.
 - **`broadcast` message/action params removed**: The `message` and `action` positional params were removed (they were never stored). The `document_path` optional param remains — when provided, it is used to check for lock conflicts among acknowledged siblings and is not persisted.
 
-## <!-- GEN:tool-count -->31<!-- /GEN --> MCP Tools + 3 Setup Commands
+## <!-- GEN:tool-count -->35<!-- /GEN --> MCP Tools + 3 Setup Commands
 
 Identity: `register_agent`, `heartbeat`, `deregister_agent`, `list_agents`, `get_lineage`, `get_siblings`
 Locking: `acquire_lock`, `release_lock`, `refresh_lock`, `get_lock_status`, `list_locks`, `release_agent_locks`, `reap_expired_locks`, `reap_stale_agents`
-Coordination: `broadcast`, `wait_for_locks`
+Coordination: `broadcast`, `wait_for_locks`, `await_agent`
+Messaging: `send_message`, `get_messages`, `mark_messages_read`
 Change: `notify_change`, `get_notifications`, `prune_notifications`
 Audit: `get_conflicts`, `get_contention_hotspots`, `status`
 Graph & Visibility (0.3.1): `load_coordination_spec`, `validate_graph`, `scan_project`, `get_agent_status`, `get_file_agent_map`, `update_agent_status`, `run_assessment`, `assess_current_session`, `get_agent_tree`
 
-**Tool count is dynamic** — `status()` returns `len(TOOL_DISPATCH)` (currently 31), not a hardcoded number.
+**Tool count is dynamic** — `status()` returns `len(TOOL_DISPATCH)` (currently 35), not a hardcoded number.
 
 ## Dev Commands
 

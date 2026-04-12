@@ -14,10 +14,13 @@ CoordinationHub fixes this by acting as a shared coordination layer — a single
 
 ## What It Does
 
-- **File locking** — Agents lock files before editing. If another agent tries to edit the same file, it gets blocked (or warned).
+- **File locking** — Agents lock files before editing. If another agent tries to edit the same file, it gets blocked (or warned). Supports retry with exponential backoff for cooperative lock acquisition.
+- **Scope enforcement** — Agents can declare a scope (list of path prefixes). Lock acquisitions outside the declared scope are denied.
 - **Boundary detection** — Warns when an agent crosses into another agent's assigned territory.
 - **Agent tracking** — Every spawned agent gets an ID. See the full hierarchy, who's alive, who's stale.
 - **Change notifications** — Agents report what they changed. Others poll to stay in sync.
+- **Inter-agent messaging** — Direct message passing between agents with payload support.
+- **Agent dependency tracking** — Wait for an agent to complete before proceeding.
 - **Contention hotspots** — Identifies files that cause the most conflicts between agents.
 - **Cascade cleanup** — When an agent dies, its children get re-parented and its locks get released. Nothing is orphaned.
 - **Region locking** — Two agents can edit different sections of the same file simultaneously.
@@ -123,18 +126,19 @@ Every agent gets a unique ID. Files are locked by agent ID. The root agent (your
 
 Agents don't message each other directly. Instead they communicate through the shared database: lock a file, write to it, notify that it changed, release the lock. Other agents poll for notifications to see what happened.
 
-## MCP Tools (<!-- GEN:tool-count -->31<!-- /GEN -->)
+## MCP Tools (<!-- GEN:tool-count -->35<!-- /GEN -->)
 
 | Category | Tools |
 |----------|-------|
 | **Identity** | `register_agent`, `heartbeat`, `deregister_agent`, `list_agents`, `get_lineage`, `get_siblings` |
 | **Locking** | `acquire_lock`, `release_lock`, `refresh_lock`, `get_lock_status`, `list_locks`, `release_agent_locks`, `reap_expired_locks`, `reap_stale_agents` |
-| **Coordination** | `broadcast`, `wait_for_locks` |
+| **Coordination** | `broadcast`, `wait_for_locks`, `await_agent` |
+| **Messaging** | `send_message`, `get_messages`, `mark_messages_read` |
 | **Changes** | `notify_change`, `get_notifications`, `prune_notifications` |
 | **Audit** | `get_conflicts`, `get_contention_hotspots`, `status` |
 | **Visibility** | `load_coordination_spec`, `validate_graph`, `scan_project`, `get_agent_status`, `get_file_agent_map`, `update_agent_status`, `run_assessment`, `assess_current_session`, [`get_agent_tree`](#agent-tree-view) |
 
-## CLI Commands (34)
+## CLI Commands (38)
 
 ```bash
 # Setup & diagnostics
@@ -214,6 +218,7 @@ coordinationhub/
   agent_status.py     — Agent status, file map, agent tree
   graphs.py           — Coordination graph loading + validation
   assessment.py       — Assessment runner (5 metric scorers)
+  messages.py         — Inter-agent messaging primitives
   mcp_server.py       — HTTP server (stdlib only)
   mcp_stdio.py        — Stdio server (optional mcp package)
   cli.py              — CLI parser + dispatch

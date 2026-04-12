@@ -1,7 +1,47 @@
 # CoordinationHub — Complete Project Documentation
 
-**Version:** <!-- GEN:version -->0.4.9<!-- /GEN -->
+**Version:** <!-- GEN:version -->0.4.10<!-- /GEN -->
 **Last updated:** 2026-04-12
+
+## v0.4.10 Changelog — Phase 10 Findings: Retry, Scope Enforcement, Messaging, Await
+
+### Motivation
+
+Phase 10 findings identified gaps in CoordinationHub's coordination primitives:
+1. Lock contention was binary (succeed or force-steal, no retry)
+2. Scope enforcement was warning-only (not enforced)
+3. No inter-agent messaging
+4. No sequential dependency tracking
+
+### Added
+
+**Retry with exponential backoff for `acquire_lock`**:
+- New parameters: `retry`, `max_retries`, `backoff_ms`, `timeout_ms`
+- Polls with exponential backoff when `retry=True`
+
+**Scope enforcement**:
+- `scope` column in `agent_responsibilities` table
+- `_check_scope_violation()` denies lock if outside declared scope
+- `update_agent_status` accepts `scope` parameter
+
+**Agent dependency tracking**:
+- `await_agent(agent_id, timeout_s)` polls until agent completes
+
+**Inter-agent messaging**:
+- `messages` table for direct agent-to-agent communication
+- New tools: `send_message`, `get_messages`, `mark_messages_read`
+
+### Schema Changes
+
+- Version: 4 → 6
+- New: `messages` table, `scope` column in `agent_responsibilities`
+
+### Counts
+
+- Tool count: 31 → 35
+- Tests: 340 passing
+
+---
 
 ## v0.4.8 Changelog — Lock Release on PostToolUse (Findings Phase 9 Fix)
 
