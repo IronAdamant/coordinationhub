@@ -1,11 +1,40 @@
 # LLM_Development.md — CoordinationHub
 
-**Version:** <!-- GEN:version -->0.4.7<!-- /GEN -->
-**Last updated:** 2026-04-11
+**Version:** <!-- GEN:version -->0.4.8<!-- /GEN -->
+**Last updated:** 2026-04-12
 
 ## Change Log
 
 All significant changes to the CoordinationHub project are documented here in reverse chronological order.
+
+---
+
+## 2026-04-12 — v0.4.8 Lock Release on PostToolUse (Findings Phase 9 Fix)
+
+### Motivation
+
+Phase 9 findings (`findings/coordinationhub.md_closed`) identified a critical gap: `PostToolUse(Write/Edit)` was only *refreshing* the lock TTL after a write completed, causing locks to persist for up to 10 minutes (300s TTL). This blocked other agents from working on the same file well after the write operation finished.
+
+The correct behavior (enforcement, not just detection) is: lock acquired before write → write completes → lock released immediately. This allows other agents to acquire the file for their own work without waiting for TTL expiry.
+
+### Changed
+
+**`handle_post_write` in `coordinationhub/hooks/claude_code.py`**:
+- Replaced `engine.refresh_lock(file_path, agent_id, ttl=300.0)` with `engine.release_lock(file_path, agent_id)`.
+- Lock is now released immediately after successful Write/Edit, not left hanging until TTL expiry.
+
+### Verification
+
+- Full test suite: 335 passed, 1 skipped
+- `test_hooks.py`: 66 passed (all PostToolUse contract and functional tests passing)
+
+### Counts
+
+- Version: 0.4.7 → 0.4.8
+- Tests: unchanged at 335 passing
+- Source LOC: `hooks/claude_code.py` unchanged (the fix is a one-line method call change)
+- Hook events handled: unchanged at 8
+- MCP tools: unchanged at 31
 
 ---
 
