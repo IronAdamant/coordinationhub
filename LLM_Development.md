@@ -1,6 +1,6 @@
 # LLM_Development.md — CoordinationHub
 
-**Version:** <!-- GEN:version -->0.4.8<!-- /GEN -->
+**Version:** <!-- GEN:version -->0.4.7<!-- /GEN -->
 **Last updated:** 2026-04-12
 
 ## Change Log
