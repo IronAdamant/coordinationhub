@@ -1,7 +1,47 @@
 # CoordinationHub — Complete Project Documentation
 
-**Version:** <!-- GEN:version -->0.4.10<!-- /GEN -->
-**Last updated:** 2026-04-12
+**Version:** <!-- GEN:version -->0.4.11<!-- /GEN -->
+**Last updated:** 2026-04-13
+
+## v0.4.11 Changelog — Phase 11 Findings: MultiAgentSubprojectOrchestrator Review
+
+### Motivation
+
+Phase 11 findings (`findings/minimax_review_4/coordinationhub.md`) evaluated CoordinationHub under a complex multi-agent workload with MultiAgentSubprojectOrchestrator, DistributedTaskGraphExecutor, and HookChainOrchestrator patterns. The review confirmed all core primitives work correctly and identified that the "challenges" are design-level limitations, not bugs.
+
+### Assessment
+
+CoordinationHub validated on all core coordination primitives:
+
+| Feature | Status |
+|---------|--------|
+| Agent registration | ✅ Working |
+| Heartbeat tracking | ✅ Working |
+| File locking (basic) | ✅ Working |
+| Scope enforcement | ✅ Reactive (at lock time) |
+| Agent tree | ✅ Working |
+| Concurrent lock retry | ✅ Working |
+| Region locking | ✅ Working |
+| Inter-agent messaging | ✅ Working |
+
+### What's Design-Not-Bug
+
+The following Phase 11 items require architectural changes beyond bug fixes (future feature candidates):
+- Broadcast/chain handoffs — current handoff is one-to-one by design
+- Subproject/group concepts — agents are individual; grouping is a caller convention
+- Proactive scope warnings — scope violations caught at lock time only
+- Dependency declarations between agents/subprojects
+
+### No Source Changes
+
+v0.4.11 ships with no code modifications. Version bumped to sync `pyproject.toml` and `__init__.py` with changelog.
+
+### Counts
+
+- Tests: 340 passing
+- Tool count: 35 (unchanged)
+
+---
 
 ## v0.4.10 Changelog — Phase 10 Findings: Retry, Scope Enforcement, Messaging, Await
 
