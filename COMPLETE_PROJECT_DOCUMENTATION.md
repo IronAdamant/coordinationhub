@@ -1,7 +1,26 @@
 # CoordinationHub — Complete Project Documentation
 
-**Version:** <!-- GEN:version -->0.4.7<!-- /GEN -->
-**Last updated:** 2026-04-11
+**Version:** <!-- GEN:version -->0.4.8<!-- /GEN -->
+**Last updated:** 2026-04-12
+
+## v0.4.8 Changelog — Lock Release on PostToolUse (Findings Phase 9 Fix)
+
+### Motivation
+
+Phase 9 findings identified a critical gap: `PostToolUse(Write/Edit)` was only *refreshing* the lock TTL after a write completed, causing locks to persist for up to 10 minutes (300s TTL). This blocked other agents from working on the same file well after the write operation finished.
+
+The correct behavior (enforcement, not just detection) is: lock acquired before write → write completes → lock released immediately.
+
+### Changed
+
+- **`handle_post_write`** in `coordinationhub/hooks/claude_code.py`: replaced `engine.refresh_lock(...)` with `engine.release_lock(...)`. Lock is now released immediately after Write/Edit completes.
+
+### Verification
+
+- Full test suite: 335 passed, 1 skipped
+- `test_hooks.py`: 66 passed
+
+---
 
 ## v0.4.7 Changelog — Sub-agent Task Correlation (Real Event Shape)
 

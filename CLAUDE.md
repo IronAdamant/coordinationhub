@@ -136,7 +136,7 @@ Project-level hooks in `.claude/settings.json` wire CoordinationHub into Claude 
 - **UserPromptSubmit**: Stamps the root agent's `current_task` with the user's prompt (truncated to 120 chars, whitespace collapsed). Without this hook, `coordinationhub watch` and `get_agent_tree` show the root agent as task-less even while it holds locks.
 - **PreToolUse Write/Edit**: Acquires a file lock before writes; denies if another agent holds it
 - **PreToolUse Agent**: Stashes the sub-agent's `description`, `prompt`, and `subagent_type` in `pending_subagent_tasks` keyed by `tool_use_id`. The following `SubagentStart` consumes it. See the "Sub-agent task correlation" design note below.
-- **PostToolUse Write/Edit**: Fires `notify_change` after successful writes
+- **PostToolUse Write/Edit**: Fires `notify_change` after successful writes; releases the lock immediately so other agents can acquire the file without waiting for TTL expiry
 - **SubagentStart/SubagentStop**: Registers/deregisters child agents for spawned subagents. SubagentStart consumes the pending task stashed by the preceding `PreToolUse[Agent]` and applies the description as the child's `current_task`. Symmetric with the root agent, whose `current_task` is populated from `UserPromptSubmit`.
 - **SessionEnd**: Releases all locks and deregisters the session agent
 

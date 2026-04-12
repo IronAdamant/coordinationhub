@@ -323,7 +323,7 @@ def handle_post_write(event: dict) -> dict | None:
         except Exception:
             pass  # ownership tracking is best-effort
         try:
-            engine.refresh_lock(file_path, agent_id, ttl=300.0)
+            engine.release_lock(file_path, agent_id)
         except Exception:
             pass  # lock may have been released already
     finally:
