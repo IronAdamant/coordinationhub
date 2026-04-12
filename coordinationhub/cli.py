@@ -1,4 +1,4 @@
-"""CoordinationHub CLI — command-line interface for all 35 coordination tool methods.
+"""CoordinationHub CLI — command-line interface for all 55 coordination tool methods.
 
 Delegates to cli_commands.py for all command handlers.
 """
@@ -120,6 +120,27 @@ def create_parser() -> argparse.ArgumentParser:
     p = sub.add_parser("broadcast", parents=[shared], help="Announce intention to siblings")
     p.add_argument("agent_id", help="Agent making the broadcast")
     p.add_argument("--document-path", default=None)
+    p.add_argument("--handoff-targets", nargs="+", default=None, dest="handoff_targets",
+                   help="Agent IDs to hand off to (triggers formal handoff)")
+
+    # acknowledge-handoff
+    p = sub.add_parser("acknowledge-handoff", parents=[shared], help="Acknowledge a handoff")
+    p.add_argument("handoff_id", type=int, help="Handoff ID to acknowledge")
+    p.add_argument("agent_id", help="Agent acknowledging")
+
+    # complete-handoff
+    p = sub.add_parser("complete-handoff", parents=[shared], help="Complete a handoff")
+    p.add_argument("handoff_id", type=int, help="Handoff ID to complete")
+
+    # cancel-handoff
+    p = sub.add_parser("cancel-handoff", parents=[shared], help="Cancel a handoff")
+    p.add_argument("handoff_id", type=int, help="Handoff ID to cancel")
+
+    # get-handoffs
+    p = sub.add_parser("get-handoffs", parents=[shared], help="Get handoffs")
+    p.add_argument("--status", default=None, help="Filter by status (pending/acknowledged/completed/cancelled)")
+    p.add_argument("--from-agent-id", default=None, dest="from_agent_id", help="Filter by sender")
+    p.add_argument("--limit", type=int, default=50)
 
     # wait-for-locks
     p = sub.add_parser("wait-for-locks", parents=[shared], help="Poll until locks are released")
@@ -243,6 +264,76 @@ def create_parser() -> argparse.ArgumentParser:
     p.add_argument("agent_id", help="Agent marking messages as read")
     p.add_argument("--message-ids", type=int, nargs="+", default=None, help="Specific message IDs to mark")
 
+    # --- TASK REGISTRY ---
+    p = sub.add_parser("create-task", parents=[shared], help="Create a new task in the shared registry")
+    p.add_argument("task_id", help="Unique task ID (e.g. hub.12345.0.task.0)")
+    p.add_argument("parent_agent_id", help="Agent creating this task")
+    p.add_argument("description", help="What this task involves")
+    p.add_argument("--depends-on", nargs="+", default=None, dest="depends_on",
+                   help="Task IDs that must complete first")
+
+    p = sub.add_parser("assign-task", parents=[shared], help="Assign a task to an agent")
+    p.add_argument("task_id", help="Task to assign")
+    p.add_argument("assigned_agent_id", help="Agent to assign the task to")
+
+    p = sub.add_parser("update-task-status", parents=[shared], help="Update a task's status")
+    p.add_argument("task_id", help="Task to update")
+    p.add_argument("status", choices=["pending", "in_progress", "completed", "blocked"],
+                   help="New status")
+    p.add_argument("--summary", default=None, help="Completion summary (used for compression chains)")
+    p.add_argument("--blocked-by", default=None, dest="blocked_by",
+                   help="Task ID blocking this task")
+
+    p = sub.add_parser("get-task", parents=[shared], help="Get a single task by ID")
+    p.add_argument("task_id", help="Task to retrieve")
+
+    p = sub.add_parser("get-child-tasks", parents=[shared], help="Get all tasks created by an agent")
+    p.add_argument("parent_agent_id", help="Agent whose child tasks to retrieve")
+
+    p = sub.add_parser("get-tasks-by-agent", parents=[shared], help="Get all tasks assigned to an agent")
+    p.add_argument("assigned_agent_id", help="Agent whose assigned tasks to retrieve")
+
+    sub.add_parser("get-all-tasks", parents=[shared], help="Get all tasks in the registry")
+
+    # --- WORK INTENT BOARD ---
+    p = sub.add_parser("declare-work-intent", parents=[shared], help="Declare intent to work on a file")
+    p.add_argument("agent_id", help="Agent declaring intent")
+    p.add_argument("document_path", help="File path the agent intends to work on")
+    p.add_argument("intent", help="Short description of work intent")
+    p.add_argument("--ttl", type=float, default=60.0, help="Seconds until intent expires (default: 60)")
+
+    p = sub.add_parser("get-work-intents", parents=[shared], help="Get all active work intents")
+    p.add_argument("--agent-id", default=None, dest="agent_id", help="Filter to a specific agent")
+
+    p = sub.add_parser("clear-work-intent", parents=[shared], help="Clear an agent's declared work intent")
+    p.add_argument("agent_id", help="Agent whose intent to clear")
+
+    # --- CROSS-AGENT DEPENDENCIES ---
+    p = sub.add_parser("declare-dependency", parents=[shared], help="Declare a dependency between agents")
+    p.add_argument("dependent_agent_id", help="Agent that depends on another")
+    p.add_argument("depends_on_agent_id", help="Agent being depended upon")
+    p.add_argument("--depends-on-task-id", default=None, dest="depends_on_task_id",
+                   help="Specific task ID that must complete")
+    p.add_argument("--condition", default="task_completed",
+                   choices=["task_completed", "agent_registered", "agent_stopped"],
+                   help="Condition for dependency satisfaction (default: task_completed)")
+
+    p = sub.add_parser("check-dependencies", parents=[shared], help="Check if an agent's dependencies are satisfied")
+    p.add_argument("agent_id", help="Agent whose dependencies to check")
+
+    p = sub.add_parser("satisfy-dependency", parents=[shared], help="Mark a dependency as satisfied")
+    p.add_argument("dep_id", type=int, help="Dependency ID to mark as satisfied")
+
+    p = sub.add_parser("get-blockers", parents=[shared], help="Get blocking dependencies for an agent")
+    p.add_argument("agent_id", help="Agent to check blockers for")
+
+    p = sub.add_parser("assert-can-start", parents=[shared], help="Assert whether an agent can start work")
+    p.add_argument("agent_id", help="Agent to check start eligibility for")
+
+    p = sub.add_parser("get-all-dependencies", parents=[shared], help="List all declared dependencies")
+    p.add_argument("--dependent-agent-id", default=None, dest="dependent_agent_id",
+                   help="Filter by dependent agent")
+
     return parser
 
 
@@ -259,6 +350,10 @@ _COMMANDS = {
     "list-locks": "cmd_list_locks",
     "release-agent-locks": "cmd_release_agent_locks", "reap-expired-locks": "cmd_reap_expired_locks",
     "reap-stale-agents": "cmd_reap_stale_agents", "broadcast": "cmd_broadcast",
+    "acknowledge-handoff": "cmd_acknowledge_handoff",
+    "complete-handoff": "cmd_complete_handoff",
+    "cancel-handoff": "cmd_cancel_handoff",
+    "get-handoffs": "cmd_get_handoffs",
     "wait-for-locks": "cmd_wait_for_locks", "notify-change": "cmd_notify_change",
     "get-notifications": "cmd_get_notifications", "prune-notifications": "cmd_prune_notifications",
     "get-conflicts": "cmd_get_conflicts", "contention-hotspots": "cmd_contention_hotspots",
@@ -274,6 +369,22 @@ _COMMANDS = {
     "send-message": "cmd_send_message",
     "get-messages": "cmd_get_messages",
     "mark-messages-read": "cmd_mark_messages_read",
+    "create-task": "cmd_create_task",
+    "assign-task": "cmd_assign_task",
+    "update-task-status": "cmd_update_task_status",
+    "get-task": "cmd_get_task",
+    "get-child-tasks": "cmd_get_child_tasks",
+    "get-tasks-by-agent": "cmd_get_tasks_by_agent",
+    "get-all-tasks": "cmd_get_all_tasks",
+    "declare-work-intent": "cmd_declare_work_intent",
+    "get-work-intents": "cmd_get_work_intents",
+    "clear-work-intent": "cmd_clear_work_intent",
+    "declare-dependency": "cmd_declare_dependency",
+    "check-dependencies": "cmd_check_dependencies",
+    "satisfy-dependency": "cmd_satisfy_dependency",
+    "get-blockers": "cmd_get_blockers",
+    "assert-can-start": "cmd_assert_can_start",
+    "get-all-dependencies": "cmd_get_all_dependencies",
 }
 
 

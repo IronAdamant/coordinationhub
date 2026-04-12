@@ -24,6 +24,10 @@ from . import agent_status as _v
 from . import scan as _scan
 from . import assessment as _assess
 from . import messages as _msg
+from . import tasks as _tasks
+from . import work_intent as _wi
+from . import handoffs as _handoffs
+from . import dependencies as _deps
 from ._storage import CoordinationStorage
 from .context import build_context_bundle
 from .core_locking import LockingMixin
@@ -202,6 +206,133 @@ class CoordinationEngine(LockingMixin):
     ) -> dict[str, Any]:
         """Mark messages as read."""
         return _msg.mark_messages_read(self._connect, agent_id, message_ids)
+
+    # ------------------------------------------------------------------ #
+    # Task Registry
+    # ------------------------------------------------------------------ #
+
+    def create_task(
+        self, task_id: str, parent_agent_id: str, description: str,
+        depends_on: list[str] | None = None,
+    ) -> dict[str, Any]:
+        """Create a new task in the shared registry."""
+        return _tasks.create_task(
+            self._connect, task_id, parent_agent_id, description, depends_on,
+        )
+
+    def assign_task(self, task_id: str, assigned_agent_id: str) -> dict[str, Any]:
+        """Assign a task to an agent."""
+        return _tasks.assign_task(self._connect, task_id, assigned_agent_id)
+
+    def update_task_status(
+        self, task_id: str, status: str,
+        summary: str | None = None, blocked_by: str | None = None,
+    ) -> dict[str, Any]:
+        """Update task status, optionally with a completion summary or blocker."""
+        return _tasks.update_task_status(
+            self._connect, task_id, status, summary, blocked_by,
+        )
+
+    def get_task(self, task_id: str) -> dict[str, Any] | None:
+        """Get a single task by ID."""
+        return _tasks.get_task(self._connect, task_id)
+
+    def get_child_tasks(self, parent_agent_id: str) -> dict[str, Any]:
+        """Get all tasks created by a given agent."""
+        tasks = _tasks.get_child_tasks(self._connect, parent_agent_id)
+        return {"tasks": tasks, "count": len(tasks)}
+
+    def get_tasks_by_agent(self, assigned_agent_id: str) -> dict[str, Any]:
+        """Get all tasks assigned to a given agent."""
+        tasks = _tasks.get_tasks_by_agent(self._connect, assigned_agent_id)
+        return {"tasks": tasks, "count": len(tasks)}
+
+    def get_all_tasks(self) -> dict[str, Any]:
+        """Get all tasks in the registry."""
+        tasks = _tasks.get_all_tasks(self._connect)
+        return {"tasks": tasks, "count": len(tasks)}
+
+    # ------------------------------------------------------------------ #
+    # Work Intent Board
+    # ------------------------------------------------------------------ #
+
+    def declare_work_intent(
+        self, agent_id: str, document_path: str, intent: str, ttl: float = 60.0,
+    ) -> dict[str, Any]:
+        """Declare intent to work on a file before acquiring a lock."""
+        return _wi.upsert_intent(self._connect, agent_id, document_path, intent, ttl)
+
+    def get_work_intents(self, agent_id: str | None = None) -> dict[str, Any]:
+        """Get all live work intents, optionally filtered by agent."""
+        intents = _wi.get_live_intents(self._connect, agent_id)
+        return {"intents": intents, "count": len(intents)}
+
+    def clear_work_intent(self, agent_id: str) -> dict[str, Any]:
+        """Clear an agent's declared work intent."""
+        return _wi.clear_intent(self._connect, agent_id)
+
+    # ------------------------------------------------------------------ #
+    # Handoffs
+    # ------------------------------------------------------------------ #
+
+    def acknowledge_handoff(self, handoff_id: int, agent_id: str) -> dict[str, Any]:
+        """Acknowledge receipt of a handoff."""
+        return _handoffs.acknowledge_handoff(self._connect, handoff_id, agent_id)
+
+    def complete_handoff(self, handoff_id: int) -> dict[str, Any]:
+        """Mark a handoff as completed."""
+        return _handoffs.complete_handoff(self._connect, handoff_id)
+
+    def cancel_handoff(self, handoff_id: int) -> dict[str, Any]:
+        """Cancel a handoff."""
+        return _handoffs.cancel_handoff(self._connect, handoff_id)
+
+    def get_handoffs(
+        self, status: str | None = None, from_agent_id: str | None = None, limit: int = 50,
+    ) -> dict[str, Any]:
+        """Get handoffs with optional filtering."""
+        handoffs = _handoffs.get_handoffs(self._connect, status, from_agent_id, limit)
+        return {"handoffs": handoffs, "count": len(handoffs)}
+
+    # ------------------------------------------------------------------ #
+    # Cross-Agent Dependencies
+    # ------------------------------------------------------------------ #
+
+    def declare_dependency(
+        self, dependent_agent_id: str, depends_on_agent_id: str,
+        depends_on_task_id: str | None = None, condition: str = "task_completed",
+    ) -> dict[str, Any]:
+        """Declare that dependent_agent needs depends_on_agent to finish first."""
+        return _deps.declare_dependency(
+            self._connect, dependent_agent_id, depends_on_agent_id,
+            depends_on_task_id, condition,
+        )
+
+    def check_dependencies(self, agent_id: str) -> dict[str, Any]:
+        """Check unsatisfied dependencies for an agent."""
+        unsatisfied = _deps.check_dependencies(self._connect, agent_id)
+        return {"agent_id": agent_id, "blocked": len(unsatisfied) > 0,
+                "unsatisfied": unsatisfied}
+
+    def satisfy_dependency(self, dep_id: int) -> dict[str, Any]:
+        """Mark a dependency as satisfied."""
+        return _deps.satisfy_dependency(self._connect, dep_id)
+
+    def get_blockers(self, agent_id: str) -> dict[str, Any]:
+        """Alias for check_dependencies."""
+        return self.check_dependencies(agent_id)
+
+    def assert_can_start(self, agent_id: str) -> dict[str, Any]:
+        """Structured check before starting work. Returns can_start bool."""
+        result = self.check_dependencies(agent_id)
+        if result["blocked"]:
+            return {"can_start": False, "blockers": result["unsatisfied"]}
+        return {"can_start": True}
+
+    def get_all_dependencies(self, dependent_agent_id: str | None = None) -> dict[str, Any]:
+        """Get all declared dependencies."""
+        deps = _deps.get_all_dependencies(self._connect, dependent_agent_id)
+        return {"dependencies": deps, "count": len(deps)}
 
     # ------------------------------------------------------------------ #
     # Change Awareness

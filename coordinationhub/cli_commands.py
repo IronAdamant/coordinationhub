@@ -33,6 +33,10 @@ from .cli_locks import (
     cmd_send_message,
     cmd_get_messages,
     cmd_mark_messages_read,
+    cmd_acknowledge_handoff,
+    cmd_complete_handoff,
+    cmd_cancel_handoff,
+    cmd_get_handoffs,
 )
 from .cli_vis import (
     cmd_notify_change,
@@ -53,4 +57,26 @@ from .cli_setup import (
     cmd_doctor,
     cmd_init,
     cmd_watch,
+)
+from .cli_tasks import (
+    cmd_create_task,
+    cmd_assign_task,
+    cmd_update_task_status,
+    cmd_get_task,
+    cmd_get_child_tasks,
+    cmd_get_tasks_by_agent,
+    cmd_get_all_tasks,
+)
+from .cli_intent import (
+    cmd_declare_work_intent,
+    cmd_get_work_intents,
+    cmd_clear_work_intent,
+)
+from .cli_deps import (
+    cmd_declare_dependency,
+    cmd_check_dependencies,
+    cmd_satisfy_dependency,
+    cmd_get_blockers,
+    cmd_assert_can_start,
+    cmd_get_all_dependencies,
 )

@@ -1,7 +1,79 @@
 # CoordinationHub — Complete Project Documentation
 
-**Version:** <!-- GEN:version -->0.4.11<!-- /GEN -->
+**Version:** <!-- GEN:version -->0.5.0<!-- /GEN -->
 **Last updated:** 2026-04-13
+
+## v0.5.0 Changelog — Phase 11 Findings: Multi-Agent Swarm Extensions
+
+### Motivation
+
+Phase 11 findings (`findings/minimax_review_4/coordinationhub.md`) evaluated CoordinationHub under a complex MultiAgentSubprojectOrchestrator workload. The review identified 5 gaps that were reclassified from "future features" to concrete implementation requests by the user. All were implemented in this release.
+
+### Features Added
+
+#### 1. Task Registry
+Shared task registry with dependency tracking. Agents can create tasks, assign them, and update status. Task completion summaries enable compression chains for sub-agent result reporting.
+
+- 7 new MCP tools: `create_task`, `assign_task`, `update_task_status`, `get_task`, `get_child_tasks`, `get_tasks_by_agent`, `get_all_tasks`
+- New table: `tasks` (schema v7)
+
+#### 2. Work Intent Board
+Cooperative "I'm working on this" board that signals intent before lock attempts. Proximity warnings appear in lock responses when another agent has declared intent for the same file.
+
+- 3 new MCP tools: `declare_work_intent`, `get_work_intents`, `clear_work_intent`
+- `_check_work_intent_conflict()` integrated into `acquire_lock` — returns `proximity_warning`, not denial
+- New table: `work_intent` (schema v7)
+
+#### 3. One-to-Many Handoffs
+Extended `broadcast` with `handoff_targets` parameter. When provided, records a formal handoff to multiple recipients with acknowledgment tracking.
+
+- 5 new/modified MCP tools: `broadcast` (handoff_targets param), `acknowledge_handoff`, `complete_handoff`, `cancel_handoff`, `get_handoffs`
+- New tables: `handoffs`, `handoff_acks` (schema v9)
+
+#### 4. Cross-Agent Dependencies
+Declarative dependency graph between agents. Blocks agent startup until dependencies are satisfied.
+
+- 6 new MCP tools: `declare_dependency`, `check_dependencies`, `satisfy_dependency`, `get_blockers`, `assert_can_start`, `get_all_dependencies`
+- Conditions: `task_completed`, `agent_registered`, `agent_stopped`
+- New table: `agent_dependencies` (schema v10)
+
+#### 5. Web Dashboard
+Self-contained HTML dashboard with zero external dependencies (no CDN, no Mermaid.js, no D3). Pure SVG agent tree rendering via custom layout algorithm.
+
+- `GET /` — HTML dashboard with 5-second polling
+- `GET /api/dashboard-data` — aggregated JSON of all tables
+- Panels: Agent tree, task board, work intent heat map, handoff list, dependency graph, lock list
+
+### Implementation Notes
+
+- All sub-modules (tasks, work_intent, handoffs, dependencies) follow zero-dependency pattern: receive `connect: ConnectFn` from caller
+- Schema migrations are idempotent — `CREATE TABLE IF NOT EXISTS` handles fresh installs; migration lambdas check `PRAGMA table_info` before running ALTER
+- Work intent is cooperative: `proximity_warning` in lock response, not a denial. Agents opt in by checking intents before locking.
+- Web dashboard SVG tree uses custom BFS layout — no external rendering libraries
+
+### Counts
+
+| Version | Tools | CLI Commands |
+|---------|-------|--------------|
+| v0.5.0 | 55 | 57 |
+| v0.4.11 | 35 | 38 |
+
+Schema version: v6 → v10 (+4 tables, +12 indexes)
+
+### New Files
+
+| File | Purpose |
+|------|---------|
+| `coordinationhub/tasks.py` | Task registry primitives |
+| `coordinationhub/work_intent.py` | Work intent board primitives |
+| `coordinationhub/handoffs.py` | Handoff recording primitives |
+| `coordinationhub/dependencies.py` | Dependency declaration primitives |
+| `coordinationhub/dashboard.py` | HTML dashboard + data aggregator |
+| `coordinationhub/cli_tasks.py` | CLI task commands |
+| `coordinationhub/cli_intent.py` | CLI work intent commands |
+| `coordinationhub/cli_deps.py` | CLI dependency commands |
+
+---
 
 ## v0.4.11 Changelog — Phase 11 Findings: MultiAgentSubprojectOrchestrator Review
 

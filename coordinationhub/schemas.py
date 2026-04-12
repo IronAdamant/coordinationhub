@@ -344,7 +344,9 @@ TOOL_SCHEMAS_COORDINATION: dict[str, dict] = {
         "description": (
             "Announce an intention to all live sibling agents before taking "
             "an action. Returns which siblings are live and any lock conflicts. "
-            "Does not store or forward messages — only checks current lock state."
+            "Does not store or forward messages — only checks current lock state. "
+            "When handoff_targets is provided, performs a formal multi-recipient "
+            "handoff recorded in the handoffs table."
         ),
         "parameters": {
             "type": "object",
@@ -362,6 +364,16 @@ TOOL_SCHEMAS_COORDINATION: dict[str, dict] = {
                     "type": "number",
                     "description": "Staleness cutoff for sibling detection in seconds (default: 30)",
                     "default": 30.0,
+                },
+                "handoff_targets": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                    "description": (
+                        "Explicit list of agent IDs to hand off to. "
+                        "When provided, broadcast becomes a formal multi-recipient handoff "
+                        "recorded in the handoffs table and sends messages to each target."
+                    ),
+                    "default": None,
                 },
             },
             "required": ["agent_id"],
@@ -839,6 +851,383 @@ TOOL_SCHEMAS_VISIBILITY: dict[str, dict] = {
 
 
 # ------------------------------------------------------------------ #
+# Task Registry
+# ------------------------------------------------------------------ #
+
+TOOL_SCHEMAS_TASKS: dict[str, dict] = {
+    "create_task": {
+        "description": (
+            "Create a new task in the shared task registry. "
+            "The creating agent (parent_agent_id) assigns the task to a child or sibling agent."
+        ),
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "task_id": {
+                    "type": "string",
+                    "description": "Unique task ID (e.g. hub.12345.0.task.0)",
+                },
+                "parent_agent_id": {
+                    "type": "string",
+                    "description": "Agent creating this task",
+                },
+                "description": {
+                    "type": "string",
+                    "description": "What this task involves",
+                },
+                "depends_on": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                    "description": "Task IDs that must complete before this one starts",
+                },
+            },
+            "required": ["task_id", "parent_agent_id", "description"],
+        },
+    },
+    "assign_task": {
+        "description": "Assign a task to a specific agent.",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "task_id": {
+                    "type": "string",
+                    "description": "Task to assign",
+                },
+                "assigned_agent_id": {
+                    "type": "string",
+                    "description": "Agent to assign the task to",
+                },
+            },
+            "required": ["task_id", "assigned_agent_id"],
+        },
+    },
+    "update_task_status": {
+        "description": (
+            "Update a task's status. When a task is completed, include a summary "
+            "that a parent agent can compress upward in the hierarchy."
+        ),
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "task_id": {
+                    "type": "string",
+                    "description": "Task to update",
+                },
+                "status": {
+                    "type": "string",
+                    "enum": ["pending", "in_progress", "completed", "blocked"],
+                    "description": "New status for the task",
+                },
+                "summary": {
+                    "type": "string",
+                    "description": "Completion summary written by the agent (used for compression chains)",
+                },
+                "blocked_by": {
+                    "type": "string",
+                    "description": "Task ID that is blocking this task",
+                },
+            },
+            "required": ["task_id", "status"],
+        },
+    },
+    "get_task": {
+        "description": "Get a single task by ID.",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "task_id": {
+                    "type": "string",
+                    "description": "Task to retrieve",
+                },
+            },
+            "required": ["task_id"],
+        },
+    },
+    "get_child_tasks": {
+        "description": "Get all tasks created by a given agent.",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "parent_agent_id": {
+                    "type": "string",
+                    "description": "Agent whose child tasks to retrieve",
+                },
+            },
+            "required": ["parent_agent_id"],
+        },
+    },
+    "get_tasks_by_agent": {
+        "description": "Get all tasks assigned to a given agent.",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "assigned_agent_id": {
+                    "type": "string",
+                    "description": "Agent whose assigned tasks to retrieve",
+                },
+            },
+            "required": ["assigned_agent_id"],
+        },
+    },
+    "get_all_tasks": {
+        "description": "Get all tasks in the task registry.",
+        "parameters": {
+            "type": "object",
+            "properties": {},
+        },
+    },
+}
+
+
+# ------------------------------------------------------------------ #
+# Work Intent Board
+# ------------------------------------------------------------------ #
+
+TOOL_SCHEMAS_INTENT: dict[str, dict] = {
+    "declare_work_intent": {
+        "description": (
+            "Declare intent to work on a file before acquiring a lock. "
+            "Other agents checking work_intent receive a proximity_warning "
+            "(not a denial) when acquiring a conflicting lock. "
+            "Intent expires after ttl seconds."
+        ),
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "agent_id": {
+                    "type": "string",
+                    "description": "Agent declaring the intent",
+                },
+                "document_path": {
+                    "type": "string",
+                    "description": "File path the agent intends to work on",
+                },
+                "intent": {
+                    "type": "string",
+                    "description": "Short description of the work intent (e.g. 'implementing get_agent_tree')",
+                },
+                "ttl": {
+                    "type": "number",
+                    "default": 60.0,
+                    "description": "Seconds until intent expires (default: 60)",
+                },
+            },
+            "required": ["agent_id", "document_path", "intent"],
+        },
+    },
+    "get_work_intents": {
+        "description": (
+            "Get all live (non-expired) work intents. "
+            "Optionally filter to a specific agent."
+        ),
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "agent_id": {
+                    "type": "string",
+                    "description": "Filter to intents declared by this agent (default: all agents)",
+                },
+            },
+        },
+    },
+    "clear_work_intent": {
+        "description": "Clear an agent's declared work intent (e.g. after lock is acquired).",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "agent_id": {
+                    "type": "string",
+                    "description": "Agent whose intent to clear",
+                },
+            },
+            "required": ["agent_id"],
+        },
+    },
+}
+
+
+# ------------------------------------------------------------------ #
+# Handoffs
+# ------------------------------------------------------------------ #
+
+TOOL_SCHEMAS_HANDOFFS: dict[str, dict] = {
+    "acknowledge_handoff": {
+        "description": "Acknowledge receipt of a handoff. Called by each target agent.",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "handoff_id": {
+                    "type": "integer",
+                    "description": "Handoff ID to acknowledge",
+                },
+                "agent_id": {
+                    "type": "string",
+                    "description": "Agent acknowledging the handoff",
+                },
+            },
+            "required": ["handoff_id", "agent_id"],
+        },
+    },
+    "complete_handoff": {
+        "description": "Mark a handoff as completed (called by the originating agent).",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "handoff_id": {
+                    "type": "integer",
+                    "description": "Handoff ID to complete",
+                },
+            },
+            "required": ["handoff_id"],
+        },
+    },
+    "cancel_handoff": {
+        "description": "Cancel a handoff (abort before completion).",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "handoff_id": {
+                    "type": "integer",
+                    "description": "Handoff ID to cancel",
+                },
+            },
+            "required": ["handoff_id"],
+        },
+    },
+    "get_handoffs": {
+        "description": (
+            "Get handoffs with optional status and sender filtering."
+        ),
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "status": {
+                    "type": "string",
+                    "description": "Filter to handoffs with this status (pending/acknowledged/completed/cancelled)",
+                },
+                "from_agent_id": {
+                    "type": "string",
+                    "description": "Filter to handoffs from this agent",
+                },
+                "limit": {
+                    "type": "integer",
+                    "default": 50,
+                    "description": "Maximum handoffs to return (default: 50)",
+                },
+            },
+        },
+    },
+}
+
+
+# ------------------------------------------------------------------ #
+# Cross-Agent Dependencies
+# ------------------------------------------------------------------ #
+
+TOOL_SCHEMAS_DEPS: dict[str, dict] = {
+    "declare_dependency": {
+        "description": (
+            "Declare that dependent_agent needs depends_on_agent to finish "
+            "task X (or any task by that agent) before starting work."
+        ),
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "dependent_agent_id": {
+                    "type": "string",
+                    "description": "Agent that has the dependency",
+                },
+                "depends_on_agent_id": {
+                    "type": "string",
+                    "description": "Agent that must complete first",
+                },
+                "depends_on_task_id": {
+                    "type": "string",
+                    "description": "Specific task ID (omit for 'any task by that agent')",
+                },
+                "condition": {
+                    "type": "string",
+                    "default": "task_completed",
+                    "description": "Condition: task_completed, agent_registered, or agent_stopped",
+                },
+            },
+            "required": ["dependent_agent_id", "depends_on_agent_id"],
+        },
+    },
+    "check_dependencies": {
+        "description": (
+            "Check whether an agent has unsatisfied cross-agent dependencies. "
+            "Returns blocked:true if any dependency is not satisfied."
+        ),
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "agent_id": {
+                    "type": "string",
+                    "description": "Agent to check dependencies for",
+                },
+            },
+            "required": ["agent_id"],
+        },
+    },
+    "satisfy_dependency": {
+        "description": "Mark a dependency as satisfied (called after condition is met).",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "dep_id": {
+                    "type": "integer",
+                    "description": "Dependency ID to satisfy",
+                },
+            },
+            "required": ["dep_id"],
+        },
+    },
+    "get_blockers": {
+        "description": "Alias for check_dependencies — get unsatisfied blockers for an agent.",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "agent_id": {
+                    "type": "string",
+                    "description": "Agent to check blockers for",
+                },
+            },
+            "required": ["agent_id"],
+        },
+    },
+    "assert_can_start": {
+        "description": (
+            "Structured check before starting significant work. "
+            "Returns can_start:false with blocker details if dependencies are unmet."
+        ),
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "agent_id": {
+                    "type": "string",
+                    "description": "Agent about to start work",
+                },
+            },
+            "required": ["agent_id"],
+        },
+    },
+    "get_all_dependencies": {
+        "description": "Get all declared dependencies, optionally filtered by dependent agent.",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "dependent_agent_id": {
+                    "type": "string",
+                    "description": "Filter to dependencies declared by this agent",
+                },
+            },
+        },
+    },
+}
+
+
+# ------------------------------------------------------------------ #
 # Aggregate
 # ------------------------------------------------------------------ #
 
@@ -850,4 +1239,8 @@ TOOL_SCHEMAS: dict[str, dict] = (
     | TOOL_SCHEMAS_AUDIT
     | TOOL_SCHEMAS_VISIBILITY
     | TOOL_SCHEMAS_MESSAGING
+    | TOOL_SCHEMAS_TASKS
+    | TOOL_SCHEMAS_INTENT
+    | TOOL_SCHEMAS_HANDOFFS
+    | TOOL_SCHEMAS_DEPS
 )

@@ -20,6 +20,7 @@ from typing import Any
 from .core import CoordinationEngine
 from .dispatch import TOOL_DISPATCH
 from .schemas import TOOL_SCHEMAS
+from .dashboard import get_dashboard_data, DASHBOARD_HTML
 
 logger = logging.getLogger(__name__)
 
@@ -67,12 +68,36 @@ class MCPRequestHandler(BaseHTTPRequestHandler):
     # -- GET endpoints ------------------------------------------------- #
 
     def do_GET(self):  # noqa: N802
-        if self.path == "/tools":
+        if self.path == "/":
+            self._serve_dashboard()
+        elif self.path == "/tools":
             self._handle_list_tools()
         elif self.path == "/health":
             self._handle_health()
+        elif self.path == "/api/dashboard-data":
+            self._serve_api_dashboard()
         else:
             self._send_error_json(404, f"Unknown endpoint: {self.path}")
+
+    def _serve_dashboard(self) -> None:
+        """GET / — serve the HTML dashboard."""
+        body = DASHBOARD_HTML.encode("utf-8")
+        self.send_response(200)
+        self.send_header("Content-Type", "text/html; charset=utf-8")
+        self.send_header("Content-Length", str(len(body)))
+        self.end_headers()
+        self.wfile.write(body)
+
+    def _serve_api_dashboard(self) -> None:
+        """GET /api/dashboard-data — aggregate all tables as JSON."""
+        import json
+        data = get_dashboard_data(self.server.engine._connect)
+        body = json.dumps(data, default=str).encode("utf-8")
+        self.send_response(200)
+        self.send_header("Content-Type", "application/json")
+        self.send_header("Content-Length", str(len(body)))
+        self.end_headers()
+        self.wfile.write(body)
 
     def _handle_list_tools(self) -> None:
         """GET /tools — return all tool schemas."""

@@ -192,18 +192,103 @@ def cmd_reap_stale_agents(args):
 def cmd_broadcast(args):
     engine = _engine_from_args(args)
     try:
-        result = engine.broadcast(args.agent_id, document_path=getattr(args, "document_path", None))
+        result = engine.broadcast(
+            args.agent_id,
+            document_path=getattr(args, "document_path", None),
+            handoff_targets=getattr(args, "handoff_targets", None),
+        )
         if args.json_output:
             _print_json(result)
         else:
-            ack = result.get("acknowledged_by", [])
-            conflicts = result.get("conflicts", [])
-            print(f"Broadcast from {args.agent_id}")
-            print(f"  Acknowledged by: {ack or '(none)'}")
-            if conflicts:
-                print(f"  Conflicts:")
-                for c in conflicts:
-                    print(f"    {c['document_path']} locked by {c['locked_by']}")
+            # Check if this was a handoff
+            if result.get("handoff_id") is not None:
+                print(f"HOFF from {args.agent_id}: {result.get('handoff_id')}")
+                print(f"  To: {', '.join(result.get('to_agents', []))}")
+                print(f"  Document: {result.get('document_path') or '(none)'}")
+                print(f"  Type: {result.get('handoff_type')}")
+            else:
+                ack = result.get("acknowledged_by", [])
+                conflicts = result.get("conflicts", [])
+                print(f"Broadcast from {args.agent_id}")
+                print(f"  Acknowledged by: {ack or '(none)'}")
+                if conflicts:
+                    print(f"  Conflicts:")
+                    for c in conflicts:
+                        print(f"    {c['document_path']} locked by {c['locked_by']}")
+    finally:
+        _close(engine)
+
+
+# ------------------------------------------------------------------ #
+# acknowledge-handoff
+# ------------------------------------------------------------------ #
+
+def cmd_acknowledge_handoff(args):
+    engine = _engine_from_args(args)
+    try:
+        result = engine.acknowledge_handoff(args.handoff_id, args.agent_id)
+        if args.json_output:
+            _print_json(result)
+        else:
+            print(f"Acknowledged handoff {args.handoff_id} by {args.agent_id}")
+    finally:
+        _close(engine)
+
+
+# ------------------------------------------------------------------ #
+# complete-handoff
+# ------------------------------------------------------------------ #
+
+def cmd_complete_handoff(args):
+    engine = _engine_from_args(args)
+    try:
+        result = engine.complete_handoff(args.handoff_id)
+        if args.json_output:
+            _print_json(result)
+        else:
+            print(f"Completed handoff {args.handoff_id}")
+    finally:
+        _close(engine)
+
+
+# ------------------------------------------------------------------ #
+# cancel-handoff
+# ------------------------------------------------------------------ #
+
+def cmd_cancel_handoff(args):
+    engine = _engine_from_args(args)
+    try:
+        result = engine.cancel_handoff(args.handoff_id)
+        if args.json_output:
+            _print_json(result)
+        else:
+            print(f"Cancelled handoff {args.handoff_id}")
+    finally:
+        _close(engine)
+
+
+# ------------------------------------------------------------------ #
+# get-handoffs
+# ------------------------------------------------------------------ #
+
+def cmd_get_handoffs(args):
+    engine = _engine_from_args(args)
+    try:
+        result = engine.get_handoffs(
+            status=getattr(args, "status", None),
+            from_agent_id=getattr(args, "from_agent_id", None),
+            limit=getattr(args, "limit", 50),
+        )
+        handoffs = result.get("handoffs", [])
+        if args.json_output:
+            _print_json(result)
+        elif not handoffs:
+            print("No handoffs found")
+        else:
+            print(f"{len(handoffs)} handoff(s):")
+            for h in handoffs:
+                to = ", ".join(h.get("to_agents", []))
+                print(f"  [{h['status']}] {h['id']} {h['from_agent_id']} → {to}")
     finally:
         _close(engine)
 
