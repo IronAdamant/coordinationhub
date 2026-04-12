@@ -126,7 +126,7 @@ Every agent gets a unique ID. Files are locked by agent ID. The root agent (your
 
 Agents don't message each other directly. Instead they communicate through the shared database: lock a file, write to it, notify that it changed, release the lock. Other agents poll for notifications to see what happened.
 
-## MCP Tools (<!-- GEN:tool-count -->35<!-- /GEN -->)
+## MCP Tools (<!-- GEN:tool-count -->55<!-- /GEN -->)
 
 | Category | Tools |
 |----------|-------|
@@ -138,7 +138,7 @@ Agents don't message each other directly. Instead they communicate through the s
 | **Audit** | `get_conflicts`, `get_contention_hotspots`, `status` |
 | **Visibility** | `load_coordination_spec`, `validate_graph`, `scan_project`, `get_agent_status`, `get_file_agent_map`, `update_agent_status`, `run_assessment`, `assess_current_session`, [`get_agent_tree`](#agent-tree-view) |
 
-## CLI Commands (38)
+## CLI Commands (57)
 
 ```bash
 # Setup & diagnostics

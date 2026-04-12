@@ -13,6 +13,9 @@ from typing import Any
 from . import conflict_log as _cl
 from . import lock_ops as _lo
 from . import agent_registry as _ar
+from . import work_intent as _wi
+from . import handoffs as _handoffs
+from . import messages as _msg
 from .paths import normalize_path
 
 
@@ -118,6 +121,10 @@ class LockingMixin:
                           "attempts": attempt + 1}
                 if ownership_warning:
                     result["ownership_warning"] = ownership_warning
+                # Check work_intent for cooperative proximity warning (not a denial)
+                proximity_warning = self._check_work_intent_conflict(conn, norm_path, agent_id)
+                if proximity_warning:
+                    result["proximity_warning"] = proximity_warning
                 return result
             except Exception:
                 conn.execute("ROLLBACK")
@@ -181,6 +188,24 @@ class LockingMixin:
             str(self._storage.project_root),
         )
         return {"owned_by": owner, "message": f"File is assigned to {owner} in file_ownership"}
+
+    def _check_work_intent_conflict(
+        self, conn, norm_path: str, agent_id: str,
+    ) -> dict[str, Any] | None:
+        """Check if another agent has a live intent for this file.
+
+        Returns a proximity_warning dict (cooperative signal, not a denial).
+        Only populated when lock acquisition would otherwise succeed.
+        """
+        conflicts = _wi.check_intent_conflict(self._connect, norm_path, agent_id)
+        if not conflicts:
+            return None
+        return {
+            "conflicting_agents": [{"agent_id": c["agent_id"], "intent": c["intent"]}
+                                   for c in conflicts],
+            "message": f"Agents {[c['agent_id'] for c in conflicts]} "
+                       f"have declared intent to work on {norm_path}",
+        }
 
     def release_lock(
         self, document_path: str, agent_id: str,
@@ -319,8 +344,15 @@ class LockingMixin:
 
     def broadcast(
         self, agent_id: str, document_path: str | None = None, ttl: float = 30.0,
+        handoff_targets: list[str] | None = None,
     ) -> dict[str, Any]:
-        """Announce an intention to siblings and check for lock conflicts."""
+        """Announce an intention to siblings, or perform a formal multi-recipient handoff.
+
+        When handoff_targets is provided, acts as a formal handoff: records to the
+        handoffs table and sends handoff messages to each target agent.
+        """
+        if handoff_targets:
+            return self._handoff(agent_id, handoff_targets, document_path)
         siblings = _ar.get_siblings(self._connect, agent_id)
         acknowledged_by: list[str] = []
         conflicts: list[dict[str, Any]] = []
@@ -340,6 +372,27 @@ class LockingMixin:
                     if row["locked_by"] != agent_id:
                         conflicts.append({"document_path": document_path, "locked_by": row["locked_by"]})
         return {"acknowledged_by": acknowledged_by, "conflicts": conflicts}
+
+    def _handoff(
+        self, agent_id: str, to_agents: list[str],
+        document_path: str | None = None, handoff_type: str = "scope_transfer",
+    ) -> dict[str, Any]:
+        """Formal multi-recipient handoff."""
+        result = _handoffs.record_handoff(
+            self._connect, agent_id, to_agents, document_path, handoff_type,
+        )
+        handoff_id = result["handoff_id"]
+        # Send handoff messages to each target agent
+        for target in to_agents:
+            _msg.send_message(
+                self._connect, agent_id, target, "handoff",
+                {"handoff_id": handoff_id, "document_path": document_path,
+                 "handoff_type": handoff_type},
+            )
+        return {
+            "handoff_id": handoff_id, "to_agents": to_agents,
+            "document_path": document_path, "handoff_type": handoff_type,
+        }
 
     def wait_for_locks(
         self, document_paths: list[str], agent_id: str, timeout_s: float = 60.0,

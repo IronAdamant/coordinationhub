@@ -141,6 +141,62 @@ _SCHEMAS = {
             read_at       REAL
         )
     """,
+    "tasks": """
+        CREATE TABLE IF NOT EXISTS tasks (
+            id               TEXT PRIMARY KEY,
+            parent_agent_id  TEXT NOT NULL,
+            assigned_agent_id TEXT,
+            description      TEXT NOT NULL,
+            status           TEXT DEFAULT 'pending',
+            created_at       REAL NOT NULL,
+            updated_at       REAL NOT NULL,
+            depends_on       TEXT DEFAULT '[]',
+            blocked_by       TEXT,
+            summary          TEXT
+        )
+    """,
+    "work_intent": """
+        CREATE TABLE IF NOT EXISTS work_intent (
+            agent_id      TEXT PRIMARY KEY,
+            document_path TEXT NOT NULL,
+            intent        TEXT NOT NULL,
+            declared_at   REAL NOT NULL,
+            ttl           REAL DEFAULT 60.0
+        )
+    """,
+    "handoffs": """
+        CREATE TABLE IF NOT EXISTS handoffs (
+            id              INTEGER PRIMARY KEY AUTOINCREMENT,
+            from_agent_id   TEXT NOT NULL,
+            to_agents       TEXT NOT NULL,
+            document_path   TEXT,
+            handoff_type    TEXT DEFAULT 'scope_transfer',
+            status          TEXT DEFAULT 'pending',
+            created_at     REAL NOT NULL,
+            acknowledged_at REAL,
+            completed_at    REAL
+        )
+    """,
+    "handoff_acks": """
+        CREATE TABLE IF NOT EXISTS handoff_acks (
+            handoff_id      INTEGER NOT NULL,
+            agent_id        TEXT NOT NULL,
+            acknowledged_at REAL NOT NULL,
+            PRIMARY KEY (handoff_id, agent_id)
+        )
+    """,
+    "agent_dependencies": """
+        CREATE TABLE IF NOT EXISTS agent_dependencies (
+            id                  INTEGER PRIMARY KEY AUTOINCREMENT,
+            dependent_agent_id  TEXT NOT NULL,
+            depends_on_agent_id TEXT NOT NULL,
+            depends_on_task_id  TEXT,
+            condition           TEXT DEFAULT 'task_completed',
+            satisfied           INTEGER DEFAULT 0,
+            satisfied_at        REAL,
+            created_at          REAL NOT NULL
+        )
+    """,
 }
 
 _INDEXES = [
@@ -161,10 +217,19 @@ _INDEXES = [
     "CREATE INDEX IF NOT EXISTS idx_descendant_ancestor ON descendant_registry(ancestor_id)",
     "CREATE INDEX IF NOT EXISTS idx_messages_to ON messages(to_agent_id)",
     "CREATE INDEX IF NOT EXISTS idx_messages_time ON messages(created_at)",
+    "CREATE INDEX IF NOT EXISTS idx_tasks_parent ON tasks(parent_agent_id)",
+    "CREATE INDEX IF NOT EXISTS idx_tasks_assigned ON tasks(assigned_agent_id)",
+    "CREATE INDEX IF NOT EXISTS idx_tasks_status ON tasks(status)",
+    "CREATE INDEX IF NOT EXISTS idx_handoffs_from ON handoffs(from_agent_id)",
+    "CREATE INDEX IF NOT EXISTS idx_handoffs_status ON handoffs(status)",
+    "CREATE INDEX IF NOT EXISTS idx_handoff_acks_id ON handoff_acks(handoff_id)",
+    "CREATE INDEX IF NOT EXISTS idx_deps_dependent ON agent_dependencies(dependent_agent_id)",
+    "CREATE INDEX IF NOT EXISTS idx_deps_depends_on ON agent_dependencies(depends_on_agent_id)",
+    "CREATE INDEX IF NOT EXISTS idx_deps_satisfied ON agent_dependencies(satisfied)",
 ]
 
 
-_CURRENT_SCHEMA_VERSION = 6
+_CURRENT_SCHEMA_VERSION = 10
 
 
 def _get_schema_version(conn: sqlite3.Connection) -> int:
@@ -221,6 +286,10 @@ _MIGRATIONS = {
     4: lambda conn: None,  # descendant_registry added via CREATE TABLE IF NOT EXISTS
     5: lambda conn: None,  # messages table added via CREATE TABLE IF NOT EXISTS
     6: lambda conn: None,  # scope column added via CREATE TABLE IF NOT EXISTS
+    7: lambda conn: None,  # tasks table added via CREATE TABLE IF NOT EXISTS
+    8: lambda conn: None,  # work_intent table added via CREATE TABLE IF NOT EXISTS
+    9: lambda conn: None,  # handoffs + handoff_acks tables added via CREATE TABLE IF NOT EXISTS
+    10: lambda conn: None,  # agent_dependencies table added via CREATE TABLE IF NOT EXISTS
 }
 
 

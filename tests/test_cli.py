@@ -25,6 +25,12 @@ EXPECTED_COMMANDS = {
     "agent-status", "assess", "assess-session", "agent-tree",
     "doctor", "init", "watch",
     "await-agent", "send-message", "get-messages", "mark-messages-read",
+    "create-task", "assign-task", "update-task-status", "get-task",
+    "get-child-tasks", "get-tasks-by-agent", "get-all-tasks",
+    "declare-work-intent", "get-work-intents", "clear-work-intent",
+    "acknowledge-handoff", "complete-handoff", "cancel-handoff", "get-handoffs",
+    "declare-dependency", "check-dependencies", "satisfy-dependency",
+    "get-blockers", "assert-can-start", "get-all-dependencies",
 }
 
 

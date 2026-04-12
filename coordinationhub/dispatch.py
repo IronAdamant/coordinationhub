@@ -28,7 +28,7 @@ TOOL_DISPATCH: dict[str, tuple[str, list[str]]] = {
     "reap_expired_locks": ("reap_expired_locks", []),
     "reap_stale_agents": ("reap_stale_agents", ["timeout"]),
     # Coordination
-    "broadcast": ("broadcast", ["agent_id", "document_path", "ttl"]),
+    "broadcast": ("broadcast", ["agent_id", "document_path", "ttl", "handoff_targets"]),
     "wait_for_locks": ("wait_for_locks", ["document_paths", "agent_id", "timeout_s"]),
     "await_agent": ("await_agent", ["agent_id", "timeout_s"]),
     # Change awareness
@@ -54,4 +54,29 @@ TOOL_DISPATCH: dict[str, tuple[str, list[str]]] = {
     "send_message": ("send_message", ["from_agent_id", "to_agent_id", "message_type", "payload"]),
     "get_messages": ("get_messages", ["agent_id", "unread_only", "limit"]),
     "mark_messages_read": ("mark_messages_read", ["agent_id", "message_ids"]),
+    # Task Registry
+    "create_task": ("create_task", ["task_id", "parent_agent_id", "description", "depends_on"]),
+    "assign_task": ("assign_task", ["task_id", "assigned_agent_id"]),
+    "update_task_status": ("update_task_status", ["task_id", "status", "summary", "blocked_by"]),
+    "get_task": ("get_task", ["task_id"]),
+    "get_child_tasks": ("get_child_tasks", ["parent_agent_id"]),
+    "get_tasks_by_agent": ("get_tasks_by_agent", ["assigned_agent_id"]),
+    "get_all_tasks": ("get_all_tasks", []),
+    # Work Intent Board
+    "declare_work_intent": ("declare_work_intent", ["agent_id", "document_path", "intent", "ttl"]),
+    "get_work_intents": ("get_work_intents", ["agent_id"]),
+    "clear_work_intent": ("clear_work_intent", ["agent_id"]),
+    # Handoffs
+    "acknowledge_handoff": ("acknowledge_handoff", ["handoff_id", "agent_id"]),
+    "complete_handoff": ("complete_handoff", ["handoff_id"]),
+    "cancel_handoff": ("cancel_handoff", ["handoff_id"]),
+    "get_handoffs": ("get_handoffs", ["status", "from_agent_id", "limit"]),
+    # Dependencies
+    "declare_dependency": ("declare_dependency", ["dependent_agent_id", "depends_on_agent_id",
+                                                    "depends_on_task_id", "condition"]),
+    "check_dependencies": ("check_dependencies", ["agent_id"]),
+    "satisfy_dependency": ("satisfy_dependency", ["dep_id"]),
+    "get_blockers": ("get_blockers", ["agent_id"]),
+    "assert_can_start": ("assert_can_start", ["agent_id"]),
+    "get_all_dependencies": ("get_all_dependencies", ["dependent_agent_id"]),
 }
