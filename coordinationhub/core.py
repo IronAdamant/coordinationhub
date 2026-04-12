@@ -252,6 +252,29 @@ class CoordinationEngine(LockingMixin):
         tasks = _tasks.get_all_tasks(self._connect)
         return {"tasks": tasks, "count": len(tasks)}
 
+    def create_subtask(
+        self,
+        task_id: str,
+        parent_task_id: str,
+        parent_agent_id: str,
+        description: str,
+        depends_on: list[str] | None = None,
+    ) -> dict[str, Any]:
+        """Create a subtask under an existing parent task."""
+        return _tasks.create_subtask(
+            self._connect, task_id, parent_task_id, parent_agent_id, description, depends_on,
+        )
+
+    def get_subtasks(self, parent_task_id: str) -> dict[str, Any]:
+        """Get all direct subtasks of a given task."""
+        subtasks = _tasks.get_subtasks(self._connect, parent_task_id)
+        return {"subtasks": subtasks, "count": len(subtasks)}
+
+    def get_task_tree(self, root_task_id: str) -> dict[str, Any]:
+        """Get a task with all subtasks recursively as a nested tree."""
+        tree = _tasks.get_task_tree(self._connect, root_task_id)
+        return tree if tree else {"error": f"Task {root_task_id!r} not found"}
+
     # ------------------------------------------------------------------ #
     # Work Intent Board
     # ------------------------------------------------------------------ #

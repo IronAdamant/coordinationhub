@@ -66,6 +66,9 @@ from .cli_tasks import (
     cmd_get_child_tasks,
     cmd_get_tasks_by_agent,
     cmd_get_all_tasks,
+    cmd_create_subtask,
+    cmd_get_subtasks,
+    cmd_get_task_tree,
 )
 from .cli_intent import (
     cmd_declare_work_intent,
