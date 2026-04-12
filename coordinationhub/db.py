@@ -145,6 +145,7 @@ _SCHEMAS = {
         CREATE TABLE IF NOT EXISTS tasks (
             id               TEXT PRIMARY KEY,
             parent_agent_id  TEXT NOT NULL,
+            parent_task_id   TEXT,
             assigned_agent_id TEXT,
             description      TEXT NOT NULL,
             status           TEXT DEFAULT 'pending',
@@ -218,6 +219,7 @@ _INDEXES = [
     "CREATE INDEX IF NOT EXISTS idx_messages_to ON messages(to_agent_id)",
     "CREATE INDEX IF NOT EXISTS idx_messages_time ON messages(created_at)",
     "CREATE INDEX IF NOT EXISTS idx_tasks_parent ON tasks(parent_agent_id)",
+    "CREATE INDEX IF NOT EXISTS idx_tasks_parent_task ON tasks(parent_task_id)",
     "CREATE INDEX IF NOT EXISTS idx_tasks_assigned ON tasks(assigned_agent_id)",
     "CREATE INDEX IF NOT EXISTS idx_tasks_status ON tasks(status)",
     "CREATE INDEX IF NOT EXISTS idx_handoffs_from ON handoffs(from_agent_id)",
@@ -229,7 +231,7 @@ _INDEXES = [
 ]
 
 
-_CURRENT_SCHEMA_VERSION = 10
+_CURRENT_SCHEMA_VERSION = 11
 
 
 def _get_schema_version(conn: sqlite3.Connection) -> int:
@@ -280,6 +282,14 @@ def _migrate_v2_to_v3(conn: sqlite3.Connection) -> None:
     conn.execute("CREATE INDEX IF NOT EXISTS idx_agents_claude_id ON agents(claude_agent_id)")
 
 
+def _migrate_v10_to_v11(conn: sqlite3.Connection) -> None:
+    """Add parent_task_id column to tasks table for subtask hierarchy."""
+    cols = [row[1] for row in conn.execute("PRAGMA table_info(tasks)").fetchall()]
+    if "parent_task_id" in cols:
+        return  # Already migrated
+    conn.execute("ALTER TABLE tasks ADD COLUMN parent_task_id TEXT")
+
+
 _MIGRATIONS = {
     2: _migrate_v1_to_v2,
     3: _migrate_v2_to_v3,
@@ -290,7 +300,16 @@ _MIGRATIONS = {
     8: lambda conn: None,  # work_intent table added via CREATE TABLE IF NOT EXISTS
     9: lambda conn: None,  # handoffs + handoff_acks tables added via CREATE TABLE IF NOT EXISTS
     10: lambda conn: None,  # agent_dependencies table added via CREATE TABLE IF NOT EXISTS
+    11: _migrate_v10_to_v11,  # parent_task_id column added via ALTER TABLE
 }
+
+
+def _migrate_v10_to_v11(conn: sqlite3.Connection) -> None:
+    """Add parent_task_id column to tasks table for subtask hierarchy."""
+    cols = [row[1] for row in conn.execute("PRAGMA table_info(tasks)").fetchall()]
+    if "parent_task_id" in cols:
+        return  # Already migrated
+    conn.execute("ALTER TABLE tasks ADD COLUMN parent_task_id TEXT")
 
 
 def init_schema(conn: sqlite3.Connection) -> None:

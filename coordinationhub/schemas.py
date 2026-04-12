@@ -976,6 +976,66 @@ TOOL_SCHEMAS_TASKS: dict[str, dict] = {
             "properties": {},
         },
     },
+    "create_subtask": {
+        "description": (
+            "Create a subtask under an existing parent task. "
+            "The subtask inherits context from its parent and can be nested further. "
+            "Use get_task_tree to retrieve the full hierarchy."
+        ),
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "task_id": {
+                    "type": "string",
+                    "description": "Unique subtask ID (e.g. parent_task_id + '.0')",
+                },
+                "parent_task_id": {
+                    "type": "string",
+                    "description": "ID of the parent task this subtask belongs to",
+                },
+                "parent_agent_id": {
+                    "type": "string",
+                    "description": "Agent creating this subtask",
+                },
+                "description": {
+                    "type": "string",
+                    "description": "What this subtask involves",
+                },
+                "depends_on": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                    "description": "Task IDs that must complete before this subtask starts",
+                },
+            },
+            "required": ["task_id", "parent_task_id", "parent_agent_id", "description"],
+        },
+    },
+    "get_subtasks": {
+        "description": "Get all direct subtasks of a given task.",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "parent_task_id": {
+                    "type": "string",
+                    "description": "ID of the parent task whose subtasks to retrieve",
+                },
+            },
+            "required": ["parent_task_id"],
+        },
+    },
+    "get_task_tree": {
+        "description": "Get a task with all its subtasks recursively as a nested tree.",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "root_task_id": {
+                    "type": "string",
+                    "description": "ID of the root task to build the tree from",
+                },
+            },
+            "required": ["root_task_id"],
+        },
+    },
 }
 
 

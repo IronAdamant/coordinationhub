@@ -295,6 +295,20 @@ def create_parser() -> argparse.ArgumentParser:
 
     sub.add_parser("get-all-tasks", parents=[shared], help="Get all tasks in the registry")
 
+    p = sub.add_parser("create-subtask", parents=[shared], help="Create a subtask under an existing parent task")
+    p.add_argument("task_id", help="Unique subtask ID (e.g. parent_task_id.0)")
+    p.add_argument("parent_task_id", help="ID of the parent task this subtask belongs to")
+    p.add_argument("parent_agent_id", help="Agent creating this subtask")
+    p.add_argument("description", help="What this subtask involves")
+    p.add_argument("--depends-on", nargs="+", default=None, dest="depends_on",
+                   help="Task IDs that must complete first")
+
+    p = sub.add_parser("get-subtasks", parents=[shared], help="Get all direct subtasks of a task")
+    p.add_argument("parent_task_id", help="ID of the parent task whose subtasks to retrieve")
+
+    p = sub.add_parser("get-task-tree", parents=[shared], help="Get a task with all subtasks recursively")
+    p.add_argument("root_task_id", help="ID of the root task to build the tree from")
+
     # --- WORK INTENT BOARD ---
     p = sub.add_parser("declare-work-intent", parents=[shared], help="Declare intent to work on a file")
     p.add_argument("agent_id", help="Agent declaring intent")
@@ -376,6 +390,9 @@ _COMMANDS = {
     "get-child-tasks": "cmd_get_child_tasks",
     "get-tasks-by-agent": "cmd_get_tasks_by_agent",
     "get-all-tasks": "cmd_get_all_tasks",
+    "create-subtask": "cmd_create_subtask",
+    "get-subtasks": "cmd_get_subtasks",
+    "get-task-tree": "cmd_get_task_tree",
     "declare-work-intent": "cmd_declare_work_intent",
     "get-work-intents": "cmd_get_work_intents",
     "clear-work-intent": "cmd_clear_work_intent",

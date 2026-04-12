@@ -62,6 +62,9 @@ TOOL_DISPATCH: dict[str, tuple[str, list[str]]] = {
     "get_child_tasks": ("get_child_tasks", ["parent_agent_id"]),
     "get_tasks_by_agent": ("get_tasks_by_agent", ["assigned_agent_id"]),
     "get_all_tasks": ("get_all_tasks", []),
+    "create_subtask": ("create_subtask", ["task_id", "parent_task_id", "parent_agent_id", "description", "depends_on"]),
+    "get_subtasks": ("get_subtasks", ["parent_task_id"]),
+    "get_task_tree": ("get_task_tree", ["root_task_id"]),
     # Work Intent Board
     "declare_work_intent": ("declare_work_intent", ["agent_id", "document_path", "intent", "ttl"]),
     "get_work_intents": ("get_work_intents", ["agent_id"]),

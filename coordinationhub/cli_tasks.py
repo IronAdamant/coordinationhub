@@ -159,3 +159,71 @@ def cmd_get_all_tasks(args):
                 print(f"  [{t['status']}] {t['id']}{assigned} — {t['description'][:50]}")
     finally:
         _close(engine)
+
+
+# ------------------------------------------------------------------ #
+# create-subtask
+# ------------------------------------------------------------------ #
+
+def cmd_create_subtask(args):
+    engine = _engine_from_args(args)
+    try:
+        result = engine.create_subtask(
+            task_id=args.task_id,
+            parent_task_id=args.parent_task_id,
+            parent_agent_id=args.parent_agent_id,
+            description=args.description,
+            depends_on=getattr(args, "depends_on", None),
+        )
+        if args.json_output:
+            _print_json(result)
+        else:
+            print(f"Subtask created: {args.task_id} under {args.parent_task_id}")
+    finally:
+        _close(engine)
+
+
+# ------------------------------------------------------------------ #
+# get-subtasks
+# ------------------------------------------------------------------ #
+
+def cmd_get_subtasks(args):
+    engine = _engine_from_args(args)
+    try:
+        result = engine.get_subtasks(args.parent_task_id)
+        subtasks = result.get("subtasks", [])
+        if args.json_output:
+            _print_json(result)
+        elif not subtasks:
+            print(f"No subtasks for {args.parent_task_id}")
+        else:
+            print(f"{len(subtasks)} subtask(s) under {args.parent_task_id}:")
+            for t in subtasks:
+                assigned = f" → {t['assigned_agent_id']}" if t.get("assigned_agent_id") else ""
+                print(f"  [{t['status']}] {t['id']}{assigned} — {t['description'][:50]}")
+    finally:
+        _close(engine)
+
+
+# ------------------------------------------------------------------ #
+# get-task-tree
+# ------------------------------------------------------------------ #
+
+def cmd_get_task_tree(args):
+    engine = _engine_from_args(args)
+    try:
+        result = engine.get_task_tree(args.root_task_id)
+        if args.json_output:
+            _print_json(result)
+        elif result.get("error"):
+            print(f"Error: {result['error']}")
+        else:
+            def _print_tree(task, indent=0):
+                prefix = "  " * indent
+                status = task.get("status", "?")
+                print(f"{prefix}[{status}] {task['id']} — {task.get('description', '')[:50]}")
+                for child in task.get("subtasks", []):
+                    _print_tree(child, indent + 1)
+            _print_tree(result)
+    finally:
+        _close(engine)

@@ -142,3 +142,69 @@ def get_all_tasks(connect: ConnectFn) -> list[dict[str, Any]]:
             d["depends_on"] = json.loads(d["depends_on"])
         tasks.append(d)
     return tasks
+
+
+def create_subtask(
+    connect: ConnectFn,
+    task_id: str,
+    parent_task_id: str,
+    parent_agent_id: str,
+    description: str,
+    depends_on: list[str] | None = None,
+) -> dict[str, Any]:
+    """Create a new subtask under an existing parent task."""
+    now = time.time()
+    with connect() as conn:
+        conn.execute(
+            """INSERT INTO tasks
+            (id, parent_task_id, parent_agent_id, description, created_at, updated_at, depends_on)
+            VALUES (?, ?, ?, ?, ?, ?, ?)""",
+            (task_id, parent_task_id, parent_agent_id, description, now, now,
+             json.dumps(depends_on) if depends_on else "[]"),
+        )
+    return {"created": True, "task_id": task_id, "parent_task_id": parent_task_id}
+
+
+def get_subtasks(connect: ConnectFn, parent_task_id: str) -> list[dict[str, Any]]:
+    """Get all direct subtasks of a given task."""
+    with connect() as conn:
+        rows = conn.execute(
+            "SELECT * FROM tasks WHERE parent_task_id=? ORDER BY created_at",
+            (parent_task_id,),
+        ).fetchall()
+    tasks = []
+    for row in rows:
+        d = dict(row)
+        if d.get("depends_on"):
+            d["depends_on"] = json.loads(d["depends_on"])
+        tasks.append(d)
+    return tasks
+
+
+def get_task_tree(connect: ConnectFn, root_task_id: str) -> dict[str, Any]:
+    """Get a task with all its subtasks recursively.
+
+    Returns a dict with task data + 'subtasks' key containing list of child task trees.
+    """
+    def _build_tree(task_id: str) -> dict[str, Any] | None:
+        with connect() as conn:
+            row = conn.execute("SELECT * FROM tasks WHERE id=?", (task_id,)).fetchone()
+        if not row:
+            return None
+        d = dict(row)
+        if d.get("depends_on"):
+            d["depends_on"] = json.loads(d["depends_on"])
+        with connect() as conn:
+            children_rows = conn.execute(
+                "SELECT id FROM tasks WHERE parent_task_id=? ORDER BY created_at",
+                (task_id,),
+            ).fetchall()
+        d["subtasks"] = []
+        for child_row in children_rows:
+            child_id = child_row["id"]
+            child_tree = _build_tree(child_id)
+            if child_tree:
+                d["subtasks"].append(child_tree)
+        return d
+
+    return _build_tree(root_task_id) or {}
