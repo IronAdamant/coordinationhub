@@ -20,7 +20,8 @@ EXPECTED_COMMANDS = {
     "list-agents", "lineage", "siblings", "acquire-lock", "release-lock",
     "refresh-lock", "lock-status", "list-locks", "release-agent-locks",
     "reap-expired-locks", "reap-stale-agents", "broadcast", "wait-for-locks",
-    "notify-change", "get-notifications", "prune-notifications", "get-conflicts", "contention-hotspots",
+    "notify-change", "get-notifications", "prune-notifications", "wait-for-notifications",
+    "get-conflicts", "contention-hotspots",
     "load-spec", "validate-spec", "scan-project", "dashboard",
     "agent-status", "assess", "assess-session", "agent-tree",
     "doctor", "init", "watch",
@@ -33,6 +34,12 @@ EXPECTED_COMMANDS = {
     "declare-dependency", "check-dependencies", "satisfy-dependency",
     "get-blockers", "assert-can-start", "get-all-dependencies",
     "retry-task", "dead-letter-queue", "task-failure-history",
+    "wait-for-task", "get-available-tasks",
+    "acquire-coordinator-lease", "refresh-coordinator-lease",
+    "release-coordinator-lease", "get-leader", "claim-leadership",
+    "leader-status", "ha-dashboard",
+    "spawn-subagent", "list-pending-spawns", "cancel-spawn",
+    "request-subagent-deregistration", "await-subagent-stopped",
 }
 
 

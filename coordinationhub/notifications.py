@@ -92,3 +92,45 @@ def prune_notifications(
                 pruned += cursor.rowcount
 
         return {"pruned": pruned}
+
+
+def wait_for_notifications(
+    connect: ConnectFn,
+    agent_id: str,
+    timeout_s: float = 30.0,
+    poll_interval_s: float = 2.0,
+    exclude_agent: str | None = None,
+) -> dict[str, Any]:
+    """Long-poll for new notifications until one arrives or timeout expires.
+
+    Returns {"notifications": [...], "timed_out": False} when new notifications arrive,
+    or {"notifications": [], "timed_out": True} if timeout expires with no new notifications.
+    """
+    import time
+    start = time.time()
+    # Track the latest notification we've seen
+    last_notification_id = None
+    with connect() as conn:
+        row = conn.execute(
+            "SELECT id FROM change_notifications ORDER BY id DESC LIMIT 1"
+        ).fetchone()
+        last_notification_id = row["id"] if row else 0
+
+    while True:
+        with connect() as conn:
+            query = "SELECT * FROM change_notifications WHERE id > ?"
+            args: list[Any] = [last_notification_id]
+            if exclude_agent is not None:
+                query += " AND agent_id != ?"
+                args.append(exclude_agent)
+            query += " ORDER BY id ASC LIMIT 100"
+            rows = conn.execute(query, args).fetchall()
+
+        if rows:
+            return {"notifications": [dict(row) for row in rows], "timed_out": False}
+
+        elapsed = time.time() - start
+        if elapsed >= timeout_s:
+            return {"notifications": [], "timed_out": True}
+
+        time.sleep(min(poll_interval_s, timeout_s - elapsed))

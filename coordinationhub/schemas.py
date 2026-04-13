@@ -589,6 +589,39 @@ TOOL_SCHEMAS_CHANGE: dict[str, dict] = {
             },
         },
     },
+    "wait_for_notifications": {
+        "description": (
+            "Long-poll for new notifications until one arrives or timeout expires. "
+            "Use this instead of polling get_notifications in a loop. "
+            "Returns notifications when new ones arrive, or {\"timed_out\": True} "
+            "if the timeout expires with no new notifications."
+        ),
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "agent_id": {
+                    "type": "string",
+                    "description": "Agent ID to use as the waiter's identity",
+                },
+                "timeout_s": {
+                    "type": "number",
+                    "description": "Maximum seconds to wait (default: 30)",
+                    "default": 30.0,
+                },
+                "poll_interval_s": {
+                    "type": "number",
+                    "description": "Polling interval in seconds (default: 2)",
+                    "default": 2.0,
+                },
+                "exclude_agent": {
+                    "type": "string",
+                    "description": "Agent ID to exclude from notifications (default: waiter's own ID)",
+                    "default": None,
+                },
+            },
+            "required": ["agent_id"],
+        },
+    },
 }
 
 
@@ -1050,6 +1083,51 @@ TOOL_SCHEMAS_TASKS: dict[str, dict] = {
             "required": ["root_task_id"],
         },
     },
+    "wait_for_task": {
+        "description": (
+            "Poll until a task reaches a terminal state (completed or failed) "
+            "or the timeout expires. Use this to coordinate sequential dependencies "
+            "between tasks when depends_on alone is not sufficient (e.g., waiting "
+            "for a task completed by an external agent or system)."
+        ),
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "task_id": {
+                    "type": "string",
+                    "description": "Task to wait on",
+                },
+                "timeout_s": {
+                    "type": "number",
+                    "description": "Maximum seconds to wait (default: 60)",
+                    "default": 60.0,
+                },
+                "poll_interval_s": {
+                    "type": "number",
+                    "description": "Polling interval in seconds (default: 2)",
+                    "default": 2.0,
+                },
+            },
+            "required": ["task_id"],
+        },
+    },
+    "get_available_tasks": {
+        "description": (
+            "Return tasks whose depends_on are all satisfied (completed) and "
+            "that are not currently claimed. A task is \"available\" if its status "
+            "is \"pending\" and all tasks in its depends_on list have status \"completed\". "
+            "Use this to find work that can be picked up by an idle agent."
+        ),
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "agent_id": {
+                    "type": "string",
+                    "description": "Optional agent ID to filter to tasks assigned to this agent",
+                },
+            },
+        },
+    },
 }
 
 
@@ -1356,6 +1434,254 @@ TOOL_SCHEMAS_DLQ: dict[str, dict] = {
 }
 
 
+TOOL_SCHEMAS_LEASES: dict[str, dict] = {
+    "acquire_coordinator_lease": {
+        "description": (
+            "Attempt to acquire the coordinator leadership lease (COORDINATOR_LEADER). "
+            "If acquired, this agent becomes the active coordinator. "
+            "The lease has a short TTL (default 10s) and must be refreshed via "
+            "refresh_coordinator_lease before it expires. "
+            "If leadership is held by another agent, returns the current holder."
+        ),
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "agent_id": {
+                    "type": "string",
+                    "description": "Agent ID attempting to acquire the lease",
+                },
+                "ttl": {
+                    "type": "number",
+                    "description": "Lease TTL in seconds (default: 10)",
+                },
+            },
+            "required": ["agent_id"],
+        },
+    },
+    "refresh_coordinator_lease": {
+        "description": (
+            "Refresh the coordinator leadership lease TTL. "
+            "Must be called before the lease expires to maintain leadership. "
+            "Returns an error if this agent is not the current lease holder."
+        ),
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "agent_id": {
+                    "type": "string",
+                    "description": "Agent ID refreshing the lease",
+                },
+            },
+            "required": ["agent_id"],
+        },
+    },
+    "release_coordinator_lease": {
+        "description": (
+            "Release the coordinator leadership lease. "
+            "Returns an error if this agent is not the current lease holder. "
+            "After release, another agent can acquire leadership via "
+            "acquire_coordinator_lease."
+        ),
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "agent_id": {
+                    "type": "string",
+                    "description": "Agent ID releasing the lease",
+                },
+            },
+            "required": ["agent_id"],
+        },
+    },
+    "get_leader": {
+        "description": (
+            "Return the current coordinator lease holder, or null if the "
+            "lease is unheld/expired."
+        ),
+        "parameters": {
+            "type": "object",
+            "properties": {},
+        },
+    },
+    "claim_leadership": {
+        "description": (
+            "Claim coordinator leadership when the current leader has failed. "
+            "Succeeds only if the current lease is expired or unheld — "
+            "it is NOT taken from a live holder. "
+            "Use after detecting a failed leader (missed heartbeat or lease expiry). "
+            "After claiming, rebuild any in-memory state from the DB."
+        ),
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "agent_id": {
+                    "type": "string",
+                    "description": "Agent ID attempting to claim leadership",
+                },
+                "ttl": {
+                    "type": "number",
+                    "description": "Lease TTL in seconds (default: 10)",
+                },
+            },
+            "required": ["agent_id"],
+        },
+    },
+}
+
+
+TOOL_SCHEMAS_SPAWNER: dict[str, dict] = {
+    "spawn_subagent": {
+        "description": (
+            "Register intent to spawn a sub-agent and return its spawn ID. "
+            "The parent agent calls this before Claude Code spawns the sub-agent. "
+            "This creates a pending spawn record that the hook will consume "
+            "when ``SubagentStart`` fires, correlating via ``parent_agent_id``. "
+            "Returns the spawn ID and pending spawn record."
+        ),
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "parent_agent_id": {
+                    "type": "string",
+                    "description": "Parent agent ID that intends to spawn the sub-agent",
+                },
+                "subagent_type": {
+                    "type": "string",
+                    "description": "Type of sub-agent to spawn (e.g. 'Explore', 'Plan', 'general-purpose')",
+                },
+                "description": {
+                    "type": "string",
+                    "description": "Description of the sub-agent's task",
+                    "default": None,
+                },
+                "prompt": {
+                    "type": "string",
+                    "description": "Prompt or instructions for the sub-agent",
+                    "default": None,
+                },
+            },
+            "required": ["parent_agent_id", "subagent_type"],
+        },
+    },
+    "get_pending_spawns": {
+        "description": (
+            "Get pending (or all) spawn requests for a parent agent. "
+            "Returns spawn records with status: pending | registered | expired."
+        ),
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "parent_agent_id": {
+                    "type": "string",
+                    "description": "Parent agent ID to get pending spawns for",
+                },
+                "include_consumed": {
+                    "type": "boolean",
+                    "description": "Include consumed/registered spawns in results",
+                    "default": False,
+                },
+            },
+            "required": ["parent_agent_id"],
+        },
+    },
+    "await_subagent_registration": {
+        "description": (
+            "Poll until a pending spawn is consumed (sub-agent registered) or timeout. "
+            "The parent agent calls this after ``spawn_subagent`` to wait for the "
+            "sub-agent to register itself via the Claude Code hook's SubagentStart handler. "
+            "Returns the consumed spawn record on success, or timed_out:true if the "
+            "sub-agent did not register within the timeout."
+        ),
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "parent_agent_id": {
+                    "type": "string",
+                    "description": "Parent agent ID that spawned the sub-agent",
+                },
+                "subagent_type": {
+                    "type": "string",
+                    "description": "Wait for a specific sub-agent type (omit to wait for any)",
+                    "default": None,
+                },
+                "timeout": {
+                    "type": "number",
+                    "description": "Timeout in seconds (default: 300)",
+                    "default": 300.0,
+                },
+            },
+            "required": ["parent_agent_id"],
+        },
+    },
+    "request_subagent_deregistration": {
+        "description": (
+            "Request graceful deregistration of a child agent. "
+            "Sets ``stop_requested_at`` on the child agent. The child is expected "
+            "to poll ``is_subagent_stop_requested`` and call ``deregister_agent`` "
+            "if the stop flag is set. After a timeout, the caller should escalate "
+            "to ``deregister_agent`` directly. "
+            "Returns ``requested`` if the stop flag was set, ``not_found`` if "
+            "the child agent does not exist or is not active."
+        ),
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "parent_agent_id": {
+                    "type": "string",
+                    "description": "Parent agent ID making the request",
+                },
+                "child_agent_id": {
+                    "type": "string",
+                    "description": "Child agent ID to request stop for",
+                },
+            },
+            "required": ["parent_agent_id", "child_agent_id"],
+        },
+    },
+    "is_subagent_stop_requested": {
+        "description": (
+            "Check if a stop has been requested for this agent. "
+            "The agent should call this periodically and deregister if "
+            "the stop flag is set."
+        ),
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "agent_id": {
+                    "type": "string",
+                    "description": "Agent ID to check stop-request flag for",
+                },
+            },
+            "required": ["agent_id"],
+        },
+    },
+    "await_subagent_stopped": {
+        "description": (
+            "Poll until a child agent is stopped or the timeout is reached. "
+            "Returns ``stopped: True`` if the child called ``deregister_agent`` "
+            "within the timeout. Returns ``timed_out: True`` with ``escalate: True`` "
+            "if the child did not stop in time — the caller should then call "
+            "``deregister_agent`` directly to force cleanup."
+        ),
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "child_agent_id": {
+                    "type": "string",
+                    "description": "Child agent ID to wait for",
+                },
+                "timeout": {
+                    "type": "number",
+                    "description": "Timeout in seconds (default: 30)",
+                    "default": 30.0,
+                },
+            },
+            "required": ["child_agent_id"],
+        },
+    },
+}
+
+
 # ------------------------------------------------------------------ #
 # Aggregate
 # ------------------------------------------------------------------ #
@@ -1373,4 +1699,6 @@ TOOL_SCHEMAS: dict[str, dict] = (
     | TOOL_SCHEMAS_HANDOFFS
     | TOOL_SCHEMAS_DEPS
     | TOOL_SCHEMAS_DLQ
+    | TOOL_SCHEMAS_LEASES
+    | TOOL_SCHEMAS_SPAWNER
 )

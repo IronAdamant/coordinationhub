@@ -9,6 +9,78 @@ All significant changes to the CoordinationHub project are documented here in re
 
 ---
 
+## 2026-04-13 — v0.6.2 Lock Bug Fix + wait_for_task + wait_for_notifications
+
+### Motivation
+
+Review Eighteen (`findings/Kimi_review_1/kimi_findings.md`) tested CoordinationHub under a live 3-agent coordinated implementation. Key findings:
+
+| Issue | Priority | Status |
+|-------|----------|--------|
+| `acquire_lock` spurious "cannot rollback" error | P0 | **Fixed** — scope check moved before COMMIT |
+| `depends_on` inert — no wait primitive | P0 | **Fixed** — added `wait_for_task` |
+| No long-poll for notifications | P1 | **Fixed** — added `wait_for_notifications` |
+| MCP config discovery gap (Kimi CLI) | P1 | **Documented** — ~/.kimi/mcp.json required |
+| Stale locks on crash | P2 | Already handled — `deregister_agent` releases locks |
+| Opaque lock conflicts | P2 | Already handled — returns conflict metadata |
+
+### Change 1 — P0 Lock Transaction Bug Fix (core_locking.py)
+
+**Bug**: `acquire_lock` returned "cannot rollback - no transaction is active" on every lock acquisition. The lock WAS acquired successfully despite the error.
+
+**Root cause**: After inserting the lock and committing (line 105), the scope violation check ran (line 108). If scope was violated, the code attempted `ROLLBACK` (line 110) — but there was no active transaction to roll back.
+
+**Fix**: Moved the scope check BEFORE the COMMIT:
+```python
+conn.execute("INSERT INTO document_locks ...")
+# Check scope BEFORE commit so ROLLBACK is valid if violated
+scope_result = self._check_scope_violation(conn, norm_path, agent_id)
+if scope_result is not None:
+    conn.execute("ROLLBACK")  # Now this works
+    return {"acquired": False, "error": "scope_violation", ...}
+conn.execute("COMMIT")
+```
+
+Also fixed the exception handler to catch "no transaction is active" gracefully.
+
+### Change 2 — `wait_for_task` (tasks.py + core_tasks.py)
+
+Added polling primitive so agents can wait for task dependencies to complete:
+- `wait_for_task(task_id, timeout_s=60, poll_interval_s=2)` — blocks until task reaches `completed` or `failed`
+- Returns `{"waited": True, "status": "...", "timed_out": False}` or `{"waited": False, "timed_out": True}`
+
+### Change 3 — `get_available_tasks` (tasks.py + core_tasks.py)
+
+Returns tasks whose `depends_on` are all satisfied and are not currently claimed:
+- `get_available_tasks(agent_id=None)` — filters to unassigned or specific agent
+- A task is "available" if status is `pending` and all deps have status `completed`
+
+### Change 4 — `wait_for_notifications` (notifications.py + core_change.py)
+
+Long-poll primitive for change notifications:
+- `wait_for_notifications(agent_id, timeout_s=30, poll_interval_s=2, exclude_agent=None)`
+- Returns `{"notifications": [...], "timed_out": False}` when new notifications arrive
+- Returns `{"notifications": [], "timed_out": True}` on timeout
+
+### New Tools Added
+
+- `wait_for_task` — poll until task reaches terminal state
+- `get_available_tasks` — find tasks with satisfied dependencies
+- `wait_for_notifications` — long-poll for change notifications
+
+### New CLI Commands
+
+- `coordinationhub wait-for-task <task_id> [--timeout S]`
+- `coordinationhub get-available-tasks [--agent-id <id>]`
+- `coordinationhub wait-for-notifications <id> [--timeout S] [--exclude-agent <agent>]`
+
+### Test Coverage
+
+- All 340 tests pass (1 skipped)
+- Updated `test_cli.py` expected commands list to include new commands
+
+---
+
 ## 2026-04-13 — v0.6.1 Task Priority + Dead Letter Queue
 
 ### Motivation

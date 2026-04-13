@@ -2,7 +2,8 @@
 
 from __future__ import annotations
 
-from .cli_utils import print_json as _print_json, engine_from_args as _engine_from_args, close as _close
+from .cli_utils import print_json as _print_json, engine_from_args as _engine_from_args
+from .cli_utils import replica_engine_from_args as _replica_engine_from_args, close as _close
 
 
 # ------------------------------------------------------------------ #
@@ -77,7 +78,7 @@ def cmd_update_task_status(args):
 # ------------------------------------------------------------------ #
 
 def cmd_get_task(args):
-    engine = _engine_from_args(args)
+    engine = _replica_engine_from_args(args)
     try:
         result = engine.get_task(args.task_id)
         if args.json_output:
@@ -109,7 +110,7 @@ def cmd_get_task(args):
 # ------------------------------------------------------------------ #
 
 def cmd_get_child_tasks(args):
-    engine = _engine_from_args(args)
+    engine = _replica_engine_from_args(args)
     try:
         result = engine.get_child_tasks(args.parent_agent_id)
         tasks = result.get("tasks", [])
@@ -133,7 +134,7 @@ def cmd_get_child_tasks(args):
 # ------------------------------------------------------------------ #
 
 def cmd_get_tasks_by_agent(args):
-    engine = _engine_from_args(args)
+    engine = _replica_engine_from_args(args)
     try:
         result = engine.get_tasks_by_agent(args.assigned_agent_id)
         tasks = result.get("tasks", [])
@@ -157,7 +158,7 @@ def cmd_get_tasks_by_agent(args):
 # ------------------------------------------------------------------ #
 
 def cmd_get_all_tasks(args):
-    engine = _engine_from_args(args)
+    engine = _replica_engine_from_args(args)
     try:
         result = engine.get_all_tasks()
         tasks = result.get("tasks", [])
@@ -207,7 +208,7 @@ def cmd_create_subtask(args):
 # ------------------------------------------------------------------ #
 
 def cmd_get_subtasks(args):
-    engine = _engine_from_args(args)
+    engine = _replica_engine_from_args(args)
     try:
         result = engine.get_subtasks(args.parent_task_id)
         subtasks = result.get("subtasks", [])
@@ -229,7 +230,7 @@ def cmd_get_subtasks(args):
 # ------------------------------------------------------------------ #
 
 def cmd_get_task_tree(args):
-    engine = _engine_from_args(args)
+    engine = _replica_engine_from_args(args)
     try:
         result = engine.get_task_tree(args.root_task_id)
         if args.json_output:
@@ -307,5 +308,55 @@ def cmd_task_failure_history(args):
                 status = h.get("status", "?")
                 error = h.get("error", "no error")[:50]
                 print(f"  [attempt {h['attempt']}] [{status}] {error}")
+    finally:
+        _close(engine)
+
+
+# ------------------------------------------------------------------ #
+# wait-for-task
+# ------------------------------------------------------------------ #
+
+def cmd_wait_for_task(args):
+    engine = _engine_from_args(args)
+    try:
+        result = engine.wait_for_task(
+            task_id=args.task_id,
+            timeout_s=getattr(args, "timeout", 60.0),
+            poll_interval_s=getattr(args, "poll_interval", 2.0),
+        )
+        if args.json_output:
+            _print_json(result)
+        elif result.get("timed_out"):
+            print(f"Timed out waiting for {args.task_id} (status: {result.get('status', 'unknown')})")
+        else:
+            print(f"Task {args.task_id} reached terminal state: {result.get('status')}")
+    finally:
+        _close(engine)
+
+
+# ------------------------------------------------------------------ #
+# get-available-tasks
+# ------------------------------------------------------------------ #
+
+def cmd_get_available_tasks(args):
+    engine = _replica_engine_from_args(args)
+    try:
+        result = engine.get_available_tasks(
+            agent_id=getattr(args, "agent_id", None),
+        )
+        tasks = result.get("tasks", [])
+        if args.json_output:
+            _print_json(result)
+        elif not tasks:
+            print("No available tasks (all pending tasks have incomplete dependencies)")
+        else:
+            print(f"{len(tasks)} available task(s):")
+            for t in tasks:
+                assigned = f" → {t['assigned_agent_id']}" if t.get("assigned_agent_id") else " (unassigned)"
+                p = t.get("priority", 0)
+                prio = f" @{p}" if p else ""
+                deps = t.get("depends_on", [])
+                deps_str = f" (deps: {', '.join(deps)})" if deps else ""
+                print(f"  [{t['status']}] {t['id']}{assigned}{prio} — {t['description'][:50]}{deps_str}")
     finally:
         _close(engine)

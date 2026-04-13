@@ -6,7 +6,8 @@ import json
 import sys
 from pathlib import Path
 
-from .cli_utils import print_json as _print_json, engine_from_args as _engine_from_args, close as _close
+from .cli_utils import print_json as _print_json, engine_from_args as _engine_from_args
+from .cli_utils import replica_engine_from_args as _replica_engine_from_args, close as _close
 
 
 # ------------------------------------------------------------------ #
@@ -30,7 +31,7 @@ def cmd_notify_change(args):
 # ------------------------------------------------------------------ #
 
 def cmd_get_notifications(args):
-    engine = _engine_from_args(args)
+    engine = _replica_engine_from_args(args)
     try:
         result = engine.get_notifications(since=args.since, exclude_agent=args.exclude_agent, limit=args.limit)
         if args.json_output:
@@ -64,11 +65,37 @@ def cmd_prune_notifications(args):
 
 
 # ------------------------------------------------------------------ #
+# wait-for-notifications
+# ------------------------------------------------------------------ #
+
+def cmd_wait_for_notifications(args):
+    engine = _engine_from_args(args)
+    try:
+        result = engine.wait_for_notifications(
+            agent_id=args.agent_id,
+            timeout_s=getattr(args, "timeout", 30.0),
+            poll_interval_s=getattr(args, "poll_interval", 2.0),
+            exclude_agent=getattr(args, "exclude_agent", None),
+        )
+        if args.json_output:
+            _print_json(result)
+        elif result.get("timed_out"):
+            print(f"Timed out waiting for notifications (no new notifications)")
+        else:
+            notifs = result.get("notifications", [])
+            print(f"Received {len(notifs)} notification(s):")
+            for n in notifs:
+                print(f"  {n['document_path']}: {n['change_type']} by {n['agent_id']}")
+    finally:
+        _close(engine)
+
+
+# ------------------------------------------------------------------ #
 # get-conflicts
 # ------------------------------------------------------------------ #
 
 def cmd_get_conflicts(args):
-    engine = _engine_from_args(args)
+    engine = _replica_engine_from_args(args)
     try:
         result = engine.get_conflicts(document_path=args.document_path, agent_id=args.agent_id, limit=args.limit)
         if args.json_output:
@@ -90,7 +117,7 @@ def cmd_get_conflicts(args):
 # ------------------------------------------------------------------ #
 
 def cmd_contention_hotspots(args):
-    engine = _engine_from_args(args)
+    engine = _replica_engine_from_args(args)
     try:
         result = engine.get_contention_hotspots(limit=args.limit)
         if args.json_output:
@@ -268,7 +295,7 @@ def cmd_dashboard(args):
 # ------------------------------------------------------------------ #
 
 def cmd_agent_status(args):
-    engine = _engine_from_args(args)
+    engine = _replica_engine_from_args(args)
     try:
         if getattr(args, "tree", False):
             result = engine.get_agent_tree(args.agent_id)
@@ -309,7 +336,7 @@ def cmd_agent_status(args):
 # ------------------------------------------------------------------ #
 
 def cmd_agent_tree(args):
-    engine = _engine_from_args(args)
+    engine = _replica_engine_from_args(args)
     try:
         result = engine.get_agent_tree(getattr(args, "agent_id", None))
         if args.json_output:

@@ -126,3 +126,29 @@ class TaskMixin:
         """Return failure history for a task."""
         history = _tf.get_task_failure_history(self._connect, task_id)
         return {"task_id": task_id, "history": history, "count": len(history)}
+
+    def wait_for_task(
+        self,
+        task_id: str,
+        timeout_s: float = 60.0,
+        poll_interval_s: float = 2.0,
+    ) -> dict[str, Any]:
+        """Poll until a task reaches a terminal state (completed/failed) or timeout expires.
+
+        Use this to coordinate sequential dependencies between tasks when
+        depends_on alone is not sufficient (e.g., waiting for a task
+        completed by an external agent).
+        """
+        return _tasks.wait_for_task(self._connect, task_id, timeout_s, poll_interval_s)
+
+    def get_available_tasks(self, agent_id: str | None = None) -> dict[str, Any]:
+        """Return tasks whose depends_on are all satisfied (completed) and not currently claimed.
+
+        A task is \"available\" if:
+        - Its status is \"pending\" (not yet claimed)
+        - All tasks in its depends_on list have status \"completed\"
+
+        Use this to find work that can be picked up by an idle agent.
+        """
+        tasks = _tasks.get_available_tasks(self._connect, agent_id)
+        return {"tasks": tasks, "count": len(tasks)}

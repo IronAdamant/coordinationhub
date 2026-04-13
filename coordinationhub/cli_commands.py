@@ -42,6 +42,7 @@ from .cli_vis import (
     cmd_notify_change,
     cmd_get_notifications,
     cmd_prune_notifications,
+    cmd_wait_for_notifications,
     cmd_get_conflicts,
     cmd_contention_hotspots,
     cmd_load_spec,
@@ -72,6 +73,8 @@ from .cli_tasks import (
     cmd_retry_task,
     cmd_dead_letter_queue,
     cmd_task_failure_history,
+    cmd_wait_for_task,
+    cmd_get_available_tasks,
 )
 from .cli_intent import (
     cmd_declare_work_intent,
@@ -85,5 +88,21 @@ from .cli_deps import (
     cmd_get_blockers,
     cmd_assert_can_start,
     cmd_get_all_dependencies,
+)
+from .cli_leases import (
+    cmd_acquire_coordinator_lease,
+    cmd_refresh_coordinator_lease,
+    cmd_release_coordinator_lease,
+    cmd_get_leader,
+    cmd_claim_leadership,
+    cmd_leader_status,
+    cmd_ha_dashboard,
+)
+from .cli_spawner import (
+    cmd_spawn_subagent,
+    cmd_list_pending_spawns,
+    cmd_cancel_spawn,
+    cmd_request_subagent_deregistration,
+    cmd_await_subagent_stopped,
 )
 from .cli_sse import cmd_serve_sse

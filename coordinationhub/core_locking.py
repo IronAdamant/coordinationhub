@@ -102,9 +102,8 @@ class LockingMixin:
                     "lock_type, region_start, region_end, worktree_root) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
                     (norm_path, agent_id, now, ttl, lock_type, region_start, region_end, worktree),
                 )
-                conn.execute("COMMIT")
 
-                # Check scope enforcement before committing the lock
+                # Check scope BEFORE commit so ROLLBACK is valid if violated
                 scope_result = self._check_scope_violation(conn, norm_path, agent_id)
                 if scope_result is not None:
                     conn.execute("ROLLBACK")
@@ -114,6 +113,9 @@ class LockingMixin:
                         "scope_violation": scope_result,
                         "attempts": attempt + 1,
                     }
+
+                conn.execute("COMMIT")
+
                 # Check file_ownership for boundary crossing (warning only)
                 ownership_warning = self._check_ownership_boundary(conn, norm_path, agent_id)
                 result = {"acquired": True, "document_path": norm_path, "locked_by": agent_id,
@@ -127,7 +129,11 @@ class LockingMixin:
                     result["proximity_warning"] = proximity_warning
                 return result
             except Exception:
-                conn.execute("ROLLBACK")
+                try:
+                    conn.execute("ROLLBACK")
+                except sqlite3.OperationalError as e:
+                    if "no transaction is active" not in str(e):
+                        raise
                 raise
 
     def _check_scope_violation(
