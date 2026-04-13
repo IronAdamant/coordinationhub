@@ -76,6 +76,8 @@ class MCPRequestHandler(BaseHTTPRequestHandler):
             self._handle_health()
         elif self.path == "/api/dashboard-data":
             self._serve_api_dashboard()
+        elif self.path == "/events":
+            self._serve_sse_events()
         else:
             self._send_error_json(404, f"Unknown endpoint: {self.path}")
 
@@ -98,6 +100,25 @@ class MCPRequestHandler(BaseHTTPRequestHandler):
         self.send_header("Content-Length", str(len(body)))
         self.end_headers()
         self.wfile.write(body)
+
+    def _serve_sse_events(self) -> None:
+        """GET /events — Server-Sent Events stream of dashboard data every 5s."""
+        import json, time as _time
+        self.send_response(200)
+        self.send_header("Content-Type", "text/event-stream")
+        self.send_header("Cache-Control", "no-cache")
+        self.send_header("Connection", "keep-alive")
+        self.send_header("X-Accel-Buffering", "no")  # disable nginx buffering
+        self.end_headers()
+        while True:
+            try:
+                data = get_dashboard_data(self.server.engine._connect)
+                payload = json.dumps(data, default=str)
+                self.wfile.write(f"data: {payload}\n\n".encode("utf-8"))
+                self.wfile.flush()
+            except Exception:
+                break  # client disconnected
+            _time.sleep(5)
 
     def _handle_list_tools(self) -> None:
         """GET /tools — return all tool schemas."""

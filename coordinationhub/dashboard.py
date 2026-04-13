@@ -221,6 +221,8 @@ DASHBOARD_HTML = r"""<!DOCTYPE html>
 (function() {
   var POLL_INTERVAL = 5000;
   var apiBase = '/api';
+  var es = null;
+  var useSSE = true;
 
   function fetchJSON(url) {
     return fetch(url).then(function(r) {
@@ -228,6 +230,47 @@ DASHBOARD_HTML = r"""<!DOCTYPE html>
       return r.json();
     });
   }
+
+  function onDashboardData(data) {
+    document.getElementById('timestamp').textContent = 'Last updated: ' + new Date().toLocaleTimeString() + (es ? ' (SSE)' : ' (poll)');
+    renderAgentTree(data);
+    renderTasks(data);
+    renderIntents(data);
+    renderHandoffs(data);
+    renderDependencies(data);
+    renderLocks(data);
+  }
+
+  function startSSE() {
+    if (es) es.close();
+    es = new EventSource('/events');
+    es.onmessage = function(evt) {
+      try {
+        var data = JSON.parse(evt.data);
+        onDashboardData(data);
+      } catch (e) { /* ignore parse errors */ }
+    };
+    es.onerror = function() {
+      useSSE = false;
+      es.close();
+      es = null;
+      setTimeout(startSSE, 30000);  // retry SSE every 30s
+    };
+  }
+
+  function poll() {
+    fetchJSON(apiBase + '/dashboard-data')
+      .then(onDashboardData)
+      .catch(function(e) { console.error('Poll error:', e); });
+  }
+
+  startSSE();
+  if (!useSSE) poll();  // fallback polling if SSE unavailable
+  setInterval(function() {
+    if (!useSSE) poll();
+  }, POLL_INTERVAL);
+})();
+</script>
 
   function escapeHTML(str) {
     if (str === null || str === undefined) return '';
@@ -486,26 +529,6 @@ DASHBOARD_HTML = r"""<!DOCTYPE html>
     }
     document.getElementById('lock-timestamp').textContent = locks.length + ' lock(s) \u00b7 ' + new Date().toLocaleTimeString();
   }
-
-  // ---- Polling ----
-  function poll() {
-    fetchJSON(apiBase + '/dashboard-data')
-      .then(function(data) {
-        document.getElementById('timestamp').textContent = 'Last updated: ' + new Date().toLocaleTimeString();
-        renderAgentTree(data);
-        renderTasks(data);
-        renderIntents(data);
-        renderHandoffs(data);
-        renderDependencies(data);
-        renderLocks(data);
-      })
-      .catch(function(e) {
-        console.error('Poll error:', e);
-      });
-  }
-
-  poll();
-  setInterval(poll, POLL_INTERVAL);
 })();
 </script>
 </body>
