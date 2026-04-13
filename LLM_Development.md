@@ -1,11 +1,43 @@
 # LLM_Development.md — CoordinationHub
 
-**Version:** <!-- GEN:version -->0.5.0<!-- /GEN -->
+**Version:** <!-- GEN:version -->0.5.1<!-- /GEN -->
 **Last updated:** 2026-04-13
 
 ## Change Log
 
 All significant changes to the CoordinationHub project are documented here in reverse chronological order.
+
+---
+
+## 2026-04-13 — v0.5.1 Task Hierarchy (Subtasks)
+
+### Motivation
+
+After shipping v0.5.0 (5 Phase 11 features), one remaining item from the original plan was straightforward to layer on top: task hierarchy (parent task → subtasks). The `depends_on` column already tracked prerequisite task IDs but not true parent-child subtask relationships.
+
+### Change
+
+Added `parent_task_id` column to `tasks` table, enabling nested task trees with compression chains.
+
+### New Tools
+
+- `create_subtask(task_id, parent_task_id, parent_agent_id, description, depends_on=None)` — create a subtask under an existing parent task
+- `get_subtasks(parent_task_id)` — get all direct subtasks of a task
+- `get_task_tree(root_task_id)` — get a task with all subtasks recursively as nested tree
+
+### Schema
+
+- Migration v11: `ALTER TABLE tasks ADD COLUMN parent_task_id TEXT`
+- New index: `idx_tasks_parent_task ON tasks(parent_task_id)`
+
+### Counts
+
+| Version | Tools | CLI Commands |
+|---------|-------|--------------|
+| v0.5.1 | 58 | 60 |
+| v0.5.0 | 55 | 57 |
+
+Schema version: 10 → 11
 
 ---
 

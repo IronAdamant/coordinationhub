@@ -1,6 +1,6 @@
 # CoordinationHub — Complete Project Documentation
 
-**Version:** <!-- GEN:version -->0.5.0<!-- /GEN -->
+**Version:** <!-- GEN:version -->0.5.1<!-- /GEN -->
 **Last updated:** 2026-04-13
 
 ## v0.5.0 Changelog — Phase 11 Findings: Multi-Agent Swarm Extensions
@@ -72,6 +72,36 @@ Schema version: v6 → v10 (+4 tables, +12 indexes)
 | `coordinationhub/cli_tasks.py` | CLI task commands |
 | `coordinationhub/cli_intent.py` | CLI work intent commands |
 | `coordinationhub/cli_deps.py` | CLI dependency commands |
+
+---
+
+## v0.5.1 Changelog — Task Hierarchy (Subtasks)
+
+### Change
+
+Added `parent_task_id` column to `tasks` table, enabling nested task trees with compression chains.
+
+### New Tools
+
+| Tool | Description |
+|------|-------------|
+| `create_subtask` | Create a subtask under an existing parent task |
+| `get_subtasks` | Get all direct subtasks of a task |
+| `get_task_tree` | Get a task with all subtasks recursively as nested tree |
+
+### Schema
+
+- Migration v11: `ALTER TABLE tasks ADD COLUMN parent_task_id TEXT`
+- New index: `idx_tasks_parent_task ON tasks(parent_task_id)`
+
+### Counts
+
+| Version | Tools | CLI Commands |
+|---------|-------|--------------|
+| v0.5.1 | 58 | 60 |
+| v0.5.0 | 55 | 57 |
+
+Schema version: 10 → 11
 
 ---
 
