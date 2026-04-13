@@ -69,6 +69,9 @@ from .cli_tasks import (
     cmd_create_subtask,
     cmd_get_subtasks,
     cmd_get_task_tree,
+    cmd_retry_task,
+    cmd_dead_letter_queue,
+    cmd_task_failure_history,
 )
 from .cli_intent import (
     cmd_declare_work_intent,

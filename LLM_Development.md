@@ -1,11 +1,68 @@
 # LLM_Development.md — CoordinationHub
 
-**Version:** <!-- GEN:version -->0.6.0<!-- /GEN -->
+**Version:** <!-- GEN:version -->0.6.1<!-- /GEN -->
 **Last updated:** 2026-04-13
 
 ## Change Log
 
 All significant changes to the CoordinationHub project are documented here in reverse chronological order.
+
+---
+
+## 2026-04-13 — v0.6.1 Task Priority + Dead Letter Queue
+
+### Motivation
+
+Review Seventeen (`MCP_Findings/Review_Seventeen/coordinationhub.md`) evaluated CoordinationHub under a `MultiAgentTaskDistributor` workload and identified 6 gaps. Investigation confirmed:
+
+| Gap | Status |
+|-----|--------|
+| Lock Safety | Already implemented (TTL locks, BEGIN IMMEDIATE, smart reap) |
+| Inter-Agent Messaging | Already implemented (`messages` table + send_message/get_messages) |
+| Task Priority Ignored | **Genuine gap** — priority not in schema |
+| No Failure Recovery / DLQ | **Genuine gap** — no retry/DLQ for tasks |
+| Centralized Bottleneck | Design-level (HA/replication) — deferred |
+| Agent Spawning External | Design-level (elastic scaling) — deferred |
+
+### Change 1 — Task Priority
+
+Tasks can now be created with a `priority` integer (higher = executes first). All task-list queries order by `priority DESC, created_at ASC`.
+
+- **Schema**: `priority INTEGER DEFAULT 0` added to `tasks` table
+- **Migration v12**: `ALTER TABLE tasks ADD COLUMN priority INTEGER DEFAULT 0`
+- **New index**: `idx_tasks_priority ON tasks(priority DESC, created_at ASC)`
+- **`create_task`**: accepts `priority` param (default 0)
+- **`create_subtask`**: accepts `priority` param (default 0)
+- All getter functions order by priority (FIFO within same priority)
+- CLI: `--priority N` flag on `create-task` and `create-subtask`
+
+### Change 2 — Dead Letter Queue
+
+When a task is marked `failed`, the failure is recorded with attempt count. After `max_retries` failures (default 3), the task enters `dead_letter` status.
+
+- **New table**: `task_failures` (schema v13)
+  - `task_id`, `error`, `attempt`, `max_retries`, `first_attempt_at`, `last_attempt_at`, `dead_letter_at`, `status`
+- **New module**: `task_failures.py` (~105 LOC, zero internal deps)
+  - `record_task_failure(connect, task_id, error, max_retries=3)` — called automatically by `update_task_status(status='failed')`
+  - `get_dead_letter_tasks(connect, limit=50)` — returns dead letter queue
+  - `retry_from_dead_letter(connect, task_id)` — resets task to `pending` and marks DLQ entry as `retried`
+  - `get_task_failure_history(connect, task_id)` — full retry history for a task
+- **New MCP tools**: `retry_task`, `get_dead_letter_tasks`, `get_task_failure_history`
+- **New CLI commands**: `retry-task`, `dead-letter-queue`, `task-failure-history`
+- `update_task_status(status='failed', error=...)` now auto-records the failure
+
+### Change 3 — Inter-Agent Messaging Surfaced
+
+Messaging was fully implemented in v0.5.0 but not prominently highlighted. The Review Seventeen "No Inter-Agent Communication" gap was incorrect — no code changes, documentation update only.
+
+### Counts
+
+| Version | Tools | CLI Commands | Schema |
+|---------|-------|--------------|--------|
+| v0.6.1 | 61 (+3 DLQ) | 64 (+3 DLQ) | 13 |
+| v0.6.0 | 58 | 61 | 11 |
+
+Schema version: 11 → 13
 
 ---
 
@@ -699,33 +756,52 @@ Block markers for multi-line content:
 | `coordinationhub/__init__.py` | 14 | CoordinationHub — multi-agent swarm coordination MCP server |
 | `coordinationhub/_storage.py` | 101 | Storage backend for CoordinationHub — SQLite pool, path resolution, lifecycle |
 | `coordinationhub/agent_registry.py` | 292 | Agent lifecycle: register, heartbeat, deregister, lineage management |
-| `coordinationhub/agent_status.py` | 262 | Agent status and file-map query helpers for CoordinationHub |
+| `coordinationhub/agent_status.py` | 274 | Agent status and file-map query helpers for CoordinationHub |
 | `coordinationhub/assessment.py` | 322 | Assessment runner for CoordinationHub coordination test suites |
 | `coordinationhub/assessment_scorers.py` | 237 | Assessment metric scorers for CoordinationHub |
-| `coordinationhub/cli.py` | 182 | CoordinationHub CLI — command-line interface for all 31 coordination tool methods |
+| `coordinationhub/cli.py` | 320 | CoordinationHub CLI — command-line interface for all 55 coordination tool methods |
 | `coordinationhub/cli_agents.py` | 127 | Agent identity and lifecycle CLI commands |
-| `coordinationhub/cli_commands.py` | 48 | CoordinationHub CLI command handlers |
-| `coordinationhub/cli_locks.py` | 158 | Document locking and coordination CLI commands |
+| `coordinationhub/cli_commands.py` | 85 | CoordinationHub CLI command handlers |
+| `coordinationhub/cli_deps.py` | 98 | CLI commands for cross-agent dependency declarations |
+| `coordinationhub/cli_intent.py` | 44 | CLI commands for the work intent board |
+| `coordinationhub/cli_locks.py` | 280 | Document locking and coordination CLI commands |
 | `coordinationhub/cli_setup.py` | 272 | CLI commands for setup and diagnostics: doctor, init, watch |
+| `coordinationhub/cli_sse.py` | 29 | CLI commands for SSE dashboard server |
+| `coordinationhub/cli_tasks.py` | 231 | CLI commands for the task registry |
 | `coordinationhub/cli_utils.py` | 21 | Shared CLI helper functions used by all cli_* sub-modules |
 | `coordinationhub/cli_vis.py` | 290 | Change awareness, audit, graph, and assessment CLI commands |
 | `coordinationhub/conflict_log.py` | 44 | Conflict recording and querying for CoordinationHub |
 | `coordinationhub/context.py` | 91 | Context bundle builder for CoordinationHub agent registration responses |
-| `coordinationhub/core.py` | 281 | CoordinationEngine — core business logic for CoordinationHub |
-| `coordinationhub/core_locking.py` | 269 | Locking and coordination methods for CoordinationEngine |
-| `coordinationhub/db.py` | 266 | SQLite schema, migrations, and connection pool for CoordinationHub |
-| `coordinationhub/dispatch.py` | 38 | Tool dispatch table for CoordinationHub |
+| `coordinationhub/core.py` | 74 | CoordinationEngine — thin host class that inherits all mixins |
+| `coordinationhub/core_change.py` | 118 | ChangeMixin — change notifications, file ownership, conflict audit, status |
+| `coordinationhub/core_dependencies.py` | 48 | DependencyMixin — cross-agent dependency declarations and checks |
+| `coordinationhub/core_handoffs.py` | 28 | HandoffMixin — one-to-many handoff acknowledgment and lifecycle |
+| `coordinationhub/core_identity.py` | 94 | IdentityMixin — agent lifecycle and lineage management |
+| `coordinationhub/core_locking.py` | 378 | Locking and coordination methods for CoordinationEngine |
+| `coordinationhub/core_messaging.py` | 59 | MessagingMixin — inter-agent messages and await |
+| `coordinationhub/core_tasks.py` | 96 | TaskMixin — shared task registry with hierarchy support |
+| `coordinationhub/core_visibility.py` | 114 | VisibilityMixin — coordination graph, project scan, agent status, assessment |
+| `coordinationhub/core_work_intent.py` | 26 | WorkIntentMixin — cooperative work intent board |
+| `coordinationhub/dashboard.py` | 483 | Web dashboard for CoordinationHub — zero external dependencies |
+| `coordinationhub/db.py` | 394 | SQLite schema, migrations, and connection pool for CoordinationHub |
+| `coordinationhub/dependencies.py` | 98 | Cross-agent dependency declaration and satisfaction tracking |
+| `coordinationhub/dispatch.py` | 69 | Tool dispatch table for CoordinationHub |
 | `coordinationhub/graphs.py` | 256 | Declarative coordination graph: loader, validator, in-memory representation |
+| `coordinationhub/handoffs.py` | 96 | Handoff recording and acknowledgement primitives for CoordinationHub |
 | `coordinationhub/hooks/__init__.py` | 1 | Hooks package — Claude Code integration via stdin/stdout event protocol |
 | `coordinationhub/hooks/claude_code.py` | 438 | CoordinationHub hook for Claude Code |
 | `coordinationhub/lock_ops.py` | 191 | Shared lock primitives used by both local locks and coordination locks |
-| `coordinationhub/mcp_server.py` | 209 | HTTP-based MCP server for CoordinationHub — zero external dependencies |
+| `coordinationhub/mcp_server.py` | 252 | HTTP-based MCP server for CoordinationHub — zero external dependencies |
 | `coordinationhub/mcp_stdio.py` | 142 | Stdio-based MCP server for CoordinationHub using the ``mcp`` Python package |
+| `coordinationhub/messages.py` | 90 | Inter-agent messaging primitives for CoordinationHub |
 | `coordinationhub/notifications.py` | 81 | Change notification storage and retrieval for CoordinationHub |
 | `coordinationhub/paths.py` | 38 | Path normalization and project-root detection utilities |
 | `coordinationhub/pending_tasks.py` | 105 | Pending sub-agent task storage for CoordinationHub |
 | `coordinationhub/scan.py` | 198 | File ownership scan for CoordinationHub |
-| `coordinationhub/schemas.py` | 675 | Tool schemas for CoordinationHub — all 31 MCP tools |
+| `coordinationhub/schemas.py` | 1299 | Tool schemas for CoordinationHub — all 31 MCP tools |
+| `coordinationhub/task_failures.py` | 95 | Task failure tracking and dead letter queue for CoordinationHub |
+| `coordinationhub/tasks.py` | 185 | Task registry primitives for CoordinationHub |
+| `coordinationhub/work_intent.py` | 77 | Work intent board primitives for CoordinationHub |
 <!-- /GEN -->
 ```
 

@@ -153,7 +153,8 @@ _SCHEMAS = {
             updated_at       REAL NOT NULL,
             depends_on       TEXT DEFAULT '[]',
             blocked_by       TEXT,
-            summary          TEXT
+            summary          TEXT,
+            priority         INTEGER DEFAULT 0
         )
     """,
     "work_intent": """
@@ -184,6 +185,19 @@ _SCHEMAS = {
             agent_id        TEXT NOT NULL,
             acknowledged_at REAL NOT NULL,
             PRIMARY KEY (handoff_id, agent_id)
+        )
+    """,
+    "task_failures": """
+        CREATE TABLE IF NOT EXISTS task_failures (
+            id               INTEGER PRIMARY KEY AUTOINCREMENT,
+            task_id          TEXT NOT NULL,
+            error            TEXT,
+            attempt          INTEGER NOT NULL DEFAULT 1,
+            max_retries      INTEGER NOT NULL DEFAULT 3,
+            first_attempt_at REAL NOT NULL,
+            last_attempt_at  REAL NOT NULL,
+            dead_letter_at   REAL,
+            status           TEXT DEFAULT 'failed'
         )
     """,
     "agent_dependencies": """
@@ -222,16 +236,19 @@ _INDEXES = [
     "CREATE INDEX IF NOT EXISTS idx_tasks_parent_task ON tasks(parent_task_id)",
     "CREATE INDEX IF NOT EXISTS idx_tasks_assigned ON tasks(assigned_agent_id)",
     "CREATE INDEX IF NOT EXISTS idx_tasks_status ON tasks(status)",
+    "CREATE INDEX IF NOT EXISTS idx_tasks_priority ON tasks(priority DESC, created_at ASC)",
     "CREATE INDEX IF NOT EXISTS idx_handoffs_from ON handoffs(from_agent_id)",
     "CREATE INDEX IF NOT EXISTS idx_handoffs_status ON handoffs(status)",
     "CREATE INDEX IF NOT EXISTS idx_handoff_acks_id ON handoff_acks(handoff_id)",
     "CREATE INDEX IF NOT EXISTS idx_deps_dependent ON agent_dependencies(dependent_agent_id)",
     "CREATE INDEX IF NOT EXISTS idx_deps_depends_on ON agent_dependencies(depends_on_agent_id)",
     "CREATE INDEX IF NOT EXISTS idx_deps_satisfied ON agent_dependencies(satisfied)",
+    "CREATE INDEX IF NOT EXISTS idx_task_failures_task ON task_failures(task_id)",
+    "CREATE INDEX IF NOT EXISTS idx_task_failures_status ON task_failures(status)",
 ]
 
 
-_CURRENT_SCHEMA_VERSION = 11
+_CURRENT_SCHEMA_VERSION = 13
 
 
 def _get_schema_version(conn: sqlite3.Connection) -> int:
@@ -290,6 +307,25 @@ def _migrate_v10_to_v11(conn: sqlite3.Connection) -> None:
     conn.execute("ALTER TABLE tasks ADD COLUMN parent_task_id TEXT")
 
 
+def _migrate_v11_to_v12(conn: sqlite3.Connection) -> None:
+    """Add priority column to tasks table."""
+    cols = [row[1] for row in conn.execute("PRAGMA table_info(tasks)").fetchall()]
+    if "priority" in cols:
+        return  # Already migrated
+    conn.execute("ALTER TABLE tasks ADD COLUMN priority INTEGER DEFAULT 0")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_tasks_priority ON tasks(priority DESC, created_at ASC)")
+
+
+def _migrate_v12_to_v13(conn: sqlite3.Connection) -> None:
+    """Add task_failures table for dead letter queue."""
+    cols = [row[1] for row in conn.execute("PRAGMA table_info(task_failures)").fetchall()]
+    if "task_id" in cols:
+        return  # Already migrated
+    conn.execute(_SCHEMAS["task_failures"])
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_task_failures_task ON task_failures(task_id)")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_task_failures_status ON task_failures(status)")
+
+
 _MIGRATIONS = {
     2: _migrate_v1_to_v2,
     3: _migrate_v2_to_v3,
@@ -301,15 +337,9 @@ _MIGRATIONS = {
     9: lambda conn: None,  # handoffs + handoff_acks tables added via CREATE TABLE IF NOT EXISTS
     10: lambda conn: None,  # agent_dependencies table added via CREATE TABLE IF NOT EXISTS
     11: _migrate_v10_to_v11,  # parent_task_id column added via ALTER TABLE
+    12: _migrate_v11_to_v12,  # priority column added via ALTER TABLE
+    13: _migrate_v12_to_v13,  # task_failures table added
 }
-
-
-def _migrate_v10_to_v11(conn: sqlite3.Connection) -> None:
-    """Add parent_task_id column to tasks table for subtask hierarchy."""
-    cols = [row[1] for row in conn.execute("PRAGMA table_info(tasks)").fetchall()]
-    if "parent_task_id" in cols:
-        return  # Already migrated
-    conn.execute("ALTER TABLE tasks ADD COLUMN parent_task_id TEXT")
 
 
 def init_schema(conn: sqlite3.Connection) -> None:

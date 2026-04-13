@@ -32,6 +32,7 @@ EXPECTED_COMMANDS = {
     "acknowledge-handoff", "complete-handoff", "cancel-handoff", "get-handoffs",
     "declare-dependency", "check-dependencies", "satisfy-dependency",
     "get-blockers", "assert-can-start", "get-all-dependencies",
+    "retry-task", "dead-letter-queue", "task-failure-history",
 }
 
 

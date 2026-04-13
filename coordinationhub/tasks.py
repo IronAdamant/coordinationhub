@@ -22,18 +22,19 @@ def create_task(
     parent_agent_id: str,
     description: str,
     depends_on: list[str] | None = None,
+    priority: int = 0,
 ) -> dict[str, Any]:
     """Create a new task in the registry."""
     now = time.time()
     with connect() as conn:
         cursor = conn.execute(
             """INSERT INTO tasks
-            (id, parent_agent_id, description, created_at, updated_at, depends_on)
-            VALUES (?, ?, ?, ?, ?, ?)""",
+            (id, parent_agent_id, description, created_at, updated_at, depends_on, priority)
+            VALUES (?, ?, ?, ?, ?, ?, ?)""",
             (task_id, parent_agent_id, description, now, now,
-             json.dumps(depends_on) if depends_on else "[]"),
+             json.dumps(depends_on) if depends_on else "[]", priority),
         )
-    return {"created": True, "task_id": task_id}
+    return {"created": True, "task_id": task_id, "priority": priority}
 
 
 def assign_task(
@@ -98,7 +99,7 @@ def get_child_tasks(
     """Get all tasks created by a given agent."""
     with connect() as conn:
         rows = conn.execute(
-            "SELECT * FROM tasks WHERE parent_agent_id=? ORDER BY created_at",
+            "SELECT * FROM tasks WHERE parent_agent_id=? ORDER BY priority DESC, created_at",
             (parent_agent_id,),
         ).fetchall()
     tasks = []
@@ -117,7 +118,7 @@ def get_tasks_by_agent(
     """Get all tasks assigned to a given agent."""
     with connect() as conn:
         rows = conn.execute(
-            "SELECT * FROM tasks WHERE assigned_agent_id=? ORDER BY created_at",
+            "SELECT * FROM tasks WHERE assigned_agent_id=? ORDER BY priority DESC, created_at",
             (assigned_agent_id,),
         ).fetchall()
     tasks = []
@@ -133,7 +134,7 @@ def get_all_tasks(connect: ConnectFn) -> list[dict[str, Any]]:
     """Get all tasks in the registry."""
     with connect() as conn:
         rows = conn.execute(
-            "SELECT * FROM tasks ORDER BY created_at"
+            "SELECT * FROM tasks ORDER BY priority DESC, created_at"
         ).fetchall()
     tasks = []
     for row in rows:
@@ -151,25 +152,26 @@ def create_subtask(
     parent_agent_id: str,
     description: str,
     depends_on: list[str] | None = None,
+    priority: int = 0,
 ) -> dict[str, Any]:
     """Create a new subtask under an existing parent task."""
     now = time.time()
     with connect() as conn:
         conn.execute(
             """INSERT INTO tasks
-            (id, parent_task_id, parent_agent_id, description, created_at, updated_at, depends_on)
-            VALUES (?, ?, ?, ?, ?, ?, ?)""",
+            (id, parent_task_id, parent_agent_id, description, created_at, updated_at, depends_on, priority)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
             (task_id, parent_task_id, parent_agent_id, description, now, now,
-             json.dumps(depends_on) if depends_on else "[]"),
+             json.dumps(depends_on) if depends_on else "[]", priority),
         )
-    return {"created": True, "task_id": task_id, "parent_task_id": parent_task_id}
+    return {"created": True, "task_id": task_id, "parent_task_id": parent_task_id, "priority": priority}
 
 
 def get_subtasks(connect: ConnectFn, parent_task_id: str) -> list[dict[str, Any]]:
     """Get all direct subtasks of a given task."""
     with connect() as conn:
         rows = conn.execute(
-            "SELECT * FROM tasks WHERE parent_task_id=? ORDER BY created_at",
+            "SELECT * FROM tasks WHERE parent_task_id=? ORDER BY priority DESC, created_at",
             (parent_task_id,),
         ).fetchall()
     tasks = []

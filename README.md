@@ -126,7 +126,7 @@ Every agent gets a unique ID. Files are locked by agent ID. The root agent (your
 
 Agents don't message each other directly. Instead they communicate through the shared database: lock a file, write to it, notify that it changed, release the lock. Other agents poll for notifications to see what happened.
 
-## MCP Tools (<!-- GEN:tool-count -->58<!-- /GEN -->)
+## MCP Tools (<!-- GEN:tool-count -->61<!-- /GEN -->)
 
 | Category | Tools |
 |----------|-------|

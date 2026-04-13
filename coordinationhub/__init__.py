@@ -11,7 +11,7 @@ from __future__ import annotations
 from .core import CoordinationEngine
 from .mcp_server import CoordinationHubMCPServer
 
-__version__ = "0.6.0"
+__version__ = "0.6.1"
 
 __all__ = [
     "CoordinationEngine",
