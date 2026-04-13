@@ -1,7 +1,47 @@
 # CoordinationHub — Complete Project Documentation
 
-**Version:** <!-- GEN:version -->0.6.1<!-- /GEN -->
+**Version:** <!-- GEN:version -->0.6.2<!-- /GEN -->
 **Last updated:** 2026-04-13
+
+## v0.6.2 Changelog — Lock Bug Fix + Task/Notification Wait Primitives
+
+### Motivation
+
+Review Eighteen (`findings/Kimi_review_1/kimi_findings.md`) tested CoordinationHub under a live 3-agent swarm. Found: lock transaction bug, missing task-wait primitive, missing long-poll for notifications. Stale-lock-on-crash and opaque lock conflicts were already handled.
+
+### Lock Transaction Bug Fix (P0)
+
+- `acquire_lock` returned "cannot rollback - no transaction is active" on every call despite lock being acquired
+- Root cause: scope check ran AFTER COMMIT; rollback attempted on inactive transaction
+- Fix: moved scope check BEFORE COMMIT in `core_locking.py`
+- Also fixed exception handler to catch "no transaction is active" gracefully
+
+### wait_for_task (P0)
+
+- `wait_for_task(task_id, timeout_s=60, poll_interval_s=2)` — blocks until task reaches `completed` or `failed`
+- Added to `tasks.py`, `core_tasks.py`, `schemas.py`, `dispatch.py`
+- CLI: `coordinationhub wait-for-task <task_id> [--timeout S]`
+
+### get_available_tasks (P0)
+
+- `get_available_tasks(agent_id=None)` — returns tasks whose `depends_on` are all satisfied and are unclaimed
+- Added to `tasks.py`, `core_tasks.py`, `schemas.py`, `dispatch.py`
+- CLI: `coordinationhub get-available-tasks [--agent-id <id>]`
+
+### wait_for_notifications (P1)
+
+- `wait_for_notifications(agent_id, timeout_s=30, poll_interval_s=2, exclude_agent=None)` — long-poll for new notifications
+- Added to `notifications.py`, `core_change.py`, `schemas.py`, `dispatch.py`
+- CLI: `coordinationhub wait-for-notifications <id> [--timeout S]`
+
+### Counts
+
+| Version | Tools | CLI Commands | Schema |
+|---------|-------|--------------|--------|
+| v0.6.2 | 64 | 67 | 13 |
+| v0.6.1 | 61 | 64 | 13 |
+
+---
 
 ## v0.6.1 Changelog — Task Priority + Dead Letter Queue
 
