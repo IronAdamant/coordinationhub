@@ -10,7 +10,7 @@ def cmd_serve_sse(args):
     """Start the HTTP server with SSE dashboard at /events and open browser."""
     from coordinationhub.mcp_server import CoordinationHubMCPServer
     host = getattr(args, "host", "127.0.0.1")
-    port = getattr(args, "port", 9878)
+    port = getattr(args, "port", 9898)
     no_browser = getattr(args, "no_browser", False)
 
     server = CoordinationHubMCPServer(host=host, port=port)
