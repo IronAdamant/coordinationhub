@@ -55,16 +55,20 @@ TOOL_DISPATCH: dict[str, tuple[str, list[str]]] = {
     "get_messages": ("get_messages", ["agent_id", "unread_only", "limit"]),
     "mark_messages_read": ("mark_messages_read", ["agent_id", "message_ids"]),
     # Task Registry
-    "create_task": ("create_task", ["task_id", "parent_agent_id", "description", "depends_on"]),
+    "create_task": ("create_task", ["task_id", "parent_agent_id", "description", "depends_on", "priority"]),
     "assign_task": ("assign_task", ["task_id", "assigned_agent_id"]),
-    "update_task_status": ("update_task_status", ["task_id", "status", "summary", "blocked_by"]),
+    "update_task_status": ("update_task_status", ["task_id", "status", "summary", "blocked_by", "error"]),
     "get_task": ("get_task", ["task_id"]),
     "get_child_tasks": ("get_child_tasks", ["parent_agent_id"]),
     "get_tasks_by_agent": ("get_tasks_by_agent", ["assigned_agent_id"]),
     "get_all_tasks": ("get_all_tasks", []),
-    "create_subtask": ("create_subtask", ["task_id", "parent_task_id", "parent_agent_id", "description", "depends_on"]),
+    "create_subtask": ("create_subtask", ["task_id", "parent_task_id", "parent_agent_id", "description", "depends_on", "priority"]),
     "get_subtasks": ("get_subtasks", ["parent_task_id"]),
     "get_task_tree": ("get_task_tree", ["root_task_id"]),
+    # Dead Letter Queue
+    "retry_task": ("retry_task", ["task_id"]),
+    "get_dead_letter_tasks": ("get_dead_letter_tasks", ["limit"]),
+    "get_task_failure_history": ("get_task_failure_history", ["task_id"]),
     # Work Intent Board
     "declare_work_intent": ("declare_work_intent", ["agent_id", "document_path", "intent", "ttl"]),
     "get_work_intents": ("get_work_intents", ["agent_id"]),

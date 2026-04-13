@@ -880,6 +880,11 @@ TOOL_SCHEMAS_TASKS: dict[str, dict] = {
                     "items": {"type": "string"},
                     "description": "Task IDs that must complete before this one starts",
                 },
+                "priority": {
+                    "type": "integer",
+                    "description": "Task priority (higher values execute first; default 0)",
+                    "default": 0,
+                },
             },
             "required": ["task_id", "parent_agent_id", "description"],
         },
@@ -915,7 +920,7 @@ TOOL_SCHEMAS_TASKS: dict[str, dict] = {
                 },
                 "status": {
                     "type": "string",
-                    "enum": ["pending", "in_progress", "completed", "blocked"],
+                    "enum": ["pending", "in_progress", "completed", "blocked", "failed"],
                     "description": "New status for the task",
                 },
                 "summary": {
@@ -925,6 +930,10 @@ TOOL_SCHEMAS_TASKS: dict[str, dict] = {
                 "blocked_by": {
                     "type": "string",
                     "description": "Task ID that is blocking this task",
+                },
+                "error": {
+                    "type": "string",
+                    "description": "Error message when marking a task as failed (records to dead letter queue)",
                 },
             },
             "required": ["task_id", "status"],
@@ -1005,6 +1014,11 @@ TOOL_SCHEMAS_TASKS: dict[str, dict] = {
                     "type": "array",
                     "items": {"type": "string"},
                     "description": "Task IDs that must complete before this subtask starts",
+                },
+                "priority": {
+                    "type": "integer",
+                    "description": "Subtask priority (higher values execute first; default 0)",
+                    "default": 0,
                 },
             },
             "required": ["task_id", "parent_task_id", "parent_agent_id", "description"],
@@ -1287,6 +1301,61 @@ TOOL_SCHEMAS_DEPS: dict[str, dict] = {
 }
 
 
+TOOL_SCHEMAS_DLQ: dict[str, dict] = {
+    "retry_task": {
+        "description": (
+            "Retry a task from the dead letter queue. "
+            "Resets the task to 'pending' status so it can be reassigned and retried. "
+            "Only tasks in dead_letter status can be retried."
+        ),
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "task_id": {
+                    "type": "string",
+                    "description": "Task ID to retry from the dead letter queue",
+                },
+            },
+            "required": ["task_id"],
+        },
+    },
+    "get_dead_letter_tasks": {
+        "description": (
+            "Get all tasks currently in the dead letter queue. "
+            "Tasks enter the DLQ after exceeding max_retries failure attempts. "
+            "Use retry_task to resurrect a task from the DLQ."
+        ),
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "limit": {
+                    "type": "integer",
+                    "description": "Maximum number of dead letter tasks to return (default 50)",
+                    "default": 50,
+                },
+            },
+        },
+    },
+    "get_task_failure_history": {
+        "description": (
+            "Get the failure history for a task. "
+            "Returns all recorded failure attempts including error messages, "
+            "attempt counts, and whether the task entered dead_letter status."
+        ),
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "task_id": {
+                    "type": "string",
+                    "description": "Task ID whose failure history to retrieve",
+                },
+            },
+            "required": ["task_id"],
+        },
+    },
+}
+
+
 # ------------------------------------------------------------------ #
 # Aggregate
 # ------------------------------------------------------------------ #
@@ -1303,4 +1372,5 @@ TOOL_SCHEMAS: dict[str, dict] = (
     | TOOL_SCHEMAS_INTENT
     | TOOL_SCHEMAS_HANDOFFS
     | TOOL_SCHEMAS_DEPS
+    | TOOL_SCHEMAS_DLQ
 )

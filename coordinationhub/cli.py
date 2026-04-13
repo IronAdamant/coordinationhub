@@ -278,6 +278,7 @@ def create_parser() -> argparse.ArgumentParser:
     p.add_argument("description", help="What this task involves")
     p.add_argument("--depends-on", nargs="+", default=None, dest="depends_on",
                    help="Task IDs that must complete first")
+    p.add_argument("--priority", type=int, default=0, help="Task priority (higher values execute first; default 0)")
 
     p = sub.add_parser("assign-task", parents=[shared], help="Assign a task to an agent")
     p.add_argument("task_id", help="Task to assign")
@@ -285,11 +286,12 @@ def create_parser() -> argparse.ArgumentParser:
 
     p = sub.add_parser("update-task-status", parents=[shared], help="Update a task's status")
     p.add_argument("task_id", help="Task to update")
-    p.add_argument("status", choices=["pending", "in_progress", "completed", "blocked"],
+    p.add_argument("status", choices=["pending", "in_progress", "completed", "blocked", "failed"],
                    help="New status")
     p.add_argument("--summary", default=None, help="Completion summary (used for compression chains)")
     p.add_argument("--blocked-by", default=None, dest="blocked_by",
                    help="Task ID blocking this task")
+    p.add_argument("--error", default=None, help="Error message (records to dead letter queue)")
 
     p = sub.add_parser("get-task", parents=[shared], help="Get a single task by ID")
     p.add_argument("task_id", help="Task to retrieve")
@@ -309,12 +311,23 @@ def create_parser() -> argparse.ArgumentParser:
     p.add_argument("description", help="What this subtask involves")
     p.add_argument("--depends-on", nargs="+", default=None, dest="depends_on",
                    help="Task IDs that must complete first")
+    p.add_argument("--priority", type=int, default=0, help="Subtask priority (higher values execute first; default 0)")
 
     p = sub.add_parser("get-subtasks", parents=[shared], help="Get all direct subtasks of a task")
     p.add_argument("parent_task_id", help="ID of the parent task whose subtasks to retrieve")
 
     p = sub.add_parser("get-task-tree", parents=[shared], help="Get a task with all subtasks recursively")
     p.add_argument("root_task_id", help="ID of the root task to build the tree from")
+
+    # --- DEAD LETTER QUEUE ---
+    p = sub.add_parser("retry-task", parents=[shared], help="Retry a task from the dead letter queue")
+    p.add_argument("task_id", help="Task ID to retry from the dead letter queue")
+
+    p = sub.add_parser("dead-letter-queue", parents=[shared], help="Get all tasks in the dead letter queue")
+    p.add_argument("--limit", type=int, default=50, help="Maximum number of tasks to return (default 50)")
+
+    p = sub.add_parser("task-failure-history", parents=[shared], help="Get failure history for a task")
+    p.add_argument("task_id", help="Task ID whose failure history to retrieve")
 
     # --- WORK INTENT BOARD ---
     p = sub.add_parser("declare-work-intent", parents=[shared], help="Declare intent to work on a file")
@@ -409,6 +422,9 @@ _COMMANDS = {
     "get-blockers": "cmd_get_blockers",
     "assert-can-start": "cmd_assert_can_start",
     "get-all-dependencies": "cmd_get_all_dependencies",
+    "retry-task": "cmd_retry_task",
+    "dead-letter-queue": "cmd_dead_letter_queue",
+    "task-failure-history": "cmd_task_failure_history",
 }
 
 
