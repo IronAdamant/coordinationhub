@@ -83,3 +83,4 @@ from .cli_deps import (
     cmd_assert_can_start,
     cmd_get_all_dependencies,
 )
+from .cli_sse import cmd_serve_sse

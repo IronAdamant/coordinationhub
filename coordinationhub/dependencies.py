@@ -99,3 +99,19 @@ def get_all_dependencies(
                 "SELECT * FROM agent_dependencies"
             ).fetchall()
     return [dict(r) for r in rows]
+
+
+def satisfy_dependencies_for_task(connect: ConnectFn, task_id: str) -> dict[str, Any]:
+    """Mark all dependencies with depends_on_task_id=task_id as satisfied.
+
+    Called automatically by TaskMixin.update_task_status when a task completes.
+    """
+    now = time.time()
+    with connect() as conn:
+        cursor = conn.execute(
+            """UPDATE agent_dependencies
+               SET satisfied=1, satisfied_at=?
+               WHERE depends_on_task_id=? AND satisfied=0""",
+            (now, task_id),
+        )
+    return {"satisfied": cursor.rowcount}

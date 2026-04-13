@@ -1,11 +1,58 @@
 # LLM_Development.md — CoordinationHub
 
-**Version:** <!-- GEN:version -->0.5.1<!-- /GEN -->
+**Version:** <!-- GEN:version -->0.6.0<!-- /GEN -->
 **Last updated:** 2026-04-13
 
 ## Change Log
 
 All significant changes to the CoordinationHub project are documented here in reverse chronological order.
+
+---
+
+## 2026-04-13 — v0.6.0 Refactor + Swarm Scale
+
+### Motivation
+
+core.py was 573 lines with 40+ methods spanning 8 unrelated domain groups. Adding tools required touching core.py + dispatch + schemas + CLI — per-feature cost was high. The deferred swarm-scale items also needed addressing.
+
+### Phase 1 — core.py Split into Mixins
+
+core.py replaced with a thin `CoordinationEngine` host class that inherits from 9 focused mixins:
+
+| Mixin | File | Methods |
+|-------|------|---------|
+| `IdentityMixin` | `core_identity.py` | register_agent, heartbeat, deregister_agent, list_agents, get_lineage, get_siblings, find_agent_by_claude_id, generate_agent_id |
+| `MessagingMixin` | `core_messaging.py` | await_agent, send_message, get_messages, mark_messages_read |
+| `TaskMixin` | `core_tasks.py` | create_task, assign_task, update_task_status, get_task, get_child_tasks, get_tasks_by_agent, get_all_tasks, create_subtask, get_subtasks, get_task_tree |
+| `WorkIntentMixin` | `core_work_intent.py` | declare_work_intent, get_work_intents, clear_work_intent |
+| `HandoffMixin` | `core_handoffs.py` | acknowledge_handoff, complete_handoff, cancel_handoff, get_handoffs |
+| `DependencyMixin` | `core_dependencies.py` | declare_dependency, check_dependencies, satisfy_dependency, get_blockers, assert_can_start, get_all_dependencies |
+| `ChangeMixin` | `core_change.py` | notify_change, claim_file_ownership, get_notifications, prune_notifications, get_conflicts, get_contention_hotspots, status |
+| `VisibilityMixin` | `core_visibility.py` | load_coordination_spec, validate_graph, scan_project, get_agent_status, get_agent_tree, get_file_agent_map, update_agent_status, run_assessment, assess_current_session |
+| `LockingMixin` | `core_locking.py` | (already separate) acquire_lock, release_lock, refresh_lock, get_lock_status, list_locks, release_agent_locks, reap_expired_locks, reap_stale_agents, broadcast, wait_for_locks |
+
+All mixins follow the host-provided contract: `self._connect()` and `self._storage.project_root`. Cross-mixin calls resolved via MRO (e.g. `deregister_agent` calls `self.release_agent_locks` which is on the host inherited from `LockingMixin`).
+
+### Phase 2 — Dependency Satisfaction Auto-Trigger
+
+When `update_task_status` is called with `status='completed'`, the engine now automatically marks all `agent_dependencies` with `depends_on_task_id=task_id` as satisfied.
+
+New function in `dependencies.py`: `satisfy_dependencies_for_task(connect, task_id)` — `UPDATE agent_dependencies SET satisfied=1, satisfied_at=? WHERE depends_on_task_id=? AND satisfied=0`.
+
+### Phase 3 — SSE Dashboard
+
+`GET /events` — Server-Sent Events stream of dashboard data every 5 seconds, replacing polling-based dashboard. Dashboard HTML updated to use `EventSource('/events')` with automatic fallback to polling if SSE is unavailable.
+
+New CLI: `coordinationhub serve-sse --port 9878` — starts MCP server with SSE dashboard.
+
+### Counts
+
+| Version | Tools | CLI Commands |
+|---------|-------|--------------|
+| v0.6.0 | 58 | 61 (+serve-sse) |
+| v0.5.1 | 58 | 60 |
+
+Schema version: 11 (unchanged)
 
 ---
 

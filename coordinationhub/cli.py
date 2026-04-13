@@ -36,6 +36,11 @@ def create_parser() -> argparse.ArgumentParser:
     # serve-mcp
     sub.add_parser("serve-mcp", parents=[shared], help="Start MCP server (stdio mode)")
 
+    # serve-sse
+    p = sub.add_parser("serve-sse", parents=[shared], help="Start HTTP server with SSE dashboard")
+    p.add_argument("--port", type=int, default=9878)
+    p.add_argument("--host", default="127.0.0.1")
+
     # status
     sub.add_parser("status", parents=[shared], help="Get coordination system status summary")
 
@@ -356,7 +361,7 @@ def create_parser() -> argparse.ArgumentParser:
 # ------------------------------------------------------------------ #
 
 _COMMANDS = {
-    "serve": "cmd_serve", "serve-mcp": "cmd_serve_mcp", "status": "cmd_status",
+    "serve": "cmd_serve", "serve-mcp": "cmd_serve_mcp", "serve-sse": "cmd_serve_sse", "status": "cmd_status",
     "register": "cmd_register", "heartbeat": "cmd_heartbeat", "deregister": "cmd_deregister",
     "list-agents": "cmd_list_agents", "lineage": "cmd_lineage", "siblings": "cmd_siblings",
     "acquire-lock": "cmd_acquire_lock", "release-lock": "cmd_release_lock",

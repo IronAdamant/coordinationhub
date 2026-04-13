@@ -138,7 +138,7 @@ Agents don't message each other directly. Instead they communicate through the s
 | **Audit** | `get_conflicts`, `get_contention_hotspots`, `status` |
 | **Visibility** | `load_coordination_spec`, `validate_graph`, `scan_project`, `get_agent_status`, `get_file_agent_map`, `update_agent_status`, `run_assessment`, `assess_current_session`, [`get_agent_tree`](#agent-tree-view) |
 
-## CLI Commands (60)
+## CLI Commands (61)
 
 ```bash
 # Setup & diagnostics

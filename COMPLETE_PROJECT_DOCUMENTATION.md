@@ -1,7 +1,36 @@
 # CoordinationHub — Complete Project Documentation
 
-**Version:** <!-- GEN:version -->0.5.1<!-- /GEN -->
+**Version:** <!-- GEN:version -->0.6.0<!-- /GEN -->
 **Last updated:** 2026-04-13
+
+## v0.6.0 Changelog — Refactor + Swarm Scale
+
+### Phase 1 — core.py Split into Mixins
+
+core.py (573 lines, 40+ methods) replaced with thin `CoordinationEngine` host class inheriting from 9 focused mixins. Per-feature cost reduced from ~6 files to ~4 files.
+
+New files: `core_identity.py`, `core_messaging.py`, `core_tasks.py`, `core_work_intent.py`, `core_handoffs.py`, `core_dependencies.py`, `core_change.py`, `core_visibility.py`.
+
+### Phase 2 — Dependency Auto-Trigger
+
+`update_task_status(task_id, status='completed')` now auto-satisfies all `agent_dependencies` where `depends_on_task_id=task_id`. No manual `satisfy_dependency` call needed.
+
+New function: `satisfy_dependencies_for_task(connect, task_id)` in `dependencies.py`.
+
+### Phase 3 — SSE Dashboard
+
+`GET /events` — Server-Sent Events stream, replacing polling. Dashboard uses `EventSource('/events')` with polling fallback.
+
+New CLI: `serve-sse` on port 9878.
+
+### Counts
+
+| Version | Tools | CLI Commands |
+|---------|-------|--------------|
+| v0.6.0 | 58 | 61 |
+| v0.5.1 | 58 | 60 |
+
+---
 
 ## v0.5.0 Changelog — Phase 11 Findings: Multi-Agent Swarm Extensions
 

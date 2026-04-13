@@ -16,7 +16,7 @@ from coordinationhub.core import CoordinationEngine
 
 
 EXPECTED_COMMANDS = {
-    "serve", "serve-mcp", "status", "register", "heartbeat", "deregister",
+    "serve", "serve-mcp", "serve-sse", "status", "register", "heartbeat", "deregister",
     "list-agents", "lineage", "siblings", "acquire-lock", "release-lock",
     "refresh-lock", "lock-status", "list-locks", "release-agent-locks",
     "reap-expired-locks", "reap-stale-agents", "broadcast", "wait-for-locks",
