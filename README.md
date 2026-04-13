@@ -134,9 +134,10 @@ Agents don't message each other directly. Instead they communicate through the s
 | **Locking** | `acquire_lock`, `release_lock`, `refresh_lock`, `get_lock_status`, `list_locks`, `release_agent_locks`, `reap_expired_locks`, `reap_stale_agents` |
 | **Coordination** | `broadcast`, `wait_for_locks`, `await_agent` |
 | **Messaging** | `send_message`, `get_messages`, `mark_messages_read` |
-| **Changes** | `notify_change`, `get_notifications`, `prune_notifications` |
+| **Changes** | `notify_change`, `get_notifications`, `prune_notifications`, `wait_for_notifications` |
 | **Audit** | `get_conflicts`, `get_contention_hotspots`, `status` |
 | **Visibility** | `load_coordination_spec`, `validate_graph`, `scan_project`, `get_agent_status`, `get_file_agent_map`, `update_agent_status`, `run_assessment`, `assess_current_session`, [`get_agent_tree`](#agent-tree-view) |
+| **Tasks** | `create_task`, `assign_task`, `update_task_status`, `get_task`, `get_child_tasks`, `get_tasks_by_agent`, `get_all_tasks`, `create_subtask`, `get_subtasks`, `get_task_tree`, `wait_for_task`, `get_available_tasks`, `retry_task`, `get_dead_letter_tasks`, `get_task_failure_history` |
 
 ## CLI Commands (61)
 
@@ -181,6 +182,7 @@ coordinationhub wait-for-locks <id> <paths...>
 coordinationhub notify-change <path> <type> <id>
 coordinationhub get-notifications
 coordinationhub prune-notifications
+coordinationhub wait-for-notifications <id> [--timeout S] [--exclude-agent <agent>]
 coordinationhub get-conflicts
 
 # Graph & assessment
@@ -189,6 +191,17 @@ coordinationhub validate-spec
 coordinationhub scan-project
 coordinationhub assess --suite <file>          # score a hand-authored trace suite
 coordinationhub assess-session                 # score the current live session (no suite file needed)
+
+# Tasks
+coordinationhub create-task <task_id> <parent_agent_id> <description> [--depends-on <task_id>...]
+coordinationhub assign-task <task_id> <agent_id>
+coordinationhub update-task-status <task_id> <status> [--summary <text>]
+coordinationhub get-task <task_id>
+coordinationhub get-all-tasks
+coordinationhub wait-for-task <task_id> [--timeout S]     # poll until terminal state
+coordinationhub get-available-tasks [--agent-id <id>]      # tasks with satisfied deps
+coordinationhub retry-task <task_id>
+coordinationhub dead-letter-queue
 ```
 
 ## Agent ID Format

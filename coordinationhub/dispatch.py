@@ -35,6 +35,7 @@ TOOL_DISPATCH: dict[str, tuple[str, list[str]]] = {
     "notify_change": ("notify_change", ["document_path", "change_type", "agent_id"]),
     "get_notifications": ("get_notifications", ["since", "exclude_agent", "limit"]),
     "prune_notifications": ("prune_notifications", ["max_age_seconds", "max_entries"]),
+    "wait_for_notifications": ("wait_for_notifications", ["agent_id", "timeout_s", "poll_interval_s", "exclude_agent"]),
     # Audit
     "get_conflicts": ("get_conflicts", ["document_path", "agent_id", "limit"]),
     "get_contention_hotspots": ("get_contention_hotspots", ["limit"]),
@@ -65,6 +66,8 @@ TOOL_DISPATCH: dict[str, tuple[str, list[str]]] = {
     "create_subtask": ("create_subtask", ["task_id", "parent_task_id", "parent_agent_id", "description", "depends_on", "priority"]),
     "get_subtasks": ("get_subtasks", ["parent_task_id"]),
     "get_task_tree": ("get_task_tree", ["root_task_id"]),
+    "wait_for_task": ("wait_for_task", ["task_id", "timeout_s", "poll_interval_s"]),
+    "get_available_tasks": ("get_available_tasks", ["agent_id"]),
     # Dead Letter Queue
     "retry_task": ("retry_task", ["task_id"]),
     "get_dead_letter_tasks": ("get_dead_letter_tasks", ["limit"]),
@@ -86,4 +89,17 @@ TOOL_DISPATCH: dict[str, tuple[str, list[str]]] = {
     "get_blockers": ("get_blockers", ["agent_id"]),
     "assert_can_start": ("assert_can_start", ["agent_id"]),
     "get_all_dependencies": ("get_all_dependencies", ["dependent_agent_id"]),
+    # Leases — HA Coordinator Leadership
+    "acquire_coordinator_lease": ("acquire_coordinator_lease", ["agent_id", "ttl"]),
+    "refresh_coordinator_lease": ("refresh_coordinator_lease", ["agent_id"]),
+    "release_coordinator_lease": ("release_coordinator_lease", ["agent_id"]),
+    "get_leader": ("get_leader", []),
+    "claim_leadership": ("claim_leadership", ["agent_id", "ttl"]),
+    # Spawner — Sub-Agent Registry
+    "spawn_subagent": ("spawn_subagent", ["parent_agent_id", "subagent_type", "description", "prompt"]),
+    "get_pending_spawns": ("get_pending_spawns", ["parent_agent_id", "include_consumed"]),
+    "await_subagent_registration": ("await_subagent_registration", ["parent_agent_id", "subagent_type", "timeout"]),
+    "request_subagent_deregistration": ("request_subagent_deregistration", ["parent_agent_id", "child_agent_id"]),
+    "is_subagent_stop_requested": ("is_subagent_stop_requested", ["agent_id"]),
+    "await_subagent_stopped": ("await_subagent_stopped", ["child_agent_id", "timeout"]),
 }

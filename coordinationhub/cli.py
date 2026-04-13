@@ -23,6 +23,8 @@ def create_parser() -> argparse.ArgumentParser:
     shared.add_argument("--project-root", default=None)
     shared.add_argument("--namespace", default="hub")
     shared.add_argument("--json", action="store_true", dest="json_output")
+    shared.add_argument("--replica", action="store_true",
+                        help="Use read-replica mode (direct WAL read, no writer round-trip)")
 
     parser = argparse.ArgumentParser(prog="coordinationhub",
                                        description="CoordinationHub — declarative multi-agent coordination")
@@ -171,6 +173,15 @@ def create_parser() -> argparse.ArgumentParser:
     p = sub.add_parser("prune-notifications", parents=[shared], help="Clean up old notifications")
     p.add_argument("--max-age", type=float, default=None, dest="max_age_seconds")
     p.add_argument("--max-entries", type=int, default=None, dest="max_entries")
+
+    # wait-for-notifications
+    p = sub.add_parser("wait-for-notifications", parents=[shared],
+                       help="Long-poll for new notifications until one arrives or timeout expires")
+    p.add_argument("agent_id", help="Agent ID doing the waiting")
+    p.add_argument("--timeout", type=float, default=30.0, help="Timeout in seconds (default: 30)")
+    p.add_argument("--poll-interval", type=float, default=2.0, dest="poll_interval",
+                   help="Polling interval in seconds (default: 2)")
+    p.add_argument("--exclude-agent", default=None, help="Agent ID to exclude from notifications")
 
     # get-conflicts
     p = sub.add_parser("get-conflicts", parents=[shared], help="Query the conflict log")
@@ -329,6 +340,18 @@ def create_parser() -> argparse.ArgumentParser:
     p = sub.add_parser("task-failure-history", parents=[shared], help="Get failure history for a task")
     p.add_argument("task_id", help="Task ID whose failure history to retrieve")
 
+    p = sub.add_parser("wait-for-task", parents=[shared],
+                       help="Poll until a task reaches terminal state or timeout expires")
+    p.add_argument("task_id", help="Task ID to wait on")
+    p.add_argument("--timeout", type=float, default=60.0, help="Timeout in seconds (default: 60)")
+    p.add_argument("--poll-interval", type=float, default=2.0, dest="poll_interval",
+                   help="Polling interval in seconds (default: 2)")
+
+    p = sub.add_parser("get-available-tasks", parents=[shared],
+                       help="Get tasks whose dependencies are all satisfied and are not claimed")
+    p.add_argument("--agent-id", default=None, dest="agent_id",
+                   help="Filter to tasks assigned to a specific agent")
+
     # --- WORK INTENT BOARD ---
     p = sub.add_parser("declare-work-intent", parents=[shared], help="Declare intent to work on a file")
     p.add_argument("agent_id", help="Agent declaring intent")
@@ -368,6 +391,68 @@ def create_parser() -> argparse.ArgumentParser:
     p.add_argument("--dependent-agent-id", default=None, dest="dependent_agent_id",
                    help="Filter by dependent agent")
 
+    # --- HA COORDINATOR LEASES ---
+    p = sub.add_parser("acquire-coordinator-lease", parents=[shared],
+                       help="Attempt to acquire the coordinator leadership lease")
+    p.add_argument("agent_id", help="Agent ID attempting to acquire the lease")
+    p.add_argument("--ttl", type=float, default=None,
+                   help="Lease TTL in seconds (default: 10)")
+
+    p = sub.add_parser("refresh-coordinator-lease", parents=[shared],
+                       help="Refresh the coordinator lease TTL")
+    p.add_argument("agent_id", help="Agent ID refreshing the lease")
+
+    p = sub.add_parser("release-coordinator-lease", parents=[shared],
+                       help="Release the coordinator leadership lease")
+    p.add_argument("agent_id", help="Agent ID releasing the lease")
+
+    sub.add_parser("get-leader", parents=[shared],
+                   help="Print the current coordinator lease holder")
+
+    p = sub.add_parser("claim-leadership", parents=[shared],
+                       help="Claim coordinator leadership from a failed leader")
+    p.add_argument("agent_id", help="Agent ID attempting to claim leadership")
+    p.add_argument("--ttl", type=float, default=None,
+                   help="Lease TTL in seconds (default: 10)")
+
+    # leader-status
+    sub.add_parser("leader-status", parents=[shared],
+                   help="Print coordinator leader and lease details")
+
+    # ha-dashboard
+    p = sub.add_parser("ha-dashboard", parents=[shared],
+                       help="HA dashboard: lease state, replica count, agent status")
+    p.add_argument("--agent-id", default=None)
+
+    # --- SPAWNER — SUB-AGENT REGISTRY ---
+    p = sub.add_parser("spawn-subagent", parents=[shared],
+                       help="Register intent to spawn a sub-agent")
+    p.add_argument("parent_agent_id", help="Parent agent ID that is spawning")
+    p.add_argument("subagent_type", help="Type of sub-agent to spawn (e.g. Explore, Plan)")
+    p.add_argument("--description", default=None, help="Description of the sub-agent's task")
+    p.add_argument("--prompt", default=None, help="Prompt or instructions for the sub-agent")
+
+    p = sub.add_parser("list-pending-spawns", parents=[shared],
+                      help="List pending sub-agent spawn requests for a parent agent")
+    p.add_argument("parent_agent_id", help="Parent agent ID to query")
+    p.add_argument("--all", action="store_true", dest="include_consumed",
+                   help="Include registered/expired spawns")
+
+    p = sub.add_parser("cancel-spawn", parents=[shared],
+                      help="Cancel a pending spawn request")
+    p.add_argument("spawn_id", help="Spawn ID to cancel")
+
+    p = sub.add_parser("request-subagent-deregistration", parents=[shared],
+                      help="Request graceful deregistration of a child agent")
+    p.add_argument("parent_agent_id", help="Parent agent ID making the request")
+    p.add_argument("child_agent_id", help="Child agent ID to request stop for")
+
+    p = sub.add_parser("await-subagent-stopped", parents=[shared],
+                      help="Poll until a child agent is stopped or timeout")
+    p.add_argument("child_agent_id", help="Child agent ID to wait for")
+    p.add_argument("--timeout", type=float, default=30.0,
+                   help="Timeout in seconds (default: 30)")
+
     return parser
 
 
@@ -390,6 +475,7 @@ _COMMANDS = {
     "get-handoffs": "cmd_get_handoffs",
     "wait-for-locks": "cmd_wait_for_locks", "notify-change": "cmd_notify_change",
     "get-notifications": "cmd_get_notifications", "prune-notifications": "cmd_prune_notifications",
+    "wait-for-notifications": "cmd_wait_for_notifications",
     "get-conflicts": "cmd_get_conflicts", "contention-hotspots": "cmd_contention_hotspots",
     "load-spec": "cmd_load_spec", "validate-spec": "cmd_validate_spec",
     "scan-project": "cmd_scan_project", "dashboard": "cmd_dashboard",
@@ -425,6 +511,20 @@ _COMMANDS = {
     "retry-task": "cmd_retry_task",
     "dead-letter-queue": "cmd_dead_letter_queue",
     "task-failure-history": "cmd_task_failure_history",
+    "wait-for-task": "cmd_wait_for_task",
+    "get-available-tasks": "cmd_get_available_tasks",
+    "acquire-coordinator-lease": "cmd_acquire_coordinator_lease",
+    "refresh-coordinator-lease": "cmd_refresh_coordinator_lease",
+    "release-coordinator-lease": "cmd_release_coordinator_lease",
+    "get-leader": "cmd_get_leader",
+    "claim-leadership": "cmd_claim_leadership",
+    "leader-status": "cmd_leader_status",
+    "ha-dashboard": "cmd_ha_dashboard",
+    "spawn-subagent": "cmd_spawn_subagent",
+    "list-pending-spawns": "cmd_list_pending_spawns",
+    "cancel-spawn": "cmd_cancel_spawn",
+    "request-subagent-deregistration": "cmd_request_subagent_deregistration",
+    "await-subagent-stopped": "cmd_await_subagent_stopped",
 }
 
 
