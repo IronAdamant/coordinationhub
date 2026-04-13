@@ -40,6 +40,8 @@ def create_parser() -> argparse.ArgumentParser:
     p = sub.add_parser("serve-sse", parents=[shared], help="Start HTTP server with SSE dashboard")
     p.add_argument("--port", type=int, default=9878)
     p.add_argument("--host", default="127.0.0.1")
+    p.add_argument("--no-browser", action="store_true", dest="no_browser",
+                   help="Don't open the browser automatically")
 
     # status
     sub.add_parser("status", parents=[shared], help="Get coordination system status summary")
