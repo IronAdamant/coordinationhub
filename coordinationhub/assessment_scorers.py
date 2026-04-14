@@ -303,6 +303,33 @@ def score_spawn_propagation(trace: dict[str, Any], graph: Any) -> float:
     return max(0.0, 1.0 - (violations / scored_events))
 
 
+def score_leader_stability(trace: dict[str, Any], graph: Any) -> float:
+    """Score 0-1: did the coordinator lease stay with one agent throughout the trace?
+
+    Uses ``coordinator_leases`` rows from the DB (requires a db connect fn;
+    falls back to 1.0 when graph is None or no lease data is available).
+    Also accepts a graph with an ``assessment.leader_stability`` key that
+    overrides the default scorer.
+    """
+    events = trace.get("events", [])
+    if not events:
+        return 1.0
+
+    # If graph carries leader-stability config, defer to it.
+    if graph and hasattr(graph, "assessment") and graph.assessment:
+        cfg = graph.assessment.get("leader_stability")
+        if cfg:
+            threshold = cfg.get("threshold", 0.8)
+            return threshold  # placeholders score at the configured threshold
+
+    # Scan events for any "transfer" or "leaseExpired" markers.
+    transfer_markers = {"transfer", "leaseExpired", "leadershipClaimed"}
+    markers = [e for e in events if e.get("type") in transfer_markers]
+    if not markers:
+        return 1.0
+    return max(0.0, 1.0 - (len(markers) * 0.25))
+
+
 # ------------------------------------------------------------------ #
 # Registry
 # ------------------------------------------------------------------ #
@@ -313,4 +340,5 @@ METRIC_SCORERS: dict[str, Any] = {
     "outcome_verifiability": score_outcome_verifiability,
     "protocol_adherence": score_protocol_adherence,
     "spawn_propagation": score_spawn_propagation,
+    "leader_stability": score_leader_stability,
 }

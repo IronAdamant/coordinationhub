@@ -49,6 +49,18 @@ def assign_task(
             "UPDATE tasks SET assigned_agent_id=?, updated_at=? WHERE id=?",
             (assigned_agent_id, now, task_id),
         )
+        # Sync agent state: update current_task in agent_responsibilities
+        row = conn.execute(
+            "SELECT description FROM tasks WHERE id=?", (task_id,)
+        ).fetchone()
+        if row:
+            conn.execute("""
+                INSERT INTO agent_responsibilities (agent_id, current_task, updated_at)
+                VALUES (?, ?, ?)
+                ON CONFLICT(agent_id) DO UPDATE SET
+                    current_task = excluded.current_task,
+                    updated_at = excluded.updated_at
+            """, (assigned_agent_id, row["description"], now))
     return {"assigned": True, "task_id": task_id}
 
 
@@ -210,3 +222,69 @@ def get_task_tree(connect: ConnectFn, root_task_id: str) -> dict[str, Any]:
         return d
 
     return _build_tree(root_task_id) or {}
+
+
+def wait_for_task(
+    connect: ConnectFn,
+    task_id: str,
+    timeout_s: float = 60.0,
+    poll_interval_s: float = 2.0,
+) -> dict[str, Any]:
+    """Poll until a task reaches a terminal state (completed/failed) or timeout expires.
+
+    Returns {"waited": True, "task_id": ..., "status": ..., "timed_out": False}
+    or {"waited": False, "task_id": ..., "timed_out": True} if timeout expired.
+    """
+    import time
+    start = time.time()
+    terminal_states = {"completed", "failed"}
+    while True:
+        task = get_task(connect, task_id)
+        if task is None:
+            return {"waited": False, "task_id": task_id, "timed_out": True, "reason": "task_not_found"}
+        if task.get("status") in terminal_states:
+            return {"waited": True, "task_id": task_id, "status": task["status"], "timed_out": False}
+        elapsed = time.time() - start
+        if elapsed >= timeout_s:
+            return {"waited": False, "task_id": task_id, "timed_out": True, "status": task.get("status")}
+        time.sleep(min(poll_interval_s, timeout_s - elapsed))
+
+
+def get_available_tasks(
+    connect: ConnectFn,
+    agent_id: str | None = None,
+) -> list[dict[str, Any]]:
+    """Return tasks whose depends_on are all satisfied (completed) and not currently claimed.
+
+    A task is "available" if:
+    - Its status is "pending" (not yet claimed)
+    - All tasks in its depends_on list have status "completed"
+    - Optionally filtered to a specific agent_id
+    """
+    import json
+    all_tasks = get_all_tasks(connect)
+    available = []
+    for task in all_tasks:
+        if task.get("status") not in (None, "pending"):
+            continue
+        if agent_id and task.get("assigned_agent_id") != agent_id:
+            continue
+        depends_on = task.get("depends_on") or []
+        if isinstance(depends_on, str):
+            try:
+                depends_on = json.loads(depends_on)
+            except json.JSONDecodeError:
+                depends_on = []
+        if not depends_on:
+            available.append(task)
+            continue
+        # Check all dependencies are satisfied (completed)
+        deps_satisfied = True
+        for dep_id in depends_on:
+            dep_task = get_task(connect, dep_id)
+            if dep_task is None or dep_task.get("status") != "completed":
+                deps_satisfied = False
+                break
+        if deps_satisfied:
+            available.append(task)
+    return available

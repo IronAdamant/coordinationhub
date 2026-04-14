@@ -288,7 +288,7 @@ def run_assessment(
 
     all_metrics = [
         "role_stability", "handoff_latency", "outcome_verifiability",
-        "protocol_adherence", "spawn_propagation",
+        "protocol_adherence", "spawn_propagation", "leader_stability",
     ]
     metrics = all_metrics[:]
     if graph and graph.assessment:

@@ -31,6 +31,8 @@ from .core_handoffs import HandoffMixin
 from .core_dependencies import DependencyMixin
 from .core_change import ChangeMixin
 from .core_visibility import VisibilityMixin
+from .core_leases import LeaseMixin
+from .core_spawner import SpawnerMixin
 from .paths import detect_project_root
 from . import graphs as _g
 
@@ -45,6 +47,8 @@ class CoordinationEngine(
     DependencyMixin,
     ChangeMixin,
     VisibilityMixin,
+    LeaseMixin,
+    SpawnerMixin,
 ):
     """Host class that inherits all capability mixins.
 
@@ -83,6 +87,23 @@ class CoordinationEngine(
     def _connect(self):
         """Return a connection from the thread-local pool."""
         return self._storage._connect()
+
+    def read_only_engine(self) -> "CoordinationEngine":
+        """Return a read-only view of this engine using direct WAL reads.
+
+        The returned engine bypasses the writer pool and opens SQLite in
+        read-only URI mode. All read-only operations (list_agents,
+        get_lock_status, get_notifications, etc.) can use this to avoid
+        round-tripping through the current leaseholder.
+        """
+        replica = CoordinationEngine(
+            storage_dir=self._storage._storage_dir,
+            project_root=self._storage.project_root,
+            namespace=self._storage._namespace,
+        )
+        # Don't call start() — we don't need the pool or graph, just storage
+        replica._connect = self._storage.read_only_connection  # type: ignore[method-assign]
+        return replica
 
     # ------------------------------------------------------------------ #
     # Backward-compatibility: _context_bundle was called with (agent_id)

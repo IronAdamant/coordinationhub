@@ -2,7 +2,8 @@
 
 from __future__ import annotations
 
-from .cli_utils import print_json as _print_json, engine_from_args as _engine_from_args, close as _close
+from .cli_utils import print_json as _print_json, engine_from_args as _engine_from_args
+from .cli_utils import replica_engine_from_args as _replica_engine_from_args, close as _close
 
 
 # ------------------------------------------------------------------ #
@@ -32,7 +33,7 @@ def cmd_declare_work_intent(args):
 # ------------------------------------------------------------------ #
 
 def cmd_get_work_intents(args):
-    engine = _engine_from_args(args)
+    engine = _replica_engine_from_args(args)
     try:
         result = engine.get_work_intents(getattr(args, "agent_id", None))
         intents = result.get("intents", [])

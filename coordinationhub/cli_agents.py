@@ -2,7 +2,8 @@
 
 from __future__ import annotations
 
-from .cli_utils import print_json as _print_json, engine_from_args as _engine_from_args, close as _close
+from .cli_utils import print_json as _print_json, engine_from_args as _engine_from_args
+from .cli_utils import replica_engine_from_args as _replica_engine_from_args, close as _close
 
 
 # ------------------------------------------------------------------ #
@@ -43,7 +44,7 @@ def cmd_serve_mcp(args):
 # ------------------------------------------------------------------ #
 
 def cmd_status(args):
-    engine = _engine_from_args(args)
+    engine = _replica_engine_from_args(args)
     try:
         result = engine.status()
         if args.json_output:
@@ -151,7 +152,7 @@ def cmd_list_agents(args):
 # ------------------------------------------------------------------ #
 
 def cmd_lineage(args):
-    engine = _engine_from_args(args)
+    engine = _replica_engine_from_args(args)
     try:
         result = engine.get_lineage(args.agent_id)
         if args.json_output:
@@ -171,7 +172,7 @@ def cmd_lineage(args):
 # ------------------------------------------------------------------ #
 
 def cmd_siblings(args):
-    engine = _engine_from_args(args)
+    engine = _replica_engine_from_args(args)
     try:
         result = engine.get_siblings(args.agent_id)
         siblings = result.get("siblings", [])

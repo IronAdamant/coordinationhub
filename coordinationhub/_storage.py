@@ -34,6 +34,7 @@ class CoordinationStorage:
         self._project_root = project_root
         self._storage_dir = self._resolve_storage_dir(storage_dir)
         self._pool: _db.ConnectionPool | None = None
+        self._db_path: Path | None = None
         self._seq_lock = threading.Lock()
         self._seq_counters: dict[str, int] = {}
 
@@ -61,8 +62,8 @@ class CoordinationStorage:
     def start(self) -> None:
         """Create the storage directory, open the connection pool, and init schemas."""
         self._storage_dir.mkdir(parents=True, exist_ok=True)
-        db_path = self._storage_dir / "coordination.db"
-        self._pool = _db.ConnectionPool(db_path)
+        self._db_path = self._storage_dir / "coordination.db"
+        self._pool = _db.ConnectionPool(self._db_path)
         _db.set_pool(self._pool)
         with self._pool.connect() as conn:
             _db.init_schema(conn)
@@ -80,6 +81,19 @@ class CoordinationStorage:
         if self._pool is None:
             raise RuntimeError("Storage not started. Call start() first.")
         return self._pool.connect()
+
+    def read_only_connection(self) -> sqlite3.Connection:
+        """Return a direct read-only SQLite connection via WAL URI.
+
+        Bypasses the thread-local writer pool entirely. Safe for concurrent
+        reads — SQLite WAL mode allows multiple readers without blocking the
+        writer. Use this for read-replica commands that don't need write access.
+        """
+        if self._db_path is None:
+            raise RuntimeError("Storage not started. Call start() first.")
+        conn = sqlite3.connect(f"file:{self._db_path}?mode=ro", uri=True)
+        conn.row_factory = sqlite3.Row
+        return conn
 
     # ------------------------------------------------------------------ #
     # Agent ID generation

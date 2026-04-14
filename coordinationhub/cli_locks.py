@@ -4,7 +4,8 @@ from __future__ import annotations
 
 from typing import Any
 
-from .cli_utils import print_json as _print_json, engine_from_args as _engine_from_args, close as _close
+from .cli_utils import print_json as _print_json, engine_from_args as _engine_from_args
+from .cli_utils import replica_engine_from_args as _replica_engine_from_args, close as _close
 
 
 def _fmt_lock_result(result: dict[str, Any], document_path: str) -> None:
@@ -95,7 +96,7 @@ def cmd_refresh_lock(args):
 # ------------------------------------------------------------------ #
 
 def cmd_lock_status(args):
-    engine = _engine_from_args(args)
+    engine = _replica_engine_from_args(args)
     try:
         result = engine.get_lock_status(args.document_path)
         if args.json_output:
@@ -116,7 +117,7 @@ def cmd_lock_status(args):
 # ------------------------------------------------------------------ #
 
 def cmd_list_locks(args):
-    engine = _engine_from_args(args)
+    engine = _replica_engine_from_args(args)
     try:
         result = engine.list_locks(agent_id=getattr(args, "agent_id", None))
         if args.json_output:
@@ -272,7 +273,7 @@ def cmd_cancel_handoff(args):
 # ------------------------------------------------------------------ #
 
 def cmd_get_handoffs(args):
-    engine = _engine_from_args(args)
+    engine = _replica_engine_from_args(args)
     try:
         result = engine.get_handoffs(
             status=getattr(args, "status", None),
@@ -357,7 +358,7 @@ def cmd_send_message(args):
 # ------------------------------------------------------------------ #
 
 def cmd_get_messages(args):
-    engine = _engine_from_args(args)
+    engine = _replica_engine_from_args(args)
     try:
         result = engine.get_messages(
             args.agent_id,
