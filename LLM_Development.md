@@ -1,11 +1,56 @@
 # LLM_Development.md — CoordinationHub
 
-**Version:** <!-- GEN:version -->0.6.4<!-- /GEN -->
+**Version:** <!-- GEN:version -->0.6.5<!-- /GEN -->
 **Last updated:** 2026-04-14
 
 ## Change Log
 
 All significant changes to the CoordinationHub project are documented here in reverse chronological order.
+
+---
+
+## 2026-04-14 — v0.6.5 Phase 13 Stress Test Fixes (Broadcast + Lock Notifications)
+
+### Motivation
+
+Phase 13 MultiAgentLockStorm stress test (`findings/kimi_review_3/coordinationhub.md`) validated CoordinationHub's core primitives under heavy contention. All core features passed (region locks, shared/exclusive semantics, agent tree, task deps, handoffs). Three minor gaps were fixed:
+
+1. **Broadcast auto-ack ambiguity** — when `require_ack=False`, `acknowledged_by` was incorrectly populated with live siblings
+2. **No lock event notifications** — `acquire_lock` and `release_lock` did not emit change notifications, forcing agents to poll `get_lock_status`
+3. **Pending acks never resolved** — non-interactive agents never called `acknowledge_broadcast`, leaving explicit-ack broadcasts dangling indefinitely
+
+### Change 1 — Fix broadcast auto-ack ambiguity (core_locking.py)
+
+**Bug**: `broadcast(require_ack=False)` returned `acknowledged_by` filled with all live sibling IDs, even though no acknowledgments were actually requested or received.
+
+**Fix**: When `require_ack=False`, `acknowledged_by` is now empty. Conflict detection still uses the live sibling list correctly.
+
+### Change 2 — Lock event notifications (core_locking.py)
+
+**Gap**: Agents had no push signal for lock releases; they had to poll `get_lock_status`.
+
+**Fix**: Successful `acquire_lock` now calls `notify_change(..., change_type="locked")` and successful `release_lock` calls `notify_change(..., change_type="unlocked")` immediately after the DB transaction commits.
+
+### Change 3 — Auto-acknowledge broadcast requests on message read (core_messaging.py)
+
+**Gap**: Non-interactive agents (e.g., background workers) poll `get_messages` but never explicitly call `acknowledge_broadcast`, so `require_ack=True` broadcasts showed pending acks forever.
+
+**Fix**: `get_messages` now auto-acknowledges any `broadcast_ack_request` messages it returns. As soon as an agent polls its mailbox, outstanding broadcast acks are resolved automatically.
+
+### Change 4 — Broadcast expected_count tracking (broadcasts.py + db.py)
+
+**Improvement**: `broadcasts` table now stores `expected_count` (schema v19). `get_broadcast_status` returns `expected_count` and `pending_acks` so callers can see acknowledgment progress.
+
+### Schema Changes
+
+- v18 → v19 migration adds `expected_count INTEGER DEFAULT 0` to `broadcasts` table.
+
+### Counts
+
+| Version | Tools | CLI Commands | Schema |
+|---------|-------|--------------|--------|
+| v0.6.5 | 79 | 79 | 19 |
+| v0.6.4 | 79 | 79 | 18 |
 
 ---
 
@@ -947,7 +992,7 @@ Block markers for multi-line content:
 | `coordinationhub/agent_status.py` | 274 | Agent status and file-map query helpers for CoordinationHub |
 | `coordinationhub/assessment.py` | 322 | Assessment runner for CoordinationHub coordination test suites |
 | `coordinationhub/assessment_scorers.py` | 258 | Assessment metric scorers for CoordinationHub |
-| `coordinationhub/broadcasts.py` | 101 | Broadcast acknowledgment primitives for CoordinationHub |
+| `coordinationhub/broadcasts.py` | 106 | Broadcast acknowledgment primitives for CoordinationHub |
 | `coordinationhub/cli.py` | 420 | CoordinationHub CLI — command-line interface for all 55 coordination tool methods |
 | `coordinationhub/cli_agents.py` | 128 | Agent identity and lifecycle CLI commands |
 | `coordinationhub/cli_commands.py` | 107 | CoordinationHub CLI command handlers |
@@ -969,14 +1014,14 @@ Block markers for multi-line content:
 | `coordinationhub/core_handoffs.py` | 28 | HandoffMixin — one-to-many handoff acknowledgment and lifecycle |
 | `coordinationhub/core_identity.py` | 94 | IdentityMixin — agent lifecycle and lineage management |
 | `coordinationhub/core_leases.py` | 109 | LeaseMixin — HA coordinator lease management |
-| `coordinationhub/core_locking.py` | 435 | Locking and coordination methods for CoordinationEngine |
-| `coordinationhub/core_messaging.py` | 59 | MessagingMixin — inter-agent messages and await |
+| `coordinationhub/core_locking.py` | 439 | Locking and coordination methods for CoordinationEngine |
+| `coordinationhub/core_messaging.py` | 66 | MessagingMixin — inter-agent messages and await |
 | `coordinationhub/core_spawner.py` | 148 | SpawnerMixin — HA coordinator sub-agent spawn management |
 | `coordinationhub/core_tasks.py` | 117 | TaskMixin — shared task registry with hierarchy support |
 | `coordinationhub/core_visibility.py` | 114 | VisibilityMixin — coordination graph, project scan, agent status, assessment |
 | `coordinationhub/core_work_intent.py` | 26 | WorkIntentMixin — cooperative work intent board |
 | `coordinationhub/dashboard.py` | 483 | Web dashboard for CoordinationHub — zero external dependencies |
-| `coordinationhub/db.py` | 494 | SQLite schema, migrations, and connection pool for CoordinationHub |
+| `coordinationhub/db.py` | 504 | SQLite schema, migrations, and connection pool for CoordinationHub |
 | `coordinationhub/dependencies.py` | 98 | Cross-agent dependency declaration and satisfaction tracking |
 | `coordinationhub/dispatch.py` | 87 | Tool dispatch table for CoordinationHub |
 | `coordinationhub/graphs.py` | 256 | Declarative coordination graph: loader, validator, in-memory representation |

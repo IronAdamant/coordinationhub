@@ -242,7 +242,8 @@ _SCHEMAS = {
             message         TEXT,
             created_at      REAL NOT NULL,
             ttl             REAL DEFAULT 30.0,
-            expires_at      REAL NOT NULL
+            expires_at      REAL NOT NULL,
+            expected_count  INTEGER DEFAULT 0
         )
     """,
     "broadcast_acks": """
@@ -294,7 +295,7 @@ _INDEXES = [
 ]
 
 
-_CURRENT_SCHEMA_VERSION = 18
+_CURRENT_SCHEMA_VERSION = 19
 
 
 def _get_schema_version(conn: sqlite3.Connection) -> int:
@@ -434,6 +435,17 @@ def _migrate_v17_to_v18(conn: sqlite3.Connection) -> None:
         conn.execute(_SCHEMAS["broadcast_acks"])
 
 
+def _migrate_v18_to_v19(conn: sqlite3.Connection) -> None:
+    """Add expected_count column to broadcasts table.
+
+    Allows get_broadcast_status to report how many acknowledgments
+    are still pending for explicit-ack broadcasts.
+    """
+    cols = [row[1] for row in conn.execute("PRAGMA table_info(broadcasts)").fetchall()]
+    if "expected_count" not in cols:
+        conn.execute("ALTER TABLE broadcasts ADD COLUMN expected_count INTEGER DEFAULT 0")
+
+
 _MIGRATIONS = {
     2: _migrate_v1_to_v2,
     3: _migrate_v2_to_v3,
@@ -452,6 +464,7 @@ _MIGRATIONS = {
     16: _migrate_v15_to_v16,  # stop_requested_at column added
     17: _migrate_v16_to_v17,  # scope column added to agent_responsibilities
     18: _migrate_v17_to_v18,  # source column + broadcasts tables
+    19: _migrate_v18_to_v19,  # expected_count column on broadcasts
 }
 
 

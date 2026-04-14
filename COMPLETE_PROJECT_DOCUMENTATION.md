@@ -1,7 +1,33 @@
 # CoordinationHub — Complete Project Documentation
 
-**Version:** <!-- GEN:version -->0.6.4<!-- /GEN -->
+**Version:** <!-- GEN:version -->0.6.5<!-- /GEN -->
 **Last updated:** 2026-04-14
+
+## v0.6.5 Changelog — Phase 13 Stress Test Fixes (Broadcast + Lock Notifications)
+
+### Motivation
+
+Phase 13 MultiAgentLockStorm stress test (`findings/kimi_review_3/coordinationhub.md`) validated CoordinationHub under heavy contention. All core primitives passed. Three minor gaps were fixed:
+
+1. **Broadcast auto-ack ambiguity** — when `require_ack=False`, `acknowledged_by` was incorrectly populated with live siblings
+2. **No lock event notifications** — `acquire_lock` and `release_lock` did not emit change notifications
+3. **Pending acks never resolved** — non-interactive agents never explicitly acknowledged broadcasts
+
+### Fixes
+
+- **Broadcast auto-ack ambiguity** (`core_locking.py`): `broadcast(require_ack=False)` now returns an empty `acknowledged_by` list. Conflicts are still detected via live siblings.
+- **Lock event notifications** (`core_locking.py`): successful `acquire_lock` emits `change_type="locked"`; successful `release_lock` emits `change_type="unlocked"`.
+- **Auto-ack on message read** (`core_messaging.py`): `get_messages` automatically acknowledges any `broadcast_ack_request` messages it returns, resolving dangling pending acks for polling agents.
+- **Broadcast expected_count tracking** (`broadcasts.py`, `db.py`): `broadcasts` table stores `expected_count` (schema v19). `get_broadcast_status` returns `expected_count` and `pending_acks`.
+
+### Counts
+
+| Version | Tools | CLI Commands | Schema |
+|---------|-------|--------------|--------|
+| v0.6.5 | 79 | 79 | 19 |
+| v0.6.4 | 79 | 79 | 18 |
+
+---
 
 ## v0.6.4 Changelog — Agnostic Spawner + Broadcast Acknowledgments
 
@@ -729,7 +755,7 @@ keep it in sync; CI checks for drift on every push.
 | `coordinationhub/agent_status.py` | 274 | Agent status and file-map query helpers for CoordinationHub |
 | `coordinationhub/assessment.py` | 322 | Assessment runner for CoordinationHub coordination test suites |
 | `coordinationhub/assessment_scorers.py` | 258 | Assessment metric scorers for CoordinationHub |
-| `coordinationhub/broadcasts.py` | 101 | Broadcast acknowledgment primitives for CoordinationHub |
+| `coordinationhub/broadcasts.py` | 106 | Broadcast acknowledgment primitives for CoordinationHub |
 | `coordinationhub/cli.py` | 420 | CoordinationHub CLI — command-line interface for all 55 coordination tool methods |
 | `coordinationhub/cli_agents.py` | 128 | Agent identity and lifecycle CLI commands |
 | `coordinationhub/cli_commands.py` | 107 | CoordinationHub CLI command handlers |
@@ -751,14 +777,14 @@ keep it in sync; CI checks for drift on every push.
 | `coordinationhub/core_handoffs.py` | 28 | HandoffMixin — one-to-many handoff acknowledgment and lifecycle |
 | `coordinationhub/core_identity.py` | 94 | IdentityMixin — agent lifecycle and lineage management |
 | `coordinationhub/core_leases.py` | 109 | LeaseMixin — HA coordinator lease management |
-| `coordinationhub/core_locking.py` | 435 | Locking and coordination methods for CoordinationEngine |
-| `coordinationhub/core_messaging.py` | 59 | MessagingMixin — inter-agent messages and await |
+| `coordinationhub/core_locking.py` | 439 | Locking and coordination methods for CoordinationEngine |
+| `coordinationhub/core_messaging.py` | 66 | MessagingMixin — inter-agent messages and await |
 | `coordinationhub/core_spawner.py` | 148 | SpawnerMixin — HA coordinator sub-agent spawn management |
 | `coordinationhub/core_tasks.py` | 117 | TaskMixin — shared task registry with hierarchy support |
 | `coordinationhub/core_visibility.py` | 114 | VisibilityMixin — coordination graph, project scan, agent status, assessment |
 | `coordinationhub/core_work_intent.py` | 26 | WorkIntentMixin — cooperative work intent board |
 | `coordinationhub/dashboard.py` | 483 | Web dashboard for CoordinationHub — zero external dependencies |
-| `coordinationhub/db.py` | 494 | SQLite schema, migrations, and connection pool for CoordinationHub |
+| `coordinationhub/db.py` | 504 | SQLite schema, migrations, and connection pool for CoordinationHub |
 | `coordinationhub/dependencies.py` | 98 | Cross-agent dependency declaration and satisfaction tracking |
 | `coordinationhub/dispatch.py` | 87 | Tool dispatch table for CoordinationHub |
 | `coordinationhub/graphs.py` | 256 | Declarative coordination graph: loader, validator, in-memory representation |
@@ -796,7 +822,7 @@ coordinationhub/
   agent_status.py       — Agent status and file-map query helpers for CoordinationHub (~274 LOC)
   assessment.py         — Assessment runner for CoordinationHub coordination test suites (~322 LOC)
   assessment_scorers.py — Assessment metric scorers for CoordinationHub (~258 LOC)
-  broadcasts.py         — Broadcast acknowledgment primitives for CoordinationHub (~101 LOC)
+  broadcasts.py         — Broadcast acknowledgment primitives for CoordinationHub (~106 LOC)
   cli.py                — CoordinationHub CLI — command-line interface for all 55 coordination tool methods (~420 LOC)
   cli_agents.py         — Agent identity and lifecycle CLI commands (~128 LOC)
   cli_commands.py       — CoordinationHub CLI command handlers (~107 LOC)
@@ -818,14 +844,14 @@ coordinationhub/
   core_handoffs.py      — HandoffMixin — one-to-many handoff acknowledgment and lifecycle (~28 LOC)
   core_identity.py      — IdentityMixin — agent lifecycle and lineage management (~94 LOC)
   core_leases.py        — LeaseMixin — HA coordinator lease management (~109 LOC)
-  core_locking.py       — Locking and coordination methods for CoordinationEngine (~435 LOC)
-  core_messaging.py     — MessagingMixin — inter-agent messages and await (~59 LOC)
+  core_locking.py       — Locking and coordination methods for CoordinationEngine (~439 LOC)
+  core_messaging.py     — MessagingMixin — inter-agent messages and await (~66 LOC)
   core_spawner.py       — SpawnerMixin — HA coordinator sub-agent spawn management (~148 LOC)
   core_tasks.py         — TaskMixin — shared task registry with hierarchy support (~117 LOC)
   core_visibility.py    — VisibilityMixin — coordination graph, project scan, agent status, assessment (~114 LOC)
   core_work_intent.py   — WorkIntentMixin — cooperative work intent board (~26 LOC)
   dashboard.py          — Web dashboard for CoordinationHub — zero external dependencies (~483 LOC)
-  db.py                 — SQLite schema, migrations, and connection pool for CoordinationHub (~494 LOC)
+  db.py                 — SQLite schema, migrations, and connection pool for CoordinationHub (~504 LOC)
   dependencies.py       — Cross-agent dependency declaration and satisfaction tracking (~98 LOC)
   dispatch.py           — Tool dispatch table for CoordinationHub (~87 LOC)
   graphs.py             — Declarative coordination graph: loader, validator, in-memory representation (~256 LOC)

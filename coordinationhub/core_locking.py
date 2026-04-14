@@ -17,6 +17,7 @@ from . import work_intent as _wi
 from . import handoffs as _handoffs
 from . import messages as _msg
 from . import broadcasts as _bc
+from . import notifications as _cn
 from .paths import normalize_path
 
 
@@ -116,6 +117,7 @@ class LockingMixin:
                     }
 
                 conn.execute("COMMIT")
+                _cn.notify_change(self._connect, norm_path, "locked", agent_id, worktree)
 
                 # Check file_ownership for boundary crossing (warning only)
                 ownership_warning = self._check_ownership_boundary(conn, norm_path, agent_id)
@@ -239,6 +241,7 @@ class LockingMixin:
                 return {"released": False, "reason": "not_owner"}
             for r in owned:
                 conn.execute("DELETE FROM document_locks WHERE id = ?", (r["id"],))
+            _cn.notify_change(self._connect, norm_path, "unlocked", agent_id, str(self._storage.project_root))
             return {"released": True, "count": len(owned)}
 
     def refresh_lock(
@@ -387,15 +390,16 @@ class LockingMixin:
                 "conflicts": [],
             }
 
-        acknowledged_by = [s["agent_id"] for s in live_siblings]
+        acknowledged_by: list[str] = []
         conflicts: list[dict[str, Any]] = []
-        if document_path and acknowledged_by:
+        sibling_ids = [s["agent_id"] for s in live_siblings]
+        if document_path and sibling_ids:
             norm_path = normalize_path(document_path, self._storage.project_root)
-            placeholders = ",".join("?" * len(acknowledged_by))
+            placeholders = ",".join("?" * len(sibling_ids))
             with self._connect() as conn:
                 lock_rows = conn.execute(
                     f"SELECT locked_by FROM document_locks WHERE document_path = ? AND locked_by IN ({placeholders})",
-                    [norm_path] + acknowledged_by,
+                    [norm_path] + sibling_ids,
                 ).fetchall()
                 for row in lock_rows:
                     if row["locked_by"] != agent_id:
