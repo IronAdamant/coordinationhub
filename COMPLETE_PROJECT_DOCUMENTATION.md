@@ -1,7 +1,39 @@
 # CoordinationHub — Complete Project Documentation
 
-**Version:** <!-- GEN:version -->0.6.6<!-- /GEN -->
-**Last updated:** 2026-04-14
+**Version:** <!-- GEN:version -->0.6.7<!-- /GEN -->
+**Last updated:** 2026-04-15
+
+## v0.6.7 Changelog — Phase 14 Critical Fixes (Scope Normalization + Connection Robustness)
+
+### Motivation
+
+Phase 14 DistributedRecipeCurationSwarm stress test (`findings/cch_kimi_review_4/coordinationhub.md`) exercised every major CoordinationHub primitive under heavy multi-agent contention. Six issues were identified and fixed:
+
+1. **Scope/path normalization bug** — absolute scopes failed to match relative lock paths
+2. **SQLite connection fragility** — closed DB connections under lock contention caused `Cannot operate on a closed database`
+3. **Dependency check did not auto-satisfy** — `check_dependencies` reported completed tasks as unsatisfied
+4. **No `wait_for_dependency` helper** — callers had to poll manually
+5. **`assess_current_session` required loaded graph** — ad-hoc swarms couldn't be scored
+6. **No handoff completion wait helpers** — multi-recipient handoffs required polling `get_handoffs`
+
+### Fixes
+
+- **Scope/path normalization** (`core_locking.py`): `_check_scope_violation()` now normalizes scope prefixes with `normalize_path()` before comparing against the lock path. Absolute scopes (e.g., `/home/user/project/src/`) now correctly match relative lock paths (e.g., `src/services/file.js`).
+- **SQLite connection robustness** (`db.py`, `core_locking.py`): `ConnectionPool.connect()` validates connections with a health-check `SELECT 1` and recreates them if closed. `acquire_lock()` retry loop no longer closes the pool connection.
+- **Dependency auto-satisfaction** (`dependencies.py`): `check_dependencies()` now auto-satisfies dependencies whose conditions are already met (completed tasks, stopped agents, active agents) and performs all queries inside the connection context.
+- **`wait_for_dependency`** (`dependencies.py`, `core_dependencies.py`): new helper that polls until a dependency is satisfied or timeout expires.
+- **`assess_current_session` without graph** (`core_visibility.py`): removed the hard error when no coordination graph is loaded. Now scores ad-hoc sessions from live DB state; graph-dependent metrics return 0.0 when no graph is present.
+- **Task assignment hints** (`tasks.py`, `core_tasks.py`): new `suggest_task_assignments()` method returns available tasks matched with idle agents (agents with no pending/in_progress tasks).
+- **Handoff completion tracking** (`core_handoffs.py`, `core_locking.py`): `acknowledge_handoff` and `complete_handoff` now publish `handoff.ack` / `handoff.completed` events. New helpers: `await_handoff_acks(handoff_id, expected_agents, timeout_s)` and `await_handoff_completion(handoff_id, timeout_s)`.
+
+### Counts
+
+| Version | Tools | CLI Commands | Schema |
+|---------|-------|--------------|--------|
+| v0.6.7 | 83 | 79 | 20 |
+| v0.6.6 | 79 | 79 | 20 |
+
+---
 
 ## v0.6.5 Changelog — Phase 13 Stress Test Fixes (Broadcast + Lock Notifications)
 
@@ -1177,7 +1209,7 @@ Full list auto-generated from `coordinationhub/schemas.py`:
 | `get_file_agent_map` | Get a map of all tracked files to their assigned Agent ID and responsibility summary |
 | `update_agent_status` | Update the current task description and/or declared scope for an agent |
 | `run_assessment` | Run an assessment suite against the loaded coordination graph |
-| `assess_current_session` | Score the current live session against the loaded coordination graph |
+| `assess_current_session` | Score the current live session. Works with or without a loaded coordination graph |
 | `get_agent_tree` | Get the hierarchical agent tree with live work status |
 | `send_message` | Send a direct message to another agent |
 | `get_messages` | Get messages sent to an agent |
@@ -1194,6 +1226,7 @@ Full list auto-generated from `coordinationhub/schemas.py`:
 | `get_task_tree` | Get a task with all its subtasks recursively as a nested tree |
 | `wait_for_task` | Poll until a task reaches a terminal state (completed or failed) or the timeout expires |
 | `get_available_tasks` | Return tasks whose depends_on are all satisfied (completed) and that are not currently claimed |
+| `suggest_task_assignments` | Suggest available tasks for idle agents |
 | `declare_work_intent` | Declare intent to work on a file before acquiring a lock |
 | `get_work_intents` | Get all live (non-expired) work intents |
 | `clear_work_intent` | Clear an agent's declared work intent (e.g |
@@ -1201,9 +1234,12 @@ Full list auto-generated from `coordinationhub/schemas.py`:
 | `complete_handoff` | Mark a handoff as completed (called by the originating agent) |
 | `cancel_handoff` | Cancel a handoff (abort before completion) |
 | `get_handoffs` | Get handoffs with optional status and sender filtering |
+| `await_handoff_acks` | Wait until all expected agents have acknowledged a handoff or timeout expires |
+| `await_handoff_completion` | Wait until a handoff is marked completed or timeout expires |
 | `declare_dependency` | Declare that dependent_agent needs depends_on_agent to finish task X (or any task by that agent) before starting work |
 | `check_dependencies` | Check whether an agent has unsatisfied cross-agent dependencies |
 | `satisfy_dependency` | Mark a dependency as satisfied (called after condition is met) |
+| `wait_for_dependency` | Poll until a dependency is satisfied or timeout expires |
 | `get_blockers` | Alias for check_dependencies — get unsatisfied blockers for an agent |
 | `assert_can_start` | Structured check before starting significant work |
 | `get_all_dependencies` | Get all declared dependencies, optionally filtered by dependent agent |

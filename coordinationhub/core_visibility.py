@@ -108,13 +108,9 @@ class VisibilityMixin:
 
         Reads live hook-recorded state (agents, notifications, lineage) and
         synthesizes a trace suite via build_suite_from_db.
+        Works even when no coordination graph is loaded — scores ad-hoc sessions.
         """
         graph = _g.get_graph()
-        if graph is None:
-            return {
-                "error": "No coordination graph loaded — "
-                        "call load_coordination_spec first",
-            }
         worktree_root = (
             str(self._storage.project_root)
             if scope == "project" and self._storage.project_root

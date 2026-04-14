@@ -91,7 +91,6 @@ class LockingMixin:
                     if retry and attempt < max_retries:
                         elapsed_ms = (time.time() - start_time) * 1000
                         if elapsed_ms + current_backoff_ms <= timeout_ms:
-                            conn.close()
                             time.sleep(current_backoff_ms / 1000.0)
                             current_backoff_ms *= 2  # Exponential backoff
                             attempt += 1
@@ -189,7 +188,8 @@ class LockingMixin:
             return None
         # Check if norm_path starts with any scope prefix
         for scope_prefix in scope_paths:
-            if norm_path.startswith(scope_prefix) or norm_path == scope_prefix.rstrip("/"):
+            norm_scope = normalize_path(scope_prefix, self._storage.project_root)
+            if norm_path.startswith(norm_scope) or norm_path == norm_scope.rstrip("/"):
                 return None
         return {
             "declared_scope": scope_paths,
@@ -505,6 +505,12 @@ class LockingMixin:
                 {"handoff_id": handoff_id, "document_path": document_path,
                  "handoff_type": handoff_type},
             )
+        self._event_bus.publish(
+            "handoff.created",
+            {"handoff_id": handoff_id, "from_agent_id": agent_id,
+             "to_agents": to_agents, "document_path": document_path,
+             "handoff_type": handoff_type},
+        )
         return {
             "handoff_id": handoff_id, "to_agents": to_agents,
             "document_path": document_path, "handoff_type": handoff_type,

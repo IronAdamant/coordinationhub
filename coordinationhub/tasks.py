@@ -288,3 +288,46 @@ def get_available_tasks(
         if deps_satisfied:
             available.append(task)
     return available
+
+
+def suggest_task_assignments(connect: ConnectFn) -> list[dict[str, Any]]:
+    """Suggest available tasks for idle agents.
+
+    Returns a list of {task_id, description, suggested_agents} where each
+    suggested agent has no currently assigned pending/in_progress tasks.
+    """
+    available = get_available_tasks(connect)
+    if not available:
+        return []
+
+    with connect() as conn:
+        # Find agents with no active tasks
+        agent_rows = conn.execute(
+            "SELECT agent_id FROM agents WHERE status = 'active'"
+        ).fetchall()
+        all_agent_ids = {r["agent_id"] for r in agent_rows}
+
+        busy_rows = conn.execute(
+            "SELECT assigned_agent_id FROM tasks WHERE status IN ('pending', 'in_progress')"
+        ).fetchall()
+        busy_agents = {r["assigned_agent_id"] for r in busy_rows if r["assigned_agent_id"]}
+
+    idle_agents = sorted(all_agent_ids - busy_agents)
+    suggestions: list[dict[str, Any]] = []
+    for task in available:
+        task_id = task["id"]
+        description = task.get("description", "")
+        # If task is already assigned to an idle agent, highlight that first
+        assigned = task.get("assigned_agent_id")
+        suggested = []
+        if assigned and assigned in idle_agents:
+            suggested.append(assigned)
+        for aid in idle_agents:
+            if aid not in suggested:
+                suggested.append(aid)
+        suggestions.append({
+            "task_id": task_id,
+            "description": description,
+            "suggested_agents": suggested,
+        })
+    return suggestions

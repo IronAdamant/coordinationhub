@@ -59,3 +59,14 @@ class DependencyMixin:
         """Get all declared dependencies."""
         deps = _deps.get_all_dependencies(self._connect, dependent_agent_id)
         return {"dependencies": deps, "count": len(deps)}
+
+    def wait_for_dependency(
+        self,
+        dep_id: int,
+        timeout_s: float = 60.0,
+        poll_interval_s: float = 2.0,
+    ) -> dict[str, Any]:
+        """Poll until a dependency is satisfied or timeout expires."""
+        return _deps.wait_for_dependency(
+            self._connect, dep_id, timeout_s, poll_interval_s,
+        )

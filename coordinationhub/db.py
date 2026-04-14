@@ -604,6 +604,11 @@ class ConnectionPool:
     def connect(self) -> sqlite3.Connection:
         """Return this thread's connection, creating if needed."""
         conn = getattr(self._local, "conn", None)
+        if conn is not None:
+            try:
+                conn.execute("SELECT 1")
+            except (sqlite3.ProgrammingError, sqlite3.OperationalError):
+                conn = None
         if conn is None:
             conn = _create_connection(self._db_path)
             self._local.conn = conn
