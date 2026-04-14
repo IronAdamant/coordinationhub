@@ -29,7 +29,7 @@ from .assessment_scorers import (
     build_trace_mappings,
     COORDINATION_PRIMITIVES,
 )
-from .db import ConnectFn
+from ...db import ConnectFn
 
 
 # ------------------------------------------------------------------ #

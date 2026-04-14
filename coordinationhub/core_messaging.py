@@ -30,7 +30,17 @@ class MessagingMixin:
         payload: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         """Send a message to another agent."""
-        return _msg.send_message(self._connect, from_agent_id, to_agent_id, message_type, payload)
+        result = _msg.send_message(self._connect, from_agent_id, to_agent_id, message_type, payload)
+        self._event_bus.publish(
+            "message.received",
+            {
+                "message_id": result.get("message_id"),
+                "from_agent_id": from_agent_id,
+                "to_agent_id": to_agent_id,
+                "message_type": message_type,
+            },
+        )
+        return result
 
     def get_messages(
         self, agent_id: str, unread_only: bool = False, limit: int = 50,
@@ -56,26 +66,33 @@ class MessagingMixin:
     def await_agent(self, agent_id: str, timeout_s: float = 60.0) -> dict[str, Any]:
         """Wait for an agent to deregister (complete its work).
 
-        Polls agent status until the agent is stopped or timeout expires.
+        Uses the event bus for low-latency notification.
         """
         start = _time.time()
-        poll_interval = 2.0
-        while _time.time() - start < timeout_s:
-            with self._connect() as conn:
-                row = conn.execute(
-                    "SELECT status FROM agents WHERE agent_id = ?", (agent_id,)
-                ).fetchone()
-                if row is None or row["status"] == "stopped":
-                    return {
-                        "awaited": True,
-                        "agent_id": agent_id,
-                        "status": row["status"] if row else "not_found",
-                        "waited_s": _time.time() - start,
-                    }
-            remaining = timeout_s - (_time.time() - start)
-            if remaining <= 0:
-                break
-            _time.sleep(min(poll_interval, remaining))
+        with self._connect() as conn:
+            row = conn.execute(
+                "SELECT status FROM agents WHERE agent_id = ?", (agent_id,)
+            ).fetchone()
+            if row is None or row["status"] == "stopped":
+                return {
+                    "awaited": True,
+                    "agent_id": agent_id,
+                    "status": row["status"] if row else "not_found",
+                    "waited_s": _time.time() - start,
+                }
+
+        event = self._event_bus.wait_for_event(
+            ["agent.deregistered"],
+            filter_fn=lambda e: e.get("agent_id") == agent_id,
+            timeout=timeout_s,
+        )
+        if event:
+            return {
+                "awaited": True,
+                "agent_id": agent_id,
+                "status": "stopped",
+                "waited_s": _time.time() - start,
+            }
         return {
             "awaited": False,
             "agent_id": agent_id,

@@ -10,10 +10,12 @@ from pathlib import Path
 from unittest.mock import patch
 
 from coordinationhub.hooks.claude_code import (
+    ClaudeCodeHook,
     _session_agent_id,
     _subagent_id,
     _subagent_type,
     _resolve_agent_id,
+    _get_engine,
     _log_error,
     handle_session_start,
     handle_user_prompt_submit,

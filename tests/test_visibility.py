@@ -9,7 +9,7 @@ import time
 from pathlib import Path
 
 from coordinationhub.core import CoordinationEngine
-from coordinationhub import graphs as _graphs
+from coordinationhub.plugins.graph import graphs as _graphs
 
 
 class TestFileOwnershipScan:

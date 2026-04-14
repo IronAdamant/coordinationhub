@@ -69,11 +69,15 @@ class TestFullLifecycleScenario:
         result = engine.acquire_lock("/src/module_1.py", children[0])
         assert result["acquired"]
 
-        # 8. All notifications flow correctly
+        # 8. All notifications flow correctly (including auto lock/unlocked events)
         engine.notify_change("/src/module_0.py", "modified", children[0])
         engine.notify_change("/src/module_2.py", "modified", children[2])
         notifs = engine.get_notifications(exclude_agent=parent)
-        assert len(notifs["notifications"]) == 2
+        modified_notifs = [n for n in notifs["notifications"] if n["change_type"] == "modified"]
+        assert len(modified_notifs) == 2
+        # Lock lifecycle also emits notifications
+        assert any(n["change_type"] == "locked" for n in notifs["notifications"])
+        assert any(n["change_type"] == "unlocked" for n in notifs["notifications"])
 
         # 9. Status is coherent
         status = engine.status()
@@ -711,7 +715,7 @@ class TestHookLevelMultiAgentScenario:
         from coordinationhub.hooks.claude_code import (
             handle_session_start, _get_engine,
         )
-        from coordinationhub import graphs as _graphs
+        from coordinationhub.plugins.graph import graphs as _graphs
 
         # Module-level graph state may be set by an earlier test in the suite.
         _graphs.clear_graph()

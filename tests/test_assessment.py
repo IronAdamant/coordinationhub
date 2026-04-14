@@ -7,7 +7,7 @@ import pytest
 import tempfile
 from pathlib import Path
 
-from coordinationhub.assessment import (
+from coordinationhub.plugins.assessment.assessment import (
     load_suite,
     run_assessment,
     format_markdown_report,
@@ -18,7 +18,7 @@ from coordinationhub.assessment import (
     score_spawn_propagation,
     _suggest_graph_refinements,
 )
-from coordinationhub.graphs import CoordinationGraph, set_graph, clear_graph
+from coordinationhub.plugins.graph.graphs import CoordinationGraph, set_graph, clear_graph
 
 
 MINIMAL_GRAPH = CoordinationGraph({
@@ -339,14 +339,14 @@ class TestBuildTraceFromDB:
     """Tests for build_trace_from_db / build_suite_from_db (live-session trace synthesis)."""
 
     def test_empty_db_returns_empty_trace(self, engine):
-        from coordinationhub.assessment import build_trace_from_db
+        from coordinationhub.plugins.assessment.assessment import build_trace_from_db
         trace = build_trace_from_db(engine._connect, trace_id="empty")
         assert trace["trace_id"] == "empty"
         assert trace["events"] == []
 
     def test_single_agent_no_writes(self, engine):
         """A registered agent with no writes produces exactly one register event."""
-        from coordinationhub.assessment import build_trace_from_db
+        from coordinationhub.plugins.assessment.assessment import build_trace_from_db
         aid = engine.generate_agent_id()
         engine.register_agent(aid)
 
@@ -361,7 +361,7 @@ class TestBuildTraceFromDB:
         """Register events carry graph_id (when agent_responsibilities matches)
         and parent_id (when agents has a parent)."""
         import json as _json
-        from coordinationhub.assessment import build_trace_from_db
+        from coordinationhub.plugins.assessment.assessment import build_trace_from_db
 
         # Load a spec so that registrations with matching agent_ids get roles
         spec = tmp_path / "coordination_spec.json"
@@ -391,7 +391,7 @@ class TestBuildTraceFromDB:
     def test_change_notifications_become_lock_modified_unlock_triples(self, engine):
         """Each 'modified' change_notification emits a lock → modified → unlock
         triple in chronological order."""
-        from coordinationhub.assessment import build_trace_from_db
+        from coordinationhub.plugins.assessment.assessment import build_trace_from_db
 
         aid = engine.generate_agent_id()
         engine.register_agent(aid)
@@ -410,7 +410,7 @@ class TestBuildTraceFromDB:
 
     def test_indexed_change_type_is_ignored(self, engine):
         """Only 'modified' notifications produce lock/modify events."""
-        from coordinationhub.assessment import build_trace_from_db
+        from coordinationhub.plugins.assessment.assessment import build_trace_from_db
 
         aid = engine.generate_agent_id()
         engine.register_agent(aid)
@@ -424,7 +424,7 @@ class TestBuildTraceFromDB:
         """A lineage row where parent and child have different graph roles emits
         a handoff event."""
         import json as _json
-        from coordinationhub.assessment import build_trace_from_db
+        from coordinationhub.plugins.assessment.assessment import build_trace_from_db
 
         spec = tmp_path / "coordination_spec.json"
         spec.write_text(_json.dumps({
@@ -449,7 +449,7 @@ class TestBuildTraceFromDB:
     def test_no_handoff_when_parent_and_child_share_role(self, engine, tmp_path):
         """Children with the same graph role as their parent do not emit handoff events."""
         import json as _json
-        from coordinationhub.assessment import build_trace_from_db
+        from coordinationhub.plugins.assessment.assessment import build_trace_from_db
 
         spec = tmp_path / "coordination_spec.json"
         spec.write_text(_json.dumps({
@@ -471,7 +471,7 @@ class TestBuildTraceFromDB:
     def test_worktree_root_filter_excludes_other_projects(self, engine):
         """Filtering by worktree_root excludes agents and notifications from
         other projects living in the same DB."""
-        from coordinationhub.assessment import build_trace_from_db
+        from coordinationhub.plugins.assessment.assessment import build_trace_from_db
 
         # Register one agent in each worktree
         engine.register_agent("agent.in_a", worktree_root="/project/a")
@@ -485,7 +485,7 @@ class TestBuildTraceFromDB:
 
     def test_build_suite_wraps_trace(self, engine):
         """build_suite_from_db returns a suite dict containing exactly one trace."""
-        from coordinationhub.assessment import build_suite_from_db
+        from coordinationhub.plugins.assessment.assessment import build_suite_from_db
 
         engine.register_agent("hub.1.0")
         suite = build_suite_from_db(engine._connect, suite_name="my_suite")

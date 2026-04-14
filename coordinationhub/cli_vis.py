@@ -236,7 +236,7 @@ def cmd_dashboard(args):
             })
             return
 
-        graph = __import__("coordinationhub.graphs", fromlist=["get_graph"]).get_graph()
+        graph = __import__("coordinationhub.plugins.graph", fromlist=["get_graph"]).get_graph()
         print("=" * 70)
         print("COORDINATIONHUB DASHBOARD")
         print("=" * 70)

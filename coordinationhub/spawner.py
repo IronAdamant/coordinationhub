@@ -41,8 +41,8 @@ def generate_spawn_id(
     with conn() as cx:
         cursor = cx.execute(
             """
-            SELECT COUNT(*) FROM pending_spawner_tasks
-            WHERE parent_agent_id = ? AND subagent_type = ?
+            SELECT COUNT(*) FROM pending_tasks
+            WHERE scope_id = ? AND subagent_type = ?
             """,
             (parent_agent_id, subagent_type),
         )
@@ -75,14 +75,14 @@ def stash_pending_spawn(
     with connect() as conn:
         # Expire stale pending rows
         conn.execute(
-            "UPDATE pending_spawner_tasks SET status = 'expired' "
+            "UPDATE pending_tasks SET status = 'expired' "
             "WHERE status = 'pending' AND created_at < ?",
             (cutoff,),
         )
         conn.execute(
             """
-            INSERT INTO pending_spawner_tasks
-            (id, parent_agent_id, subagent_type, description, prompt, created_at, status, source)
+            INSERT INTO pending_tasks
+            (task_id, scope_id, subagent_type, description, prompt, created_at, status, source)
             VALUES (?, ?, ?, ?, ?, ?, 'pending', ?)
             """,
             (spawn_id, parent_agent_id, subagent_type, description, prompt, now, source),
@@ -110,9 +110,9 @@ def consume_pending_spawn(
         if subagent_type:
             row = conn.execute(
                 """
-                SELECT id, description, prompt, created_at
-                FROM pending_spawner_tasks
-                WHERE parent_agent_id = ?
+                SELECT task_id, description, prompt, created_at
+                FROM pending_tasks
+                WHERE scope_id = ?
                   AND subagent_type = ?
                   AND status = 'pending'
                 ORDER BY created_at ASC
@@ -123,9 +123,9 @@ def consume_pending_spawn(
         else:
             row = conn.execute(
                 """
-                SELECT id, description, prompt, created_at
-                FROM pending_spawner_tasks
-                WHERE parent_agent_id = ?
+                SELECT task_id, description, prompt, created_at
+                FROM pending_tasks
+                WHERE scope_id = ?
                   AND status = 'pending'
                 ORDER BY created_at ASC
                 LIMIT 1
@@ -137,9 +137,9 @@ def consume_pending_spawn(
             return None
 
         conn.execute(
-            "UPDATE pending_spawner_tasks SET consumed_at = ?, status = 'registered' "
-            "WHERE id = ?",
-            (now, row["id"]),
+            "UPDATE pending_tasks SET consumed_at = ?, status = 'registered' "
+            "WHERE task_id = ?",
+            (now, row["task_id"]),
         )
         return dict(row)
 
@@ -154,10 +154,10 @@ def get_pending_spawns(
         if include_consumed:
             rows = conn.execute(
                 """
-                SELECT id, parent_agent_id, subagent_type, description, prompt,
+                SELECT task_id, scope_id, subagent_type, description, prompt,
                        created_at, consumed_at, status, source
-                FROM pending_spawner_tasks
-                WHERE parent_agent_id = ?
+                FROM pending_tasks
+                WHERE scope_id = ?
                 ORDER BY created_at ASC
                 """,
                 (parent_agent_id,),
@@ -165,10 +165,10 @@ def get_pending_spawns(
         else:
             rows = conn.execute(
                 """
-                SELECT id, parent_agent_id, subagent_type, description, prompt,
+                SELECT task_id, scope_id, subagent_type, description, prompt,
                        created_at, consumed_at, status, source
-                FROM pending_spawner_tasks
-                WHERE parent_agent_id = ? AND status = 'pending'
+                FROM pending_tasks
+                WHERE scope_id = ? AND status = 'pending'
                 ORDER BY created_at ASC
                 """,
                 (parent_agent_id,),
@@ -185,7 +185,7 @@ def prune_stale_spawns(
     with connect() as conn:
         cursor = conn.execute(
             """
-            DELETE FROM pending_spawner_tasks
+            DELETE FROM pending_tasks
             WHERE status IN ('registered', 'expired') AND consumed_at < ?
             """,
             (cutoff,),
@@ -212,9 +212,9 @@ def report_subagent_spawned(
         if subagent_type:
             row = conn.execute(
                 """
-                SELECT id, description, prompt, created_at
-                FROM pending_spawner_tasks
-                WHERE parent_agent_id = ? AND subagent_type = ? AND status = 'pending'
+                SELECT task_id, description, prompt, created_at
+                FROM pending_tasks
+                WHERE scope_id = ? AND subagent_type = ? AND status = 'pending'
                 ORDER BY created_at ASC LIMIT 1
                 """,
                 (parent_agent_id, subagent_type),
@@ -222,19 +222,19 @@ def report_subagent_spawned(
         else:
             row = conn.execute(
                 """
-                SELECT id, description, prompt, created_at
-                FROM pending_spawner_tasks
-                WHERE parent_agent_id = ? AND status = 'pending'
+                SELECT task_id, description, prompt, created_at
+                FROM pending_tasks
+                WHERE scope_id = ? AND status = 'pending'
                 ORDER BY created_at ASC LIMIT 1
                 """,
                 (parent_agent_id,),
             ).fetchone()
 
-        spawn_id = row["id"] if row else None
+        spawn_id = row["task_id"] if row else None
 
         if spawn_id:
             conn.execute(
-                "UPDATE pending_spawner_tasks SET consumed_at = ?, status = 'registered', source = ? WHERE id = ?",
+                "UPDATE pending_tasks SET consumed_at = ?, status = 'registered', source = ? WHERE task_id = ?",
                 (now, source, spawn_id),
             )
 
@@ -259,7 +259,7 @@ def cancel_spawn(
     """
     with connect() as conn:
         row = conn.execute(
-            "SELECT status FROM pending_spawner_tasks WHERE id = ?",
+            "SELECT status FROM pending_tasks WHERE task_id = ?",
             (spawn_id,),
         ).fetchone()
         if row is None:
@@ -268,7 +268,7 @@ def cancel_spawn(
             return {"not_found": True, "spawn_id": spawn_id, "status": row["status"]}
         now = time.time()
         conn.execute(
-            "UPDATE pending_spawner_tasks SET consumed_at = ?, status = 'expired' WHERE id = ?",
+            "UPDATE pending_tasks SET consumed_at = ?, status = 'expired' WHERE task_id = ?",
             (now, spawn_id),
         )
         return {"cancelled": True, "spawn_id": spawn_id}

@@ -16,7 +16,7 @@ import time
 from typing import Any
 
 from . import agent_registry as _ar
-from . import graphs as _g
+from .plugins.graph import graphs as _g
 from . import scan as _scan
 from .context import build_context_bundle
 
@@ -69,6 +69,7 @@ class IdentityMixin:
             str(self._storage.project_root) if self._storage.project_root else os.getcwd()
         )
         _ar.register_agent(self._connect, agent_id, worktree, parent_id, claude_agent_id=claude_agent_id)
+        self._event_bus.publish("agent.registered", {"agent_id": agent_id, "parent_id": parent_id})
         if parent_id is not None:
             with self._connect() as conn:
                 conn.execute(
@@ -101,6 +102,7 @@ class IdentityMixin:
         # Cross-mixin call via MRO: LockingMixin.release_agent_locks is on the host
         lock_result = self.release_agent_locks(agent_id)
         result["locks_released"] = lock_result.get("released", 0)
+        self._event_bus.publish("agent.deregistered", {"agent_id": agent_id})
         return result
 
     def list_agents(

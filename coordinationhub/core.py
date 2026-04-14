@@ -18,10 +18,13 @@ Zero third-party dependencies.
 
 from __future__ import annotations
 
+import time
 from pathlib import Path
 from typing import Any
 
 from ._storage import CoordinationStorage
+from .event_bus import EventBus
+from .lock_cache import LockCache
 from .core_locking import LockingMixin
 from .core_identity import IdentityMixin
 from .core_messaging import MessagingMixin
@@ -34,7 +37,7 @@ from .core_visibility import VisibilityMixin
 from .core_leases import LeaseMixin
 from .core_spawner import SpawnerMixin
 from .paths import detect_project_root
-from . import graphs as _g
+from .plugins.graph import graphs as _g
 
 
 class CoordinationEngine(
@@ -71,11 +74,20 @@ class CoordinationEngine(
             project_root=project_root or detect_project_root(),
             namespace=namespace,
         )
+        self._event_bus = EventBus()
+        self._lock_cache = LockCache()
         self._graph = None  # set in start()
 
     def start(self) -> None:
-        """Start storage and load coordination graph."""
+        """Start storage, warm lock cache, and load coordination graph."""
         self._storage.start()
+        now = time.time()
+        with self._connect() as conn:
+            rows = conn.execute(
+                "SELECT * FROM document_locks WHERE locked_at + lock_ttl >= ?",
+                (now,),
+            ).fetchall()
+            self._lock_cache.warm([dict(r) for r in rows])
         self._graph = _g.load_coordination_spec_from_disk(
             self._connect, self._storage.project_root,
         )

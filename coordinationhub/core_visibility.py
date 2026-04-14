@@ -14,10 +14,10 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
-from . import graphs as _g
+from .plugins.graph import graphs as _g
 from . import scan as _scan
 from . import agent_status as _v
-from . import assessment as _assess
+from .plugins.assessment import assessment as _assess
 
 
 class VisibilityMixin:

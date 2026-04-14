@@ -91,17 +91,20 @@ _SCHEMAS = {
             updated_at      REAL NOT NULL
         )
     """,
-    "pending_subagent_tasks": """
-        CREATE TABLE IF NOT EXISTS pending_subagent_tasks (
-            tool_use_id    TEXT PRIMARY KEY,
-            session_id     TEXT NOT NULL,
-            subagent_type  TEXT NOT NULL,
-            description    TEXT,
-            prompt         TEXT,
-            created_at     REAL NOT NULL,
-            consumed_at    REAL
+    "pending_tasks": """
+        CREATE TABLE IF NOT EXISTS pending_tasks (
+            task_id         TEXT PRIMARY KEY,
+            scope_id        TEXT NOT NULL,
+            subagent_type   TEXT,
+            description     TEXT,
+            prompt          TEXT,
+            created_at      REAL NOT NULL,
+            consumed_at     REAL,
+            status          TEXT DEFAULT 'pending',
+            source          TEXT DEFAULT 'external'
         )
     """,
+
     "file_ownership": """
         CREATE TABLE IF NOT EXISTS file_ownership (
             document_path     TEXT PRIMARY KEY,
@@ -270,7 +273,7 @@ _INDEXES = [
     "CREATE INDEX IF NOT EXISTS idx_file_owner_agent ON file_ownership(assigned_agent_id)",
     "CREATE INDEX IF NOT EXISTS idx_locks_expiry ON document_locks(document_path, locked_at, lock_ttl)",
     "CREATE INDEX IF NOT EXISTS idx_agents_claude_id ON agents(claude_agent_id)",
-    "CREATE INDEX IF NOT EXISTS idx_pending_subagent_session_type ON pending_subagent_tasks(session_id, subagent_type, consumed_at)",
+    "CREATE INDEX IF NOT EXISTS idx_pending_tasks_scope_type ON pending_tasks(scope_id, subagent_type, status)",
     "CREATE INDEX IF NOT EXISTS idx_descendant_ancestor ON descendant_registry(ancestor_id)",
     "CREATE INDEX IF NOT EXISTS idx_messages_to ON messages(to_agent_id)",
     "CREATE INDEX IF NOT EXISTS idx_messages_time ON messages(created_at)",
@@ -288,14 +291,14 @@ _INDEXES = [
     "CREATE INDEX IF NOT EXISTS idx_task_failures_task ON task_failures(task_id)",
     "CREATE INDEX IF NOT EXISTS idx_task_failures_status ON task_failures(status)",
     "CREATE INDEX IF NOT EXISTS idx_leases_expires ON coordinator_leases(expires_at)",
-    "CREATE INDEX IF NOT EXISTS idx_spawner_parent_type ON pending_spawner_tasks(parent_agent_id, subagent_type, status)",
+    "CREATE INDEX IF NOT EXISTS idx_pending_tasks_created_at ON pending_tasks(created_at)",
     "CREATE INDEX IF NOT EXISTS idx_broadcasts_from ON broadcasts(from_agent_id)",
     "CREATE INDEX IF NOT EXISTS idx_broadcasts_expires ON broadcasts(expires_at)",
     "CREATE INDEX IF NOT EXISTS idx_broadcast_acks_id ON broadcast_acks(broadcast_id)",
 ]
 
 
-_CURRENT_SCHEMA_VERSION = 19
+_CURRENT_SCHEMA_VERSION = 20
 
 
 def _get_schema_version(conn: sqlite3.Connection) -> int:
@@ -446,6 +449,56 @@ def _migrate_v18_to_v19(conn: sqlite3.Connection) -> None:
         conn.execute("ALTER TABLE broadcasts ADD COLUMN expected_count INTEGER DEFAULT 0")
 
 
+def _migrate_v19_to_v20(conn: sqlite3.Connection) -> None:
+    """Merge pending_subagent_tasks and pending_spawner_tasks into pending_tasks.
+
+    Unifies the two similar tables into a single pending_tasks table.
+    """
+    tables = {
+        row[0] for row in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")
+    }
+    if "pending_tasks" in tables:
+        return  # Already migrated
+
+    conn.execute(_SCHEMAS["pending_tasks"])
+
+    if "pending_subagent_tasks" in tables:
+        conn.execute("""
+            INSERT INTO pending_tasks
+            (task_id, scope_id, subagent_type, description, prompt, created_at, consumed_at, status, source)
+            SELECT
+                tool_use_id,
+                session_id,
+                subagent_type,
+                description,
+                prompt,
+                created_at,
+                consumed_at,
+                CASE WHEN consumed_at IS NULL THEN 'pending' ELSE 'consumed' END,
+                'external'
+            FROM pending_subagent_tasks
+        """)
+        conn.execute("DROP TABLE pending_subagent_tasks")
+
+    if "pending_spawner_tasks" in tables:
+        conn.execute("""
+            INSERT INTO pending_tasks
+            (task_id, scope_id, subagent_type, description, prompt, created_at, consumed_at, status, source)
+            SELECT
+                id,
+                parent_agent_id,
+                subagent_type,
+                description,
+                prompt,
+                created_at,
+                consumed_at,
+                status,
+                source
+            FROM pending_spawner_tasks
+        """)
+        conn.execute("DROP TABLE pending_spawner_tasks")
+
+
 _MIGRATIONS = {
     2: _migrate_v1_to_v2,
     3: _migrate_v2_to_v3,
@@ -465,6 +518,7 @@ _MIGRATIONS = {
     17: _migrate_v16_to_v17,  # scope column added to agent_responsibilities
     18: _migrate_v17_to_v18,  # source column + broadcasts tables
     19: _migrate_v18_to_v19,  # expected_count column on broadcasts
+    20: _migrate_v19_to_v20,  # merge pending_subagent_tasks and pending_spawner_tasks
 }
 
 

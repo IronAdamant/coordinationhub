@@ -80,9 +80,20 @@ class SpawnerMixin:
         spawning a sub-agent via its native mechanism. This consumes the
         pending spawn record and links it to the actual child agent ID.
         """
-        return _spawner.report_subagent_spawned(
+        result = _spawner.report_subagent_spawned(
             self._connect, parent_agent_id, subagent_type, child_agent_id, source,
         )
+        if result.get("spawn_id"):
+            self._event_bus.publish(
+                "spawner.registered",
+                {
+                    "parent_agent_id": parent_agent_id,
+                    "child_agent_id": child_agent_id,
+                    "subagent_type": subagent_type,
+                    "spawn_id": result["spawn_id"],
+                },
+            )
+        return result
 
     def await_subagent_registration(
         self,
@@ -90,34 +101,53 @@ class SpawnerMixin:
         subagent_type: str | None = None,
         timeout: float | None = None,
     ) -> dict[str, Any]:
-        """Poll until a pending spawn is consumed (sub-agent registered) or timeout.
+        """Wait until a pending spawn is consumed (sub-agent registered) or timeout.
 
-        The parent agent calls this after ``spawn_subagent`` to wait for the
-        external spawning system to report that the sub-agent is alive.
-
+        Uses the event bus for low-latency notification.
         Returns the consumed spawn record on success.
         Returns ``{"timed_out": True, ...}`` if the sub-agent did not register
         within the timeout.
         """
         timeout = timeout if timeout is not None else self.DEFAULT_SPAWN_TIMEOUT
-        deadline = time.time() + timeout
-        poll_interval = 0.5  # 500ms between polls
+        start = time.time()
 
-        while time.time() < deadline:
-            spawns = _spawner.get_pending_spawns(
-                connect=self._connect,
-                parent_agent_id=parent_agent_id,
-                include_consumed=True,
-            )
-            for spawn in spawns:
-                # Check if the matching type (or any if no type) is now registered
-                if subagent_type is None or spawn.get("subagent_type") == subagent_type:
-                    if spawn["status"] == "registered":
-                        return {"registered": True, "spawn": spawn}
-                    elif spawn["status"] == "expired":
-                        # Found but expired — keep looking for a newer one
-                        pass
-            time.sleep(poll_interval)
+        # Fast-path: check if already registered
+        spawns = _spawner.get_pending_spawns(
+            connect=self._connect,
+            parent_agent_id=parent_agent_id,
+            include_consumed=True,
+        )
+        for spawn in spawns:
+            if subagent_type is None or spawn.get("subagent_type") == subagent_type:
+                if spawn["status"] == "registered":
+                    return {"registered": True, "spawn": spawn}
+
+        event = self._event_bus.wait_for_event(
+            ["spawner.registered"],
+            filter_fn=lambda e: (
+                e.get("parent_agent_id") == parent_agent_id
+                and (subagent_type is None or e.get("subagent_type") == subagent_type)
+            ),
+            timeout=timeout,
+        )
+        if event is None:
+            return {
+                "timed_out": True,
+                "timeout": timeout,
+                "parent_agent_id": parent_agent_id,
+                "subagent_type": subagent_type,
+            }
+
+        # Re-query to get the full spawn record
+        spawns = _spawner.get_pending_spawns(
+            connect=self._connect,
+            parent_agent_id=parent_agent_id,
+            include_consumed=True,
+        )
+        for spawn in spawns:
+            if subagent_type is None or spawn.get("subagent_type") == subagent_type:
+                if spawn["status"] == "registered":
+                    return {"registered": True, "spawn": spawn}
 
         return {
             "timed_out": True,
@@ -170,15 +200,31 @@ class SpawnerMixin:
         child_agent_id: str,
         timeout: float = 30.0,
     ) -> dict[str, Any]:
-        """Poll until a child agent is stopped or the timeout is reached.
+        """Wait until a child agent is stopped or the timeout is reached.
 
+        Uses the event bus for low-latency notification.
         Returns ``stopped: True`` if the child called ``deregister_agent`` within
         the timeout. Returns ``timed_out: True`` with ``escalate: True`` if the
         child did not stop in time — the caller should then call
         ``deregister_agent`` directly to force cleanup.
         """
-        return _spawner.await_agent_stopped(
-            connect=self._connect,
-            child_agent_id=child_agent_id,
+        with self._connect() as conn:
+            row = conn.execute(
+                "SELECT status FROM agents WHERE agent_id = ?", (child_agent_id,)
+            ).fetchone()
+            if row is None or row["status"] == "stopped":
+                return {"stopped": True, "child_agent_id": child_agent_id}
+
+        event = self._event_bus.wait_for_event(
+            ["agent.deregistered"],
+            filter_fn=lambda e: e.get("agent_id") == child_agent_id,
             timeout=timeout,
         )
+        if event:
+            return {"stopped": True, "child_agent_id": child_agent_id}
+        return {
+            "timed_out": True,
+            "child_agent_id": child_agent_id,
+            "timeout": timeout,
+            "escalate": True,
+        }
