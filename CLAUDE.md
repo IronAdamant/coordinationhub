@@ -14,59 +14,66 @@ Zero third-party dependencies in core. Works standalone or alongside Stele, Chis
 ```
 coordinationhub/
   __init__.py           — CoordinationHub — multi-agent swarm coordination MCP server (~14 LOC)
-  _storage.py           — Storage backend for CoordinationHub — SQLite pool, path resolution, lifecycle (~101 LOC)
+  _storage.py           — Storage backend for CoordinationHub — SQLite pool, path resolution, lifecycle (~113 LOC)
   agent_registry.py     — Agent lifecycle: register, heartbeat, deregister, lineage management (~292 LOC)
   agent_status.py       — Agent status and file-map query helpers for CoordinationHub (~274 LOC)
   assessment.py         — Assessment runner for CoordinationHub coordination test suites (~322 LOC)
-  assessment_scorers.py — Assessment metric scorers for CoordinationHub (~237 LOC)
-  cli.py                — CoordinationHub CLI — command-line interface for all 55 coordination tool methods (~320 LOC)
-  cli_agents.py         — Agent identity and lifecycle CLI commands (~127 LOC)
-  cli_commands.py       — CoordinationHub CLI command handlers (~85 LOC)
-  cli_deps.py           — CLI commands for cross-agent dependency declarations (~98 LOC)
-  cli_intent.py         — CLI commands for the work intent board (~44 LOC)
-  cli_locks.py          — Document locking and coordination CLI commands (~280 LOC)
+  assessment_scorers.py — Assessment metric scorers for CoordinationHub (~258 LOC)
+  broadcasts.py         — Broadcast acknowledgment primitives for CoordinationHub (~101 LOC)
+  cli.py                — CoordinationHub CLI — command-line interface for all 55 coordination tool methods (~420 LOC)
+  cli_agents.py         — Agent identity and lifecycle CLI commands (~128 LOC)
+  cli_commands.py       — CoordinationHub CLI command handlers (~107 LOC)
+  cli_deps.py           — CLI commands for cross-agent dependency declarations (~99 LOC)
+  cli_intent.py         — CLI commands for the work intent board (~45 LOC)
+  cli_leases.py         — CLI commands for HA coordinator lease management (~150 LOC)
+  cli_locks.py          — Document locking and coordination CLI commands (~314 LOC)
   cli_setup.py          — CLI commands for setup and diagnostics: doctor, init, watch (~272 LOC)
+  cli_spawner.py        — CLI commands for HA coordinator spawner — sub-agent registry management (~115 LOC)
   cli_sse.py            — CLI commands for SSE dashboard server (~29 LOC)
-  cli_tasks.py          — CLI commands for the task registry (~231 LOC)
-  cli_utils.py          — Shared CLI helper functions used by all cli_* sub-modules (~21 LOC)
-  cli_vis.py            — Change awareness, audit, graph, and assessment CLI commands (~290 LOC)
+  cli_tasks.py          — CLI commands for the task registry (~270 LOC)
+  cli_utils.py          — Shared CLI helper functions used by all cli_* sub-modules (~31 LOC)
+  cli_vis.py            — Change awareness, audit, graph, and assessment CLI commands (~311 LOC)
   conflict_log.py       — Conflict recording and querying for CoordinationHub (~44 LOC)
   context.py            — Context bundle builder for CoordinationHub agent registration responses (~91 LOC)
-  core.py               — CoordinationEngine — thin host class that inherits all mixins (~74 LOC)
-  core_change.py        — ChangeMixin — change notifications, file ownership, conflict audit, status (~118 LOC)
+  core.py               — CoordinationEngine — thin host class that inherits all mixins (~92 LOC)
+  core_change.py        — ChangeMixin — change notifications, file ownership, conflict audit, status (~133 LOC)
   core_dependencies.py  — DependencyMixin — cross-agent dependency declarations and checks (~48 LOC)
   core_handoffs.py      — HandoffMixin — one-to-many handoff acknowledgment and lifecycle (~28 LOC)
   core_identity.py      — IdentityMixin — agent lifecycle and lineage management (~94 LOC)
-  core_locking.py       — Locking and coordination methods for CoordinationEngine (~378 LOC)
+  core_leases.py        — LeaseMixin — HA coordinator lease management (~109 LOC)
+  core_locking.py       — Locking and coordination methods for CoordinationEngine (~435 LOC)
   core_messaging.py     — MessagingMixin — inter-agent messages and await (~59 LOC)
-  core_tasks.py         — TaskMixin — shared task registry with hierarchy support (~96 LOC)
+  core_spawner.py       — SpawnerMixin — HA coordinator sub-agent spawn management (~148 LOC)
+  core_tasks.py         — TaskMixin — shared task registry with hierarchy support (~117 LOC)
   core_visibility.py    — VisibilityMixin — coordination graph, project scan, agent status, assessment (~114 LOC)
   core_work_intent.py   — WorkIntentMixin — cooperative work intent board (~26 LOC)
   dashboard.py          — Web dashboard for CoordinationHub — zero external dependencies (~483 LOC)
-  db.py                 — SQLite schema, migrations, and connection pool for CoordinationHub (~394 LOC)
+  db.py                 — SQLite schema, migrations, and connection pool for CoordinationHub (~494 LOC)
   dependencies.py       — Cross-agent dependency declaration and satisfaction tracking (~98 LOC)
-  dispatch.py           — Tool dispatch table for CoordinationHub (~69 LOC)
+  dispatch.py           — Tool dispatch table for CoordinationHub (~87 LOC)
   graphs.py             — Declarative coordination graph: loader, validator, in-memory representation (~256 LOC)
   handoffs.py           — Handoff recording and acknowledgement primitives for CoordinationHub (~96 LOC)
+  leases.py             — Zero-deps lease primitives for HA coordinator leadership (~197 LOC)
   lock_ops.py           — Shared lock primitives used by both local locks and coordination locks (~191 LOC)
   mcp_server.py         — HTTP-based MCP server for CoordinationHub — zero external dependencies (~252 LOC)
   mcp_stdio.py          — Stdio-based MCP server for CoordinationHub using the ``mcp`` Python package (~142 LOC)
   messages.py           — Inter-agent messaging primitives for CoordinationHub (~90 LOC)
-  notifications.py      — Change notification storage and retrieval for CoordinationHub (~81 LOC)
+  notifications.py      — Change notification storage and retrieval for CoordinationHub (~115 LOC)
   paths.py              — Path normalization and project-root detection utilities (~38 LOC)
   pending_tasks.py      — Pending sub-agent task storage for CoordinationHub (~105 LOC)
   scan.py               — File ownership scan for CoordinationHub (~198 LOC)
-  schemas.py            — Tool schemas for CoordinationHub — all 31 MCP tools (~1299 LOC)
+  schemas.py            — Tool schemas for CoordinationHub — all 31 MCP tools (~1729 LOC)
+  spawner.py            — Zero-deps spawner primitives for HA coordinator sub-agent registry (~316 LOC)
   task_failures.py      — Task failure tracking and dead letter queue for CoordinationHub (~95 LOC)
-  tasks.py              — Task registry primitives for CoordinationHub (~185 LOC)
+  tasks.py              — Task registry primitives for CoordinationHub (~255 LOC)
   work_intent.py        — Work intent board primitives for CoordinationHub (~77 LOC)
   hooks/
     __init__.py         — Hooks package — Claude Code integration via stdin/stdout event protocol (~1 LOC)
-    claude_code.py      — CoordinationHub hook for Claude Code (~438 LOC)
+    claude_code.py      — CoordinationHub hook for Claude Code (~450 LOC)
 ```
 <!-- /GEN -->
 
-The `tests/` directory contains the pytest suite (<!-- GEN:test-count -->341<!-- /GEN --> tests across 16 files), including `tests/fixtures/claude_code_events/` contract fixtures.
+The `tests/` directory contains the pytest suite (<!-- GEN:test-count -->354<!-- /GEN --> tests across 16 files), including `tests/fixtures/claude_code_events/` contract fixtures.
 
 ## Module Design
 
@@ -104,7 +111,7 @@ The `tests/` directory contains the pytest suite (<!-- GEN:test-count -->341<!--
 - **Sub-agent task correlation (PreToolUse[Agent] → SubagentStart)**: Claude Code's `SubagentStart` event carries only `agent_id` (raw hex), `agent_type`, `session_id`, and `cwd` — no description, no `tool_use_id`. The description lives only in the preceding `PreToolUse` event with `tool_name == "Agent"`. `handle_pre_agent` stashes `(tool_use_id, session_id, subagent_type, description, prompt)` in `pending_subagent_tasks`; the following `handle_subagent_start` pops the oldest unconsumed row for `(session_id, subagent_type)` and applies the description as `current_task`. FIFO correlation works because Claude Code fires the two events in order. Bucketing by `subagent_type` means parallel spawns of different types (Explore + Plan) don't collide. Stale rows are reaped automatically after 10 minutes.
 - **`broadcast` message/action params removed**: The `message` and `action` positional params were removed (they were never stored). The `document_path` optional param remains — when provided, it is used to check for lock conflicts among acknowledged siblings and is not persisted.
 
-## <!-- GEN:tool-count -->61<!-- /GEN --> MCP Tools + 3 Setup Commands
+## <!-- GEN:tool-count -->79<!-- /GEN --> MCP Tools + 3 Setup Commands
 
 Identity: `register_agent`, `heartbeat`, `deregister_agent`, `list_agents`, `get_lineage`, `get_siblings`
 Locking: `acquire_lock`, `release_lock`, `refresh_lock`, `get_lock_status`, `list_locks`, `release_agent_locks`, `reap_expired_locks`, `reap_stale_agents`
@@ -177,7 +184,7 @@ To disable hooks temporarily, add `"disableAllHooks": true` to `~/.claude/settin
 
 ```bash
 python -m pytest tests/ -v
-# <!-- GEN:test-count -->341<!-- /GEN --> tests across 16 test files:
+# <!-- GEN:test-count -->354<!-- /GEN --> tests across 16 test files:
 #   test_agent_lifecycle.py  — 21 tests
 #   test_locking.py          — 40 tests (includes smart reap)
 #   test_notifications.py    — 8 tests
