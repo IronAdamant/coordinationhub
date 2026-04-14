@@ -15,12 +15,12 @@ CoordinationHub fixes this by acting as a shared coordination layer — a single
 ## What It Does
 
 - **File locking** — Agents lock files before editing. If another agent tries to edit the same file, it gets blocked (or warned). Supports retry with exponential backoff for cooperative lock acquisition.
-- **Scope enforcement** — Agents can declare a scope (list of path prefixes). Lock acquisitions outside the declared scope are denied.
+- **Scope enforcement** — Agents can declare a scope (list of path prefixes). Lock acquisitions outside the declared scope are denied. Supports both absolute and project-relative paths.
 - **Boundary detection** — Warns when an agent crosses into another agent's assigned territory.
 - **Agent tracking** — Every spawned agent gets an ID. See the full hierarchy, who's alive, who's stale.
 - **Change notifications** — Agents report what they changed. Others poll to stay in sync.
 - **Inter-agent messaging** — Direct message passing between agents with payload support.
-- **Agent dependency tracking** — Wait for an agent to complete before proceeding.
+- **Agent dependency tracking** — Wait for an agent or task to complete before proceeding. Dependencies auto-satisfy when the depended-on task completes.
 - **Contention hotspots** — Identifies files that cause the most conflicts between agents.
 - **Cascade cleanup** — When an agent dies, its children get re-parented and its locks get released. Nothing is orphaned.
 - **Region locking** — Two agents can edit different sections of the same file simultaneously.
@@ -126,18 +126,20 @@ Every agent gets a unique ID. Files are locked by agent ID. The root agent (your
 
 Agents don't message each other directly. Instead they communicate through the shared database: lock a file, write to it, notify that it changed, release the lock. Other agents poll for notifications to see what happened.
 
-## MCP Tools (<!-- GEN:tool-count -->79<!-- /GEN -->)
+## MCP Tools (<!-- GEN:tool-count -->83<!-- /GEN -->)
 
 | Category | Tools |
 |----------|-------|
 | **Identity** | `register_agent`, `heartbeat`, `deregister_agent`, `list_agents`, `get_lineage`, `get_siblings` |
 | **Locking** | `acquire_lock`, `release_lock`, `refresh_lock`, `get_lock_status`, `list_locks`, `release_agent_locks`, `reap_expired_locks`, `reap_stale_agents` |
 | **Coordination** | `broadcast`, `wait_for_locks`, `await_agent` |
+| **Handoffs** | `acknowledge_handoff`, `complete_handoff`, `cancel_handoff`, `get_handoffs`, `await_handoff_acks`, `await_handoff_completion` |
 | **Messaging** | `send_message`, `get_messages`, `mark_messages_read` |
 | **Changes** | `notify_change`, `get_notifications`, `prune_notifications`, `wait_for_notifications` |
 | **Audit** | `get_conflicts`, `get_contention_hotspots`, `status` |
 | **Visibility** | `load_coordination_spec`, `validate_graph`, `scan_project`, `get_agent_status`, `get_file_agent_map`, `update_agent_status`, `run_assessment`, `assess_current_session`, [`get_agent_tree`](#agent-tree-view) |
-| **Tasks** | `create_task`, `assign_task`, `update_task_status`, `get_task`, `get_child_tasks`, `get_tasks_by_agent`, `get_all_tasks`, `create_subtask`, `get_subtasks`, `get_task_tree`, `wait_for_task`, `get_available_tasks`, `retry_task`, `get_dead_letter_tasks`, `get_task_failure_history` |
+| **Tasks** | `create_task`, `assign_task`, `update_task_status`, `get_task`, `get_child_tasks`, `get_tasks_by_agent`, `get_all_tasks`, `create_subtask`, `get_subtasks`, `get_task_tree`, `wait_for_task`, `get_available_tasks`, `suggest_task_assignments`, `retry_task`, `get_dead_letter_tasks`, `get_task_failure_history` |
+| **Dependencies** | `declare_dependency`, `check_dependencies`, `satisfy_dependency`, `wait_for_dependency`, `get_blockers`, `assert_can_start`, `get_all_dependencies` |
 
 ## CLI Commands (61)
 
@@ -200,7 +202,7 @@ coordinationhub get-task <task_id>
 coordinationhub get-all-tasks
 coordinationhub wait-for-task <task_id> [--timeout S]     # poll until terminal state
 coordinationhub get-available-tasks [--agent-id <id>]      # tasks with satisfied deps
-coordinationhub retry-task <task_id>
+# coordinationhub suggest-task-assignments                  # suggest ready tasks for idle agents (API only)coordinationhub retry-task <task_id>
 coordinationhub dead-letter-queue
 ```
 

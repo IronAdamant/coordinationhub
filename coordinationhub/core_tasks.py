@@ -173,3 +173,12 @@ class TaskMixin:
         """
         tasks = _tasks.get_available_tasks(self._connect, agent_id)
         return {"tasks": tasks, "count": len(tasks)}
+
+    def suggest_task_assignments(self) -> dict[str, Any]:
+        """Suggest available tasks for idle agents.
+
+        Returns a list of {task_id, description, suggested_agents} where each
+        suggested agent has no currently assigned pending/in_progress tasks.
+        """
+        suggestions = _tasks.suggest_task_assignments(self._connect)
+        return {"suggestions": suggestions, "count": len(suggestions)}

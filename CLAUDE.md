@@ -134,6 +134,9 @@ Messaging: `send_message`, `get_messages`, `mark_messages_read`
 Change: `notify_change`, `get_notifications`, `prune_notifications`
 Audit: `get_conflicts`, `get_contention_hotspots`, `status`
 Graph & Visibility (0.3.1): `load_coordination_spec`, `validate_graph`, `scan_project`, `get_agent_status`, `get_file_agent_map`, `update_agent_status`, `run_assessment`, `assess_current_session`, `get_agent_tree`
+Tasks (0.6.7): `wait_for_task`, `get_available_tasks`, `suggest_task_assignments`
+Dependencies (0.6.7): `declare_dependency`, `check_dependencies`, `satisfy_dependency`, `wait_for_dependency`, `get_blockers`, `assert_can_start`, `get_all_dependencies`
+Handoffs (0.6.7): `acknowledge_handoff`, `complete_handoff`, `cancel_handoff`, `get_handoffs`, `await_handoff_acks`, `await_handoff_completion`
 
 **Tool count is dynamic** — `status()` returns `len(TOOL_DISPATCH)` (currently 35), not a hardcoded number.
 

@@ -726,7 +726,7 @@ class TestHookLevelMultiAgentScenario:
         engine = _get_engine(cwd)
         try:
             result = engine.assess_current_session(format="json")
-            assert "error" in result
-            assert "graph" in result["error"].lower()
+            assert "error" not in result
+            assert result.get("graph_loaded") is False
         finally:
             engine.close()

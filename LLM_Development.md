@@ -798,7 +798,7 @@ Events are sorted by timestamp with internal `_ts` sort keys stripped before ret
 
 **`build_suite_from_db(connect, suite_name, worktree_root=None)`** — one-call wrapper that returns `{"name": ..., "traces": [<one trace>]}`.
 
-**`CoordinationEngine.assess_current_session(format, graph_agent_id, scope)`** — scores the live session. Refuses with a clear error if no coordination graph is loaded (rather than returning vacuous-1.0 scores). `scope="project"` (default) filters to the engine's worktree; `scope="all"` scores every agent in the DB.
+**`CoordinationEngine.assess_current_session(format, graph_agent_id, scope)`** — scores the live session from live DB state. Works even when no coordination graph is loaded — ad-hoc agent swarms are scored directly. Graph-dependent metrics return 0.0 when no graph is present. `scope="project"` (default) filters to the engine's worktree; `scope="all"` scores every agent in the DB.
 
 **`assess_current_session` MCP tool** — new dispatch entry, schema, and `assess-session` CLI subcommand with `--format`, `--graph-agent-id`, `--scope`, and `--output` flags. Tool count 30 → 31.
 
@@ -811,7 +811,7 @@ Events are sorted by timestamp with internal `_ts` sort keys stripped before ret
 - **9 new unit tests** in `test_assessment.py::TestBuildTraceFromDB` — empty DB, single agent with no writes, graph_id + parent_id propagation, lock/modified/unlock triples, `indexed` change type is ignored, handoffs from lineage with distinct roles, no handoffs for same-role children, worktree_root filter, suite wrapping.
 - **2 new scenario tests** in `test_scenario.py::TestHookLevelMultiAgentScenario`:
   - `test_assess_current_session_from_live_db` — drives multi-agent hooks, tags sub-agents with graph roles, then calls `assess_current_session` with no hand-built suite. Asserts all 5 metrics scored, `outcome_verifiability > 0` (the synthesized lock/modify pairs are not vacuous), and results persisted.
-  - `test_assess_current_session_without_graph_returns_error` — verifies the no-graph path returns a structured error instead of silent 1.0s.
+  - `test_assess_current_session_without_graph_returns_error` — verifies the no-graph path scores the session with `graph_loaded=False` instead of returning an error.
 
 ### Fixed (incidental)
 
