@@ -1,6 +1,6 @@
 # CoordinationHub — Complete Project Documentation
 
-**Version:** <!-- GEN:version -->0.6.5<!-- /GEN -->
+**Version:** <!-- GEN:version -->0.6.6<!-- /GEN -->
 **Last updated:** 2026-04-14
 
 ## v0.6.5 Changelog — Phase 13 Stress Test Fixes (Broadcast + Lock Notifications)
