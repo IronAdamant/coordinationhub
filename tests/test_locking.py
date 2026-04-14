@@ -313,3 +313,71 @@ class TestLockReaping:
         engine.acquire_lock("/b.txt", registered_agent, region_start=1, region_end=50)
         result = engine.release_agent_locks(registered_agent)
         assert result["released"] == 2
+
+
+class TestBroadcastAcknowledgment:
+    def _heartbeat_all(self, engine, two_agents):
+        engine.heartbeat(two_agents["parent"])
+        engine.heartbeat(two_agents["child"])
+        engine.heartbeat(two_agents["other"])
+
+    def test_broadcast_without_require_ack(self, engine, two_agents):
+        self._heartbeat_all(engine, two_agents)
+        # broadcast from child so other is a sibling
+        result = engine.broadcast(two_agents["child"])
+        assert "broadcast_id" not in result
+        assert "acknowledged_by" in result
+
+    def test_broadcast_with_require_ack_creates_broadcast(self, engine, two_agents):
+        self._heartbeat_all(engine, two_agents)
+        child = two_agents["child"]
+        other = two_agents["other"]
+
+        result = engine.broadcast(child, require_ack=True, message="hello")
+        assert "broadcast_id" in result
+        assert result["pending_acks"] == [other]
+        assert result["acknowledged_by"] == []
+
+    def test_acknowledge_broadcast(self, engine, two_agents):
+        self._heartbeat_all(engine, two_agents)
+        child = two_agents["child"]
+        other = two_agents["other"]
+
+        broadcast = engine.broadcast(child, require_ack=True)
+        bid = broadcast["broadcast_id"]
+
+        result = engine.acknowledge_broadcast(bid, other)
+        assert result["acknowledged"] is True
+
+        status = engine.get_broadcast_status(bid)
+        assert status["found"] is True
+        assert other in status["acknowledged_by"]
+
+    def test_acknowledge_expired_broadcast_fails(self, engine, two_agents):
+        self._heartbeat_all(engine, two_agents)
+        child = two_agents["child"]
+        other = two_agents["other"]
+
+        broadcast = engine.broadcast(child, require_ack=True, ttl=0.01)
+        bid = broadcast["broadcast_id"]
+        time.sleep(0.02)
+
+        result = engine.acknowledge_broadcast(bid, other)
+        assert result["acknowledged"] is False
+        assert result["reason"] == "expired_or_not_found"
+
+    def test_get_broadcast_status_not_found(self, engine):
+        status = engine.get_broadcast_status(99999)
+        assert status["found"] is False
+
+    def test_broadcast_sends_ack_request_messages(self, engine, two_agents):
+        self._heartbeat_all(engine, two_agents)
+        child = two_agents["child"]
+        other = two_agents["other"]
+
+        engine.broadcast(child, require_ack=True, message="test")
+
+        msgs = engine.get_messages(other, unread_only=True)
+        assert msgs["count"] == 1
+        assert msgs["messages"][0]["message_type"] == "broadcast_ack_request"
+        assert msgs["messages"][0]["payload"]["message"] == "test"

@@ -57,15 +57,18 @@ def stash_pending_spawn(
     subagent_type: str | None = None,
     description: str | None = None,
     prompt: str | None = None,
+    source: str = "external",
 ) -> dict[str, Any]:
     """Record a pending sub-agent spawn from a parent agent.
 
     Called by a parent agent that intends to spawn a sub-agent. When
-    Claude Code fires ``SubagentStart``, the hook correlates it with
-    this pending record via ``consume_pending_spawn``.
+    the external system (Claude Code, Kimi CLI, etc.) spawns the agent,
+    it correlates the spawn with this pending record via
+    ``report_subagent_spawned``.
 
     Also prunes rows older than ``_SPAWN_TTL_SECONDS`` so the table
-    cannot grow without bound if spawn requests fail before SubagentStart.
+    cannot grow without bound if spawn requests fail before the agent
+    is actually spawned.
     """
     now = time.time()
     cutoff = now - _SPAWN_TTL_SECONDS
@@ -79,10 +82,10 @@ def stash_pending_spawn(
         conn.execute(
             """
             INSERT INTO pending_spawner_tasks
-            (id, parent_agent_id, subagent_type, description, prompt, created_at, status)
-            VALUES (?, ?, ?, ?, ?, ?, 'pending')
+            (id, parent_agent_id, subagent_type, description, prompt, created_at, status, source)
+            VALUES (?, ?, ?, ?, ?, ?, 'pending', ?)
             """,
-            (spawn_id, parent_agent_id, subagent_type, description, prompt, now),
+            (spawn_id, parent_agent_id, subagent_type, description, prompt, now, source),
         )
     return {"stashed": True, "spawn_id": spawn_id, "parent_agent_id": parent_agent_id}
 
@@ -152,7 +155,7 @@ def get_pending_spawns(
             rows = conn.execute(
                 """
                 SELECT id, parent_agent_id, subagent_type, description, prompt,
-                       created_at, consumed_at, status
+                       created_at, consumed_at, status, source
                 FROM pending_spawner_tasks
                 WHERE parent_agent_id = ?
                 ORDER BY created_at ASC
@@ -163,7 +166,7 @@ def get_pending_spawns(
             rows = conn.execute(
                 """
                 SELECT id, parent_agent_id, subagent_type, description, prompt,
-                       created_at, consumed_at, status
+                       created_at, consumed_at, status, source
                 FROM pending_spawner_tasks
                 WHERE parent_agent_id = ? AND status = 'pending'
                 ORDER BY created_at ASC
@@ -188,6 +191,61 @@ def prune_stale_spawns(
             (cutoff,),
         )
         return {"pruned": cursor.rowcount}
+
+
+def report_subagent_spawned(
+    connect: ConnectFn,
+    parent_agent_id: str,
+    subagent_type: str | None,
+    child_agent_id: str,
+    source: str = "external",
+) -> dict[str, Any]:
+    """Report that a sub-agent has been spawned by an external system.
+
+    Consumes the oldest pending spawn for this parent + type and links
+    it to the actual child agent ID. Any IDE/CLI (Claude Code, Kimi,
+    Cursor, etc.) can call this after spawning a sub-agent via its
+    native mechanism.
+    """
+    now = time.time()
+    with connect() as conn:
+        if subagent_type:
+            row = conn.execute(
+                """
+                SELECT id, description, prompt, created_at
+                FROM pending_spawner_tasks
+                WHERE parent_agent_id = ? AND subagent_type = ? AND status = 'pending'
+                ORDER BY created_at ASC LIMIT 1
+                """,
+                (parent_agent_id, subagent_type),
+            ).fetchone()
+        else:
+            row = conn.execute(
+                """
+                SELECT id, description, prompt, created_at
+                FROM pending_spawner_tasks
+                WHERE parent_agent_id = ? AND status = 'pending'
+                ORDER BY created_at ASC LIMIT 1
+                """,
+                (parent_agent_id,),
+            ).fetchone()
+
+        spawn_id = row["id"] if row else None
+
+        if spawn_id:
+            conn.execute(
+                "UPDATE pending_spawner_tasks SET consumed_at = ?, status = 'registered', source = ? WHERE id = ?",
+                (now, source, spawn_id),
+            )
+
+        return {
+            "reported": True,
+            "parent_agent_id": parent_agent_id,
+            "child_agent_id": child_agent_id,
+            "spawn_id": spawn_id,
+            "description": row["description"] if row else None,
+            "prompt": row["prompt"] if row else None,
+        }
 
 
 def cancel_spawn(

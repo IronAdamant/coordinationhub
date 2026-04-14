@@ -16,6 +16,7 @@ from . import agent_registry as _ar
 from . import work_intent as _wi
 from . import handoffs as _handoffs
 from . import messages as _msg
+from . import broadcasts as _bc
 from .paths import normalize_path
 
 
@@ -351,21 +352,43 @@ class LockingMixin:
     def broadcast(
         self, agent_id: str, document_path: str | None = None, ttl: float = 30.0,
         handoff_targets: list[str] | None = None,
+        require_ack: bool = False, message: str | None = None,
     ) -> dict[str, Any]:
         """Announce an intention to siblings, or perform a formal multi-recipient handoff.
 
         When handoff_targets is provided, acts as a formal handoff: records to the
         handoffs table and sends handoff messages to each target agent.
+
+        When require_ack is True, creates a trackable broadcast record and sends
+        acknowledgment request messages to each live sibling. Recipients must call
+        acknowledge_broadcast to confirm receipt.
         """
         if handoff_targets:
             return self._handoff(agent_id, handoff_targets, document_path)
+
         siblings = _ar.get_siblings(self._connect, agent_id)
-        acknowledged_by: list[str] = []
-        conflicts: list[dict[str, Any]] = []
         now = time.time()
-        for sib in siblings:
-            if now - sib.get("last_heartbeat", 0) <= 60.0:
-                acknowledged_by.append(sib["agent_id"])
+        live_siblings = [s for s in siblings if now - s.get("last_heartbeat", 0) <= ttl]
+
+        if require_ack and live_siblings:
+            result = _bc.record_broadcast(
+                self._connect, agent_id, document_path, message, ttl, len(live_siblings),
+            )
+            broadcast_id = result["broadcast_id"]
+            for sib in live_siblings:
+                _msg.send_message(
+                    self._connect, agent_id, sib["agent_id"], "broadcast_ack_request",
+                    {"broadcast_id": broadcast_id, "document_path": document_path, "message": message},
+                )
+            return {
+                "broadcast_id": broadcast_id,
+                "acknowledged_by": [],
+                "pending_acks": [s["agent_id"] for s in live_siblings],
+                "conflicts": [],
+            }
+
+        acknowledged_by = [s["agent_id"] for s in live_siblings]
+        conflicts: list[dict[str, Any]] = []
         if document_path and acknowledged_by:
             norm_path = normalize_path(document_path, self._storage.project_root)
             placeholders = ",".join("?" * len(acknowledged_by))
@@ -378,6 +401,48 @@ class LockingMixin:
                     if row["locked_by"] != agent_id:
                         conflicts.append({"document_path": document_path, "locked_by": row["locked_by"]})
         return {"acknowledged_by": acknowledged_by, "conflicts": conflicts}
+
+    def acknowledge_broadcast(
+        self, broadcast_id: int, agent_id: str,
+    ) -> dict[str, Any]:
+        """Acknowledge receipt of a broadcast."""
+        return _bc.acknowledge_broadcast(self._connect, broadcast_id, agent_id)
+
+    def get_broadcast_status(
+        self, broadcast_id: int,
+    ) -> dict[str, Any]:
+        """Get the current acknowledgment status for a broadcast."""
+        return _bc.get_broadcast_status(self._connect, broadcast_id)
+
+    def await_broadcast_acks(
+        self, broadcast_id: int, timeout_s: float = 30.0,
+    ) -> dict[str, Any]:
+        """Poll until all expected acknowledgments are received or timeout expires.
+
+        Returns the final broadcast status, including acknowledged_by and pending_acks.
+        """
+        deadline = time.time() + timeout_s
+        poll_interval = 0.5
+
+        while time.time() < deadline:
+            status = self.get_broadcast_status(broadcast_id)
+            if not status.get("found"):
+                return {"timed_out": True, "reason": "not_found"}
+
+            if status.get("expires_at", 0) < time.time():
+                return {
+                    "timed_out": True,
+                    "reason": "expired",
+                    "acknowledged_by": status.get("acknowledged_by", []),
+                }
+
+            time.sleep(poll_interval)
+
+        status = self.get_broadcast_status(broadcast_id)
+        return {
+            "timed_out": True,
+            "acknowledged_by": status.get("acknowledged_by", []),
+        }
 
     def _handoff(
         self, agent_id: str, to_agents: list[str],

@@ -131,6 +131,20 @@ def create_parser() -> argparse.ArgumentParser:
     p.add_argument("--document-path", default=None)
     p.add_argument("--handoff-targets", nargs="+", default=None, dest="handoff_targets",
                    help="Agent IDs to hand off to (triggers formal handoff)")
+    p.add_argument("--require-ack", action="store_true", default=False,
+                   help="Require recipients to acknowledge via acknowledge-broadcast")
+    p.add_argument("--message", default=None, help="Message payload when ack is required")
+
+    # acknowledge-broadcast
+    p = sub.add_parser("acknowledge-broadcast", parents=[shared],
+                       help="Acknowledge receipt of a broadcast")
+    p.add_argument("broadcast_id", type=int, help="Broadcast ID to acknowledge")
+    p.add_argument("agent_id", help="Agent acknowledging the broadcast")
+
+    # broadcast-status
+    p = sub.add_parser("broadcast-status", parents=[shared],
+                       help="Get broadcast acknowledgment status")
+    p.add_argument("broadcast_id", type=int, help="Broadcast ID to query")
 
     # acknowledge-handoff
     p = sub.add_parser("acknowledge-handoff", parents=[shared], help="Acknowledge a handoff")
@@ -431,6 +445,14 @@ def create_parser() -> argparse.ArgumentParser:
     p.add_argument("subagent_type", help="Type of sub-agent to spawn (e.g. Explore, Plan)")
     p.add_argument("--description", default=None, help="Description of the sub-agent's task")
     p.add_argument("--prompt", default=None, help="Prompt or instructions for the sub-agent")
+    p.add_argument("--source", default="external", help="Spawning system (e.g. claude_code, kimi_cli)")
+
+    p = sub.add_parser("report-subagent-spawned", parents=[shared],
+                       help="Report that a sub-agent was spawned by an external system")
+    p.add_argument("parent_agent_id", help="Parent agent ID that spawned the sub-agent")
+    p.add_argument("child_agent_id", help="Actual agent ID of the spawned sub-agent")
+    p.add_argument("--subagent-type", default=None, help="Type of sub-agent that was spawned")
+    p.add_argument("--source", default="external", help="Spawning system (e.g. claude_code, kimi_cli)")
 
     p = sub.add_parser("list-pending-spawns", parents=[shared],
                       help="List pending sub-agent spawn requests for a parent agent")
@@ -469,6 +491,8 @@ _COMMANDS = {
     "list-locks": "cmd_list_locks",
     "release-agent-locks": "cmd_release_agent_locks", "reap-expired-locks": "cmd_reap_expired_locks",
     "reap-stale-agents": "cmd_reap_stale_agents", "broadcast": "cmd_broadcast",
+    "acknowledge-broadcast": "cmd_acknowledge_broadcast",
+    "broadcast-status": "cmd_broadcast_status",
     "acknowledge-handoff": "cmd_acknowledge_handoff",
     "complete-handoff": "cmd_complete_handoff",
     "cancel-handoff": "cmd_cancel_handoff",
@@ -521,6 +545,7 @@ _COMMANDS = {
     "leader-status": "cmd_leader_status",
     "ha-dashboard": "cmd_ha_dashboard",
     "spawn-subagent": "cmd_spawn_subagent",
+    "report-subagent-spawned": "cmd_report_subagent_spawned",
     "list-pending-spawns": "cmd_list_pending_spawns",
     "cancel-spawn": "cmd_cancel_spawn",
     "request-subagent-deregistration": "cmd_request_subagent_deregistration",

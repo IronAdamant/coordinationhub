@@ -230,7 +230,27 @@ _SCHEMAS = {
             prompt           TEXT,
             created_at       REAL NOT NULL,
             consumed_at      REAL,
-            status           TEXT DEFAULT 'pending'
+            status           TEXT DEFAULT 'pending',
+            source           TEXT DEFAULT 'external'
+        )
+    """,
+    "broadcasts": """
+        CREATE TABLE IF NOT EXISTS broadcasts (
+            id              INTEGER PRIMARY KEY AUTOINCREMENT,
+            from_agent_id   TEXT NOT NULL,
+            document_path   TEXT,
+            message         TEXT,
+            created_at      REAL NOT NULL,
+            ttl             REAL DEFAULT 30.0,
+            expires_at      REAL NOT NULL
+        )
+    """,
+    "broadcast_acks": """
+        CREATE TABLE IF NOT EXISTS broadcast_acks (
+            broadcast_id    INTEGER NOT NULL,
+            agent_id        TEXT NOT NULL,
+            acknowledged_at REAL NOT NULL,
+            PRIMARY KEY (broadcast_id, agent_id)
         )
     """,
 }
@@ -268,10 +288,13 @@ _INDEXES = [
     "CREATE INDEX IF NOT EXISTS idx_task_failures_status ON task_failures(status)",
     "CREATE INDEX IF NOT EXISTS idx_leases_expires ON coordinator_leases(expires_at)",
     "CREATE INDEX IF NOT EXISTS idx_spawner_parent_type ON pending_spawner_tasks(parent_agent_id, subagent_type, status)",
+    "CREATE INDEX IF NOT EXISTS idx_broadcasts_from ON broadcasts(from_agent_id)",
+    "CREATE INDEX IF NOT EXISTS idx_broadcasts_expires ON broadcasts(expires_at)",
+    "CREATE INDEX IF NOT EXISTS idx_broadcast_acks_id ON broadcast_acks(broadcast_id)",
 ]
 
 
-_CURRENT_SCHEMA_VERSION = 17
+_CURRENT_SCHEMA_VERSION = 18
 
 
 def _get_schema_version(conn: sqlite3.Connection) -> int:
@@ -391,6 +414,26 @@ def _migrate_v16_to_v17(conn: sqlite3.Connection) -> None:
     conn.execute("ALTER TABLE agent_responsibilities ADD COLUMN scope TEXT")
 
 
+def _migrate_v17_to_v18(conn: sqlite3.Connection) -> None:
+    """Add source column to pending_spawner_tasks and broadcasts tables.
+
+    Makes sub-agent spawn tracking agnostic to the spawning system
+    (Claude Code, Kimi CLI, Cursor, etc.) and adds broadcast
+    acknowledgment tracking for delivery confirmation.
+    """
+    cols = [row[1] for row in conn.execute("PRAGMA table_info(pending_spawner_tasks)").fetchall()]
+    if "source" not in cols:
+        conn.execute("ALTER TABLE pending_spawner_tasks ADD COLUMN source TEXT DEFAULT 'external'")
+
+    tables = {
+        row[0] for row in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")
+    }
+    if "broadcasts" not in tables:
+        conn.execute(_SCHEMAS["broadcasts"])
+    if "broadcast_acks" not in tables:
+        conn.execute(_SCHEMAS["broadcast_acks"])
+
+
 _MIGRATIONS = {
     2: _migrate_v1_to_v2,
     3: _migrate_v2_to_v3,
@@ -408,6 +451,7 @@ _MIGRATIONS = {
     15: _migrate_v14_to_v15,  # pending_spawner_tasks table added
     16: _migrate_v15_to_v16,  # stop_requested_at column added
     17: _migrate_v16_to_v17,  # scope column added to agent_responsibilities
+    18: _migrate_v17_to_v18,  # source column + broadcasts tables
 }
 
 

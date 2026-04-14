@@ -399,7 +399,6 @@ def handle_subagent_start(event: dict) -> dict | None:
     lets the parent track spawn intent → sub-agent registration lifecycle.
     """
     from coordinationhub.pending_tasks import consume_pending_task
-    from coordinationhub.spawner import consume_pending_spawn
 
     engine = _get_engine(event.get("cwd", "."))
     try:
@@ -432,6 +431,11 @@ def handle_subagent_start(event: dict) -> dict | None:
                 engine.heartbeat(existing)
                 if pending_desc:
                     engine.update_agent_status(existing, current_task=pending_desc)
+                # Stage 6: report spawn so parent sees registered status
+                try:
+                    engine.report_subagent_spawned(parent_id, subagent_type, existing, source="claude_code")
+                except Exception:
+                    pass
                 return None
 
         child_id = _subagent_id(parent_id, event, engine=engine)
@@ -450,9 +454,9 @@ def handle_subagent_start(event: dict) -> dict | None:
         if pending_desc:
             engine.update_agent_status(child_id, current_task=pending_desc)
 
-        # Stage 6: consume pending spawn so parent sees registered status
+        # Stage 6: report spawn so parent sees registered status
         try:
-            consume_pending_spawn(engine._connect, parent_id, subagent_type)
+            engine.report_subagent_spawned(parent_id, subagent_type, child_id, source="claude_code")
         except Exception:
             pass  # spawner tracking is best-effort
     finally:

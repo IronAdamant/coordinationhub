@@ -28,6 +28,8 @@ from .cli_locks import (
     cmd_reap_expired_locks,
     cmd_reap_stale_agents,
     cmd_broadcast,
+    cmd_acknowledge_broadcast,
+    cmd_broadcast_status,
     cmd_wait_for_locks,
     cmd_await_agent,
     cmd_send_message,
@@ -100,6 +102,7 @@ from .cli_leases import (
 )
 from .cli_spawner import (
     cmd_spawn_subagent,
+    cmd_report_subagent_spawned,
     cmd_list_pending_spawns,
     cmd_cancel_spawn,
     cmd_request_subagent_deregistration,
