@@ -8,7 +8,7 @@ import tempfile
 from pathlib import Path
 
 from coordinationhub.core import CoordinationEngine
-from coordinationhub import graphs as _g
+from coordinationhub.plugins.graph import graphs as _g
 
 
 class TestRegisterAgentWithGraph:

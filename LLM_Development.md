@@ -659,7 +659,7 @@ v0.4.6's claim of "symmetry between root and sub-agent task visibility" was ther
 
 ### Added
 
-**`pending_subagent_tasks` table and `coordinationhub/pending_tasks.py` module** — a tiny FIFO queue for correlating the two events.
+**`pending_tasks` table and `coordinationhub/pending_tasks.py` module** — a tiny FIFO queue for correlating the two events. Replaces the legacy `pending_subagent_tasks` and `pending_spawner_tasks` tables.
 
 - Schema: `(tool_use_id PRIMARY KEY, session_id, subagent_type, description, prompt, created_at, consumed_at)` in `db.py._SCHEMAS`.
 - Index on `(session_id, subagent_type, consumed_at)` for fast FIFO lookup.
@@ -991,7 +991,7 @@ Block markers for multi-line content:
 | `coordinationhub/agent_registry.py` | 292 | Agent lifecycle: register, heartbeat, deregister, lineage management |
 | `coordinationhub/agent_status.py` | 274 | Agent status and file-map query helpers for CoordinationHub |
 | `coordinationhub/assessment.py` | 322 | Assessment runner for CoordinationHub coordination test suites |
-| `coordinationhub/assessment_scorers.py` | 258 | Assessment metric scorers for CoordinationHub |
+| `coordinationhub/plugins/assessment/assessment_scorers.py` | 258 | Assessment metric scorers for CoordinationHub |
 | `coordinationhub/broadcasts.py` | 106 | Broadcast acknowledgment primitives for CoordinationHub |
 | `coordinationhub/cli.py` | 420 | CoordinationHub CLI — command-line interface for all 55 coordination tool methods |
 | `coordinationhub/cli_agents.py` | 128 | Agent identity and lifecycle CLI commands |
@@ -1020,11 +1020,11 @@ Block markers for multi-line content:
 | `coordinationhub/core_tasks.py` | 117 | TaskMixin — shared task registry with hierarchy support |
 | `coordinationhub/core_visibility.py` | 114 | VisibilityMixin — coordination graph, project scan, agent status, assessment |
 | `coordinationhub/core_work_intent.py` | 26 | WorkIntentMixin — cooperative work intent board |
-| `coordinationhub/dashboard.py` | 483 | Web dashboard for CoordinationHub — zero external dependencies |
+| `coordinationhub/plugins/dashboard/dashboard.py` | 483 | Web dashboard for CoordinationHub — zero external dependencies |
 | `coordinationhub/db.py` | 504 | SQLite schema, migrations, and connection pool for CoordinationHub |
 | `coordinationhub/dependencies.py` | 98 | Cross-agent dependency declaration and satisfaction tracking |
 | `coordinationhub/dispatch.py` | 87 | Tool dispatch table for CoordinationHub |
-| `coordinationhub/graphs.py` | 256 | Declarative coordination graph: loader, validator, in-memory representation |
+| `coordinationhub/plugins/graph/graphs.py` | 256 | Declarative coordination graph: loader, validator, in-memory representation |
 | `coordinationhub/handoffs.py` | 96 | Handoff recording and acknowledgement primitives for CoordinationHub |
 | `coordinationhub/hooks/__init__.py` | 1 | Hooks package — Claude Code integration via stdin/stdout event protocol |
 | `coordinationhub/hooks/claude_code.py` | 450 | CoordinationHub hook for Claude Code |

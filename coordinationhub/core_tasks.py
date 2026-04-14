@@ -58,9 +58,15 @@ class TaskMixin:
         # Auto-trigger: when task completes, satisfy any deps that reference it
         if status == "completed":
             _deps.satisfy_dependencies_for_task(self._connect, task_id)
+            self._event_bus.publish(
+                "task.completed", {"task_id": task_id, "status": "completed"}
+            )
         # Auto-record failure: when task fails, record in DLQ
         if status == "failed":
             _tf.record_task_failure(self._connect, task_id, error)
+            self._event_bus.publish(
+                "task.failed", {"task_id": task_id, "status": "failed"}
+            )
         return result
 
     def get_task(self, task_id: str) -> dict[str, Any] | None:
@@ -133,13 +139,28 @@ class TaskMixin:
         timeout_s: float = 60.0,
         poll_interval_s: float = 2.0,
     ) -> dict[str, Any]:
-        """Poll until a task reaches a terminal state (completed/failed) or timeout expires.
+        """Wait until a task reaches a terminal state (completed/failed) or timeout expires.
 
-        Use this to coordinate sequential dependencies between tasks when
-        depends_on alone is not sufficient (e.g., waiting for a task
-        completed by an external agent).
+        Uses the event bus for low-latency notification.
         """
-        return _tasks.wait_for_task(self._connect, task_id, timeout_s, poll_interval_s)
+        import time as _time
+        start = _time.time()
+        task = _tasks.get_task(self._connect, task_id)
+        if task and task.get("status") in ("completed", "failed"):
+            return {"waited": True, "status": task["status"], "timed_out": False}
+
+        event = self._event_bus.wait_for_event(
+            ["task.completed", "task.failed"],
+            filter_fn=lambda e: e.get("task_id") == task_id,
+            timeout=timeout_s,
+        )
+        if event:
+            return {
+                "waited": True,
+                "status": event.get("status"),
+                "timed_out": False,
+            }
+        return {"waited": False, "timed_out": True}
 
     def get_available_tasks(self, agent_id: str | None = None) -> dict[str, Any]:
         """Return tasks whose depends_on are all satisfied (completed) and not currently claimed.

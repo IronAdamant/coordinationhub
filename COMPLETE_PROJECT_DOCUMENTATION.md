@@ -266,7 +266,7 @@ Schema version: v6 → v10 (+4 tables, +12 indexes)
 | `coordinationhub/work_intent.py` | Work intent board primitives |
 | `coordinationhub/handoffs.py` | Handoff recording primitives |
 | `coordinationhub/dependencies.py` | Dependency declaration primitives |
-| `coordinationhub/dashboard.py` | HTML dashboard + data aggregator |
+| `coordinationhub/plugins/dashboard/` | HTML dashboard + data aggregator |
 | `coordinationhub/cli_tasks.py` | CLI task commands |
 | `coordinationhub/cli_intent.py` | CLI work intent commands |
 | `coordinationhub/cli_deps.py` | CLI dependency commands |
@@ -418,7 +418,7 @@ Three symptoms from one root cause (fabricated fixture):
 
 ### Added
 
-- **`pending_subagent_tasks` table** in `db.py._SCHEMAS` — keyed by `tool_use_id` with `(session_id, subagent_type, description, prompt, created_at, consumed_at)`. Index on `(session_id, subagent_type, consumed_at)` for FIFO lookup.
+- **`pending_tasks` table** in `db.py._SCHEMAS` — unified queue keyed by `task_id` with `(scope_id, subagent_type, description, prompt, created_at, consumed_at, status, source)`. Index on `(scope_id, subagent_type, status)` for FIFO lookup. Replaces the legacy `pending_subagent_tasks` and `pending_spawner_tasks` tables.
 - **`coordinationhub/pending_tasks.py`** (~105 LOC) — new zero-internal-deps module with `stash_pending_task`, `consume_pending_task`, `prune_consumed_pending_tasks`. Same pattern as `notifications.py` and `conflict_log.py`.
 - **`handle_pre_agent` in `hooks/claude_code.py`** — new handler for `PreToolUse[Agent]`. Reads `tool_input.description`, `tool_input.prompt`, `tool_input.subagent_type`, `tool_use_id` and calls `stash_pending_task`. No-ops if tool_use_id or subagent_type is missing.
 - **`_subagent_type` helper** — reads top-level `agent_type` (real shape) with fallback to `tool_input.subagent_type` (legacy). Used by both `_subagent_id` and `handle_subagent_start`.
@@ -754,7 +754,7 @@ keep it in sync; CI checks for drift on every push.
 | `coordinationhub/agent_registry.py` | 292 | Agent lifecycle: register, heartbeat, deregister, lineage management |
 | `coordinationhub/agent_status.py` | 274 | Agent status and file-map query helpers for CoordinationHub |
 | `coordinationhub/assessment.py` | 322 | Assessment runner for CoordinationHub coordination test suites |
-| `coordinationhub/assessment_scorers.py` | 258 | Assessment metric scorers for CoordinationHub |
+| `coordinationhub/plugins/assessment/assessment_scorers.py` | 258 | Assessment metric scorers for CoordinationHub |
 | `coordinationhub/broadcasts.py` | 106 | Broadcast acknowledgment primitives for CoordinationHub |
 | `coordinationhub/cli.py` | 420 | CoordinationHub CLI — command-line interface for all 55 coordination tool methods |
 | `coordinationhub/cli_agents.py` | 128 | Agent identity and lifecycle CLI commands |
@@ -783,11 +783,11 @@ keep it in sync; CI checks for drift on every push.
 | `coordinationhub/core_tasks.py` | 117 | TaskMixin — shared task registry with hierarchy support |
 | `coordinationhub/core_visibility.py` | 114 | VisibilityMixin — coordination graph, project scan, agent status, assessment |
 | `coordinationhub/core_work_intent.py` | 26 | WorkIntentMixin — cooperative work intent board |
-| `coordinationhub/dashboard.py` | 483 | Web dashboard for CoordinationHub — zero external dependencies |
+| `coordinationhub/plugins/dashboard/dashboard.py` | 483 | Web dashboard for CoordinationHub — zero external dependencies |
 | `coordinationhub/db.py` | 504 | SQLite schema, migrations, and connection pool for CoordinationHub |
 | `coordinationhub/dependencies.py` | 98 | Cross-agent dependency declaration and satisfaction tracking |
 | `coordinationhub/dispatch.py` | 87 | Tool dispatch table for CoordinationHub |
-| `coordinationhub/graphs.py` | 256 | Declarative coordination graph: loader, validator, in-memory representation |
+| `coordinationhub/plugins/graph/graphs.py` | 256 | Declarative coordination graph: loader, validator, in-memory representation |
 | `coordinationhub/handoffs.py` | 96 | Handoff recording and acknowledgement primitives for CoordinationHub |
 | `coordinationhub/hooks/__init__.py` | 1 | Hooks package — Claude Code integration via stdin/stdout event protocol |
 | `coordinationhub/hooks/claude_code.py` | 450 | CoordinationHub hook for Claude Code |
@@ -821,7 +821,7 @@ coordinationhub/
   agent_registry.py     — Agent lifecycle: register, heartbeat, deregister, lineage management (~292 LOC)
   agent_status.py       — Agent status and file-map query helpers for CoordinationHub (~274 LOC)
   assessment.py         — Assessment runner for CoordinationHub coordination test suites (~322 LOC)
-  assessment_scorers.py — Assessment metric scorers for CoordinationHub (~258 LOC)
+  plugins/assessment/assessment_scorers.py — Assessment metric scorers for CoordinationHub (~258 LOC)
   broadcasts.py         — Broadcast acknowledgment primitives for CoordinationHub (~106 LOC)
   cli.py                — CoordinationHub CLI — command-line interface for all 55 coordination tool methods (~420 LOC)
   cli_agents.py         — Agent identity and lifecycle CLI commands (~128 LOC)
@@ -850,11 +850,11 @@ coordinationhub/
   core_tasks.py         — TaskMixin — shared task registry with hierarchy support (~117 LOC)
   core_visibility.py    — VisibilityMixin — coordination graph, project scan, agent status, assessment (~114 LOC)
   core_work_intent.py   — WorkIntentMixin — cooperative work intent board (~26 LOC)
-  dashboard.py          — Web dashboard for CoordinationHub — zero external dependencies (~483 LOC)
+  plugins/dashboard/dashboard.py — Web dashboard for CoordinationHub — zero external dependencies (~483 LOC)
   db.py                 — SQLite schema, migrations, and connection pool for CoordinationHub (~504 LOC)
   dependencies.py       — Cross-agent dependency declaration and satisfaction tracking (~98 LOC)
   dispatch.py           — Tool dispatch table for CoordinationHub (~87 LOC)
-  graphs.py             — Declarative coordination graph: loader, validator, in-memory representation (~256 LOC)
+  plugins/graph/graphs.py — Declarative coordination graph: loader, validator, in-memory representation (~256 LOC)
   handoffs.py           — Handoff recording and acknowledgement primitives for CoordinationHub (~96 LOC)
   leases.py             — Zero-deps lease primitives for HA coordinator leadership (~197 LOC)
   lock_ops.py           — Shared lock primitives used by both local locks and coordination locks (~191 LOC)

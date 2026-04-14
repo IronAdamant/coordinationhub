@@ -266,7 +266,10 @@ def cmd_init(args):
     print(f"Hooks written to {_CLAUDE_SETTINGS_PATH}")
     print(f"  Python interpreter: {python_path}")
 
-    # Step 4: Run doctor
+    # Step 4: Detect other IDEs and print integration notes
+    _install_ide_hooks(project_root or Path.cwd(), python_path)
+
+    # Step 5: Run doctor
     print("\nRunning diagnostics...")
     results = run_doctor()
     all_ok = True
@@ -280,6 +283,24 @@ def cmd_init(args):
         print("\nSetup complete. CoordinationHub is ready.")
     else:
         print("\nSetup complete with warnings. Check the failures above.")
+
+
+def _install_ide_hooks(project_root: Path, python_path: str) -> None:
+    """Detect IDE directories and install or print hook integration notes."""
+    kimi_dir = Path.home() / ".kimi"
+    cursor_dir = Path.home() / ".cursor"
+
+    if kimi_dir.exists():
+        print("\nDetected Kimi CLI.")
+        print(f"  Hook adapter: {python_path} -m coordinationhub.hooks.kimi_cli")
+        print("  Kimi CLI does not have a native hook system. Integrate by wrapping")
+        print("  tool calls or using a sidecar that pipes events to the adapter above.")
+
+    if cursor_dir.exists():
+        print("\nDetected Cursor.")
+        print(f"  Hook adapter: {python_path} -m coordinationhub.hooks.cursor")
+        print("  Cursor does not have a native hook system. Integrate by wrapping")
+        print("  tool calls or using a sidecar that pipes events to the adapter above.")
 
 
 def _merge_hooks(existing: dict, new: dict) -> dict:

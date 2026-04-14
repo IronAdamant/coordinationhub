@@ -52,19 +52,20 @@ def stash_pending_task(
     cutoff = now - _STALE_TTL_SECONDS
     with connect() as conn:
         conn.execute(
-            "DELETE FROM pending_subagent_tasks WHERE created_at < ?",
+            "DELETE FROM pending_tasks WHERE status = 'pending' AND created_at < ?",
             (cutoff,),
         )
         conn.execute(
             """
-            INSERT INTO pending_subagent_tasks
-            (tool_use_id, session_id, subagent_type, description, prompt, created_at)
-            VALUES (?, ?, ?, ?, ?, ?)
-            ON CONFLICT(tool_use_id) DO UPDATE SET
+            INSERT INTO pending_tasks
+            (task_id, scope_id, subagent_type, description, prompt, created_at, status, source)
+            VALUES (?, ?, ?, ?, ?, ?, 'pending', 'external')
+            ON CONFLICT(task_id) DO UPDATE SET
                 description = excluded.description,
                 prompt      = excluded.prompt,
                 created_at  = excluded.created_at,
-                consumed_at = NULL
+                consumed_at = NULL,
+                status      = 'pending'
             """,
             (tool_use_id, session_id, subagent_type, description, prompt, now),
         )
@@ -89,11 +90,11 @@ def consume_pending_task(
     with connect() as conn:
         row = conn.execute(
             """
-            SELECT tool_use_id, description, prompt, created_at
-            FROM pending_subagent_tasks
-            WHERE session_id = ?
+            SELECT task_id, description, prompt, created_at
+            FROM pending_tasks
+            WHERE scope_id = ?
               AND subagent_type = ?
-              AND consumed_at IS NULL
+              AND status = 'pending'
             ORDER BY created_at ASC
             LIMIT 1
             """,
@@ -102,8 +103,8 @@ def consume_pending_task(
         if row is None:
             return None
         conn.execute(
-            "UPDATE pending_subagent_tasks SET consumed_at = ? WHERE tool_use_id = ?",
-            (now, row["tool_use_id"]),
+            "UPDATE pending_tasks SET consumed_at = ?, status = 'consumed' WHERE task_id = ?",
+            (now, row["task_id"]),
         )
         return dict(row)
 
@@ -120,8 +121,8 @@ def prune_consumed_pending_tasks(
     cutoff = time.time() - max_age_seconds
     with connect() as conn:
         cursor = conn.execute(
-            "DELETE FROM pending_subagent_tasks "
-            "WHERE consumed_at IS NOT NULL AND consumed_at < ?",
+            "DELETE FROM pending_tasks "
+            "WHERE status = 'consumed' AND consumed_at < ?",
             (cutoff,),
         )
         return {"pruned": cursor.rowcount}

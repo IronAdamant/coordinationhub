@@ -39,10 +39,20 @@ class ChangeMixin:
     ) -> dict[str, Any]:
         """Record a change event for downstream agents to poll."""
         norm_path = normalize_path(document_path, self._storage.project_root)
-        return _cn.notify_change(
+        result = _cn.notify_change(
             self._connect, norm_path, change_type, agent_id,
             str(self._storage.project_root),
         )
+        self._event_bus.publish(
+            "notification.created",
+            {
+                "document_path": norm_path,
+                "change_type": change_type,
+                "agent_id": agent_id,
+                "created_at": result.get("created_at") or time.time(),
+            },
+        )
+        return result
 
     def claim_file_ownership(self, document_path: str, agent_id: str) -> None:
         """Assign file ownership on first write (INSERT OR IGNORE).
@@ -85,13 +95,27 @@ class ChangeMixin:
     ) -> dict[str, Any]:
         """Long-poll for new notifications until one arrives or timeout expires.
 
-        Use this instead of polling get_notifications in a loop.
+        Uses the event bus for low-latency notification, then fetches the
+        matching notification batch from the database.
         Returns {"notifications": [...], "timed_out": False} when new notifications arrive,
         or {"notifications": [], "timed_out": True} if timeout expires.
         """
-        return _cn.wait_for_notifications(
-            self._connect, agent_id, timeout_s, poll_interval_s, exclude_agent,
+        start = time.time()
+        event = self._event_bus.wait_for_event(
+            ["notification.created"],
+            filter_fn=lambda e: e.get("agent_id") != exclude_agent if exclude_agent else True,
+            timeout=timeout_s,
         )
+        if event is None:
+            return {"notifications": [], "timed_out": True}
+
+        # Fetch the batch including the triggering event and any that arrived just after.
+        since = event.get("created_at", start) - 1.0
+        result = _cn.get_notifications(
+            self._connect, since=since, exclude_agent=exclude_agent, limit=100
+        )
+        result["timed_out"] = False
+        return result
 
     # ------------------------------------------------------------------ #
     # Conflict Audit
@@ -151,7 +175,7 @@ class ChangeMixin:
                     (SELECT COUNT(*) FROM lock_conflicts) AS conflict_count,
                     (SELECT COUNT(*) FROM file_ownership) AS file_owner_count
             """, (now - 600.0,)).fetchone()
-        from . import graphs as _g
+        from .plugins.graph import graphs as _g
         return {
             "registered_agents": counts["agent_count"],
             "active_agents": counts["active_count"],

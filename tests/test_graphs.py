@@ -7,7 +7,7 @@ import json
 import tempfile
 from pathlib import Path
 
-from coordinationhub.graphs import (
+from coordinationhub.plugins.graph.graphs import (
     validate_graph,
     CoordinationGraph,
     load_graph,

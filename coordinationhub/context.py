@@ -13,7 +13,7 @@ import time
 from typing import TYPE_CHECKING, Any, Callable
 
 if TYPE_CHECKING:
-    import graphs as _g
+    from .plugins.graph import graphs as _g
 
 DEFAULT_PORT = 9877
 

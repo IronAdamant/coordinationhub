@@ -20,7 +20,7 @@ from typing import Any
 from .core import CoordinationEngine
 from .dispatch import TOOL_DISPATCH
 from .schemas import TOOL_SCHEMAS
-from .dashboard import get_dashboard_data, DASHBOARD_HTML
+from .plugins.dashboard.dashboard import get_dashboard_data, DASHBOARD_HTML
 
 logger = logging.getLogger(__name__)
 
