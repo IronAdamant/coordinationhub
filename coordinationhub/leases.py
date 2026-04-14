@@ -1,0 +1,246 @@
+"""Zero-deps lease primitives for HA coordinator leadership.
+
+Receives connect: ConnectFn from the caller — no internal pool dependency.
+"""
+
+from __future__ import annotations
+
+import sqlite3
+import time
+from typing import NamedTuple
+
+
+class LeaseHolder(NamedTuple):
+    """Holder information returned by get_lease_holder."""
+    lease_name: str
+    holder_id: str
+    acquired_at: float
+    ttl: float
+    expires_at: float
+
+
+def acquire_lease(
+    conn: sqlite3.Connection,
+    lease_name: str,
+    holder_id: str,
+    ttl: float,
+) -> bool:
+    """Attempt to acquire a named lease.
+
+    Uses a two-phase approach:
+    1. Try a lightweight INSERT first (no explicit transaction needed).
+       If it succeeds the lease is ours.
+    2. If INSERT fails (row exists), use BEGIN IMMEDIATE to serialize
+       the check-and-update, preventing races from implicit transactions.
+
+    Returns True if this holder now holds the lease, False otherwise.
+    """
+    acquired_at = time.time()
+    expires_at = acquired_at + ttl
+
+    # Fast path: try direct insert (works when no row exists)
+    try:
+        conn.execute(
+            "INSERT INTO coordinator_leases (lease_name, holder_id, acquired_at, ttl, expires_at) "
+            "VALUES (?, ?, ?, ?, ?)",
+            (lease_name, holder_id, acquired_at, ttl, expires_at),
+        )
+        conn.commit()
+        return True
+    except sqlite3.IntegrityError:
+        pass
+
+    # Row exists — use an immediate transaction to safely read + update
+    try:
+        conn.execute("BEGIN IMMEDIATE")
+    except sqlite3.OperationalError:
+        # Another writer is active; bail out
+        return False
+
+    try:
+        cursor = conn.execute(
+            "SELECT holder_id, expires_at FROM coordinator_leases WHERE lease_name = ?",
+            (lease_name,),
+        )
+        row = cursor.fetchone()
+        if row is None:
+            return False
+
+        existing_holder = row["holder_id"]
+        existing_expires = row["expires_at"]
+        now = time.time()
+
+        # Reject if another valid holder has the lease
+        if existing_holder != holder_id and existing_expires > now:
+            return False
+
+        # Overwrite: either unheld (expired) or ours
+        conn.execute(
+            "UPDATE coordinator_leases SET holder_id = ?, acquired_at = ?, ttl = ?, expires_at = ? "
+            "WHERE lease_name = ?",
+            (holder_id, acquired_at, ttl, expires_at, lease_name),
+        )
+        return True
+    finally:
+        conn.commit()
+
+def refresh_lease(
+    conn: sqlite3.Connection,
+    lease_name: str,
+    holder_id: str,
+) -> bool:
+    """Refresh a lease's TTL, extending its expiry time.
+
+    Only the current holder can refresh. Returns True if refresh succeeded.
+    """
+    now = time.time()
+
+    # Use an immediate transaction to atomically check-and-update
+    try:
+        conn.execute("BEGIN IMMEDIATE")
+    except sqlite3.OperationalError:
+        return False
+
+    try:
+        cursor = conn.execute(
+            "SELECT holder_id, ttl FROM coordinator_leases WHERE lease_name = ?",
+            (lease_name,),
+        )
+        row = cursor.fetchone()
+        if row is None or row["holder_id"] != holder_id:
+            return False
+
+        ttl = row["ttl"]
+        expires_at = now + ttl
+
+        conn.execute(
+            "UPDATE coordinator_leases SET acquired_at = ?, expires_at = ? WHERE lease_name = ?",
+            (now, expires_at, lease_name),
+        )
+        return True
+    finally:
+        conn.commit()
+
+
+def release_lease(
+    conn: sqlite3.Connection,
+    lease_name: str,
+    holder_id: str,
+) -> bool:
+    """Release a lease held by the given holder.
+
+    Returns True if the lease was released, False if it wasn't held by this holder.
+    """
+    try:
+        conn.execute("BEGIN IMMEDIATE")
+    except sqlite3.OperationalError:
+        return False
+
+    try:
+        cursor = conn.execute(
+            "SELECT holder_id FROM coordinator_leases WHERE lease_name = ?",
+            (lease_name,),
+        )
+        row = cursor.fetchone()
+        if row is None or row["holder_id"] != holder_id:
+            return False
+
+        conn.execute(
+            "DELETE FROM coordinator_leases WHERE lease_name = ? AND holder_id = ?",
+            (lease_name, holder_id),
+        )
+        return True
+    finally:
+        conn.commit()
+
+
+def get_lease_holder(
+    conn: sqlite3.Connection,
+    lease_name: str,
+) -> LeaseHolder | None:
+    """Get the current holder of a lease, or None if unheld/expired.
+
+    Returns None if the lease does not exist or has expired.
+    """
+    cursor = conn.execute(
+        "SELECT lease_name, holder_id, acquired_at, ttl, expires_at "
+        "FROM coordinator_leases WHERE lease_name = ?",
+        (lease_name,),
+    )
+    row = cursor.fetchone()
+    if row is None:
+        return None
+    return LeaseHolder(
+        lease_name=row["lease_name"],
+        holder_id=row["holder_id"],
+        acquired_at=row["acquired_at"],
+        ttl=row["ttl"],
+        expires_at=row["expires_at"],
+    )
+
+
+def is_lease_expired(conn: sqlite3.Connection, lease_name: str) -> bool:
+    """Return True if the named lease is expired or does not exist."""
+    cursor = conn.execute(
+        "SELECT expires_at FROM coordinator_leases WHERE lease_name = ?",
+        (lease_name,),
+    )
+    row = cursor.fetchone()
+    if row is None:
+        return True
+    return row["expires_at"] <= time.time()
+
+
+def claim_leadership(
+    conn: sqlite3.Connection,
+    lease_name: str,
+    agent_id: str,
+    ttl: float,
+) -> bool:
+    """Claim leadership of a lease whose current holder has failed.
+
+    Uses BEGIN IMMEDIATE to serialize races. If the current lease is
+    expired (or unheld), this agent takes it. If the current holder is
+    still valid, the claim is rejected — the lease is not stolen from
+    a live holder.
+
+    This is safe for HA failover: the old leader's lease expires naturally
+    via TTL; the new leader's acquired_at > old leader's expires_at makes
+    the old lease stale.
+
+    Returns True if this agent now holds the lease, False otherwise.
+    """
+    acquired_at = time.time()
+    expires_at = acquired_at + ttl
+
+    try:
+        conn.execute("BEGIN IMMEDIATE")
+    except sqlite3.OperationalError:
+        return False
+
+    try:
+        cursor = conn.execute(
+            "SELECT holder_id, expires_at FROM coordinator_leases WHERE lease_name = ?",
+            (lease_name,),
+        )
+        row = cursor.fetchone()
+
+        if row is not None:
+            existing_holder = row["holder_id"]
+            existing_expires = row["expires_at"]
+            now = time.time()
+
+            # Reject if a live holder has the lease
+            if existing_holder != agent_id and existing_expires > now:
+                return False
+
+        # Claim: insert if absent, or update if expired/unheld
+        conn.execute(
+            "INSERT OR REPLACE INTO coordinator_leases "
+            "(lease_name, holder_id, acquired_at, ttl, expires_at) "
+            "VALUES (?, ?, ?, ?, ?)",
+            (lease_name, agent_id, acquired_at, ttl, expires_at),
+        )
+        return True
+    finally:
+        conn.commit()

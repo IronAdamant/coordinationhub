@@ -1,7 +1,40 @@
 # CoordinationHub — Complete Project Documentation
 
-**Version:** <!-- GEN:version -->0.6.2<!-- /GEN -->
-**Last updated:** 2026-04-13
+**Version:** <!-- GEN:version -->0.6.3<!-- /GEN -->
+**Last updated:** 2026-04-14
+
+## v0.6.3 Changelog — Scope Column Migration + Agent State Sync
+
+### Motivation
+
+Review Nineteen (`findings/coordinationhub.md`) tested CoordinationHub under a live 3-agent swarm and identified a critical bug: `acquire_lock` failed with "no such column: scope" on legacy databases. It also noted that `current_task` was not auto-updated when tasks were assigned.
+
+### Missing `scope` Column Migration (P0)
+
+- `acquire_lock` failed on every call for DBs created before the `scope` column existed
+- Root cause: migration v6 was a no-op (`lambda conn: None`) because the column was added via `CREATE TABLE IF NOT EXISTS`, which does not alter existing tables
+- Fix: added proper v16→v17 migration (`_migrate_v16_to_v17`) that uses `ALTER TABLE agent_responsibilities ADD COLUMN scope TEXT`
+- All legacy databases now get the column on the next `init_schema` call
+
+### Agent State Sync on Task Assignment (P1)
+
+- `assign_task(task_id, assigned_agent_id)` now auto-updates `current_task` in `agent_responsibilities` with the task description
+- This makes `get_agent_tree` / `coordinationhub watch` immediately show what each agent is working on
+- Uses `INSERT ... ON CONFLICT(agent_id) DO UPDATE` so it works for both new and existing responsibility rows
+
+### Dependency Auto-Satisfaction (Already Present)
+
+- `update_task_status(task_id, status='completed')` already auto-satisfies `agent_dependencies` where `depends_on_task_id=task_id`
+- This was implemented in v0.6.0 and confirmed working in Review Nineteen
+
+### Counts
+
+| Version | Tools | CLI Commands | Schema |
+|---------|-------|--------------|--------|
+| v0.6.3 | 64 | 67 | 14 |
+| v0.6.2 | 64 | 67 | 13 |
+
+---
 
 ## v0.6.2 Changelog — Lock Bug Fix + Task/Notification Wait Primitives
 

@@ -180,6 +180,50 @@ class TestStuckVersionRecovery:
         assert rows[0]["version"] == _CURRENT_SCHEMA_VERSION
 
 
+class TestScopeColumnMigration:
+    """Review Nineteen: legacy DBs missing the `scope` column in agent_responsibilities.
+
+    Migration v6 was a no-op (`lambda conn: None`) because the column was
+    added via `CREATE TABLE IF NOT EXISTS`. Existing tables never got the
+    column, causing `acquire_lock` to fail with "no such column: scope".
+    """
+
+    def test_legacy_db_without_scope_column_gets_migrated(self, tmp_path: Path) -> None:
+        db = tmp_path / "no_scope.db"
+        conn = sqlite3.connect(db)
+        # Create agent_responsibilities exactly as it existed before scope
+        conn.execute("""
+            CREATE TABLE agent_responsibilities (
+                agent_id TEXT PRIMARY KEY,
+                graph_agent_id TEXT,
+                role TEXT,
+                model TEXT,
+                responsibilities TEXT,
+                current_task TEXT,
+                updated_at REAL NOT NULL
+            )
+        """)
+        conn.commit()
+        conn.close()
+
+        conn = _create_connection(db)
+        init_schema(conn)
+        conn.commit()
+
+        assert "scope" in _cols(conn, "agent_responsibilities")
+
+    def test_scope_migration_idempotent(self, tmp_path: Path) -> None:
+        db = tmp_path / "scope_repaired.db"
+        conn = _create_connection(db)
+        init_schema(conn)
+        conn.commit()
+        assert "scope" in _cols(conn, "agent_responsibilities")
+
+        init_schema(conn)  # second call must not raise
+        conn.commit()
+        assert "scope" in _cols(conn, "agent_responsibilities")
+
+
 class TestFreshInstall:
     def test_fresh_db_creates_all_tables_and_columns(self, tmp_path: Path) -> None:
         db = tmp_path / "fresh.db"

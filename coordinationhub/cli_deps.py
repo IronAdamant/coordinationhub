@@ -2,7 +2,8 @@
 
 from __future__ import annotations
 
-from .cli_utils import print_json as _print_json, engine_from_args as _engine_from_args, close as _close
+from .cli_utils import print_json as _print_json, engine_from_args as _engine_from_args
+from .cli_utils import replica_engine_from_args as _replica_engine_from_args, close as _close
 
 
 # ------------------------------------------------------------------ #
@@ -76,7 +77,7 @@ def cmd_satisfy_dependency(args):
 # ------------------------------------------------------------------ #
 
 def cmd_get_blockers(args):
-    engine = _engine_from_args(args)
+    engine = _replica_engine_from_args(args)
     try:
         result = engine.get_blockers(args.agent_id)
         blockers = result.get("unsatisfied", [])
@@ -119,7 +120,7 @@ def cmd_assert_can_start(args):
 # ------------------------------------------------------------------ #
 
 def cmd_get_all_dependencies(args):
-    engine = _engine_from_args(args)
+    engine = _replica_engine_from_args(args)
     try:
         result = engine.get_all_dependencies(getattr(args, "dependent_agent_id", None))
         deps = result.get("dependencies", [])

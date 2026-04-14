@@ -1,11 +1,65 @@
 # LLM_Development.md — CoordinationHub
 
-**Version:** <!-- GEN:version -->0.6.1<!-- /GEN -->
-**Last updated:** 2026-04-13
+**Version:** <!-- GEN:version -->0.6.3<!-- /GEN -->
+**Last updated:** 2026-04-14
 
 ## Change Log
 
 All significant changes to the CoordinationHub project are documented here in reverse chronological order.
+
+---
+
+## 2026-04-14 — v0.6.3 Scope Column Migration + Agent State Sync
+
+### Motivation
+
+Review Nineteen (`findings/coordinationhub.md`) tested CoordinationHub under a live 3-agent swarm and identified a critical bug: `acquire_lock` failed with "no such column: scope" on legacy databases. It also noted that `current_task` was not auto-updated when tasks were assigned.
+
+### Change 1 — P0 Scope Column Migration (db.py)
+
+**Bug**: `acquire_lock` failed on every call for DBs created before the `scope` column existed in `agent_responsibilities`.
+
+**Root cause**: migration v6 was a no-op:
+```python
+6: lambda conn: None,  # scope column added via CREATE TABLE IF NOT EXISTS
+```
+`CREATE TABLE IF NOT EXISTS` is a no-op for existing tables, so legacy databases never got the `scope` column.
+
+**Fix**: added proper v16→v17 migration:
+```python
+def _migrate_v16_to_v17(conn: sqlite3.Connection) -> None:
+    cols = [row[1] for row in conn.execute("PRAGMA table_info(agent_responsibilities)").fetchall()]
+    if "scope" in cols:
+        return
+    conn.execute("ALTER TABLE agent_responsibilities ADD COLUMN scope TEXT")
+```
+
+On the next `init_schema` call, all legacy databases get the column and `acquire_lock` works correctly.
+
+### Change 2 — P1 Agent State Sync on Task Assignment (tasks.py)
+
+**Gap**: `assign_task` updated the `tasks` table but did not sync `current_task` to `agent_responsibilities`, so `get_agent_tree` showed empty task descriptions.
+
+**Fix**: `assign_task` now looks up the task description and upserts it into `agent_responsibilities`:
+```python
+row = conn.execute("SELECT description FROM tasks WHERE id=?", (task_id,)).fetchone()
+if row:
+    conn.execute("""
+        INSERT INTO agent_responsibilities (agent_id, current_task, updated_at)
+        VALUES (?, ?, ?)
+        ON CONFLICT(agent_id) DO UPDATE SET
+            current_task = excluded.current_task,
+            updated_at = excluded.updated_at
+    """, (assigned_agent_id, row["description"], now))
+```
+
+### Counts
+
+| Version | Tools | CLI Commands | Schema |
+|---------|-------|--------------|--------|
+| v0.6.3 | 64 | 67 | 14 |
+| v0.6.2 | 64 | 67 | 13 |
+| v0.6.1 | 61 | 64 | 13 |
 
 ---
 

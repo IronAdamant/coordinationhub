@@ -200,6 +200,15 @@ _SCHEMAS = {
             status           TEXT DEFAULT 'failed'
         )
     """,
+    "coordinator_leases": """
+        CREATE TABLE IF NOT EXISTS coordinator_leases (
+            lease_name    TEXT PRIMARY KEY,
+            holder_id     TEXT NOT NULL,
+            acquired_at   REAL NOT NULL,
+            ttl           REAL NOT NULL,
+            expires_at    REAL NOT NULL
+        )
+    """,
     "agent_dependencies": """
         CREATE TABLE IF NOT EXISTS agent_dependencies (
             id                  INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -210,6 +219,18 @@ _SCHEMAS = {
             satisfied           INTEGER DEFAULT 0,
             satisfied_at        REAL,
             created_at          REAL NOT NULL
+        )
+    """,
+    "pending_spawner_tasks": """
+        CREATE TABLE IF NOT EXISTS pending_spawner_tasks (
+            id               TEXT PRIMARY KEY,
+            parent_agent_id  TEXT NOT NULL,
+            subagent_type    TEXT,
+            description      TEXT,
+            prompt           TEXT,
+            created_at       REAL NOT NULL,
+            consumed_at      REAL,
+            status           TEXT DEFAULT 'pending'
         )
     """,
 }
@@ -245,10 +266,12 @@ _INDEXES = [
     "CREATE INDEX IF NOT EXISTS idx_deps_satisfied ON agent_dependencies(satisfied)",
     "CREATE INDEX IF NOT EXISTS idx_task_failures_task ON task_failures(task_id)",
     "CREATE INDEX IF NOT EXISTS idx_task_failures_status ON task_failures(status)",
+    "CREATE INDEX IF NOT EXISTS idx_leases_expires ON coordinator_leases(expires_at)",
+    "CREATE INDEX IF NOT EXISTS idx_spawner_parent_type ON pending_spawner_tasks(parent_agent_id, subagent_type, status)",
 ]
 
 
-_CURRENT_SCHEMA_VERSION = 13
+_CURRENT_SCHEMA_VERSION = 17
 
 
 def _get_schema_version(conn: sqlite3.Connection) -> int:
@@ -326,12 +349,54 @@ def _migrate_v12_to_v13(conn: sqlite3.Connection) -> None:
     conn.execute("CREATE INDEX IF NOT EXISTS idx_task_failures_status ON task_failures(status)")
 
 
+def _migrate_v13_to_v14(conn: sqlite3.Connection) -> None:
+    """Add coordinator_leases table for HA coordinator leadership."""
+    cols = [row[1] for row in conn.execute("PRAGMA table_info(coordinator_leases)").fetchall()]
+    if "lease_name" in cols:
+        return  # Already migrated
+    conn.execute(_SCHEMAS["coordinator_leases"])
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_leases_expires ON coordinator_leases(expires_at)")
+
+
+def _migrate_v14_to_v15(conn: sqlite3.Connection) -> None:
+    """Add pending_spawner_tasks table for HA spawner sub-agent registry."""
+    cols = [row[1] for row in conn.execute("PRAGMA table_info(pending_spawner_tasks)").fetchall()]
+    if "id" in cols:
+        return  # Already migrated
+    conn.execute(_SCHEMAS["pending_spawner_tasks"])
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_spawner_parent_type "
+        "ON pending_spawner_tasks(parent_agent_id, subagent_type, status)"
+    )
+
+
+def _migrate_v15_to_v16(conn: sqlite3.Connection) -> None:
+    """Add stop_requested_at column to agents table for spawner deregistration requests."""
+    cols = [row[1] for row in conn.execute("PRAGMA table_info(agents)").fetchall()]
+    if "stop_requested_at" in cols:
+        return  # Already migrated
+    conn.execute("ALTER TABLE agents ADD COLUMN stop_requested_at REAL")
+
+
+def _migrate_v16_to_v17(conn: sqlite3.Connection) -> None:
+    """Add scope column to agent_responsibilities for legacy databases.
+
+    The column was originally added via CREATE TABLE IF NOT EXISTS, which
+    is a no-op for existing tables. This migration ensures existing DBs
+    get the column via ALTER TABLE.
+    """
+    cols = [row[1] for row in conn.execute("PRAGMA table_info(agent_responsibilities)").fetchall()]
+    if "scope" in cols:
+        return  # Already migrated
+    conn.execute("ALTER TABLE agent_responsibilities ADD COLUMN scope TEXT")
+
+
 _MIGRATIONS = {
     2: _migrate_v1_to_v2,
     3: _migrate_v2_to_v3,
     4: lambda conn: None,  # descendant_registry added via CREATE TABLE IF NOT EXISTS
     5: lambda conn: None,  # messages table added via CREATE TABLE IF NOT EXISTS
-    6: lambda conn: None,  # scope column added via CREATE TABLE IF NOT EXISTS
+    6: lambda conn: None,  # scope column added via CREATE TABLE IF NOT EXISTS (legacy no-op)
     7: lambda conn: None,  # tasks table added via CREATE TABLE IF NOT EXISTS
     8: lambda conn: None,  # work_intent table added via CREATE TABLE IF NOT EXISTS
     9: lambda conn: None,  # handoffs + handoff_acks tables added via CREATE TABLE IF NOT EXISTS
@@ -339,6 +404,10 @@ _MIGRATIONS = {
     11: _migrate_v10_to_v11,  # parent_task_id column added via ALTER TABLE
     12: _migrate_v11_to_v12,  # priority column added via ALTER TABLE
     13: _migrate_v12_to_v13,  # task_failures table added
+    14: _migrate_v13_to_v14,  # coordinator_leases table added
+    15: _migrate_v14_to_v15,  # pending_spawner_tasks table added
+    16: _migrate_v15_to_v16,  # stop_requested_at column added
+    17: _migrate_v16_to_v17,  # scope column added to agent_responsibilities
 }
 
 

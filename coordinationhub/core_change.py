@@ -76,6 +76,23 @@ class ChangeMixin:
         """Clean up old notifications."""
         return _cn.prune_notifications(self._connect, max_age_seconds, max_entries)
 
+    def wait_for_notifications(
+        self,
+        agent_id: str,
+        timeout_s: float = 30.0,
+        poll_interval_s: float = 2.0,
+        exclude_agent: str | None = None,
+    ) -> dict[str, Any]:
+        """Long-poll for new notifications until one arrives or timeout expires.
+
+        Use this instead of polling get_notifications in a loop.
+        Returns {"notifications": [...], "timed_out": False} when new notifications arrive,
+        or {"notifications": [], "timed_out": True} if timeout expires.
+        """
+        return _cn.wait_for_notifications(
+            self._connect, agent_id, timeout_s, poll_interval_s, exclude_agent,
+        )
+
     # ------------------------------------------------------------------ #
     # Conflict Audit
     # ------------------------------------------------------------------ #

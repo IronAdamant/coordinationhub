@@ -392,8 +392,14 @@ def handle_subagent_start(event: dict) -> dict | None:
     Deduplicates by ``claude_agent_id`` — background agents
     (``run_in_background: true``) fire SubagentStart twice with the
     same hex ID but would otherwise get two different sequence numbers.
+
+    **Stage 6 (HA Spawner)**: After registering the sub-agent, calls
+    ``consume_pending_spawn`` to mark any matching pending spawn record
+    (from the parent's ``spawn_subagent`` call) as ``registered``. This
+    lets the parent track spawn intent → sub-agent registration lifecycle.
     """
     from coordinationhub.pending_tasks import consume_pending_task
+    from coordinationhub.spawner import consume_pending_spawn
 
     engine = _get_engine(event.get("cwd", "."))
     try:
@@ -443,6 +449,12 @@ def handle_subagent_start(event: dict) -> dict | None:
 
         if pending_desc:
             engine.update_agent_status(child_id, current_task=pending_desc)
+
+        # Stage 6: consume pending spawn so parent sees registered status
+        try:
+            consume_pending_spawn(engine._connect, parent_id, subagent_type)
+        except Exception:
+            pass  # spawner tracking is best-effort
     finally:
         engine.close()
     return None
