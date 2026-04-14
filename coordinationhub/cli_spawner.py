@@ -18,6 +18,7 @@ def cmd_spawn_subagent(args):
             subagent_type=args.subagent_type,
             description=getattr(args, "description", None),
             prompt=getattr(args, "prompt", None),
+            source=getattr(args, "source", "external"),
         )
         if args.json_output:
             _print_json(result)
@@ -26,6 +27,33 @@ def cmd_spawn_subagent(args):
             print(f"  Parent: {result['parent_agent_id']}")
             status = result.get("status", "pending")
             print(f"  Status: {status}")
+    finally:
+        _close(engine)
+
+
+# ------------------------------------------------------------------ #
+# report-subagent-spawned
+# ------------------------------------------------------------------ #
+
+def cmd_report_subagent_spawned(args):
+    engine = _engine_from_args(args)
+    try:
+        result = engine.report_subagent_spawned(
+            parent_agent_id=args.parent_agent_id,
+            subagent_type=getattr(args, "subagent_type", None),
+            child_agent_id=args.child_agent_id,
+            source=getattr(args, "source", "external"),
+        )
+        if args.json_output:
+            _print_json(result)
+        else:
+            if result.get("spawn_id"):
+                print(f"Spawn reported: {result['spawn_id']}")
+                print(f"  Child: {result['child_agent_id']}")
+                print(f"  Description: {result.get('description', '')}")
+            else:
+                print(f"No pending spawn found for {args.parent_agent_id}")
+                print(f"  Child: {result['child_agent_id']}")
     finally:
         _close(engine)
 

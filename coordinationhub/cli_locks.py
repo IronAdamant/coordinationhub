@@ -197,6 +197,8 @@ def cmd_broadcast(args):
             args.agent_id,
             document_path=getattr(args, "document_path", None),
             handoff_targets=getattr(args, "handoff_targets", None),
+            require_ack=getattr(args, "require_ack", False),
+            message=getattr(args, "message", None),
         )
         if args.json_output:
             _print_json(result)
@@ -207,6 +209,10 @@ def cmd_broadcast(args):
                 print(f"  To: {', '.join(result.get('to_agents', []))}")
                 print(f"  Document: {result.get('document_path') or '(none)'}")
                 print(f"  Type: {result.get('handoff_type')}")
+            elif result.get("broadcast_id") is not None:
+                print(f"Broadcast from {args.agent_id} (ack required)")
+                print(f"  Broadcast ID: {result['broadcast_id']}")
+                print(f"  Pending acks: {', '.join(result.get('pending_acks', [])) or '(none)'}")
             else:
                 ack = result.get("acknowledged_by", [])
                 conflicts = result.get("conflicts", [])
@@ -216,6 +222,45 @@ def cmd_broadcast(args):
                     print(f"  Conflicts:")
                     for c in conflicts:
                         print(f"    {c['document_path']} locked by {c['locked_by']}")
+    finally:
+        _close(engine)
+
+
+# ------------------------------------------------------------------ #
+# acknowledge-broadcast
+# ------------------------------------------------------------------ #
+
+def cmd_acknowledge_broadcast(args):
+    engine = _engine_from_args(args)
+    try:
+        result = engine.acknowledge_broadcast(args.broadcast_id, args.agent_id)
+        if args.json_output:
+            _print_json(result)
+        elif result.get("acknowledged"):
+            print(f"Acknowledged broadcast {args.broadcast_id} by {args.agent_id}")
+        else:
+            print(f"Failed: {result.get('reason', 'unknown')}")
+    finally:
+        _close(engine)
+
+
+# ------------------------------------------------------------------ #
+# broadcast-status
+# ------------------------------------------------------------------ #
+
+def cmd_broadcast_status(args):
+    engine = _engine_from_args(args)
+    try:
+        result = engine.get_broadcast_status(args.broadcast_id)
+        if args.json_output:
+            _print_json(result)
+        elif result.get("found"):
+            print(f"Broadcast {args.broadcast_id}")
+            print(f"  From: {result['from_agent_id']}")
+            acks = result.get("acknowledged_by", [])
+            print(f"  Acknowledged by: {acks or '(none)'}")
+        else:
+            print(f"Broadcast {args.broadcast_id} not found")
     finally:
         _close(engine)
 

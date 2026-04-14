@@ -28,7 +28,10 @@ TOOL_DISPATCH: dict[str, tuple[str, list[str]]] = {
     "reap_expired_locks": ("reap_expired_locks", []),
     "reap_stale_agents": ("reap_stale_agents", ["timeout"]),
     # Coordination
-    "broadcast": ("broadcast", ["agent_id", "document_path", "ttl", "handoff_targets"]),
+    "broadcast": ("broadcast", ["agent_id", "document_path", "ttl", "handoff_targets", "require_ack", "message"]),
+    "acknowledge_broadcast": ("acknowledge_broadcast", ["broadcast_id", "agent_id"]),
+    "get_broadcast_status": ("get_broadcast_status", ["broadcast_id"]),
+    "await_broadcast_acks": ("await_broadcast_acks", ["broadcast_id", "timeout_s"]),
     "wait_for_locks": ("wait_for_locks", ["document_paths", "agent_id", "timeout_s"]),
     "await_agent": ("await_agent", ["agent_id", "timeout_s"]),
     # Change awareness
@@ -96,7 +99,8 @@ TOOL_DISPATCH: dict[str, tuple[str, list[str]]] = {
     "get_leader": ("get_leader", []),
     "claim_leadership": ("claim_leadership", ["agent_id", "ttl"]),
     # Spawner — Sub-Agent Registry
-    "spawn_subagent": ("spawn_subagent", ["parent_agent_id", "subagent_type", "description", "prompt"]),
+    "spawn_subagent": ("spawn_subagent", ["parent_agent_id", "subagent_type", "description", "prompt", "source"]),
+    "report_subagent_spawned": ("report_subagent_spawned", ["parent_agent_id", "subagent_type", "child_agent_id", "source"]),
     "get_pending_spawns": ("get_pending_spawns", ["parent_agent_id", "include_consumed"]),
     "await_subagent_registration": ("await_subagent_registration", ["parent_agent_id", "subagent_type", "timeout"]),
     "request_subagent_deregistration": ("request_subagent_deregistration", ["parent_agent_id", "child_agent_id"]),

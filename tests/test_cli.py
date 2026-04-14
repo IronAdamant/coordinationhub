@@ -19,7 +19,8 @@ EXPECTED_COMMANDS = {
     "serve", "serve-mcp", "serve-sse", "status", "register", "heartbeat", "deregister",
     "list-agents", "lineage", "siblings", "acquire-lock", "release-lock",
     "refresh-lock", "lock-status", "list-locks", "release-agent-locks",
-    "reap-expired-locks", "reap-stale-agents", "broadcast", "wait-for-locks",
+    "reap-expired-locks", "reap-stale-agents", "broadcast", "acknowledge-broadcast",
+    "broadcast-status", "wait-for-locks",
     "notify-change", "get-notifications", "prune-notifications", "wait-for-notifications",
     "get-conflicts", "contention-hotspots",
     "load-spec", "validate-spec", "scan-project", "dashboard",
@@ -38,7 +39,7 @@ EXPECTED_COMMANDS = {
     "acquire-coordinator-lease", "refresh-coordinator-lease",
     "release-coordinator-lease", "get-leader", "claim-leadership",
     "leader-status", "ha-dashboard",
-    "spawn-subagent", "list-pending-spawns", "cancel-spawn",
+    "spawn-subagent", "report-subagent-spawned", "list-pending-spawns", "cancel-spawn",
     "request-subagent-deregistration", "await-subagent-stopped",
 }
 

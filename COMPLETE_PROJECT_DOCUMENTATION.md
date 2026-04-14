@@ -1,7 +1,45 @@
 # CoordinationHub — Complete Project Documentation
 
-**Version:** <!-- GEN:version -->0.6.3<!-- /GEN -->
+**Version:** <!-- GEN:version -->0.6.4<!-- /GEN -->
 **Last updated:** 2026-04-14
+
+## v0.6.4 Changelog — Agnostic Spawner + Broadcast Acknowledgments
+
+### Motivation
+
+Review Nineteen identified two design-level gaps:
+1. `spawn_subagent` was tightly coupled to Claude Code hooks — other IDE/CLIs had no way to report sub-agent spawns back to CoordinationHub
+2. `broadcast` without `handoff_targets` had no delivery confirmation mechanism
+
+### Agnostic Sub-Agent Spawning (P0)
+
+- Added `source` parameter to `spawn_subagent` and `pending_spawner_tasks` table
+- New MCP tool / CLI command: `report_subagent_spawned(parent_agent_id, subagent_type, child_agent_id, source)`
+  - Any IDE/CLI (Claude Code, Kimi CLI, Cursor, etc.) calls this after spawning a sub-agent via its native mechanism
+  - Consumes the pending spawn record and links it to the actual child agent ID
+- Updated Claude Code hook to use `report_subagent_spawned` internally, unifying the code path
+- This makes CoordinationHub a coordination layer that **complements** native spawn tools instead of trying to replace them
+
+### Broadcast Delivery Confirmation (P0)
+
+- Added `broadcasts` and `broadcast_acks` tables to the schema
+- Updated `broadcast` with new optional parameters:
+  - `require_ack=True` — creates a trackable broadcast record and sends `broadcast_ack_request` messages to each live sibling
+  - `message` — optional payload included in the broadcast
+- New MCP tools / CLI commands:
+  - `acknowledge_broadcast(broadcast_id, agent_id)` — recipient confirms receipt
+  - `get_broadcast_status(broadcast_id)` — query current acknowledgments
+  - `await_broadcast_acks(broadcast_id, timeout_s)` — poll until timeout
+- The legacy `broadcast` behavior (no ack required) remains unchanged for backward compatibility
+
+### Counts
+
+| Version | Tools | CLI Commands | Schema |
+|---------|-------|--------------|--------|
+| v0.6.4 | 68 | 71 | 16 |
+| v0.6.3 | 64 | 67 | 14 |
+
+---
 
 ## v0.6.3 Changelog — Scope Column Migration + Agent State Sync
 

@@ -29,12 +29,14 @@ class SpawnerMixin:
         subagent_type: str,
         description: str | None = None,
         prompt: str | None = None,
+        source: str = "external",
     ) -> dict[str, Any]:
         """Register intent to spawn a sub-agent and return its spawn ID.
 
-        The parent agent calls this before Claude Code spawns the sub-agent.
-        This creates a pending spawn record that the hook will consume
-        when ``SubagentStart`` fires, correlating via ``parent_agent_id``.
+        The parent agent calls this before the external system (Claude Code,
+        Kimi CLI, etc.) spawns the sub-agent. This creates a pending spawn
+        record that the spawning system will consume when the agent is
+        actually spawned, correlating via ``parent_agent_id``.
 
         Returns the spawn ID and pending spawn record.
         """
@@ -48,6 +50,7 @@ class SpawnerMixin:
             subagent_type=subagent_type,
             description=description,
             prompt=prompt,
+            source=source,
         )
         result["spawn_id"] = spawn_id
         return result
@@ -64,6 +67,23 @@ class SpawnerMixin:
             include_consumed=include_consumed,
         )
 
+    def report_subagent_spawned(
+        self,
+        parent_agent_id: str,
+        subagent_type: str | None,
+        child_agent_id: str,
+        source: str = "external",
+    ) -> dict[str, Any]:
+        """Report that a sub-agent has been spawned by an external system.
+
+        Any IDE/CLI (Claude Code, Kimi CLI, Cursor, etc.) calls this after
+        spawning a sub-agent via its native mechanism. This consumes the
+        pending spawn record and links it to the actual child agent ID.
+        """
+        return _spawner.report_subagent_spawned(
+            self._connect, parent_agent_id, subagent_type, child_agent_id, source,
+        )
+
     def await_subagent_registration(
         self,
         parent_agent_id: str,
@@ -73,8 +93,7 @@ class SpawnerMixin:
         """Poll until a pending spawn is consumed (sub-agent registered) or timeout.
 
         The parent agent calls this after ``spawn_subagent`` to wait for the
-        sub-agent to register itself via the Claude Code hook's
-        ``SubagentStart`` handler.
+        external spawning system to report that the sub-agent is alive.
 
         Returns the consumed spawn record on success.
         Returns ``{"timed_out": True, ...}`` if the sub-agent did not register

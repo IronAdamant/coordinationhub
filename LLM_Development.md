@@ -1,11 +1,73 @@
 # LLM_Development.md — CoordinationHub
 
-**Version:** <!-- GEN:version -->0.6.3<!-- /GEN -->
+**Version:** <!-- GEN:version -->0.6.4<!-- /GEN -->
 **Last updated:** 2026-04-14
 
 ## Change Log
 
 All significant changes to the CoordinationHub project are documented here in reverse chronological order.
+
+---
+
+## 2026-04-14 — v0.6.4 Agnostic Spawner + Broadcast Acknowledgments
+
+### Motivation
+
+Review Nineteen identified two design-level gaps:
+1. `spawn_subagent` was tightly coupled to Claude Code hooks — other IDE/CLIs had no way to report sub-agent spawns back to CoordinationHub
+2. `broadcast` without `handoff_targets` had no delivery confirmation mechanism
+
+### Change 1 — P0 Agnostic Sub-Agent Spawning
+
+**Gap**: `spawn_subagent` created a pending record, but only the Claude Code hook could consume it via `SubagentStart`. Kimi CLI, Cursor, and other environments had no integration path.
+
+**Fix**: Added a generic `report_subagent_spawned` tool that any external system can call after spawning an agent via its native mechanism:
+```python
+def report_subagent_spawned(
+    connect, parent_agent_id, subagent_type, child_agent_id, source="external"
+):
+    ...
+```
+
+- Added `source` column to `pending_spawner_tasks` to track which system performed the spawn
+- `spawn_subagent` now accepts an optional `source` parameter
+- The Claude Code hook was updated to use `engine.report_subagent_spawned(...)` internally, unifying the code path
+- New CLI command: `coordinationhub report-subagent-spawned <parent> <child> [--subagent-type TYPE] [--source SOURCE]`
+
+This makes CoordinationHub a **coordination layer that complements native spawn tools** instead of trying to replace them.
+
+### Change 2 — P0 Broadcast Delivery Confirmation
+
+**Gap**: `broadcast` without `handoff_targets` returned `acknowledged_by: []` with no actual acknowledgment tracking. Only the handoff variant created persistent state.
+
+**Fix**: Added `broadcasts` and `broadcast_acks` tables, plus optional `require_ack` on `broadcast`:
+```python
+engine.broadcast(agent_id, require_ack=True, message="hello")
+# Returns: {"broadcast_id": 1, "pending_acks": [...], "acknowledged_by": []}
+
+engine.acknowledge_broadcast(1, recipient_agent_id)
+# Returns: {"acknowledged": True}
+```
+
+- New MCP tools: `acknowledge_broadcast`, `get_broadcast_status`, `await_broadcast_acks`
+- New CLI commands: `acknowledge-broadcast`, `broadcast-status`
+- Legacy `broadcast` behavior (no ack required) is unchanged for backward compatibility
+- When `require_ack=True`, each live sibling receives a `broadcast_ack_request` message via the existing mailbox system
+
+### Schema Changes
+
+- v17 → v18 migration adds:
+  - `source` column to `pending_spawner_tasks`
+  - `broadcasts` table
+  - `broadcast_acks` table
+
+### Counts
+
+| Version | Tools | CLI Commands | Schema |
+|---------|-------|--------------|--------|
+| v0.6.4 | 68 | 71 | 16 |
+| v0.6.3 | 64 | 67 | 14 |
+| v0.6.2 | 64 | 67 | 13 |
 
 ---
 

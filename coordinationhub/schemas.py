@@ -344,9 +344,10 @@ TOOL_SCHEMAS_COORDINATION: dict[str, dict] = {
         "description": (
             "Announce an intention to all live sibling agents before taking "
             "an action. Returns which siblings are live and any lock conflicts. "
-            "Does not store or forward messages — only checks current lock state. "
             "When handoff_targets is provided, performs a formal multi-recipient "
-            "handoff recorded in the handoffs table."
+            "handoff recorded in the handoffs table. "
+            "When require_ack is True, creates a trackable broadcast record and "
+            "sends acknowledgment request messages to each live sibling."
         ),
         "parameters": {
             "type": "object",
@@ -375,8 +376,75 @@ TOOL_SCHEMAS_COORDINATION: dict[str, dict] = {
                     ),
                     "default": None,
                 },
+                "require_ack": {
+                    "type": "boolean",
+                    "description": "If True, require recipients to acknowledge the broadcast via acknowledge_broadcast",
+                    "default": False,
+                },
+                "message": {
+                    "type": "string",
+                    "description": "Optional message payload when require_ack is True",
+                    "default": None,
+                },
             },
             "required": ["agent_id"],
+        },
+    },
+    "acknowledge_broadcast": {
+        "description": (
+            "Acknowledge receipt of a broadcast. Called by recipient agents "
+            "when they receive a broadcast_ack_request message."
+        ),
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "broadcast_id": {
+                    "type": "integer",
+                    "description": "ID of the broadcast to acknowledge",
+                },
+                "agent_id": {
+                    "type": "string",
+                    "description": "Agent acknowledging the broadcast",
+                },
+            },
+            "required": ["broadcast_id", "agent_id"],
+        },
+    },
+    "get_broadcast_status": {
+        "description": (
+            "Get the current acknowledgment status for a broadcast. "
+            "Returns the list of agents that have acknowledged it."
+        ),
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "broadcast_id": {
+                    "type": "integer",
+                    "description": "ID of the broadcast to query",
+                },
+            },
+            "required": ["broadcast_id"],
+        },
+    },
+    "await_broadcast_acks": {
+        "description": (
+            "Poll until all expected acknowledgments are received or timeout expires. "
+            "Use after broadcast with require_ack=True to wait for recipients."
+        ),
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "broadcast_id": {
+                    "type": "integer",
+                    "description": "ID of the broadcast to wait for",
+                },
+                "timeout_s": {
+                    "type": "number",
+                    "description": "Maximum seconds to wait (default: 30)",
+                    "default": 30.0,
+                },
+            },
+            "required": ["broadcast_id"],
         },
     },
     "wait_for_locks": {
@@ -1533,9 +1601,9 @@ TOOL_SCHEMAS_SPAWNER: dict[str, dict] = {
     "spawn_subagent": {
         "description": (
             "Register intent to spawn a sub-agent and return its spawn ID. "
-            "The parent agent calls this before Claude Code spawns the sub-agent. "
-            "This creates a pending spawn record that the hook will consume "
-            "when ``SubagentStart`` fires, correlating via ``parent_agent_id``. "
+            "The parent agent calls this before the external system spawns the sub-agent. "
+            "This creates a pending spawn record that the spawning system will consume "
+            "when the agent is actually spawned, correlating via ``parent_agent_id``. "
             "Returns the spawn ID and pending spawn record."
         ),
         "parameters": {
@@ -1559,8 +1627,46 @@ TOOL_SCHEMAS_SPAWNER: dict[str, dict] = {
                     "description": "Prompt or instructions for the sub-agent",
                     "default": None,
                 },
+                "source": {
+                    "type": "string",
+                    "description": "Source system that will perform the spawn (e.g. 'claude_code', 'kimi_cli', 'cursor')",
+                    "default": "external",
+                },
             },
             "required": ["parent_agent_id", "subagent_type"],
+        },
+    },
+    "report_subagent_spawned": {
+        "description": (
+            "Report that a sub-agent has been spawned by an external system. "
+            "Any IDE/CLI (Claude Code, Kimi CLI, Cursor, etc.) calls this after "
+            "spawning a sub-agent via its native mechanism. This consumes the "
+            "pending spawn record created by ``spawn_subagent`` and links it to "
+            "the actual child agent ID."
+        ),
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "parent_agent_id": {
+                    "type": "string",
+                    "description": "Parent agent ID that spawned the sub-agent",
+                },
+                "subagent_type": {
+                    "type": "string",
+                    "description": "Type of sub-agent that was spawned",
+                    "default": None,
+                },
+                "child_agent_id": {
+                    "type": "string",
+                    "description": "Actual agent ID of the spawned sub-agent",
+                },
+                "source": {
+                    "type": "string",
+                    "description": "Source system that performed the spawn (e.g. 'claude_code', 'kimi_cli')",
+                    "default": "external",
+                },
+            },
+            "required": ["parent_agent_id", "child_agent_id"],
         },
     },
     "get_pending_spawns": {
@@ -1588,7 +1694,7 @@ TOOL_SCHEMAS_SPAWNER: dict[str, dict] = {
         "description": (
             "Poll until a pending spawn is consumed (sub-agent registered) or timeout. "
             "The parent agent calls this after ``spawn_subagent`` to wait for the "
-            "sub-agent to register itself via the Claude Code hook's SubagentStart handler. "
+            "external spawning system to report that the sub-agent is alive. "
             "Returns the consumed spawn record on success, or timed_out:true if the "
             "sub-agent did not register within the timeout."
         ),
