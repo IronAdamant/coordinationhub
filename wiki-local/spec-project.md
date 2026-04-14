@@ -1,6 +1,6 @@
 # CoordinationHub — Multi-Agent Swarm Coordination MCP
 
-**Version:** <!-- GEN:version -->0.6.4<!-- /GEN -->
+**Version:** <!-- GEN:version -->0.6.5<!-- /GEN -->
 **Language:** Python 3.10+ (stdlib-only core — **zero third-party dependencies**, `mcp` optional for stdio only)
 **Transports:** stdio + HTTP (both, like Stele/Chisel/Trammel)
 
@@ -287,7 +287,7 @@ coordinationhub/
   agent_status.py       — Agent status and file-map query helpers for CoordinationHub (~274 LOC)
   assessment.py         — Assessment runner for CoordinationHub coordination test suites (~322 LOC)
   assessment_scorers.py — Assessment metric scorers for CoordinationHub (~258 LOC)
-  broadcasts.py         — Broadcast acknowledgment primitives for CoordinationHub (~101 LOC)
+  broadcasts.py         — Broadcast acknowledgment primitives for CoordinationHub (~106 LOC)
   cli.py                — CoordinationHub CLI — command-line interface for all 55 coordination tool methods (~420 LOC)
   cli_agents.py         — Agent identity and lifecycle CLI commands (~128 LOC)
   cli_commands.py       — CoordinationHub CLI command handlers (~107 LOC)
@@ -309,14 +309,14 @@ coordinationhub/
   core_handoffs.py      — HandoffMixin — one-to-many handoff acknowledgment and lifecycle (~28 LOC)
   core_identity.py      — IdentityMixin — agent lifecycle and lineage management (~94 LOC)
   core_leases.py        — LeaseMixin — HA coordinator lease management (~109 LOC)
-  core_locking.py       — Locking and coordination methods for CoordinationEngine (~435 LOC)
-  core_messaging.py     — MessagingMixin — inter-agent messages and await (~59 LOC)
+  core_locking.py       — Locking and coordination methods for CoordinationEngine (~439 LOC)
+  core_messaging.py     — MessagingMixin — inter-agent messages and await (~66 LOC)
   core_spawner.py       — SpawnerMixin — HA coordinator sub-agent spawn management (~148 LOC)
   core_tasks.py         — TaskMixin — shared task registry with hierarchy support (~117 LOC)
   core_visibility.py    — VisibilityMixin — coordination graph, project scan, agent status, assessment (~114 LOC)
   core_work_intent.py   — WorkIntentMixin — cooperative work intent board (~26 LOC)
   dashboard.py          — Web dashboard for CoordinationHub — zero external dependencies (~483 LOC)
-  db.py                 — SQLite schema, migrations, and connection pool for CoordinationHub (~494 LOC)
+  db.py                 — SQLite schema, migrations, and connection pool for CoordinationHub (~504 LOC)
   dependencies.py       — Cross-agent dependency declaration and satisfaction tracking (~98 LOC)
   dispatch.py           — Tool dispatch table for CoordinationHub (~87 LOC)
   graphs.py             — Declarative coordination graph: loader, validator, in-memory representation (~256 LOC)

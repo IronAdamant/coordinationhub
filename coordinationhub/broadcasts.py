@@ -29,10 +29,10 @@ def record_broadcast(
         cursor = conn.execute(
             """
             INSERT INTO broadcasts
-            (from_agent_id, document_path, message, created_at, ttl, expires_at)
-            VALUES (?, ?, ?, ?, ?, ?)
+            (from_agent_id, document_path, message, created_at, ttl, expires_at, expected_count)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
             """,
-            (from_agent_id, document_path, message, now, ttl, now + ttl),
+            (from_agent_id, document_path, message, now, ttl, now + ttl, expected_count),
         )
         broadcast_id = cursor.lastrowid
     return {
@@ -84,6 +84,11 @@ def get_broadcast_status(
             (broadcast_id,),
         ).fetchall()
 
+    expected_count = row["expected_count"] or 0
+    acked = [a["agent_id"] for a in acks]
+    pending_acks: list[str] = []
+    # pending_acks can only be computed when we know the original targets.
+    # For now, report the counts so callers can see progress.
     return {
         "found": True,
         "broadcast_id": broadcast_id,
@@ -92,7 +97,9 @@ def get_broadcast_status(
         "message": row["message"],
         "created_at": row["created_at"],
         "expires_at": row["expires_at"],
-        "acknowledged_by": [a["agent_id"] for a in acks],
+        "expected_count": expected_count,
+        "acknowledged_by": acked,
+        "pending_acks": pending_acks,
     }
 
 

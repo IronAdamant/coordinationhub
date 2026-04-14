@@ -12,6 +12,7 @@ import time as _time
 from typing import Any
 
 from . import messages as _msg
+from . import broadcasts as _bc
 
 
 class MessagingMixin:
@@ -36,6 +37,14 @@ class MessagingMixin:
     ) -> dict[str, Any]:
         """Get messages for an agent."""
         messages = _msg.get_messages(self._connect, agent_id, unread_only, limit)
+        # Auto-acknowledge broadcast requests so non-interactive agents
+        # don't leave pending_acks dangling indefinitely.
+        for msg in messages:
+            if msg.get("message_type") == "broadcast_ack_request":
+                payload = msg.get("payload") or {}
+                broadcast_id = payload.get("broadcast_id")
+                if broadcast_id is not None:
+                    _bc.acknowledge_broadcast(self._connect, broadcast_id, agent_id)
         return {"messages": messages, "count": len(messages)}
 
     def mark_messages_read(
