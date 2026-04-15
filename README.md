@@ -1,10 +1,12 @@
 # CoordinationHub
 
-**Stop AI agents from overwriting each other's work.**
+**Stop AI coding assistants from overwriting each other's work.**
 
-CoordinationHub is a small MCP server that coordinates multiple AI coding agents on the same codebase. It tracks who owns which files, prevents two agents from editing the same file at once, and gives you one live view of the swarm.
+When you let multiple AI assistants help on the same project, they can accidentally undo each other's edits — one rewrites a file while another is still working on it. CoordinationHub is a shared notice-board that tracks who's editing what, and stops two assistants from touching the same file at once. Live dashboard included.
 
-Built for Claude Code, compatible with any MCP client. Pure Python stdlib. Zero third-party dependencies. No Docker.
+Runs locally on your machine. No Docker, no external services, no API keys to manage.
+
+*For developers:* small MCP server, pure Python stdlib, zero third-party dependencies. Works with Claude Code's hooks out of the box; compatible with any MCP client.
 
 ![CoordinationHub dashboard](screenshots/dashboard.png)
 
@@ -14,7 +16,7 @@ Built for Claude Code, compatible with any MCP client. Pure Python stdlib. Zero 
 
 ## Why you might want this
 
-Spawn three Claude Code agents to refactor a service. Without coordination they happily race on the same files, silently overwrite each other, and leave you to figure out what happened from a confused git diff. CoordinationHub is the shared whiteboard they all check before touching anything: one source of truth for *who is alive*, *who holds which lock*, *which tasks are blocked*, and *where one agent's edits are crossing into another's territory*.
+When three AI coding assistants help refactor the same part of your project, they'll sometimes step on each other — two of them editing the same file at once, whichever saves last wins, no warning that anything was lost. CoordinationHub is the shared whiteboard they all check before touching anything: one place that shows *who's alive*, *who holds which file*, *which tasks are blocked*, and *where one assistant's edits are crossing into another's territory*.
 
 ## Install
 
