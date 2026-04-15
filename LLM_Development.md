@@ -1,6 +1,6 @@
 # LLM_Development.md — CoordinationHub
 
-**Version:** <!-- GEN:version -->0.7.0<!-- /GEN -->
+**Version:** <!-- GEN:version -->0.7.1<!-- /GEN -->
 **Last updated:** 2026-04-15
 
 ## Change Log
@@ -9,13 +9,92 @@ All significant changes to the CoordinationHub project are documented here in re
 
 ---
 
+## 2026-04-15 — v0.7.1 Polish Pass (File-Size Rule Enforcement + Doc Parity)
+
+### Motivation
+
+v0.7.0 shipped with two files that violated the project's 500-code-LOC-per-file rule (`schemas.py` at 1260, `db.py` at 565). Kimi's fill-in changelogs for v0.6.6 / v0.6.7 / v0.7.0 also carried several wrong count-table numbers. In addition, stale tool-name references lingered in CLAUDE.md, README.md, and the wiki after the v0.7.0 consolidation.
+
+### Change 1 — `schemas.py` split into a `schemas/` package
+
+`schemas.py` was already internally organized into 14 `TOOL_SCHEMAS_*` sub-dicts. Each moved into its own sibling module:
+
+- `schemas/identity.py`, `locking.py`, `coordination.py`, `messaging.py`, `change.py`, `audit.py`, `visibility.py`, `tasks.py`, `intent.py`, `handoffs.py`, `deps.py`, `dlq.py`, `leases.py`, `spawner.py`
+- `schemas/__init__.py` aggregates them into `TOOL_SCHEMAS` using `dict | dict | ...` (identical shape to the old dict).
+
+External callers (`mcp_server.py`, `mcp_stdio.py`, `scripts/gen_docs.py`, tests) continue to `from .schemas import TOOL_SCHEMAS` — no import sites changed. The `_REGION_PROPS` shared region-start/region-end property block is inlined into `schemas/locking.py`.
+
+Largest new module: `tasks.py` at 220 code LOC.
+
+### Change 2 — `db.py` split into `db.py` + `db_schemas.py` + `db_migrations.py`
+
+- `db_schemas.py` (287 code LOC) — pure data. Holds `_SCHEMAS` (dict of `CREATE TABLE` statements) and `_INDEXES` (list of `CREATE INDEX` statements).
+- `db_migrations.py` (222 code LOC) — every `_migrate_v*_to_v*` function, `_CURRENT_SCHEMA_VERSION`, `_get_schema_version`, the `_MIGRATIONS` dict, and the `init_schema()` driver.
+- `db.py` (93 code LOC) — `ConnectionPool`, `_create_connection`, module-level pool helpers (`set_pool` / `clear_pool` / `connect`), and re-exports of the schema and migration names used by `_storage.py`, `mcp_stdio.py`, and tests.
+
+No-cycle import graph: `db_schemas` has no internal deps; `db_migrations` imports `_SCHEMAS` / `_INDEXES` from `db_schemas`; `db` imports from both.
+
+### Change 3 — Deleted `scripts/update_schemas.py`
+
+296-line one-shot Phase 1 consolidation script with no callers anywhere in the codebase, CI, or docs. Rerunning it would destructively overwrite the current `schemas/` package, so leaving it in the repo was an active hazard.
+
+### Change 4 — Deleted the `_context_bundle` back-compat shim
+
+The 7-line deprecated wrapper in `core.py` had a single caller (`tests/test_notifications.py::test_context_bundle_has_url`). Updated the test to call the canonical `_build_context_bundle(agent_id, None)` and removed the shim.
+
+### Change 5 — Dropped `pytest-asyncio`
+
+No async tests exist. Removed `pytest-asyncio>=0.21` from `[project.optional-dependencies].dev` and dropped `asyncio_mode = "auto"` from `[tool.pytest.ini_options]`. This eliminates the `Unknown config option: asyncio_mode` warning that fired on every pytest run.
+
+### Change 6 — `cli-count` generator
+
+Added a `get_cli_count()` generator to `scripts/gen_docs.py` (computes `len(coordinationhub.cli._COMMANDS)`). Wrapped the "CLI Commands (74)" header in `README.md` in a matching `GEN` marker. Future drift in CLI surface is now caught by `python scripts/gen_docs.py --check`.
+
+### Change 7 — Doc parity fixes
+
+- CLAUDE.md tool manifest rewritten to match current `TOOL_DISPATCH`. Previous listing referenced `get_lineage`, `get_siblings`, `suggest_task_assignments`, `acknowledge_handoff`, `complete_handoff`, `cancel_handoff`, `declare_dependency`, `check_dependencies`, `satisfy_dependency`, `wait_for_dependency`, `get_blockers`, `assert_can_start`, `get_all_dependencies`, `get_messages`, `mark_messages_read`, `prune_notifications`, `release_agent_locks`, `reap_expired_locks`, `reap_stale_agents`, `validate_graph`, `assess_current_session` — all consolidated into meta-tools in v0.7.0.
+- CLAUDE.md `_CURRENT_SCHEMA_VERSION = 3` design note updated to 20 with the full migration-chain summary (v2 document_locks restructure through v20 pending-table merge).
+- Stale count strings corrected across CLAUDE.md, README.md, COMPLETE_PROJECT_DOCUMENTATION.md, and wiki: "currently 35" → 50, "19 test files" → 23, "all 30 tool schemas" → 50, "55 coordination tool methods" → generic wording.
+- README.md tool manifest table rewritten and its CLI count header wrapped in a `GEN` marker.
+- Glossary entries for Agent Lineage, Notification Pruning, Reaping, and Stale Agent updated to point at the current MCP tool names (`get_agent_relations`, `admin_locks`, etc.).
+- `wiki-local/spec-project.md` MCP tools section rewritten against the current surface; stdlib-deps table updated to include `db_schemas`, `db_migrations`, and the `schemas/` package.
+- `coordinationhub/cli.py` module docstring — dropped the stale "all 55 coordination tool methods" count.
+
+### Change 8 — Fixed count drift in Kimi's v0.6.6 / v0.6.7 / v0.7.0 changelog tables
+
+Git-verified historical counts (`grep -c 'sub.add_parser(' cli.py` + `grep -c '":' dispatch.py` at each tagged commit):
+
+| Version | Real (tools / CLI / schema) | Kimi's fill-in |
+|---------|------------------------------|----------------|
+| v0.7.0  | 50 / 74 / 20                 | 50 / ~55 / 20  |
+| v0.6.7  | 79 / 84 / 20                 | 83 / 79 / 20   |
+| v0.6.6  | 79 / 84 / 20                 | 79 / 79 / 20   |
+
+Also fixed the prose "grown to 83 tools" → "grown to 79 tools" and "down from 83" → "down from 79" in the v0.7.0 changelog.
+
+### Verification
+
+- 392 tests pass, 1 skipped (same as v0.7.0 baseline). No test changes beyond the `_build_context_bundle` rename in `test_notifications.py`.
+- `scripts/gen_docs.py --check` is clean across all five doc targets.
+- Every file in `coordinationhub/` is ≤ 500 code LOC. Largest: `core_locking.py` (496), `dashboard.py` (483), `cli.py` (398).
+- Schemas ↔ dispatch ↔ CLI handlers are all in sync.
+
+### Counts
+
+| Version | Tools | CLI Commands | Schema |
+|---------|-------|--------------|--------|
+| v0.7.1 | 50 | 74 | 20 |
+| v0.7.0 | 50 | 74 | 20 |
+
+---
+
 ## 2026-04-15 — v0.7.0 Multi-Agent Consolidation (Tool Surface Reduction + Cross-Process Event Sync)
 
 ### Motivation
 
-With 83 MCP tools, discovery and usability had become a bottleneck for multi-agent workflows. Worse, the in-memory `EventBus` meant that every `wait_for_task`, `await_handoff_completion`, and `wait_for_notifications` call timed out when talking to a remote `coordinationhub serve` process. This release consolidates duplicated APIs, fixes cross-process synchronization, and hardens DB connection patterns.
+With 79 MCP tools, discovery and usability had become a bottleneck for multi-agent workflows. Worse, the in-memory `EventBus` meant that every `wait_for_task`, `await_handoff_completion`, and `wait_for_notifications` call timed out when talking to a remote `coordinationhub serve` process. This release consolidates duplicated APIs, fixes cross-process synchronization, and hardens DB connection patterns.
 
-### Change 1 — Tool consolidation from 83 → 50 (dispatch.py + all core_/cli_ modules)
+### Change 1 — Tool consolidation from 79 → 50 (dispatch.py + all core_/cli_ modules)
 
 **Gap**: Seven separate dependency tools, six task query tools, and scattered DLQ/lock-admin/broadcast utilities made the surface overwhelming.
 
@@ -70,8 +149,8 @@ With 83 MCP tools, discovery and usability had become a bottleneck for multi-age
 
 | Version | Tools | CLI Commands | Schema |
 |---------|-------|--------------|--------|
-| v0.7.0 | 50 | ~55 | 20 |
-| v0.6.7 | 83 | 79 | 20 |
+| v0.7.0 | 50 | 74 | 20 |
+| v0.6.7 | 79 | 84 | 20 |
 
 ---
 
@@ -127,8 +206,8 @@ Phase 14 DistributedRecipeCurationSwarm stress test exercised every major primit
 
 | Version | Tools | CLI Commands | Schema |
 |---------|-------|--------------|--------|
-| v0.6.7 | 83 | 79 | 20 |
-| v0.6.6 | 79 | 79 | 20 |
+| v0.6.7 | 79 | 84 | 20 |
+| v0.6.6 | 79 | 84 | 20 |
 
 ---
 
@@ -172,8 +251,8 @@ Standalone modules (`assessment.py`, `graphs.py`, `dashboard.py`) and IDE-specif
 
 | Version | Tools | CLI Commands | Schema |
 |---------|-------|--------------|--------|
-| v0.6.6 | 79 | 79 | 20 |
-| v0.6.5 | 79 | 79 | 19 |
+| v0.6.6 | 79 | 84 | 20 |
+| v0.6.5 | 79 | 84 | 19 |
 
 ---
 
@@ -1186,7 +1265,9 @@ Block markers for multi-line content:
 | `coordinationhub/core_tasks.py` | 193 | TaskMixin — shared task registry with hierarchy support |
 | `coordinationhub/core_visibility.py` | 127 | VisibilityMixin — coordination graph, project scan, agent status, assessment |
 | `coordinationhub/core_work_intent.py` | 45 | WorkIntentMixin — cooperative work intent board |
-| `coordinationhub/db.py` | 565 | SQLite schema, migrations, and connection pool for CoordinationHub |
+| `coordinationhub/db.py` | 93 | SQLite connection pool and public re-exports for CoordinationHub |
+| `coordinationhub/db_migrations.py` | 222 | Schema-version tracking, migration functions, and the ``init_schema`` driver |
+| `coordinationhub/db_schemas.py` | 287 | Canonical SQLite schema definitions for CoordinationHub |
 | `coordinationhub/dependencies.py` | 140 | Cross-agent dependency declaration and satisfaction tracking |
 | `coordinationhub/dispatch.py` | 57 | Tool dispatch table for CoordinationHub |
 | `coordinationhub/event_bus.py` | 73 | Lightweight thread-safe in-memory pub-sub event bus for CoordinationHub |
@@ -1215,7 +1296,21 @@ Block markers for multi-line content:
 | `coordinationhub/plugins/graph/graphs.py` | 309 | Declarative coordination graph: loader, validator, in-memory representation |
 | `coordinationhub/plugins/registry.py` | 41 | Plugin registry for CoordinationHub |
 | `coordinationhub/scan.py` | 198 | File ownership scan for CoordinationHub |
-| `coordinationhub/schemas.py` | 1260 | Tool schemas for CoordinationHub — all 50 MCP tools |
+| `coordinationhub/schemas/__init__.py` | 56 | Tool schemas for CoordinationHub — all MCP tools |
+| `coordinationhub/schemas/audit.py` | 61 | Audit & Status tool schemas for CoordinationHub |
+| `coordinationhub/schemas/change.py` | 41 | Change Awareness tool schemas for CoordinationHub |
+| `coordinationhub/schemas/coordination.py` | 145 | Coordination Actions tool schemas for CoordinationHub |
+| `coordinationhub/schemas/deps.py` | 29 | Cross-Agent Dependencies tool schemas for CoordinationHub |
+| `coordinationhub/schemas/dlq.py` | 23 | Dead Letter Queue tool schemas for CoordinationHub |
+| `coordinationhub/schemas/handoffs.py` | 23 | Handoffs tool schemas for CoordinationHub |
+| `coordinationhub/schemas/identity.py` | 112 | Identity & Registration tool schemas for CoordinationHub |
+| `coordinationhub/schemas/intent.py` | 20 | Work Intent Board tool schemas for CoordinationHub |
+| `coordinationhub/schemas/leases.py` | 35 | HA Coordinator Leases tool schemas for CoordinationHub |
+| `coordinationhub/schemas/locking.py` | 193 | Document Locking tool schemas for CoordinationHub |
+| `coordinationhub/schemas/messaging.py` | 41 | Messaging tool schemas for CoordinationHub |
+| `coordinationhub/schemas/spawner.py` | 193 | Spawner tool schemas for CoordinationHub |
+| `coordinationhub/schemas/tasks.py` | 220 | Task Registry tool schemas for CoordinationHub |
+| `coordinationhub/schemas/visibility.py` | 159 | Graph & Visibility tool schemas for CoordinationHub |
 | `coordinationhub/spawner.py` | 318 | Zero-deps spawner primitives for HA coordinator sub-agent registry |
 | `coordinationhub/task_failures.py` | 95 | Task failure tracking and dead letter queue for CoordinationHub |
 | `coordinationhub/tasks.py` | 289 | Task registry primitives for CoordinationHub (work board) |

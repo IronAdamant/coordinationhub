@@ -45,7 +45,9 @@ coordinationhub/
   core_tasks.py         — TaskMixin — shared task registry with hierarchy support (~193 LOC)
   core_visibility.py    — VisibilityMixin — coordination graph, project scan, agent status, assessment (~127 LOC)
   core_work_intent.py   — WorkIntentMixin — cooperative work intent board (~45 LOC)
-  db.py                 — SQLite schema, migrations, and connection pool for CoordinationHub (~565 LOC)
+  db.py                 — SQLite connection pool and public re-exports for CoordinationHub (~93 LOC)
+  db_migrations.py      — Schema-version tracking, migration functions, and the ``init_schema`` driver (~222 LOC)
+  db_schemas.py         — Canonical SQLite schema definitions for CoordinationHub (~287 LOC)
   dependencies.py       — Cross-agent dependency declaration and satisfaction tracking (~140 LOC)
   dispatch.py           — Tool dispatch table for CoordinationHub (~57 LOC)
   event_bus.py          — Lightweight thread-safe in-memory pub-sub event bus for CoordinationHub (~73 LOC)
@@ -60,7 +62,6 @@ coordinationhub/
   paths.py              — Path normalization and project-root detection utilities (~38 LOC)
   pending_tasks.py      — Pending sub-agent task storage for CoordinationHub (~106 LOC)
   scan.py               — File ownership scan for CoordinationHub (~198 LOC)
-  schemas.py            — Tool schemas for CoordinationHub — all 50 MCP tools (~1260 LOC)
   spawner.py            — Zero-deps spawner primitives for HA coordinator sub-agent registry (~318 LOC)
   task_failures.py      — Task failure tracking and dead letter queue for CoordinationHub (~95 LOC)
   tasks.py              — Task registry primitives for CoordinationHub (work board) (~289 LOC)
@@ -84,6 +85,22 @@ coordinationhub/
   plugins/graph/
     __init__.py         — Graph plugin for CoordinationHub (~31 LOC)
     graphs.py           — Declarative coordination graph: loader, validator, in-memory representation (~309 LOC)
+  schemas/
+    __init__.py         — Tool schemas for CoordinationHub — all MCP tools (~56 LOC)
+    audit.py            — Audit & Status tool schemas for CoordinationHub (~61 LOC)
+    change.py           — Change Awareness tool schemas for CoordinationHub (~41 LOC)
+    coordination.py     — Coordination Actions tool schemas for CoordinationHub (~145 LOC)
+    deps.py             — Cross-Agent Dependencies tool schemas for CoordinationHub (~29 LOC)
+    dlq.py              — Dead Letter Queue tool schemas for CoordinationHub (~23 LOC)
+    handoffs.py         — Handoffs tool schemas for CoordinationHub (~23 LOC)
+    identity.py         — Identity & Registration tool schemas for CoordinationHub (~112 LOC)
+    intent.py           — Work Intent Board tool schemas for CoordinationHub (~20 LOC)
+    leases.py           — HA Coordinator Leases tool schemas for CoordinationHub (~35 LOC)
+    locking.py          — Document Locking tool schemas for CoordinationHub (~193 LOC)
+    messaging.py        — Messaging tool schemas for CoordinationHub (~41 LOC)
+    spawner.py          — Spawner tool schemas for CoordinationHub (~193 LOC)
+    tasks.py            — Task Registry tool schemas for CoordinationHub (~220 LOC)
+    visibility.py       — Graph & Visibility tool schemas for CoordinationHub (~159 LOC)
 ```
 <!-- /GEN -->
 
@@ -94,11 +111,11 @@ The `tests/` directory contains the pytest suite (<!-- GEN:test-count -->393<!--
 - **Zero internal deps in sub-modules**: `agent_registry.py`, `lock_ops.py`, `conflict_log.py`, `notifications.py`, `scan.py`, `agent_status.py` all receive `connect: ConnectFn` from the caller. They have no internal imports from each other.
 - **LockingMixin in `core_locking.py`**: All locking and coordination methods (`acquire_lock`, `release_lock`, `refresh_lock`, `get_lock_status`, `list_locks`, `release_agent_locks`, `reap_expired_locks`, `reap_stale_agents`, `broadcast`, `wait_for_locks`) live in `LockingMixin`. `CoordinationEngine` inherits from `LockingMixin`, keeping `core.py` focused on identity, change awareness, audit, and graph/visibility.
 - **Storage layer isolated in `_storage.py`**: `CoordinationStorage` owns the SQLite pool, path resolution, and schema init. Both `core.py` and CLI entry points depend on it.
-- **Canonical schemas in `db.py` only**: All table definitions and indexes live in `db.py._SCHEMAS` and `db.py._INDEXES`. Sub-modules do not define their own schemas — `init_schema()` creates everything.
+- **Canonical schemas in `db_schemas.py` only**: All table definitions and indexes live in `db_schemas._SCHEMAS` and `db_schemas._INDEXES` (re-exported from `db` for back-compat). Migration functions and the `init_schema()` driver live in `db_migrations.py`. Sub-modules do not define their own schemas — `init_schema()` creates everything.
 - **Thread-local connection pool**: `db.py` provides a `ConnectionPool` that gives each thread its own reused SQLite connection. WAL mode enabled, 30s busy timeout.
 - **Thread-safe ID generation**: `_storage.py` uses `threading.Lock` + in-memory sequence counters to guarantee unique agent IDs even under concurrent `generate_agent_id()` calls.
 - **CLI helpers consolidated**: `cli_utils.py` provides `print_json`, `engine_from_args`, and `close` shared by all `cli_*.py` modules.
-- **Dispatch separation**: `schemas.py` (all <!-- GEN:tool-count -->50<!-- /GEN --> tool schemas as pure data) and `dispatch.py` (dispatch table) are separate modules shared by both HTTP and stdio servers.
+- **Dispatch separation**: the `schemas/` package (all <!-- GEN:tool-count -->50<!-- /GEN --> tool schemas as pure data, one module per functional group) and `dispatch.py` (dispatch table) are separate modules shared by both HTTP and stdio servers.
 - **Project root detection**: `detect_project_root()` in `paths.py` walks up from CWD looking for `.git`. Used by `CoordinationEngine.__init__`.
 
 ## Key Design Decisions

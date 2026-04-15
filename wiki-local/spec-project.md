@@ -1,6 +1,6 @@
 # CoordinationHub — Multi-Agent Swarm Coordination MCP
 
-**Version:** <!-- GEN:version -->0.7.0<!-- /GEN -->
+**Version:** <!-- GEN:version -->0.7.1<!-- /GEN -->
 **Language:** Python 3.10+ (stdlib-only core — **zero third-party dependencies**, `mcp` optional for stdio only)
 **Transports:** stdio + HTTP (both, like Stele/Chisel/Trammel)
 
@@ -31,6 +31,8 @@ The **core** module (all `.py` files except `mcp_stdio.py`) uses **only the Pyth
 | Module | Stdlib dependencies used |
 |--------|--------------------------|
 | `db.py` | `sqlite3`, `threading`, `pathlib` |
+| `db_schemas.py` | (no deps — pure data) |
+| `db_migrations.py` | `sqlite3`, `time` |
 | `agent_registry.py` | `sqlite3`, `time`, `os` |
 | `lock_ops.py` | `sqlite3`, `time` |
 | `conflict_log.py` | `sqlite3`, `time`, `json` |
@@ -40,7 +42,7 @@ The **core** module (all `.py` files except `mcp_stdio.py`) uses **only the Pyth
 | `scan.py` | `pathlib`, `time`, `json` |
 | `agent_status.py` | `sqlite3`, `time`, `json` |
 | `assessment.py` | `pathlib`, `time`, `json`, `sqlite3` |
-| `schemas.py` | `pathlib`, `json` |
+| `schemas/` (14 modules) | (no deps — pure data) |
 | `dispatch.py` | (no deps) |
 | `mcp_server.py` | `http.server`, `socketserver`, `json`, `threading` |
 | `cli.py` | `argparse`, `pathlib` |
@@ -324,7 +326,9 @@ coordinationhub/
   core_tasks.py         — TaskMixin — shared task registry with hierarchy support (~193 LOC)
   core_visibility.py    — VisibilityMixin — coordination graph, project scan, agent status, assessment (~127 LOC)
   core_work_intent.py   — WorkIntentMixin — cooperative work intent board (~45 LOC)
-  db.py                 — SQLite schema, migrations, and connection pool for CoordinationHub (~565 LOC)
+  db.py                 — SQLite connection pool and public re-exports for CoordinationHub (~93 LOC)
+  db_migrations.py      — Schema-version tracking, migration functions, and the ``init_schema`` driver (~222 LOC)
+  db_schemas.py         — Canonical SQLite schema definitions for CoordinationHub (~287 LOC)
   dependencies.py       — Cross-agent dependency declaration and satisfaction tracking (~140 LOC)
   dispatch.py           — Tool dispatch table for CoordinationHub (~57 LOC)
   event_bus.py          — Lightweight thread-safe in-memory pub-sub event bus for CoordinationHub (~73 LOC)
@@ -339,7 +343,6 @@ coordinationhub/
   paths.py              — Path normalization and project-root detection utilities (~38 LOC)
   pending_tasks.py      — Pending sub-agent task storage for CoordinationHub (~106 LOC)
   scan.py               — File ownership scan for CoordinationHub (~198 LOC)
-  schemas.py            — Tool schemas for CoordinationHub — all 50 MCP tools (~1260 LOC)
   spawner.py            — Zero-deps spawner primitives for HA coordinator sub-agent registry (~318 LOC)
   task_failures.py      — Task failure tracking and dead letter queue for CoordinationHub (~95 LOC)
   tasks.py              — Task registry primitives for CoordinationHub (work board) (~289 LOC)
@@ -363,6 +366,22 @@ coordinationhub/
   plugins/graph/
     __init__.py         — Graph plugin for CoordinationHub (~31 LOC)
     graphs.py           — Declarative coordination graph: loader, validator, in-memory representation (~309 LOC)
+  schemas/
+    __init__.py         — Tool schemas for CoordinationHub — all MCP tools (~56 LOC)
+    audit.py            — Audit & Status tool schemas for CoordinationHub (~61 LOC)
+    change.py           — Change Awareness tool schemas for CoordinationHub (~41 LOC)
+    coordination.py     — Coordination Actions tool schemas for CoordinationHub (~145 LOC)
+    deps.py             — Cross-Agent Dependencies tool schemas for CoordinationHub (~29 LOC)
+    dlq.py              — Dead Letter Queue tool schemas for CoordinationHub (~23 LOC)
+    handoffs.py         — Handoffs tool schemas for CoordinationHub (~23 LOC)
+    identity.py         — Identity & Registration tool schemas for CoordinationHub (~112 LOC)
+    intent.py           — Work Intent Board tool schemas for CoordinationHub (~20 LOC)
+    leases.py           — HA Coordinator Leases tool schemas for CoordinationHub (~35 LOC)
+    locking.py          — Document Locking tool schemas for CoordinationHub (~193 LOC)
+    messaging.py        — Messaging tool schemas for CoordinationHub (~41 LOC)
+    spawner.py          — Spawner tool schemas for CoordinationHub (~193 LOC)
+    tasks.py            — Task Registry tool schemas for CoordinationHub (~220 LOC)
+    visibility.py       — Graph & Visibility tool schemas for CoordinationHub (~159 LOC)
 ```
 <!-- /GEN -->
 
