@@ -1,11 +1,66 @@
 # LLM_Development.md — CoordinationHub
 
-**Version:** <!-- GEN:version -->0.7.2<!-- /GEN -->
+**Version:** <!-- GEN:version -->0.7.3<!-- /GEN -->
 **Last updated:** 2026-04-15
 
 ## Change Log
 
 All significant changes to the CoordinationHub project are documented here in reverse chronological order.
+
+---
+
+## 2026-04-15 — v0.7.3 Four Latent Bug Fixes
+
+### Motivation
+
+Four latent bugs surfaced while building the v0.7.2 demo screenshot. None are behavioural changes to the MCP surface; each fixes a specific fragility that only shows up in corner cases.
+
+### Fix 1 — context.py:76 NULL-responsibilities crash
+
+**Bug**: `build_context_bundle` used
+```
+responsibilities = json.loads(resp.get("responsibilities", "[]")) if resp else []
+```
+`dict.get(key, default)` returns `None` (NOT the default) when the key is present with value `None`. `agent_responsibilities.responsibilities` is a nullable column, and `update_agent_status_tool` inserts rows with only `(agent_id, current_task, updated_at)` — leaving `responsibilities` at `NULL`. Any subsequent `register_agent` on the same id (including a simple re-registration on a dirty DB, which happens every hook restart) then hit `json.loads(None)` and crashed with `TypeError: the JSON object must be str, bytes or bytearray, not NoneType`.
+
+**Fix**: `resp.get("responsibilities") or "[]"` — the pattern already used in `agent_status.py` at three other sites. Added regression test `test_register_agent_tolerates_null_responsibilities_row` in `test_agent_lifecycle.py`; confirmed it passes with the fix and fails without it.
+
+### Fix 2 — cli_sse.py dropped root/storage/namespace flags
+
+**Bug**: `cmd_serve_sse` constructed `CoordinationHubMCPServer(host=host, port=port)` without forwarding `args.project_root`, `args.storage_dir`, `args.namespace`. `coordinationhub serve-sse --project-root /foo` silently ignored `--project-root` and the server defaulted to the CWD's project root — meaning the dashboard would show the wrong project's state on any machine that ran the command from outside the target repo.
+
+**Fix**: forward all three via `getattr(args, "<flag>", default)`, matching the pattern in `cmd_serve`.
+
+### Fix 3 — mcp_server.py __import__("pathlib")
+
+**Bug (cosmetic)**: `CoordinationHubMCPServer.__init__` did
+```
+storage_dir=storage_dir and __import__("pathlib").Path(storage_dir),
+project_root=project_root and __import__("pathlib").Path(project_root),
+```
+No reason — `pathlib` is pure stdlib with no import side effects. The lazy-import pattern was just ugly.
+
+**Fix**: top-level `from pathlib import Path` plus a normal ternary `Path(x) if x else None` in both branches.
+
+### Fix 4 — gen_docs.py greedy regex foot-gun
+
+**Bug**: `BLOCK_RE` accepted any HTML-comment marker token as an opener and used a non-greedy `.*?` body. When a prose description mentioned a marker token without pairing it with a matching closer, the body extended greedily to the NEXT real marker's closer — destructively wiping everything in between when `gen_docs.py` rewrote the file. Encountered once while drafting the v0.7.1 changelog (a prose mention of the CLI-count marker matched against a real marker's closer ~200 lines later, corrupting the changelog).
+
+**Fix**: add a negative lookahead on the body so it stops at any further opener or closer token. When the body can't contain another marker, the regex engine backtracks from a bad prose opener and the match fails instead of corrupting the file. Verified with a synthetic doc containing both a prose mention and a real marker — prose is preserved, only the real marker updates. See `scripts/gen_docs.py` for the exact regex.
+
+### Verification
+
+- 393 tests pass (was 392 — the only added test is the `context.py` regression), 1 skipped.
+- `python scripts/gen_docs.py --check` clean across all five doc targets.
+- Every file in `coordinationhub/` remains ≤ 500 code LOC.
+- Both workflows (`Tests` on push, `Publish to PyPI` on release) continue to run with zero third-party GitHub Actions.
+
+### Counts
+
+| Version | Tools | CLI Commands | Schema |
+|---------|-------|--------------|--------|
+| v0.7.3 | 50 | 74 | 20 |
+| v0.7.2 | 50 | 74 | 20 |
 
 ---
 

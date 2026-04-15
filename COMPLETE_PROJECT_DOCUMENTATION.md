@@ -1,7 +1,37 @@
 # CoordinationHub — Complete Project Documentation
 
-**Version:** <!-- GEN:version -->0.7.2<!-- /GEN -->
+**Version:** <!-- GEN:version -->0.7.3<!-- /GEN -->
 **Last updated:** 2026-04-15
+
+## v0.7.3 Changelog — Four Latent Bug Fixes
+
+### Motivation
+
+Four latent bugs surfaced while building the v0.7.2 demo screenshot. None are behavioural changes to the MCP surface; each fixes a specific fragility that only shows up in corner cases.
+
+### Fixes
+
+- **`context.py:76` NULL-responsibilities crash** (plus a regression test in `test_agent_lifecycle.py`): `build_context_bundle` used `json.loads(resp.get("responsibilities", "[]")) if resp else []`. `dict.get(key, default)` returns `None` (NOT the default) when the key is present with value `None`. `agent_responsibilities.responsibilities` is nullable and `update_agent_status` inserts rows without setting it, so any later `register_agent` on the same id (including simple re-registration on a dirty DB, e.g. a hook restart) crashed with `TypeError: the JSON object must be str, bytes or bytearray, not NoneType`. Fixed with the pattern `agent_status.py` already uses in three other sites.
+- **`cli_sse.py` silently dropped `--project-root` / `--storage-dir` / `--namespace`**: `cmd_serve_sse` constructed `CoordinationHubMCPServer(host=host, port=port)` without forwarding the three root/storage/namespace flags that every other `serve` command honours. Running `coordinationhub serve-sse --project-root /foo` quietly ignored `--project-root` and defaulted to the CWD's project root. Now forwards all three via `getattr(args, …, default)`.
+- **`mcp_server.py` dynamic `__import__("pathlib").Path(...)`**: replaced with a top-level `from pathlib import Path` and a clean `Path(x) if x else None` branch. `pathlib` is stdlib; the lazy-import dance had no reason to exist.
+- **`scripts/gen_docs.py` greedy-regex foot-gun**: a stray `<!-- GEN:name -->` token appearing in prose (no matching closer) matched as an opener, and the non-greedy body then slurped up to the NEXT real marker's closer — destructively wiping out intervening content when `gen_docs.py` wrote the file back. Encountered once while drafting the v0.7.1 changelog. Fixed with a negative lookahead on the body that stops matching at any `<!-- GEN:` or `<!-- /GEN` token, so a stray prose opener fails to match instead of consuming downstream content.
+
+### Verification
+
+- 393 tests pass (was 392; +1 regression test for the `context.py` fix), 1 skipped.
+- `python scripts/gen_docs.py --check` clean across all five doc targets.
+- Every file in `coordinationhub/` remains ≤ 500 code LOC.
+- Context-bundle fix verified by a regression test that passes with the fix and fails without it.
+- `gen_docs.py` regex fix verified by a synthetic doc containing both a prose mention and a real marker — the prose is left alone, only the real marker updates.
+
+### Counts
+
+| Version | Tools | CLI Commands | Schema |
+|---------|-------|--------------|--------|
+| v0.7.3 | 50 | 74 | 20 |
+| v0.7.2 | 50 | 74 | 20 |
+
+---
 
 ## v0.7.2 Changelog — Dashboard Fix + Clarity Pass + Zero-Dep CI
 
