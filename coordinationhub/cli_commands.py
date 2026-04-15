@@ -15,8 +15,7 @@ from .cli_agents import (
     cmd_heartbeat,
     cmd_deregister,
     cmd_list_agents,
-    cmd_lineage,
-    cmd_siblings,
+    cmd_agent_relations,
 )
 from .cli_locks import (
     cmd_acquire_lock,
@@ -24,12 +23,10 @@ from .cli_locks import (
     cmd_refresh_lock,
     cmd_lock_status,
     cmd_list_locks,
-    cmd_release_agent_locks,
-    cmd_reap_expired_locks,
-    cmd_reap_stale_agents,
+    cmd_admin_locks,
     cmd_broadcast,
     cmd_acknowledge_broadcast,
-    cmd_broadcast_status,
+    cmd_wait_for_broadcast_acks,
     cmd_wait_for_locks,
     cmd_await_agent,
     cmd_send_message,
@@ -39,6 +36,7 @@ from .cli_locks import (
     cmd_complete_handoff,
     cmd_cancel_handoff,
     cmd_get_handoffs,
+    cmd_wait_for_handoff,
 )
 from .cli_vis import (
     cmd_notify_change,
@@ -53,7 +51,6 @@ from .cli_vis import (
     cmd_dashboard,
     cmd_agent_status,
     cmd_assess,
-    cmd_assess_session,
     cmd_agent_tree,
 )
 from .cli_setup import (
@@ -65,13 +62,8 @@ from .cli_tasks import (
     cmd_create_task,
     cmd_assign_task,
     cmd_update_task_status,
-    cmd_get_task,
-    cmd_get_child_tasks,
-    cmd_get_tasks_by_agent,
-    cmd_get_all_tasks,
+    cmd_query_tasks,
     cmd_create_subtask,
-    cmd_get_subtasks,
-    cmd_get_task_tree,
     cmd_retry_task,
     cmd_dead_letter_queue,
     cmd_task_failure_history,
@@ -85,10 +77,8 @@ from .cli_intent import (
 )
 from .cli_deps import (
     cmd_declare_dependency,
-    cmd_check_dependencies,
+    cmd_manage_dependencies,
     cmd_satisfy_dependency,
-    cmd_get_blockers,
-    cmd_assert_can_start,
     cmd_get_all_dependencies,
 )
 from .cli_leases import (

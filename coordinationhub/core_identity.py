@@ -69,7 +69,7 @@ class IdentityMixin:
             str(self._storage.project_root) if self._storage.project_root else os.getcwd()
         )
         _ar.register_agent(self._connect, agent_id, worktree, parent_id, claude_agent_id=claude_agent_id)
-        self._event_bus.publish("agent.registered", {"agent_id": agent_id, "parent_id": parent_id})
+        self._publish_event("agent.registered", {"agent_id": agent_id, "parent_id": parent_id})
         if parent_id is not None:
             with self._connect() as conn:
                 conn.execute(
@@ -102,7 +102,7 @@ class IdentityMixin:
         # Cross-mixin call via MRO: LockingMixin.release_agent_locks is on the host
         lock_result = self.release_agent_locks(agent_id)
         result["locks_released"] = lock_result.get("released", 0)
-        self._event_bus.publish("agent.deregistered", {"agent_id": agent_id})
+        self._publish_event("agent.deregistered", {"agent_id": agent_id})
         return result
 
     def list_agents(
@@ -112,14 +112,12 @@ class IdentityMixin:
         agents = _ar.list_agents(self._connect, active_only, stale_timeout)
         return {"agents": agents}
 
-    def get_lineage(self, agent_id: str) -> dict[str, Any]:
-        """Get ancestors and descendants of an agent."""
+    def get_agent_relations(self, agent_id: str, mode: str = "lineage") -> dict[str, Any]:
+        """Get ancestors/descendants (mode='lineage') or siblings (mode='siblings') of an agent."""
+        if mode == "siblings":
+            siblings = _ar.get_siblings(self._connect, agent_id)
+            return {"mode": "siblings", "agent_id": agent_id, "siblings": siblings}
         return _ar.get_lineage(self._connect, agent_id)
-
-    def get_siblings(self, agent_id: str) -> dict[str, Any]:
-        """Get agents that share the same parent."""
-        siblings = _ar.get_siblings(self._connect, agent_id)
-        return {"siblings": siblings}
 
     def find_agent_by_claude_id(self, claude_agent_id: str) -> str | None:
         """Look up a hub.cc.* agent_id by the raw Claude Code hex ID."""

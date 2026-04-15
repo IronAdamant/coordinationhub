@@ -57,7 +57,7 @@ def get_live_intents(
                 WHERE declared_at + ttl > ? ORDER BY declared_at DESC""",
                 (now,),
             ).fetchall()
-    return [dict(r) for r in rows]
+        return [dict(r) for r in rows]
 
 
 def clear_intent(connect: ConnectFn, agent_id: str) -> dict[str, Any]:
@@ -87,4 +87,4 @@ def check_intent_conflict(
                 WHERE document_path=? AND declared_at + ttl > ?""",
                 (document_path, now),
             ).fetchall()
-    return [dict(r) for r in rows]
+        return [dict(r) for r in rows]

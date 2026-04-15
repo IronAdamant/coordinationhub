@@ -273,7 +273,7 @@ class TestLockReaping:
     def test_reap_expired_locks(self, engine, registered_agent):
         engine.acquire_lock("/test.txt", registered_agent, ttl=0.01)
         time.sleep(0.02)
-        result = engine.reap_expired_locks()
+        result = engine.admin_locks(action="reap_expired")
         assert result["reaped"] >= 1
 
     def test_reap_spares_active_agent_locks(self, engine, registered_agent):
@@ -282,7 +282,7 @@ class TestLockReaping:
         time.sleep(0.02)
         # Lock is expired, but agent has a fresh heartbeat
         engine.heartbeat(registered_agent)
-        result = engine.reap_expired_locks(agent_grace_seconds=120.0)
+        result = engine.admin_locks(action="reap_expired", grace_seconds=120.0)
         assert result["reaped"] == 0
         # Lock still exists
         status = engine.get_lock_status("/active.txt")
@@ -298,20 +298,20 @@ class TestLockReaping:
                 "UPDATE agents SET last_heartbeat = 0 WHERE agent_id = ?",
                 (registered_agent,),
             )
-        result = engine.reap_expired_locks(agent_grace_seconds=120.0)
+        result = engine.admin_locks(action="reap_expired", grace_seconds=120.0)
         assert result["reaped"] >= 1
 
     def test_release_agent_locks(self, engine, two_agents):
         engine.acquire_lock("/a.txt", two_agents["child"])
         engine.acquire_lock("/b.txt", two_agents["child"])
-        result = engine.release_agent_locks(two_agents["child"])
+        result = engine.admin_locks(action="release_by_agent", agent_id=two_agents["child"])
         assert result["released"] == 2
 
     def test_release_agent_locks_includes_regions(self, engine, registered_agent):
         """release_agent_locks releases both whole-file and region locks."""
         engine.acquire_lock("/a.txt", registered_agent)
         engine.acquire_lock("/b.txt", registered_agent, region_start=1, region_end=50)
-        result = engine.release_agent_locks(registered_agent)
+        result = engine.admin_locks(action="release_by_agent", agent_id=registered_agent)
         assert result["released"] == 2
 
 
@@ -349,8 +349,8 @@ class TestBroadcastAcknowledgment:
         result = engine.acknowledge_broadcast(bid, other)
         assert result["acknowledged"] is True
 
-        status = engine.get_broadcast_status(bid)
-        assert status["found"] is True
+        status = engine.wait_for_broadcast_acks(bid, timeout_s=1.0)
+        assert status["timed_out"] is False
         assert other in status["acknowledged_by"]
 
     def test_acknowledge_expired_broadcast_fails(self, engine, two_agents):
@@ -366,9 +366,10 @@ class TestBroadcastAcknowledgment:
         assert result["acknowledged"] is False
         assert result["reason"] == "expired_or_not_found"
 
-    def test_get_broadcast_status_not_found(self, engine):
-        status = engine.get_broadcast_status(99999)
-        assert status["found"] is False
+    def test_wait_for_broadcast_acks_not_found(self, engine):
+        status = engine.wait_for_broadcast_acks(99999, timeout_s=0.1)
+        assert status["timed_out"] is True
+        assert status["reason"] == "not_found"
 
     def test_broadcast_sends_ack_request_messages(self, engine, two_agents):
         self._heartbeat_all(engine, two_agents)

@@ -40,13 +40,18 @@ class LeaseMixin:
 
         if ok:
             holder = _leases.get_lease_holder(conn, self.COORDINATOR_LEASE)
-            return {
+            result = {
                 "acquired": True,
                 "lease_name": self.COORDINATOR_LEASE,
                 "holder_id": agent_id,
                 "ttl": ttl,
                 "expires_at": holder.expires_at if holder else None,
             }
+            self._publish_event(
+                "lease.acquired",
+                {"lease_name": self.COORDINATOR_LEASE, "holder_id": agent_id, "ttl": ttl},
+            )
+            return result
         else:
             holder = _leases.get_lease_holder(conn, self.COORDINATOR_LEASE)
             return {
@@ -66,11 +71,16 @@ class LeaseMixin:
         if not ok:
             return {"refreshed": False, "error": "Not the current lease holder"}
         holder = _leases.get_lease_holder(conn, self.COORDINATOR_LEASE)
-        return {
+        result = {
             "refreshed": True,
             "lease_name": self.COORDINATOR_LEASE,
             "expires_at": holder.expires_at if holder else None,
         }
+        self._publish_event(
+            "lease.refreshed",
+            {"lease_name": self.COORDINATOR_LEASE, "holder_id": agent_id},
+        )
+        return result
 
     def release_coordinator_lease(self, agent_id: str) -> dict[str, Any]:
         """Release the coordinator lease.
@@ -82,6 +92,10 @@ class LeaseMixin:
         ok = _leases.release_lease(conn, self.COORDINATOR_LEASE, agent_id)
         if not ok:
             return {"released": False, "error": "Not the current lease holder"}
+        self._publish_event(
+            "lease.released",
+            {"lease_name": self.COORDINATOR_LEASE, "holder_id": agent_id},
+        )
         return {"released": True, "lease_name": self.COORDINATOR_LEASE}
 
     def is_leader(self, agent_id: str) -> bool:
@@ -125,10 +139,15 @@ class LeaseMixin:
                 "holder": holder._asdict() if holder else None,
             }
         holder = _leases.get_lease_holder(conn, self.COORDINATOR_LEASE)
-        return {
+        result = {
             "claimed": True,
             "lease_name": self.COORDINATOR_LEASE,
             "holder_id": agent_id,
             "ttl": ttl,
             "expires_at": holder.expires_at if holder else None,
         }
+        self._publish_event(
+            "lease.claimed",
+            {"lease_name": self.COORDINATOR_LEASE, "holder_id": agent_id, "ttl": ttl},
+        )
+        return result

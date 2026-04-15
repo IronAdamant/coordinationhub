@@ -55,16 +55,16 @@ def get_messages(
                 ORDER BY created_at DESC LIMIT ?""",
                 (agent_id, limit),
             ).fetchall()
-    messages = []
-    for row in rows:
-        d = dict(row)
-        if d["payload_json"]:
-            d["payload"] = json.loads(d["payload_json"])
-        else:
-            d["payload"] = None
-        del d["payload_json"]
-        messages.append(d)
-    return messages
+        messages = []
+        for row in rows:
+            d = dict(row)
+            if d["payload_json"]:
+                d["payload"] = json.loads(d["payload_json"])
+            else:
+                d["payload"] = None
+            del d["payload_json"]
+            messages.append(d)
+        return messages
 
 
 def mark_messages_read(

@@ -148,41 +148,28 @@ def cmd_list_agents(args):
 
 
 # ------------------------------------------------------------------ #
-# lineage
+# agent-relations
 # ------------------------------------------------------------------ #
 
-def cmd_lineage(args):
+def cmd_agent_relations(args):
     engine = _replica_engine_from_args(args)
     try:
-        result = engine.get_lineage(args.agent_id)
+        result = engine.get_agent_relations(args.agent_id, mode=args.mode)
         if args.json_output:
             _print_json(result)
+        elif args.mode == "siblings":
+            siblings = result.get("siblings", [])
+            if not siblings:
+                print(f"No siblings for {args.agent_id}")
+            else:
+                print(f"{len(siblings)} sibling(s):")
+                for s in siblings:
+                    print(f"  {s['agent_id']}: {s['status']}")
         else:
             ancestors = result.get("ancestors", [])
             descendants = result.get("descendants", [])
             print(f"Lineage for {args.agent_id}:")
             print(f"  Ancestors: {', '.join(a['agent_id'] for a in ancestors) or '(none)'}")
             print(f"  Descendants: {', '.join(d['agent_id'] for d in descendants) or '(none)'}")
-    finally:
-        _close(engine)
-
-
-# ------------------------------------------------------------------ #
-# siblings
-# ------------------------------------------------------------------ #
-
-def cmd_siblings(args):
-    engine = _replica_engine_from_args(args)
-    try:
-        result = engine.get_siblings(args.agent_id)
-        siblings = result.get("siblings", [])
-        if args.json_output:
-            _print_json(result)
-        elif not siblings:
-            print(f"No siblings for {args.agent_id}")
-        else:
-            print(f"{len(siblings)} sibling(s):")
-            for s in siblings:
-                print(f"  {s['agent_id']}: {s['status']}")
     finally:
         _close(engine)

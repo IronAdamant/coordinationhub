@@ -103,9 +103,9 @@ def get_handoffs(
         query += " ORDER BY created_at DESC LIMIT ?"
         args.append(limit)
         rows = conn.execute(query, args).fetchall()
-    handoffs = []
-    for r in rows:
-        d = dict(r)
-        d["to_agents"] = json.loads(d["to_agents"])
-        handoffs.append(d)
+        handoffs = []
+        for r in rows:
+            d = dict(r)
+            d["to_agents"] = json.loads(d["to_agents"])
+            handoffs.append(d)
     return handoffs

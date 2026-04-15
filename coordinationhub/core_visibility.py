@@ -18,6 +18,7 @@ from .plugins.graph import graphs as _g
 from . import scan as _scan
 from . import agent_status as _v
 from .plugins.assessment import assessment as _assess
+from . import agent_registry as _ar
 
 
 class VisibilityMixin:
@@ -32,13 +33,25 @@ class VisibilityMixin:
         target = Path(path) if path else None
         if path and target and not target.is_file():
             return {"loaded": False, "error": f"Coordination spec not found: {path}"}
-        return _g.load_coordination_spec_from_disk(
+        result = _g.load_coordination_spec_from_disk(
             self._connect, self._storage.project_root, target,
         )
+        self._publish_event(
+            "graph.loaded",
+            {"loaded": result.get("loaded"), "path": str(target) if target else None},
+        )
+        return result
 
     def validate_graph(self) -> dict[str, Any]:
         """Validate the loaded coordination graph."""
         return _g.validate_graph_tool()
+
+    def _effective_graph(self):
+        """Return the loaded graph or a dynamically-built implicit graph."""
+        graph = _g.get_graph()
+        if graph is not None:
+            return graph
+        return _g.build_implicit_graph(self._connect)
 
     def scan_project(
         self,
@@ -48,15 +61,27 @@ class VisibilityMixin:
         """Scan project files and assign ownership based on coordination graph."""
         if extensions is not None and not extensions:
             return {"scanned": 0, "owned": 0, "error": "extensions list cannot be empty"}
-        graph = _g.get_graph()
-        return _scan.scan_project_tool(
+        graph = self._effective_graph()
+        result = _scan.scan_project_tool(
             self._connect, self._storage.project_root, worktree_root, extensions, graph,
         )
+        self._publish_event(
+            "scan.completed",
+            {
+                "scanned": result.get("scanned", 0),
+                "owned": result.get("owned", 0),
+                "worktree_root": worktree_root or str(self._storage.project_root),
+            },
+        )
+        return result
 
     def get_agent_status(self, agent_id: str) -> dict[str, Any]:
         """Get full status for an agent: locks, notifications, descendants, responsibilities."""
-        # get_lineage is on the host (IdentityMixin), pass it as a callable
-        return _v.get_agent_status_tool(self._connect, agent_id, self.get_lineage)
+        # Avoid MRO/HTTP transport issues by using the module-level get_lineage directly
+        return _v.get_agent_status_tool(
+            self._connect, agent_id,
+            lambda aid: _ar.get_lineage(self._connect, aid),
+        )
 
     def get_agent_tree(self, agent_id: str | None = None) -> dict[str, Any]:
         """Print agent hierarchy as a tree."""
@@ -77,55 +102,50 @@ class VisibilityMixin:
 
     def run_assessment(
         self,
-        suite_path: str,
-        format: str = "markdown",
-        graph_agent_id: str | None = None,
-    ) -> dict[str, Any]:
-        """Run a pre-authored assessment suite and return scores."""
-        suite_file = Path(suite_path)
-        if not suite_file.is_file():
-            return {"error": f"Suite file not found: {suite_path}"}
-        try:
-            suite = _assess.load_suite(suite_file)
-        except Exception as exc:
-            return {"error": f"Failed to load suite: {exc}"}
-        graph = _g.get_graph()
-        with self._connect() as conn:
-            result = _assess.run_assessment(suite, graph, graph_agent_id=graph_agent_id)
-            _assess.store_assessment_results(conn, result)
-        if format == "json":
-            return result
-        report = _assess.format_markdown_report(result)
-        return {"report": report, "scores": result}
-
-    def assess_current_session(
-        self,
+        suite_path: str | None = None,
         format: str = "markdown",
         graph_agent_id: str | None = None,
         scope: str = "project",
     ) -> dict[str, Any]:
-        """Build a trace from current DB state and run assessment.
+        """Run an assessment suite or score the live session.
 
-        Reads live hook-recorded state (agents, notifications, lineage) and
-        synthesizes a trace suite via build_suite_from_db.
-        Works even when no coordination graph is loaded — scores ad-hoc sessions.
+        If suite_path is provided, loads the JSON suite and runs it.
+        If suite_path is omitted, synthesizes a live session trace from DB state.
         """
-        graph = _g.get_graph()
-        worktree_root = (
-            str(self._storage.project_root)
-            if scope == "project" and self._storage.project_root
-            else None
-        )
-        suite = _assess.build_suite_from_db(
-            self._connect,
-            suite_name="live_session",
-            worktree_root=worktree_root,
-        )
-        with self._connect() as conn:
-            result = _assess.run_assessment(
-                suite, graph, graph_agent_id=graph_agent_id,
+        graph = self._effective_graph()
+        if suite_path is not None:
+            suite_file = Path(suite_path)
+            if not suite_file.is_file():
+                return {"error": f"Suite file not found: {suite_path}"}
+            try:
+                suite = _assess.load_suite(suite_file)
+            except Exception as exc:
+                return {"error": f"Failed to load suite: {exc}"}
+        else:
+            worktree_root = (
+                str(self._storage.project_root)
+                if scope == "project" and self._storage.project_root
+                else None
             )
+            suite = _assess.build_suite_from_db(
+                self._connect,
+                suite_name="live_session",
+                worktree_root=worktree_root,
+            )
+
+        with self._connect() as conn:
+            result = _assess.run_assessment(suite, graph, graph_agent_id=graph_agent_id)
             _assess.store_assessment_results(conn, result)
+
+        self._publish_event(
+            "assessment.completed",
+            {
+                "suite_path": suite_path,
+                "graph_agent_id": graph_agent_id,
+                "scores": result.get("scores", {}),
+            },
+        )
+
         if format == "json":
             return result
         report = _assess.format_markdown_report(result)

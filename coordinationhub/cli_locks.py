@@ -138,50 +138,30 @@ def cmd_list_locks(args):
 
 
 # ------------------------------------------------------------------ #
-# release-agent-locks
+# admin-locks
 # ------------------------------------------------------------------ #
 
-def cmd_release_agent_locks(args):
+def cmd_admin_locks(args):
     engine = _engine_from_args(args)
     try:
-        result = engine.release_agent_locks(args.agent_id)
+        result = engine.admin_locks(
+            action=args.action,
+            agent_id=getattr(args, "agent_id", None),
+            grace_seconds=getattr(args, "grace_seconds", 0.0),
+            timeout=getattr(args, "timeout", 600.0),
+        )
         if args.json_output:
             _print_json(result)
         else:
-            print(f"Released {result.get('released', 0)} lock(s) for {args.agent_id}")
-    finally:
-        _close(engine)
-
-
-# ------------------------------------------------------------------ #
-# reap-expired-locks
-# ------------------------------------------------------------------ #
-
-def cmd_reap_expired_locks(args):
-    engine = _engine_from_args(args)
-    try:
-        result = engine.reap_expired_locks()
-        if args.json_output:
-            _print_json(result)
-        else:
-            print(f"Reaped {result.get('reaped', 0)} expired lock(s)")
-    finally:
-        _close(engine)
-
-
-# ------------------------------------------------------------------ #
-# reap-stale-agents
-# ------------------------------------------------------------------ #
-
-def cmd_reap_stale_agents(args):
-    engine = _engine_from_args(args)
-    try:
-        result = engine.reap_stale_agents(timeout=args.timeout)
-        if args.json_output:
-            _print_json(result)
-        else:
-            print(f"Reaped {result.get('reaped', 0)} stale agent(s)")
-            print(f"  Orphaned children: {result.get('orphaned_children', 0)}")
+            if args.action == "release_by_agent":
+                print(f"Released {result.get('released', 0)} lock(s) for {getattr(args, 'agent_id', 'unknown')}")
+            elif args.action == "reap_expired":
+                print(f"Reaped {result.get('reaped', 0)} expired lock(s)")
+            elif args.action == "reap_stale":
+                print(f"Reaped {result.get('reaped', 0)} stale agent(s)")
+                print(f"  Orphaned children: {result.get('orphaned_children', 0)}")
+            else:
+                _print_json(result)
     finally:
         _close(engine)
 
@@ -245,22 +225,24 @@ def cmd_acknowledge_broadcast(args):
 
 
 # ------------------------------------------------------------------ #
-# broadcast-status
+# wait-for-broadcast-acks
 # ------------------------------------------------------------------ #
 
-def cmd_broadcast_status(args):
+def cmd_wait_for_broadcast_acks(args):
     engine = _engine_from_args(args)
     try:
-        result = engine.get_broadcast_status(args.broadcast_id)
+        result = engine.wait_for_broadcast_acks(
+            broadcast_id=args.broadcast_id,
+            timeout_s=getattr(args, "timeout", 30.0),
+        )
         if args.json_output:
             _print_json(result)
-        elif result.get("found"):
-            print(f"Broadcast {args.broadcast_id}")
-            print(f"  From: {result['from_agent_id']}")
-            acks = result.get("acknowledged_by", [])
-            print(f"  Acknowledged by: {acks or '(none)'}")
+        elif result.get("timed_out"):
+            reason = result.get("reason", "timeout")
+            print(f"Timed out waiting for broadcast acks: {reason}")
         else:
-            print(f"Broadcast {args.broadcast_id} not found")
+            acks = result.get("acknowledged_by", [])
+            print(f"Broadcast {args.broadcast_id} acknowledged by: {', '.join(acks) or '(none)'}")
     finally:
         _close(engine)
 
@@ -335,6 +317,27 @@ def cmd_get_handoffs(args):
             for h in handoffs:
                 to = ", ".join(h.get("to_agents", []))
                 print(f"  [{h['status']}] {h['id']} {h['from_agent_id']} → {to}")
+    finally:
+        _close(engine)
+
+
+# ------------------------------------------------------------------ #
+# wait-for-handoff
+# ------------------------------------------------------------------ #
+
+def cmd_wait_for_handoff(args):
+    engine = _engine_from_args(args)
+    try:
+        result = engine.wait_for_handoff(
+            handoff_id=args.handoff_id,
+            timeout_s=getattr(args, "timeout", 30.0),
+        )
+        if args.json_output:
+            _print_json(result)
+        elif result.get("timed_out"):
+            print(f"Timed out waiting for handoff {args.handoff_id}")
+        else:
+            print(f"Handoff {args.handoff_id} completed")
     finally:
         _close(engine)
 

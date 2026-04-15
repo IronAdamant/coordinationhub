@@ -45,7 +45,7 @@ class TestAgentRegistration:
     def test_deregister_orphans_children(self, engine, two_agents):
         """When a parent is deregistered, children are re-parented to grandparent."""
         engine.deregister_agent(two_agents["parent"])
-        lineage = engine.get_lineage(two_agents["child"])
+        lineage = engine.get_agent_relations(two_agents["child"], mode="lineage")
         # Child's parent_id should now be None (grandparent doesn't exist)
         assert lineage["ancestors"] == []  # reparented to None
 
@@ -89,13 +89,13 @@ class TestAgentRegistration:
         assert result["agents"][0]["stale"] is False
 
 
-class TestAgentLineage:
-    def test_get_lineage_empty_for_new_agent(self, engine, registered_agent):
-        lineage = engine.get_lineage(registered_agent)
+class TestAgentRelations:
+    def test_get_agent_relations_lineage_empty_for_new_agent(self, engine, registered_agent):
+        lineage = engine.get_agent_relations(registered_agent, mode="lineage")
         assert lineage["ancestors"] == []
         assert lineage["descendants"] == []
 
-    def test_get_lineage_ancestors(self, engine):
+    def test_get_agent_relations_lineage_ancestors(self, engine):
         root = engine.generate_agent_id()
         engine.register_agent(root)
         child = engine.generate_agent_id(root)
@@ -103,28 +103,28 @@ class TestAgentLineage:
         grandchild = engine.generate_agent_id(child)
         engine.register_agent(grandchild, parent_id=child)
 
-        lineage = engine.get_lineage(grandchild)
+        lineage = engine.get_agent_relations(grandchild, mode="lineage")
         assert len(lineage["ancestors"]) == 2
 
-    def test_get_lineage_descendants(self, engine, two_agents):
+    def test_get_agent_relations_lineage_descendants(self, engine, two_agents):
         # two_agents has parent, child, other (siblings under same parent)
-        lineage = engine.get_lineage(two_agents["parent"])
+        lineage = engine.get_agent_relations(two_agents["parent"], mode="lineage")
         assert len(lineage["descendants"]) == 2
 
-    def test_get_lineage_ancestor_parent_ids_preserved(self, engine):
+    def test_get_agent_relations_lineage_ancestor_parent_ids_preserved(self, engine):
         """Ancestor entries preserve their own parent_id, not set to None."""
         root = engine.generate_agent_id()
         engine.register_agent(root)
         child = engine.generate_agent_id(root)
         engine.register_agent(child, parent_id=root)
 
-        lineage = engine.get_lineage(child)
+        lineage = engine.get_agent_relations(child, mode="lineage")
         # First ancestor should be root, and root's parent_id should be preserved (may be None or a value)
         assert lineage["ancestors"][0]["agent_id"] == root
         assert "parent_id" in lineage["ancestors"][0]
 
-    def test_get_siblings(self, engine, two_agents):
-        result = engine.get_siblings(two_agents["child"])
+    def test_get_agent_relations_siblings(self, engine, two_agents):
+        result = engine.get_agent_relations(two_agents["child"], mode="siblings")
         siblings = result["siblings"]
         sibling_ids = [s["agent_id"] for s in siblings]
         assert two_agents["other"] in sibling_ids
@@ -140,7 +140,7 @@ class TestReaping:
                 "UPDATE agents SET last_heartbeat = ? WHERE agent_id = ?",
                 (old_time, registered_agent),
             )
-        result = engine.reap_stale_agents(timeout=600.0)
+        result = engine.admin_locks(action="reap_stale", timeout=600.0)
         assert result["reaped"] >= 1
 
     def test_reap_stale_agents_orphans_children(self, engine):
@@ -156,7 +156,7 @@ class TestReaping:
                 "UPDATE agents SET last_heartbeat = 0 WHERE agent_id = ?",
                 (parent,),
             )
-        result = engine.reap_stale_agents(timeout=600.0)
+        result = engine.admin_locks(action="reap_stale", timeout=600.0)
         assert result["orphaned_children"] == 1
 
     def test_reap_cleans_lineage_rows(self, engine):
@@ -171,7 +171,7 @@ class TestReaping:
                 "UPDATE agents SET last_heartbeat = 0 WHERE agent_id = ?",
                 (parent,),
             )
-        engine.reap_stale_agents(timeout=600.0)
+        engine.admin_locks(action="reap_stale", timeout=600.0)
 
         # The lineage row (parent, child) should be deleted
         with engine._connect() as conn:

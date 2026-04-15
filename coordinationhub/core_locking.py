@@ -133,7 +133,7 @@ class LockingMixin:
                     }
                 )
                 _cn.notify_change(self._connect, norm_path, "locked", agent_id, worktree)
-                self._event_bus.publish(
+                self._publish_event(
                     "lock.acquired",
                     {
                         "document_path": norm_path,
@@ -269,7 +269,7 @@ class LockingMixin:
                 conn.execute("DELETE FROM document_locks WHERE id = ?", (r["id"],))
             _cn.notify_change(self._connect, norm_path, "unlocked", agent_id, str(self._storage.project_root))
             self._lock_cache.remove_lock(norm_path, agent_id, region_start, region_end)
-            self._event_bus.publish(
+            self._publish_event(
                 "lock.released",
                 {
                     "document_path": norm_path,
@@ -309,65 +309,70 @@ class LockingMixin:
         locks = self._lock_cache.list_active(now, agent_id)
         return {"locks": locks, "count": len(locks)}
 
+    def admin_locks(
+        self,
+        action: str,
+        agent_id: str | None = None,
+        grace_seconds: float = 0.0,
+        timeout: float = 600.0,
+    ) -> dict[str, Any]:
+        """Administrative lock operations: release_by_agent, reap_expired, reap_stale."""
+        if action == "release_by_agent":
+            if not agent_id:
+                return {"error": "agent_id is required for release_by_agent"}
+            with self._connect() as conn:
+                result = _lo.release_agent_locks(conn, "document_locks", agent_id, delete=True)
+            removed = self._lock_cache.remove_by_agent(agent_id)
+            if removed:
+                self._publish_event(
+                    "lock.released",
+                    {"agent_id": agent_id, "bulk": True, "count": removed},
+                )
+            return result
+
+        if action == "reap_expired":
+            with self._connect() as conn:
+                result = _lo.reap_expired_locks(
+                    conn, "document_locks",
+                    agent_grace_seconds=grace_seconds,
+                )
+            now = time.time()
+            with self._connect() as conn:
+                rows = conn.execute(
+                    "SELECT * FROM document_locks WHERE locked_at + lock_ttl >= ?",
+                    (now,),
+                ).fetchall()
+                self._lock_cache.warm([dict(r) for r in rows])
+            return result
+
+        if action == "reap_stale":
+            result = _ar.reap_stale_agents(self._connect, timeout)
+            with self._connect() as conn:
+                stale_rows = conn.execute(
+                    "SELECT agent_id FROM agents WHERE status = 'stopped'"
+                ).fetchall()
+                if stale_rows:
+                    stale_ids = [r["agent_id"] for r in stale_rows]
+                    placeholders = ",".join("?" * len(stale_ids))
+                    cursor = conn.execute(
+                        f"DELETE FROM document_locks WHERE locked_by IN ({placeholders})", stale_ids,
+                    )
+                    result["locks_released"] = cursor.rowcount
+                    for sid in stale_ids:
+                        self._lock_cache.remove_by_agent(sid)
+            return result
+
+        return {"error": f"Unknown action: {action}"}
+
+    # Backward compatibility aliases
     def release_agent_locks(self, agent_id: str) -> dict[str, Any]:
-        with self._connect() as conn:
-            result = _lo.release_agent_locks(conn, "document_locks", agent_id, delete=True)
-        removed = self._lock_cache.remove_by_agent(agent_id)
-        # Publish release events for cache-cleared locks
-        # (exact paths are inferred from count; detailed path loss is acceptable here)
-        if removed:
-            self._event_bus.publish(
-                "lock.released",
-                {"agent_id": agent_id, "bulk": True, "count": removed},
-            )
-        return result
+        return self.admin_locks("release_by_agent", agent_id=agent_id)
 
     def reap_expired_locks(self, agent_grace_seconds: float = 0.0) -> dict[str, Any]:
-        """Clear expired locks.
-
-        The name is historical — this is more accurately "reconcile expired
-        locks."  When *agent_grace_seconds* > 0 (the hook calls with 120.0),
-        expired locks held by agents with a recent heartbeat are
-        **implicitly refreshed** instead of deleted.  The TTL acts as a
-        fallback for crashed agents, not a hard deadline for active ones.
-
-        With ``agent_grace_seconds=0`` (the default, used by the MCP tool),
-        behavior is strict: all expired locks are deleted.
-
-        Returns ``{"reaped": N}`` where N is the count of locks actually
-        deleted (not refreshed).
-        """
-        with self._connect() as conn:
-            result = _lo.reap_expired_locks(
-                conn, "document_locks",
-                agent_grace_seconds=agent_grace_seconds,
-            )
-        # Re-warm cache so implicitly-refreshed locks are reflected
-        now = time.time()
-        with self._connect() as conn:
-            rows = conn.execute(
-                "SELECT * FROM document_locks WHERE locked_at + lock_ttl >= ?",
-                (now,),
-            ).fetchall()
-            self._lock_cache.warm([dict(r) for r in rows])
-        return result
+        return self.admin_locks("reap_expired", grace_seconds=agent_grace_seconds)
 
     def reap_stale_agents(self, timeout: float = 600.0) -> dict[str, Any]:
-        result = _ar.reap_stale_agents(self._connect, timeout)
-        with self._connect() as conn:
-            stale_rows = conn.execute(
-                "SELECT agent_id FROM agents WHERE status = 'stopped'"
-            ).fetchall()
-            if stale_rows:
-                stale_ids = [r["agent_id"] for r in stale_rows]
-                placeholders = ",".join("?" * len(stale_ids))
-                cursor = conn.execute(
-                    f"DELETE FROM document_locks WHERE locked_by IN ({placeholders})", stale_ids,
-                )
-                result["locks_released"] = cursor.rowcount
-                for sid in stale_ids:
-                    self._lock_cache.remove_by_agent(sid)
-        return result
+        return self.admin_locks("reap_stale", timeout=timeout)
 
     def broadcast(
         self, agent_id: str, document_path: str | None = None, ttl: float = 30.0,
@@ -400,6 +405,15 @@ class LockingMixin:
                     self._connect, agent_id, sib["agent_id"], "broadcast_ack_request",
                     {"broadcast_id": broadcast_id, "document_path": document_path, "message": message},
                 )
+            self._publish_event(
+                "broadcast.created",
+                {
+                    "broadcast_id": broadcast_id,
+                    "agent_id": agent_id,
+                    "document_path": document_path,
+                    "pending_acks": [s["agent_id"] for s in live_siblings],
+                },
+            )
             return {
                 "broadcast_id": broadcast_id,
                 "acknowledged_by": [],
@@ -429,7 +443,7 @@ class LockingMixin:
         """Acknowledge receipt of a broadcast."""
         result = _bc.acknowledge_broadcast(self._connect, broadcast_id, agent_id)
         if result.get("acknowledged"):
-            self._event_bus.publish(
+            self._publish_event(
                 "broadcast.ack",
                 {"broadcast_id": broadcast_id, "agent_id": agent_id},
             )
@@ -441,15 +455,15 @@ class LockingMixin:
         """Get the current acknowledgment status for a broadcast."""
         return _bc.get_broadcast_status(self._connect, broadcast_id)
 
-    def await_broadcast_acks(
+    def wait_for_broadcast_acks(
         self, broadcast_id: int, timeout_s: float = 30.0,
     ) -> dict[str, Any]:
         """Wait until all expected acknowledgments are received or timeout expires.
 
-        Uses the event bus for low-latency notification of broadcast acks.
+        Uses the event bus for low-latency notification and falls back to the
+        SQLite event journal for cross-process synchronization.
         Returns the final broadcast status, including acknowledged_by and pending_acks.
         """
-        import queue as _queue
         start = time.time()
         status = self.get_broadcast_status(broadcast_id)
         if not status.get("found"):
@@ -467,22 +481,18 @@ class LockingMixin:
             return {"timed_out": False, "acknowledged_by": status.get("acknowledged_by", [])}
 
         acked = set(status.get("acknowledged_by", []))
-        sub_id, sub = self._event_bus.subscribe(
-            ["broadcast.ack"],
-            filter_fn=lambda e: e.get("broadcast_id") == broadcast_id,
-        )
-        try:
-            while len(acked) < expected:
-                elapsed = time.time() - start
-                if elapsed >= timeout_s:
-                    break
-                try:
-                    event = sub.get(timeout=timeout_s - elapsed)
-                except _queue.Empty:
-                    break
-                acked.add(event.get("agent_id"))
-        finally:
-            self._event_bus.unsubscribe(sub_id)
+        while len(acked) < expected:
+            elapsed = time.time() - start
+            if elapsed >= timeout_s:
+                break
+            event = self._hybrid_wait(
+                ["broadcast.ack"],
+                filter_fn=lambda e: e.get("broadcast_id") == broadcast_id,
+                timeout=timeout_s - elapsed,
+            )
+            if event is None:
+                break
+            acked.add(event.get("agent_id"))
 
         return {
             "timed_out": len(acked) < expected,
@@ -505,7 +515,7 @@ class LockingMixin:
                 {"handoff_id": handoff_id, "document_path": document_path,
                  "handoff_type": handoff_type},
             )
-        self._event_bus.publish(
+        self._publish_event(
             "handoff.created",
             {"handoff_id": handoff_id, "from_agent_id": agent_id,
              "to_agents": to_agents, "document_path": document_path,
@@ -534,7 +544,7 @@ class LockingMixin:
             elapsed = time.time() - start
             if elapsed >= timeout_s:
                 break
-            event = self._event_bus.wait_for_event(
+            event = self._hybrid_wait(
                 ["lock.released"],
                 filter_fn=lambda e: e.get("document_path") in paths_set,
                 timeout=timeout_s - elapsed,

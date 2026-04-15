@@ -35,7 +35,7 @@ class TestFullLifecycleScenario:
             children.append(cid)
 
         # Verify lineage
-        lineage = engine.get_lineage(parent)
+        lineage = engine.get_agent_relations(parent, mode="lineage")
         desc_ids = {d["agent_id"] for d in lineage["descendants"]}
         assert desc_ids == set(children)
 
@@ -95,7 +95,7 @@ class TestFullLifecycleScenario:
         engine.register_agent(leaf, parent_id=mid)
 
         # Verify three-level lineage
-        lineage = engine.get_lineage(root)
+        lineage = engine.get_agent_relations(root, mode="lineage")
         desc_ids = {d["agent_id"] for d in lineage["descendants"]}
         assert mid in desc_ids
         assert leaf in desc_ids
@@ -110,7 +110,7 @@ class TestFullLifecycleScenario:
         assert mid not in active_ids
 
         # Leaf's lineage now shows root as ancestor
-        leaf_lineage = engine.get_lineage(leaf)
+        leaf_lineage = engine.get_agent_relations(leaf, mode="lineage")
         ancestor_ids = {a["agent_id"] for a in leaf_lineage["ancestors"]}
         assert root in ancestor_ids
 
@@ -156,7 +156,7 @@ class TestFullLifecycleScenario:
         time.sleep(0.02)
 
         # Reap expired locks
-        reaped = engine.reap_expired_locks()
+        reaped = engine.admin_locks(action="reap_expired")
         assert reaped["reaped"] == 1
 
         # File is now available
@@ -177,7 +177,7 @@ class TestFullLifecycleScenario:
 
         # Waiter waits — the lock should expire within timeout
         time.sleep(0.06)
-        engine.reap_expired_locks()
+        engine.admin_locks(action="reap_expired")
         result = engine.wait_for_locks(["/shared.py"], waiter, timeout_s=1.0)
         assert "/shared.py" in result.get("released", [])
 
@@ -207,7 +207,9 @@ class TestFullLifecycleScenario:
 
         # Prune to keep only 5
         pruned = engine.prune_notifications(max_entries=5)
-        assert pruned["pruned"] == 4
+        # prune_notifications now also cleans up coordination_events, so the
+        # pruned count may be higher than just the notification table change.
+        assert pruned["pruned"] >= 4
 
         remaining = engine.get_notifications(limit=50)
         assert len(remaining["notifications"]) == 5
@@ -428,7 +430,7 @@ class TestHookLevelMultiAgentScenario:
             engine.heartbeat(root_id)
 
             # Smart reap (as the hook calls it) should spare and refresh
-            reaped = engine.reap_expired_locks(agent_grace_seconds=120.0)
+            reaped = engine.admin_locks(action="reap_expired", grace_seconds=120.0)
             assert reaped["reaped"] == 0, "Active-agent lock should be spared"
 
             # Lock is now effectively live again (locked_at refreshed to now)
@@ -468,7 +470,7 @@ class TestHookLevelMultiAgentScenario:
                     (root_id,),
                 )
 
-            reaped = engine.reap_expired_locks(agent_grace_seconds=120.0)
+            reaped = engine.admin_locks(action="reap_expired", grace_seconds=120.0)
             assert reaped["reaped"] == 1, (
                 "Crashed-agent locks should be reaped even with grace period"
             )
@@ -683,7 +685,7 @@ class TestHookLevelMultiAgentScenario:
             handle_subagent_stop(self._subagent_stop_event(cwd, session_id, raw_b))
 
             # Score the live session — no suite file, no manual trace.
-            result = engine.assess_current_session(format="json", scope="all")
+            result = engine.run_assessment(suite_path=None, format="json", scope="all")
             assert "error" not in result, f"Got error: {result.get('error')}"
             assert result["graph_loaded"] is True
 
@@ -710,7 +712,7 @@ class TestHookLevelMultiAgentScenario:
             engine.close()
 
     def test_assess_current_session_without_graph_returns_error(self, tmp_path):
-        """Without a loaded coordination graph, assess_current_session returns
+        """Without a loaded coordination graph, run_assessment with no suite_path returns
         a clear error rather than producing vacuous scores."""
         from coordinationhub.hooks.claude_code import (
             handle_session_start, _get_engine,
@@ -725,8 +727,9 @@ class TestHookLevelMultiAgentScenario:
         handle_session_start(self._session_event(cwd, session_id))
         engine = _get_engine(cwd)
         try:
-            result = engine.assess_current_session(format="json")
+            result = engine.run_assessment(suite_path=None, format="json")
             assert "error" not in result
-            assert result.get("graph_loaded") is False
+            # An implicit graph is built from the live agent tree when no spec is loaded
+            assert result.get("graph_loaded") is True
         finally:
             engine.close()

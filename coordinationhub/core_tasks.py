@@ -35,13 +35,27 @@ class TaskMixin:
         priority: int = 0,
     ) -> dict[str, Any]:
         """Create a new task in the shared registry."""
-        return _tasks.create_task(
+        result = _tasks.create_task(
             self._connect, task_id, parent_agent_id, description, depends_on, priority,
         )
+        self._publish_event(
+            "task.created",
+            {
+                "task_id": task_id,
+                "parent_agent_id": parent_agent_id,
+                "description": description,
+            },
+        )
+        return result
 
     def assign_task(self, task_id: str, assigned_agent_id: str) -> dict[str, Any]:
         """Assign a task to an agent."""
-        return _tasks.assign_task(self._connect, task_id, assigned_agent_id)
+        result = _tasks.assign_task(self._connect, task_id, assigned_agent_id)
+        self._publish_event(
+            "task.assigned",
+            {"task_id": task_id, "assigned_agent_id": assigned_agent_id},
+        )
+        return result
 
     def update_task_status(
         self,
@@ -58,35 +72,56 @@ class TaskMixin:
         # Auto-trigger: when task completes, satisfy any deps that reference it
         if status == "completed":
             _deps.satisfy_dependencies_for_task(self._connect, task_id)
-            self._event_bus.publish(
+            self._publish_event(
                 "task.completed", {"task_id": task_id, "status": "completed"}
             )
         # Auto-record failure: when task fails, record in DLQ
         if status == "failed":
             _tf.record_task_failure(self._connect, task_id, error)
-            self._event_bus.publish(
+            self._publish_event(
                 "task.failed", {"task_id": task_id, "status": "failed"}
             )
         return result
 
-    def get_task(self, task_id: str) -> dict[str, Any] | None:
-        """Get a single task by ID."""
-        return _tasks.get_task(self._connect, task_id)
-
-    def get_child_tasks(self, parent_agent_id: str) -> dict[str, Any]:
-        """Get all tasks created by a given agent."""
-        tasks = _tasks.get_child_tasks(self._connect, parent_agent_id)
-        return {"tasks": tasks, "count": len(tasks)}
-
-    def get_tasks_by_agent(self, assigned_agent_id: str) -> dict[str, Any]:
-        """Get all tasks assigned to a given agent."""
-        tasks = _tasks.get_tasks_by_agent(self._connect, assigned_agent_id)
-        return {"tasks": tasks, "count": len(tasks)}
-
-    def get_all_tasks(self) -> dict[str, Any]:
-        """Get all tasks in the registry."""
-        tasks = _tasks.get_all_tasks(self._connect)
-        return {"tasks": tasks, "count": len(tasks)}
+    def query_tasks(
+        self,
+        query_type: str,
+        task_id: str | None = None,
+        parent_agent_id: str | None = None,
+        assigned_agent_id: str | None = None,
+        parent_task_id: str | None = None,
+        root_task_id: str | None = None,
+    ) -> dict[str, Any]:
+        """Unified task query: task | child | by_agent | all | subtasks | tree."""
+        if query_type == "task":
+            if not task_id:
+                return {"error": "task_id is required for query_type='task'"}
+            item = _tasks.get_task(self._connect, task_id)
+            return {"task": item} if item else {"error": f"Task {task_id!r} not found"}
+        if query_type == "child":
+            if not parent_agent_id:
+                return {"error": "parent_agent_id is required for query_type='child'"}
+            tasks = _tasks.get_child_tasks(self._connect, parent_agent_id)
+            return {"tasks": tasks, "count": len(tasks)}
+        if query_type == "by_agent":
+            if not assigned_agent_id:
+                return {"error": "assigned_agent_id is required for query_type='by_agent'"}
+            tasks = _tasks.get_tasks_by_agent(self._connect, assigned_agent_id)
+            return {"tasks": tasks, "count": len(tasks)}
+        if query_type == "all":
+            tasks = _tasks.get_all_tasks(self._connect)
+            return {"tasks": tasks, "count": len(tasks)}
+        if query_type == "subtasks":
+            if not parent_task_id:
+                return {"error": "parent_task_id is required for query_type='subtasks'"}
+            subtasks = _tasks.get_subtasks(self._connect, parent_task_id)
+            return {"subtasks": subtasks, "count": len(subtasks)}
+        if query_type == "tree":
+            if not root_task_id:
+                return {"error": "root_task_id is required for query_type='tree'"}
+            tree = _tasks.get_task_tree(self._connect, root_task_id)
+            return tree if tree else {"error": f"Task {root_task_id!r} not found"}
+        return {"error": f"Unknown query_type: {query_type!r}"}
 
     def create_subtask(
         self,
@@ -101,16 +136,6 @@ class TaskMixin:
         return _tasks.create_subtask(
             self._connect, task_id, parent_task_id, parent_agent_id, description, depends_on, priority,
         )
-
-    def get_subtasks(self, parent_task_id: str) -> dict[str, Any]:
-        """Get all direct subtasks of a given task."""
-        subtasks = _tasks.get_subtasks(self._connect, parent_task_id)
-        return {"subtasks": subtasks, "count": len(subtasks)}
-
-    def get_task_tree(self, root_task_id: str) -> dict[str, Any]:
-        """Get a task with all subtasks recursively as a nested tree."""
-        tree = _tasks.get_task_tree(self._connect, root_task_id)
-        return tree if tree else {"error": f"Task {root_task_id!r} not found"}
 
     # ------------------------------------------------------------------ #
     # Dead Letter Queue
@@ -147,38 +172,33 @@ class TaskMixin:
         start = _time.time()
         task = _tasks.get_task(self._connect, task_id)
         if task and task.get("status") in ("completed", "failed"):
-            return {"waited": True, "status": task["status"], "timed_out": False}
+            return {
+                "task_id": task_id,
+                "status": task["status"],
+                "timed_out": False,
+                "waited_s": _time.time() - start,
+            }
 
-        event = self._event_bus.wait_for_event(
+        event = self._hybrid_wait(
             ["task.completed", "task.failed"],
             filter_fn=lambda e: e.get("task_id") == task_id,
             timeout=timeout_s,
         )
         if event:
             return {
-                "waited": True,
-                "status": event.get("status"),
+                "task_id": task_id,
+                "status": event.get("status", "unknown"),
                 "timed_out": False,
+                "waited_s": _time.time() - start,
             }
-        return {"waited": False, "timed_out": True}
+        return {
+            "task_id": task_id,
+            "status": "timeout",
+            "timed_out": True,
+            "timeout_s": timeout_s,
+        }
 
     def get_available_tasks(self, agent_id: str | None = None) -> dict[str, Any]:
-        """Return tasks whose depends_on are all satisfied (completed) and not currently claimed.
-
-        A task is \"available\" if:
-        - Its status is \"pending\" (not yet claimed)
-        - All tasks in its depends_on list have status \"completed\"
-
-        Use this to find work that can be picked up by an idle agent.
-        """
+        """Return tasks whose dependencies are satisfied and that are not claimed."""
         tasks = _tasks.get_available_tasks(self._connect, agent_id)
         return {"tasks": tasks, "count": len(tasks)}
-
-    def suggest_task_assignments(self) -> dict[str, Any]:
-        """Suggest available tasks for idle agents.
-
-        Returns a list of {task_id, description, suggested_agents} where each
-        suggested agent has no currently assigned pending/in_progress tasks.
-        """
-        suggestions = _tasks.suggest_task_assignments(self._connect)
-        return {"suggestions": suggestions, "count": len(suggestions)}

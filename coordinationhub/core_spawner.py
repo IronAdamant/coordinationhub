@@ -84,7 +84,7 @@ class SpawnerMixin:
             self._connect, parent_agent_id, subagent_type, child_agent_id, source,
         )
         if result.get("spawn_id"):
-            self._event_bus.publish(
+            self._publish_event(
                 "spawner.registered",
                 {
                     "parent_agent_id": parent_agent_id,
@@ -122,7 +122,7 @@ class SpawnerMixin:
                 if spawn["status"] == "registered":
                     return {"registered": True, "spawn": spawn}
 
-        event = self._event_bus.wait_for_event(
+        event = self._hybrid_wait(
             ["spawner.registered"],
             filter_fn=lambda e: (
                 e.get("parent_agent_id") == parent_agent_id
@@ -215,7 +215,7 @@ class SpawnerMixin:
             if row is None or row["status"] == "stopped":
                 return {"stopped": True, "child_agent_id": child_agent_id}
 
-        event = self._event_bus.wait_for_event(
+        event = self._hybrid_wait(
             ["agent.deregistered"],
             filter_fn=lambda e: e.get("agent_id") == child_agent_id,
             timeout=timeout,

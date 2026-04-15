@@ -96,9 +96,9 @@ def get_task(connect: ConnectFn, task_id: str) -> dict[str, Any] | None:
     """Get a single task by ID."""
     with connect() as conn:
         row = conn.execute("SELECT * FROM tasks WHERE id=?", (task_id,)).fetchone()
-    if not row:
-        return None
-    d = dict(row)
+        if not row:
+            return None
+        d = dict(row)
     if d.get("depends_on"):
         d["depends_on"] = json.loads(d["depends_on"])
     return d
@@ -114,12 +114,12 @@ def get_child_tasks(
             "SELECT * FROM tasks WHERE parent_agent_id=? ORDER BY priority DESC, created_at",
             (parent_agent_id,),
         ).fetchall()
-    tasks = []
-    for row in rows:
-        d = dict(row)
-        if d.get("depends_on"):
-            d["depends_on"] = json.loads(d["depends_on"])
-        tasks.append(d)
+        tasks = []
+        for row in rows:
+            d = dict(row)
+            if d.get("depends_on"):
+                d["depends_on"] = json.loads(d["depends_on"])
+            tasks.append(d)
     return tasks
 
 
@@ -133,12 +133,12 @@ def get_tasks_by_agent(
             "SELECT * FROM tasks WHERE assigned_agent_id=? ORDER BY priority DESC, created_at",
             (assigned_agent_id,),
         ).fetchall()
-    tasks = []
-    for row in rows:
-        d = dict(row)
-        if d.get("depends_on"):
-            d["depends_on"] = json.loads(d["depends_on"])
-        tasks.append(d)
+        tasks = []
+        for row in rows:
+            d = dict(row)
+            if d.get("depends_on"):
+                d["depends_on"] = json.loads(d["depends_on"])
+            tasks.append(d)
     return tasks
 
 
@@ -148,12 +148,12 @@ def get_all_tasks(connect: ConnectFn) -> list[dict[str, Any]]:
         rows = conn.execute(
             "SELECT * FROM tasks ORDER BY priority DESC, created_at"
         ).fetchall()
-    tasks = []
-    for row in rows:
-        d = dict(row)
-        if d.get("depends_on"):
-            d["depends_on"] = json.loads(d["depends_on"])
-        tasks.append(d)
+        tasks = []
+        for row in rows:
+            d = dict(row)
+            if d.get("depends_on"):
+                d["depends_on"] = json.loads(d["depends_on"])
+            tasks.append(d)
     return tasks
 
 
@@ -186,12 +186,12 @@ def get_subtasks(connect: ConnectFn, parent_task_id: str) -> list[dict[str, Any]
             "SELECT * FROM tasks WHERE parent_task_id=? ORDER BY priority DESC, created_at",
             (parent_task_id,),
         ).fetchall()
-    tasks = []
-    for row in rows:
-        d = dict(row)
-        if d.get("depends_on"):
-            d["depends_on"] = json.loads(d["depends_on"])
-        tasks.append(d)
+        tasks = []
+        for row in rows:
+            d = dict(row)
+            if d.get("depends_on"):
+                d["depends_on"] = json.loads(d["depends_on"])
+            tasks.append(d)
     return tasks
 
 
@@ -203,19 +203,18 @@ def get_task_tree(connect: ConnectFn, root_task_id: str) -> dict[str, Any]:
     def _build_tree(task_id: str) -> dict[str, Any] | None:
         with connect() as conn:
             row = conn.execute("SELECT * FROM tasks WHERE id=?", (task_id,)).fetchone()
-        if not row:
-            return None
-        d = dict(row)
-        if d.get("depends_on"):
-            d["depends_on"] = json.loads(d["depends_on"])
-        with connect() as conn:
+            if not row:
+                return None
+            d = dict(row)
+            if d.get("depends_on"):
+                d["depends_on"] = json.loads(d["depends_on"])
             children_rows = conn.execute(
                 "SELECT id FROM tasks WHERE parent_task_id=? ORDER BY created_at",
                 (task_id,),
             ).fetchall()
+            child_ids = [child_row["id"] for child_row in children_rows]
         d["subtasks"] = []
-        for child_row in children_rows:
-            child_id = child_row["id"]
+        for child_id in child_ids:
             child_tree = _build_tree(child_id)
             if child_tree:
                 d["subtasks"].append(child_tree)
@@ -312,7 +311,7 @@ def suggest_task_assignments(connect: ConnectFn) -> list[dict[str, Any]]:
         ).fetchall()
         busy_agents = {r["assigned_agent_id"] for r in busy_rows if r["assigned_agent_id"]}
 
-    idle_agents = sorted(all_agent_ids - busy_agents)
+        idle_agents = sorted(all_agent_ids - busy_agents)
     suggestions: list[dict[str, Any]] = []
     for task in available:
         task_id = task["id"]

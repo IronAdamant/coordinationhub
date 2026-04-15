@@ -69,7 +69,7 @@ def get_dead_letter_tasks(
             "SELECT * FROM task_failures WHERE status = 'dead_letter' ORDER BY dead_letter_at DESC LIMIT ?",
             (limit,),
         ).fetchall()
-    return [dict(row) for row in rows]
+        return [dict(row) for row in rows]
 
 
 def retry_from_dead_letter(
@@ -113,4 +113,4 @@ def get_task_failure_history(
             "SELECT * FROM task_failures WHERE task_id = ? ORDER BY attempt ASC",
             (task_id,),
         ).fetchall()
-    return [dict(row) for row in rows]
+        return [dict(row) for row in rows]

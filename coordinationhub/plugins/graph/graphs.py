@@ -328,6 +328,69 @@ def _populate_agent_responsibilities_from_graph(
                 """, (graph_id, graph_id, role, model, json.dumps(responsibilities), now))
 
 
+def build_implicit_graph(connect) -> CoordinationGraph:
+    """Build a minimal coordination graph from the live agent tree.
+
+    Used as a fallback when no coordination_spec.yaml is loaded so that
+    scan_project and assessment still have a graph to work with.
+    """
+    agents: list[dict[str, Any]] = []
+    handoffs: list[dict[str, Any]] = []
+    agent_ids: set[str] = set()
+
+    with connect() as conn:
+        rows = conn.execute(
+            "SELECT agent_id, parent_id FROM agents WHERE status = 'active'"
+        ).fetchall()
+
+    # Always include an orchestrator node for the root
+    agents.append({
+        "id": "orchestrator",
+        "role": "project manager",
+        "responsibilities": ["coordinate", "orchestrate", "monitor"],
+    })
+    agent_ids.add("orchestrator")
+
+    for row in rows:
+        agent_id = row["agent_id"]
+        parent_id = row["parent_id"]
+        if parent_id is None:
+            # Root agent maps to orchestrator
+            continue
+        # Derive a graph role from the agent_id suffix or use "worker"
+        role = "worker"
+        if "." in agent_id:
+            suffix = agent_id.rsplit(".", 1)[-1]
+            if suffix.isdigit():
+                role = "worker"
+            else:
+                role = suffix
+        graph_id = agent_id
+        if graph_id not in agent_ids:
+            agents.append({
+                "id": graph_id,
+                "role": role,
+                "responsibilities": ["implement", "write", "code"],
+            })
+            agent_ids.add(graph_id)
+        # Add handoff from orchestrator to child
+        handoffs.append({
+            "from": "orchestrator",
+            "to": graph_id,
+            "condition": "task_assigned",
+        })
+        # Add handoff from parent to child if parent is also active
+        if parent_id in {r["agent_id"] for r in rows}:
+            handoffs.append({
+                "from": parent_id,
+                "to": graph_id,
+                "condition": "subtask_created",
+            })
+
+    data = {"agents": agents, "handoffs": handoffs}
+    return CoordinationGraph(data)
+
+
 def validate_graph_tool() -> dict[str, Any]:
     """MCP tool implementation: validate the currently loaded graph."""
     graph = get_graph()

@@ -121,7 +121,7 @@ def get_all_dependencies(
             rows = conn.execute(
                 "SELECT * FROM agent_dependencies"
             ).fetchall()
-    return [dict(r) for r in rows]
+        return [dict(r) for r in rows]
 
 
 def satisfy_dependencies_for_task(connect: ConnectFn, task_id: str) -> dict[str, Any]:
@@ -158,10 +158,10 @@ def wait_for_dependency(
                 "SELECT satisfied FROM agent_dependencies WHERE id=?",
                 (dep_id,),
             ).fetchone()
-        if not row:
-            return {"satisfied": False, "dep_id": dep_id, "timed_out": True, "reason": "not_found"}
-        if row["satisfied"]:
-            return {"satisfied": True, "dep_id": dep_id, "timed_out": False}
+            if not row:
+                return {"satisfied": False, "dep_id": dep_id, "timed_out": True, "reason": "not_found"}
+            if row["satisfied"]:
+                return {"satisfied": True, "dep_id": dep_id, "timed_out": False}
         elapsed = time.time() - start
         if elapsed >= timeout_s:
             return {"satisfied": False, "dep_id": dep_id, "timed_out": True}
