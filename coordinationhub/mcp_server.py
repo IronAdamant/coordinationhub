@@ -235,8 +235,6 @@ class CoordinationHubMCPServer:
         )
         self._httpd: ThreadedHTTPServer | None = None
         self._thread: threading.Thread | None = None
-        self._heartbeat_thread: threading.Thread | None = None
-        self._server_agent_id: str | None = None
 
     # -- Public API ---------------------------------------------------- #
 
@@ -246,11 +244,14 @@ class CoordinationHubMCPServer:
         Args:
             blocking: If True (default), serve forever on the calling thread.
                       If False, spawn a daemon thread and return immediately.
+
+        The server does NOT register itself as an agent. It is coordination
+        middleware, not a swarm participant — registering a self-agent only
+        served to keep its own ``last_heartbeat`` fresh, which nothing
+        consumed. The previous behaviour also leaked a ghost ``hub.<PID>.0``
+        row in the agents table on every SIGKILL/abrupt shutdown.
         """
         self._engine.start()
-        # Register a server-side agent for this HTTP server process
-        self._server_agent_id = self._engine.generate_agent_id()
-        self._engine.register_agent(self._server_agent_id)
 
         self._httpd = ThreadedHTTPServer(
             (self._host, self._port), MCPRequestHandler, self._engine,
@@ -259,14 +260,6 @@ class CoordinationHubMCPServer:
         self._port = self._httpd.server_address[1]
 
         logger.info("CoordinationHub MCP server listening on %s", self.get_url())
-
-        # Start background heartbeat thread
-        self._heartbeat_thread = threading.Thread(
-            target=self._heartbeat_loop,
-            daemon=True,
-            name="coordinationhub-heartbeat",
-        )
-        self._heartbeat_thread.start()
 
         if blocking:
             try:
@@ -281,27 +274,12 @@ class CoordinationHubMCPServer:
             )
             self._thread.start()
 
-    def _heartbeat_loop(self) -> None:
-        """Background heartbeat for agent registration and lock cleanup."""
-        while self._httpd is not None:
-            if self._server_agent_id:
-                self._engine.heartbeat(self._server_agent_id)
-            _time.sleep(CoordinationEngine.HEARTBEAT_INTERVAL)
-
     def stop(self) -> None:
         """Shut down the server gracefully and close the engine."""
-        if self._server_agent_id:
-            try:
-                self._engine.deregister_agent(self._server_agent_id)
-            except Exception:
-                pass
         if self._httpd is not None:
             self._httpd.shutdown()
             self._httpd.server_close()
             self._httpd = None
-        if self._heartbeat_thread is not None:
-            self._heartbeat_thread.join(timeout=5)
-            self._heartbeat_thread = None
         if self._thread is not None:
             self._thread.join(timeout=5)
             self._thread = None

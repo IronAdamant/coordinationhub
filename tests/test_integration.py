@@ -132,6 +132,23 @@ class TestHTTPTransport:
         assert result.get("acquired") is True
         assert result.get("locked_by") == test_server.agent_id
 
+    def test_server_does_not_register_self_as_agent(self, test_server):
+        """The HTTP server is coordination middleware, not a swarm participant.
+
+        Regression: before v0.7.4, ``CoordinationHubMCPServer.start`` called
+        ``register_agent`` for itself and ran a heartbeat thread to keep the
+        row alive. Nothing consumed the server-agent, and a SIGKILL of the
+        server left a ghost ``hub.<PID>.0`` row that polluted the agent tree
+        until the 600s stale-timeout reap.
+        """
+        result = test_server.client.call("list_agents", {"active_only": False})
+        agents = result.get("agents", [])
+        ids = {a["agent_id"] for a in agents}
+        # Only the explicitly-registered test agent should be present
+        assert ids == {test_server.agent_id}, (
+            f"Server registered an unexpected self-agent. Got: {ids}"
+        )
+
     def test_release_lock_via_http(self, test_server):
         """release_lock returns released=True after acquiring."""
         test_server.client.call("acquire_lock", {

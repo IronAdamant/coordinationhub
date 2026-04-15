@@ -1,7 +1,38 @@
 # CoordinationHub — Complete Project Documentation
 
-**Version:** <!-- GEN:version -->0.7.3<!-- /GEN -->
+**Version:** <!-- GEN:version -->0.7.4<!-- /GEN -->
 **Last updated:** 2026-04-15
+
+## v0.7.4 Changelog — Drop Server Self-Registration + `python -m coordinationhub`
+
+### Motivation
+
+Two items I had flagged as deferred after the v0.7.3 ship.
+
+### Fixes
+
+- **`mcp_server.py` and `mcp_stdio.py` no longer register a server-side agent.** Both servers used to call `register_agent` on themselves at startup and run a heartbeat loop to keep the row alive. Nothing consumed the server-agent — its only effect was that a `hub.<PID>.0` row leaked into the agents table whenever the server was killed before it could call `deregister_agent` (SIGKILL, OOM, host crash, container restart, etc.). The dashboard then surfaced these ghost agents until the 600s stale-timeout reap. The server is coordination middleware, not a swarm participant; removing the self-registration eliminates the leak entirely and the heartbeat thread along with it. The HTTP server's `start()` no longer spawns a heartbeat thread; the stdio server's `_run_server` no longer schedules an `asyncio.ensure_future(heartbeat_loop())`. Added `test_server_does_not_register_self_as_agent` in `tests/test_integration.py` as a regression guard.
+- **Added `coordinationhub/__main__.py`** so `python -m coordinationhub` works the same as the installed `coordinationhub` console script. Useful in tox envs, CI runners, and any environment where the entry-point script may not be on `PATH` (e.g. `python -m coordinationhub status`).
+
+### Side benefit
+
+The removed heartbeat thread had been holding integration-test teardown for up to 5 seconds each (`heartbeat_thread.join(timeout=5)`). The full pytest suite now runs in **13 seconds** instead of 87.
+
+### Verification
+
+- 394 tests pass (was 393; +1 regression test for the server-agent removal), 1 skipped.
+- `python scripts/gen_docs.py --check` clean.
+- `python -m coordinationhub status --help` confirmed working.
+- Integration test confirms `list_agents` returns only explicitly-registered agents after the server starts.
+
+### Counts
+
+| Version | Tools | CLI Commands | Schema |
+|---------|-------|--------------|--------|
+| v0.7.4 | 50 | 74 | 20 |
+| v0.7.3 | 50 | 74 | 20 |
+
+---
 
 ## v0.7.3 Changelog — Four Latent Bug Fixes
 
@@ -948,6 +979,7 @@ keep it in sync; CI checks for drift on every push.
 | Path | LOC | Purpose |
 |------|-----|---------|
 | `coordinationhub/__init__.py` | 14 | CoordinationHub — multi-agent swarm coordination MCP server |
+| `coordinationhub/__main__.py` | 10 | ``python -m coordinationhub`` entry point — delegates to :mod:`cli` |
 | `coordinationhub/_storage.py` | 113 | Storage backend for CoordinationHub — SQLite pool, path resolution, lifecycle |
 | `coordinationhub/agent_registry.py` | 292 | Agent lifecycle: register, heartbeat, deregister, lineage management |
 | `coordinationhub/agent_status.py` | 277 | Agent status and file-map query helpers for CoordinationHub |
@@ -994,8 +1026,8 @@ keep it in sync; CI checks for drift on every push.
 | `coordinationhub/leases.py` | 197 | Zero-deps lease primitives for HA coordinator leadership |
 | `coordinationhub/lock_cache.py` | 180 | In-memory lock cache for CoordinationHub |
 | `coordinationhub/lock_ops.py` | 191 | Shared lock primitives used by both local locks and coordination locks |
-| `coordinationhub/mcp_server.py` | 253 | HTTP-based MCP server for CoordinationHub — zero external dependencies |
-| `coordinationhub/mcp_stdio.py` | 142 | Stdio-based MCP server for CoordinationHub using the ``mcp`` Python package |
+| `coordinationhub/mcp_server.py` | 234 | HTTP-based MCP server for CoordinationHub — zero external dependencies |
+| `coordinationhub/mcp_stdio.py` | 133 | Stdio-based MCP server for CoordinationHub using the ``mcp`` Python package |
 | `coordinationhub/messages.py` | 90 | Inter-agent messaging primitives for CoordinationHub |
 | `coordinationhub/notifications.py` | 136 | Change notification storage and retrieval for CoordinationHub |
 | `coordinationhub/paths.py` | 38 | Path normalization and project-root detection utilities |
@@ -1032,7 +1064,7 @@ keep it in sync; CI checks for drift on every push.
 | `coordinationhub/work_intent.py` | 77 | Work intent board primitives for CoordinationHub |
 <!-- /GEN -->
 
-**Total: <!-- GEN:test-count -->394<!-- /GEN --> tests across 23 test files.**
+**Total: <!-- GEN:test-count -->395<!-- /GEN --> tests across 23 test files.**
 
 ---
 
@@ -1042,6 +1074,7 @@ keep it in sync; CI checks for drift on every push.
 ```
 coordinationhub/
   __init__.py           — CoordinationHub — multi-agent swarm coordination MCP server (~14 LOC)
+  __main__.py           — ``python -m coordinationhub`` entry point — delegates to :mod:`cli` (~10 LOC)
   _storage.py           — Storage backend for CoordinationHub — SQLite pool, path resolution, lifecycle (~113 LOC)
   agent_registry.py     — Agent lifecycle: register, heartbeat, deregister, lineage management (~292 LOC)
   agent_status.py       — Agent status and file-map query helpers for CoordinationHub (~277 LOC)
@@ -1083,8 +1116,8 @@ coordinationhub/
   leases.py             — Zero-deps lease primitives for HA coordinator leadership (~197 LOC)
   lock_cache.py         — In-memory lock cache for CoordinationHub (~180 LOC)
   lock_ops.py           — Shared lock primitives used by both local locks and coordination locks (~191 LOC)
-  mcp_server.py         — HTTP-based MCP server for CoordinationHub — zero external dependencies (~253 LOC)
-  mcp_stdio.py          — Stdio-based MCP server for CoordinationHub using the ``mcp`` Python package (~142 LOC)
+  mcp_server.py         — HTTP-based MCP server for CoordinationHub — zero external dependencies (~234 LOC)
+  mcp_stdio.py          — Stdio-based MCP server for CoordinationHub using the ``mcp`` Python package (~133 LOC)
   messages.py           — Inter-agent messaging primitives for CoordinationHub (~90 LOC)
   notifications.py      — Change notification storage and retrieval for CoordinationHub (~136 LOC)
   paths.py              — Path normalization and project-root detection utilities (~38 LOC)
@@ -1133,7 +1166,7 @@ coordinationhub/
 ```
 <!-- /GEN -->
 
-The `tests/` directory holds <!-- GEN:test-count -->394<!-- /GEN --> tests across 23 files,
+The `tests/` directory holds <!-- GEN:test-count -->395<!-- /GEN --> tests across 23 files,
 plus `tests/fixtures/claude_code_events/` for hook contract fixtures.
 
 **Module design principles:**
@@ -1600,7 +1633,7 @@ Air-gapped install: `pip install coordinationhub --no-deps`.
 
 ```bash
 python -m pytest tests/ -v
-# <!-- GEN:test-count -->394<!-- /GEN --> tests across 23 test files
+# <!-- GEN:test-count -->395<!-- /GEN --> tests across 23 test files
 ```
 
 ---

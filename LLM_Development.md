@@ -1,11 +1,57 @@
 # LLM_Development.md — CoordinationHub
 
-**Version:** <!-- GEN:version -->0.7.3<!-- /GEN -->
+**Version:** <!-- GEN:version -->0.7.4<!-- /GEN -->
 **Last updated:** 2026-04-15
 
 ## Change Log
 
 All significant changes to the CoordinationHub project are documented here in reverse chronological order.
+
+---
+
+## 2026-04-15 — v0.7.4 Drop Server Self-Registration + python -m coordinationhub
+
+### Motivation
+
+Two items I had flagged as deferred after the v0.7.3 ship: the server-self-registration ghost-agent leak on SIGKILL, and the missing `__main__.py`.
+
+### Fix 1 — Drop server-side agent registration in mcp_server.py and mcp_stdio.py
+
+**Bug**: Both `CoordinationHubMCPServer.start()` and `mcp_stdio._run_server()` called `engine.generate_agent_id()` + `engine.register_agent(server_agent_id)` at startup, then ran a heartbeat loop (`threading.Thread` for HTTP, `asyncio.ensure_future` for stdio) to keep the row alive every 30s. The server-agent had no consumer — its only effect was that a `hub.<PID>.0` row appeared in the agents table on startup and leaked there whenever the server was killed before `deregister_agent` could run (SIGKILL, OOM, host crash, container restart). The dashboard surfaced these ghosts as standalone root agents until the 600s stale-timeout reap.
+
+**Fix**: Remove the self-registration entirely. The HTTP and stdio servers are coordination middleware — they expose tools that swarm members call, but they are not themselves participants. The change deletes:
+
+- `_server_agent_id` attribute and its `register_agent` call in `CoordinationHubMCPServer.__init__` / `start`.
+- The `_heartbeat_thread` and `_heartbeat_loop` method in `mcp_server.py`.
+- The `deregister_agent` call in `CoordinationHubMCPServer.stop`.
+- The `server_agent_id` parameter and its registration in `mcp_stdio.create_server`.
+- The `heartbeat_loop` async task in `mcp_stdio._run_server`.
+
+`create_server` in `mcp_stdio` now returns `(server, engine)` instead of `(server, engine, server_agent_id)`. Internal-only API, no documented consumers.
+
+Regression guard `test_server_does_not_register_self_as_agent` added in `tests/test_integration.py` — asserts that after starting the HTTP server with one explicitly-registered test agent, `list_agents(active_only=False)` returns exactly that one agent and nothing else.
+
+**Side benefit**: the removed heartbeat thread had been blocking `CoordinationHubMCPServer.stop()` for up to 5 seconds per test (`heartbeat_thread.join(timeout=5)`). With ~15 integration tests stopping the server each, the full pytest suite ran in 87s. After the removal it runs in 13s — a 6.5x speedup that fell out of the lifecycle simplification.
+
+### Fix 2 — Add coordinationhub/__main__.py
+
+**Gap**: `python -m coordinationhub` failed with `'coordinationhub' is a package and cannot be directly executed` because the package had no `__main__.py`. Users could only invoke the CLI via the installed `coordinationhub` console script, which isn't always on `PATH` (tox envs, CI runners, fresh venvs without re-install).
+
+**Fix**: 13-line `coordinationhub/__main__.py` that imports `from .cli import main` and runs `sys.exit(main() or 0)`. `python -m coordinationhub status --help` now works identically to `coordinationhub status --help`.
+
+### Verification
+
+- 394 tests pass (was 393; +1 regression test in test_integration.py), 1 skipped. Full suite runs in 13s (was 87s).
+- `python scripts/gen_docs.py --check` clean across all five doc targets.
+- `python -m coordinationhub` lists subcommands. `python -m coordinationhub status --help` produces the same help text as `coordinationhub status --help`.
+- `list_agents(active_only=False)` against a freshly-started HTTP server returns only the agent the test registered explicitly — no `hub.<PID>.0` self-agent.
+
+### Counts
+
+| Version | Tools | CLI Commands | Schema |
+|---------|-------|--------------|--------|
+| v0.7.4 | 50 | 74 | 20 |
+| v0.7.3 | 50 | 74 | 20 |
 
 ---
 
@@ -1362,6 +1408,7 @@ Block markers for multi-line content:
 | Path | LOC | Purpose |
 |------|-----|---------|
 | `coordinationhub/__init__.py` | 14 | CoordinationHub — multi-agent swarm coordination MCP server |
+| `coordinationhub/__main__.py` | 10 | ``python -m coordinationhub`` entry point — delegates to :mod:`cli` |
 | `coordinationhub/_storage.py` | 113 | Storage backend for CoordinationHub — SQLite pool, path resolution, lifecycle |
 | `coordinationhub/agent_registry.py` | 292 | Agent lifecycle: register, heartbeat, deregister, lineage management |
 | `coordinationhub/agent_status.py` | 277 | Agent status and file-map query helpers for CoordinationHub |
@@ -1408,8 +1455,8 @@ Block markers for multi-line content:
 | `coordinationhub/leases.py` | 197 | Zero-deps lease primitives for HA coordinator leadership |
 | `coordinationhub/lock_cache.py` | 180 | In-memory lock cache for CoordinationHub |
 | `coordinationhub/lock_ops.py` | 191 | Shared lock primitives used by both local locks and coordination locks |
-| `coordinationhub/mcp_server.py` | 253 | HTTP-based MCP server for CoordinationHub — zero external dependencies |
-| `coordinationhub/mcp_stdio.py` | 142 | Stdio-based MCP server for CoordinationHub using the ``mcp`` Python package |
+| `coordinationhub/mcp_server.py` | 234 | HTTP-based MCP server for CoordinationHub — zero external dependencies |
+| `coordinationhub/mcp_stdio.py` | 133 | Stdio-based MCP server for CoordinationHub using the ``mcp`` Python package |
 | `coordinationhub/messages.py` | 90 | Inter-agent messaging primitives for CoordinationHub |
 | `coordinationhub/notifications.py` | 136 | Change notification storage and retrieval for CoordinationHub |
 | `coordinationhub/paths.py` | 38 | Path normalization and project-root detection utilities |
@@ -1449,7 +1496,7 @@ Block markers for multi-line content:
 
 Inline markers for single values (render invisibly in Markdown):
 ```markdown
-This project has <!-- GEN:test-count -->394<!-- /GEN --> tests.
+This project has <!-- GEN:test-count -->395<!-- /GEN --> tests.
 ```
 
 Unknown marker names raise an error during rewrite (catches typos).

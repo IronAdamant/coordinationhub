@@ -37,7 +37,7 @@ except ImportError:
     _MCP_AVAILABLE = False
 
 
-def _configure_server(engine: CoordinationEngine, server_agent_id: str):
+def _configure_server(engine: CoordinationEngine):
     """Register all CoordinationHub tools on an MCP Server instance.
 
     Factored out of ``create_server`` so that ``_run_server`` can manage
@@ -87,8 +87,13 @@ def create_server(
         namespace: Agent ID namespace prefix. Defaults to "hub".
 
     Returns:
-        A tuple of (configured ``mcp.server.Server`` instance, ``CoordinationEngine``,
-        ``server_agent_id``).
+        A tuple of (configured ``mcp.server.Server`` instance, ``CoordinationEngine``).
+
+    The server does NOT register itself as an agent. It is coordination
+    middleware, not a swarm participant — registering a self-agent only
+    served to keep its own ``last_heartbeat`` fresh, which nothing
+    consumed, and leaked a ``hub.<PID>.0`` row in the agents table on every
+    abrupt shutdown.
     """
     if not _MCP_AVAILABLE:
         raise RuntimeError(
@@ -103,15 +108,13 @@ def create_server(
         namespace=namespace,
     )
     engine.start()
-    server_agent_id = engine.generate_agent_id()
-    engine.register_agent(server_agent_id)
 
     try:
-        server = _configure_server(engine, server_agent_id)
+        server = _configure_server(engine)
     except Exception:
         engine.close()
         raise
-    return server, engine, server_agent_id
+    return server, engine
 
 
 async def _run_server() -> None:
@@ -120,22 +123,11 @@ async def _run_server() -> None:
     project_root = os.environ.get("COORDINATIONHUB_PROJECT_ROOT")
     namespace = os.environ.get("COORDINATIONHUB_NAMESPACE", "hub")
 
-    server, engine, server_agent_id = create_server(
+    server, engine = create_server(
         storage_dir=storage_dir,
         project_root=project_root,
         namespace=namespace,
     )
-
-    async def heartbeat_loop() -> None:
-        """Background heartbeat for agent registration and lock cleanup."""
-        while True:
-            await asyncio.sleep(CoordinationEngine.HEARTBEAT_INTERVAL)
-            try:
-                engine.heartbeat(server_agent_id)
-            except Exception:
-                logger.exception("Heartbeat failed for %s", server_agent_id)
-
-    heartbeat_task = asyncio.ensure_future(heartbeat_loop())
 
     try:
         async with stdio_server() as (read_stream, write_stream):
@@ -145,8 +137,6 @@ async def _run_server() -> None:
                 server.create_initialization_options(),
             )
     finally:
-        heartbeat_task.cancel()
-        engine.deregister_agent(server_agent_id)
         engine.close()
 
 
