@@ -17,23 +17,23 @@ from coordinationhub.core import CoordinationEngine
 
 EXPECTED_COMMANDS = {
     "serve", "serve-mcp", "serve-sse", "status", "register", "heartbeat", "deregister",
-    "list-agents", "lineage", "siblings", "acquire-lock", "release-lock",
-    "refresh-lock", "lock-status", "list-locks", "release-agent-locks",
-    "reap-expired-locks", "reap-stale-agents", "broadcast", "acknowledge-broadcast",
-    "broadcast-status", "wait-for-locks",
+    "list-agents", "agent-relations", "acquire-lock", "release-lock",
+    "refresh-lock", "lock-status", "list-locks", "admin-locks",
+    "broadcast", "acknowledge-broadcast",
+    "wait-for-broadcast-acks", "wait-for-locks",
     "notify-change", "get-notifications", "prune-notifications", "wait-for-notifications",
     "get-conflicts", "contention-hotspots",
     "load-spec", "validate-spec", "scan-project", "dashboard",
-    "agent-status", "assess", "assess-session", "agent-tree",
+    "agent-status", "assess", "agent-tree",
     "doctor", "init", "watch",
     "await-agent", "send-message", "get-messages", "mark-messages-read",
-    "create-task", "assign-task", "update-task-status", "get-task",
-    "get-child-tasks", "get-tasks-by-agent", "get-all-tasks",
-    "create-subtask", "get-subtasks", "get-task-tree",
+    "create-task", "assign-task", "update-task-status", "query-tasks",
+    "create-subtask",
     "declare-work-intent", "get-work-intents", "clear-work-intent",
     "acknowledge-handoff", "complete-handoff", "cancel-handoff", "get-handoffs",
-    "declare-dependency", "check-dependencies", "satisfy-dependency",
-    "get-blockers", "assert-can-start", "get-all-dependencies",
+    "wait-for-handoff",
+    "declare-dependency", "manage-dependencies", "satisfy-dependency",
+    "get-all-dependencies",
     "retry-task", "dead-letter-queue", "task-failure-history",
     "wait-for-task", "get-available-tasks",
     "acquire-coordinator-lease", "refresh-coordinator-lease",
@@ -101,18 +101,19 @@ class TestCreateParser:
         assert args.exclude_agent == "dead.agent"
         assert args.limit == 50
 
-    def test_assess_requires_suite_path(self):
-        """assess requires --suite and accepts --format, --output, --graph-agent-id."""
+    def test_assess_accepts_suite_path(self):
+        """assess accepts --suite, --format, --output, --graph-agent-id, --scope."""
         parser = create_parser()
         args = parser.parse_args([
             "assess", "--suite", "/path/to/suite.json",
             "--format", "json", "--output", "/tmp/report.md",
-            "--graph-agent-id", "planner",
+            "--graph-agent-id", "planner", "--scope", "all",
         ])
         assert args.suite_path == "/path/to/suite.json"
         assert args.format == "json"
         assert args.output_path == "/tmp/report.md"
         assert args.graph_agent_id == "planner"
+        assert args.scope == "all"
 
     def test_shared_args_present(self):
         """--storage-dir, --project-root, --namespace, --json are available on each subcommand."""

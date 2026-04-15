@@ -52,12 +52,12 @@ def _get_spawned_agent_responsibilities(
             JOIN agent_responsibilities ar ON l.parent_id = ar.agent_id
             WHERE l.child_id = ?
         """, (assigned_agent_id,)).fetchone()
-    if row:
-        import json
-        graph_id = row["graph_agent_id"]
-        resp = json.loads(row["responsibilities"]) if row["responsibilities"] else []
-        return graph_id, resp
-    return None, []
+        if row:
+            import json
+            graph_id = row["graph_agent_id"]
+            resp = json.loads(row["responsibilities"]) if row["responsibilities"] else []
+            return graph_id, resp
+        return None, []
 
 
 def _role_based_agent(
@@ -127,9 +127,9 @@ def scan_project_tool(
         ownership_rows = conn.execute(
             "SELECT document_path, assigned_agent_id FROM file_ownership"
         ).fetchall()
-    path_to_agent: dict[str, str] = {
-        row["document_path"]: row["assigned_agent_id"] for row in ownership_rows
-    }
+        path_to_agent: dict[str, str] = {
+            row["document_path"]: row["assigned_agent_id"] for row in ownership_rows
+        }
 
     # Build dir -> agent for nearest-ancestor lookup
     dir_to_agent: dict[str, str] = {}

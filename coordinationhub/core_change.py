@@ -43,7 +43,7 @@ class ChangeMixin:
             self._connect, norm_path, change_type, agent_id,
             str(self._storage.project_root),
         )
-        self._event_bus.publish(
+        self._publish_event(
             "notification.created",
             {
                 "document_path": norm_path,
@@ -101,7 +101,7 @@ class ChangeMixin:
         or {"notifications": [], "timed_out": True} if timeout expires.
         """
         start = time.time()
-        event = self._event_bus.wait_for_event(
+        event = self._hybrid_wait(
             ["notification.created"],
             filter_fn=lambda e: e.get("agent_id") != exclude_agent if exclude_agent else True,
             timeout=timeout_s,

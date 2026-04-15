@@ -84,23 +84,23 @@ def get_broadcast_status(
             (broadcast_id,),
         ).fetchall()
 
-    expected_count = row["expected_count"] or 0
-    acked = [a["agent_id"] for a in acks]
-    pending_acks: list[str] = []
-    # pending_acks can only be computed when we know the original targets.
-    # For now, report the counts so callers can see progress.
-    return {
-        "found": True,
-        "broadcast_id": broadcast_id,
-        "from_agent_id": row["from_agent_id"],
-        "document_path": row["document_path"],
-        "message": row["message"],
-        "created_at": row["created_at"],
-        "expires_at": row["expires_at"],
-        "expected_count": expected_count,
-        "acknowledged_by": acked,
-        "pending_acks": pending_acks,
-    }
+        expected_count = row["expected_count"] or 0
+        acked = [a["agent_id"] for a in acks]
+        pending_acks: list[str] = []
+        # pending_acks can only be computed when we know the original targets.
+        # For now, report the counts so callers can see progress.
+        return {
+            "found": True,
+            "broadcast_id": broadcast_id,
+            "from_agent_id": row["from_agent_id"],
+            "document_path": row["document_path"],
+            "message": row["message"],
+            "created_at": row["created_at"],
+            "expires_at": row["expires_at"],
+            "expected_count": expected_count,
+            "acknowledged_by": acked,
+            "pending_acks": pending_acks,
+        }
 
 
 def get_broadcasts(
@@ -119,7 +119,7 @@ def get_broadcasts(
         args.append(limit)
         rows = conn.execute(query, args).fetchall()
 
-    broadcasts = []
-    for r in rows:
-        broadcasts.append(dict(r))
+        broadcasts = []
+        for r in rows:
+            broadcasts.append(dict(r))
     return broadcasts

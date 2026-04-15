@@ -184,9 +184,9 @@ class TestHTTPTransport:
         ids = {a["agent_id"] for a in agents}
         assert test_server.agent_id in ids
 
-    def test_get_lineage_via_http(self, test_server):
-        """get_lineage returns ancestors and descendants."""
-        result = test_server.client.call("get_lineage", {
+    def test_get_agent_relations_lineage_via_http(self, test_server):
+        """get_agent_relations with mode='lineage' returns ancestors and descendants."""
+        result = test_server.client.call("get_agent_relations", {
             "agent_id": test_server.agent_id,
         })
         assert "ancestors" in result

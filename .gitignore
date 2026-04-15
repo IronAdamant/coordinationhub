@@ -20,5 +20,6 @@ build/
 
 # Scratch / planning artifacts
 findings/
+plan/
 *-checklist.md
 *-plan.md

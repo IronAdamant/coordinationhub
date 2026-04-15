@@ -63,14 +63,16 @@ def build_context_bundle(
             "FROM change_notifications WHERE created_at > ? ORDER BY created_at DESC LIMIT 20",
             (now - 300,),
         ).fetchall()
+        notifs = [dict(n) for n in notifs]
         resp_row = conn.execute(
             "SELECT graph_agent_id, role, responsibilities, current_task "
             "FROM agent_responsibilities WHERE agent_id = ?", (agent_id,)
         ).fetchone()
+        resp = dict(resp_row) if resp_row else {}
         owned_files = conn.execute(
             "SELECT document_path FROM file_ownership WHERE assigned_agent_id = ?", (agent_id,)
         ).fetchall()
-    resp = dict(resp_row) if resp_row else {}
+        owned_files = [dict(f) for f in owned_files]
     responsibilities = json.loads(resp.get("responsibilities", "[]")) if resp else []
     bundle: dict[str, Any] = {
         "agent_id": agent_id,
@@ -81,7 +83,7 @@ def build_context_bundle(
             for a in agents
         ],
         "active_locks": active_locks,
-        "pending_notifications": [dict(n) for n in notifs],
+        "pending_notifications": notifs,
         "coordination_url": os.environ.get(
             "COORDINATIONHUB_COORDINATION_URL",
             f"http://localhost:{default_port}",

@@ -257,6 +257,15 @@ _SCHEMAS = {
             PRIMARY KEY (broadcast_id, agent_id)
         )
     """,
+    "coordination_events": """
+        CREATE TABLE IF NOT EXISTS coordination_events (
+            id              INTEGER PRIMARY KEY AUTOINCREMENT,
+            topic           TEXT NOT NULL,
+            payload_json    TEXT NOT NULL,
+            created_at      REAL NOT NULL
+        )
+    """,
+
 }
 
 _INDEXES = [
@@ -295,6 +304,7 @@ _INDEXES = [
     "CREATE INDEX IF NOT EXISTS idx_broadcasts_from ON broadcasts(from_agent_id)",
     "CREATE INDEX IF NOT EXISTS idx_broadcasts_expires ON broadcasts(expires_at)",
     "CREATE INDEX IF NOT EXISTS idx_broadcast_acks_id ON broadcast_acks(broadcast_id)",
+    "CREATE INDEX IF NOT EXISTS idx_coordination_events_topic ON coordination_events(topic, created_at)",
 ]
 
 

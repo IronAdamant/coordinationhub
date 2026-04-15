@@ -62,7 +62,7 @@ def prune_notifications(
     max_age_seconds: float | None = None,
     max_entries: int | None = None,
 ) -> dict[str, Any]:
-    """Clean up old notifications by age or entry count."""
+    """Clean up old notifications and coordination events by age or entry count."""
     with connect() as conn:
         pruned = 0
 
@@ -70,6 +70,11 @@ def prune_notifications(
             cutoff = time.time() - max_age_seconds
             cursor = conn.execute(
                 "DELETE FROM change_notifications WHERE created_at < ?",
+                (cutoff,),
+            )
+            pruned += cursor.rowcount
+            cursor = conn.execute(
+                "DELETE FROM coordination_events WHERE created_at < ?",
                 (cutoff,),
             )
             pruned += cursor.rowcount
@@ -85,6 +90,23 @@ def prune_notifications(
                     """
                     DELETE FROM change_notifications WHERE id IN (
                         SELECT id FROM change_notifications ORDER BY created_at ASC LIMIT ?
+                    )
+                    """,
+                    (excess,),
+                )
+                pruned += cursor.rowcount
+
+            # Also prune events table if it exceeds the same limit
+            count_row = conn.execute(
+                "SELECT COUNT(*) as cnt FROM coordination_events"
+            ).fetchone()
+            count = count_row["cnt"] if count_row else 0
+            if count > max_entries:
+                excess = count - max_entries
+                cursor = conn.execute(
+                    """
+                    DELETE FROM coordination_events WHERE id IN (
+                        SELECT id FROM coordination_events ORDER BY created_at ASC LIMIT ?
                     )
                     """,
                     (excess,),
@@ -125,9 +147,10 @@ def wait_for_notifications(
                 args.append(exclude_agent)
             query += " ORDER BY id ASC LIMIT 100"
             rows = conn.execute(query, args).fetchall()
+            notifications = [dict(row) for row in rows]
 
-        if rows:
-            return {"notifications": [dict(row) for row in rows], "timed_out": False}
+        if notifications:
+            return {"notifications": notifications, "timed_out": False}
 
         elapsed = time.time() - start
         if elapsed >= timeout_s:

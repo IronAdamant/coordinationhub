@@ -74,105 +74,99 @@ def cmd_update_task_status(args):
 
 
 # ------------------------------------------------------------------ #
-# get-task
+# query-tasks
 # ------------------------------------------------------------------ #
 
-def cmd_get_task(args):
+def cmd_query_tasks(args):
     engine = _replica_engine_from_args(args)
     try:
-        result = engine.get_task(args.task_id)
+        result = engine.query_tasks(
+            query_type=args.query_type,
+            task_id=getattr(args, "task_id", None),
+            parent_agent_id=getattr(args, "parent_agent_id", None),
+            assigned_agent_id=getattr(args, "assigned_agent_id", None),
+            parent_task_id=getattr(args, "parent_task_id", None),
+            root_task_id=getattr(args, "root_task_id", None),
+        )
         if args.json_output:
             _print_json(result)
-        elif result is None:
-            print(f"Task not found: {args.task_id}")
-        else:
-            print(f"Task: {result['id']}")
-            print(f"  Status: {result['status']}")
-            print(f"  Parent: {result['parent_agent_id']}")
-            if result.get("assigned_agent_id"):
-                print(f"  Assigned: {result['assigned_agent_id']}")
-            print(f"  Description: {result['description']}")
-            if result.get("depends_on"):
-                print(f"  Depends on: {', '.join(result['depends_on'])}")
-            if result.get("blocked_by"):
-                print(f"  Blocked by: {result['blocked_by']}")
-            if result.get("summary"):
-                print(f"  Summary: {result['summary']}")
-            p = result.get("priority", 0)
+            return
+
+        if result.get("error"):
+            print(f"Error: {result['error']}")
+            return
+
+        if args.query_type == "task":
+            task = result.get("task")
+            if not task:
+                print(f"Task not found: {getattr(args, 'task_id', 'unknown')}")
+                return
+            print(f"Task: {task['id']}")
+            print(f"  Status: {task['status']}")
+            print(f"  Parent: {task['parent_agent_id']}")
+            if task.get("assigned_agent_id"):
+                print(f"  Assigned: {task['assigned_agent_id']}")
+            print(f"  Description: {task['description']}")
+            if task.get("depends_on"):
+                print(f"  Depends on: {', '.join(task['depends_on'])}")
+            if task.get("blocked_by"):
+                print(f"  Blocked by: {task['blocked_by']}")
+            if task.get("summary"):
+                print(f"  Summary: {task['summary']}")
+            p = task.get("priority", 0)
             if p:
                 print(f"  Priority: {p}")
-    finally:
-        _close(engine)
 
+        elif args.query_type in ("child", "by_agent"):
+            tasks = result.get("tasks", [])
+            label = (
+                f"from {args.parent_agent_id}"
+                if args.query_type == "child"
+                else f"for {args.assigned_agent_id}"
+            )
+            if not tasks:
+                print(f"No tasks {label}")
+            else:
+                print(f"{len(tasks)} task(s) {label}:")
+                for t in tasks:
+                    assigned = f" → {t['assigned_agent_id']}" if t.get("assigned_agent_id") else ""
+                    p = t.get("priority", 0)
+                    prio = f" @{p}" if p else ""
+                    print(f"  [{t['status']}] {t['id']}{assigned}{prio} — {t['description'][:50]}")
 
-# ------------------------------------------------------------------ #
-# get-child-tasks
-# ------------------------------------------------------------------ #
+        elif args.query_type == "all":
+            tasks = result.get("tasks", [])
+            if not tasks:
+                print("Task registry is empty")
+            else:
+                print(f"{len(tasks)} task(s) in registry:")
+                for t in tasks:
+                    assigned = f" → {t['assigned_agent_id']}" if t.get("assigned_agent_id") else ""
+                    p = t.get("priority", 0)
+                    prio = f" @{p}" if p else ""
+                    print(f"  [{t['status']}] {t['id']}{assigned}{prio} — {t['description'][:50]}")
 
-def cmd_get_child_tasks(args):
-    engine = _replica_engine_from_args(args)
-    try:
-        result = engine.get_child_tasks(args.parent_agent_id)
-        tasks = result.get("tasks", [])
-        if args.json_output:
-            _print_json(result)
-        elif not tasks:
-            print(f"No tasks from {args.parent_agent_id}")
-        else:
-            print(f"{len(tasks)} task(s) from {args.parent_agent_id}:")
-            for t in tasks:
-                assigned = f" → {t['assigned_agent_id']}" if t.get("assigned_agent_id") else ""
-                p = t.get("priority", 0)
+        elif args.query_type == "subtasks":
+            subtasks = result.get("subtasks", [])
+            if not subtasks:
+                print(f"No subtasks for {args.parent_task_id}")
+            else:
+                print(f"{len(subtasks)} subtask(s) under {args.parent_task_id}:")
+                for t in subtasks:
+                    assigned = f" → {t['assigned_agent_id']}" if t.get("assigned_agent_id") else ""
+                    print(f"  [{t['status']}] {t['id']}{assigned} — {t['description'][:50]}")
+
+        elif args.query_type == "tree":
+            def _print_tree(task, indent=0):
+                prefix = "  " * indent
+                status = task.get("status", "?")
+                p = task.get("priority", 0)
                 prio = f" @{p}" if p else ""
-                print(f"  [{t['status']}] {t['id']}{assigned}{prio} — {t['description'][:50]}")
-    finally:
-        _close(engine)
+                print(f"{prefix}[{status}] {task['id']}{prio} — {task.get('description', '')[:50]}")
+                for child in task.get("subtasks", []):
+                    _print_tree(child, indent + 1)
 
-
-# ------------------------------------------------------------------ #
-# get-tasks-by-agent
-# ------------------------------------------------------------------ #
-
-def cmd_get_tasks_by_agent(args):
-    engine = _replica_engine_from_args(args)
-    try:
-        result = engine.get_tasks_by_agent(args.assigned_agent_id)
-        tasks = result.get("tasks", [])
-        if args.json_output:
-            _print_json(result)
-        elif not tasks:
-            print(f"No tasks for {args.assigned_agent_id}")
-        else:
-            print(f"{len(tasks)} task(s) for {args.assigned_agent_id}:")
-            for t in tasks:
-                assigned = f" → {t['assigned_agent_id']}" if t.get("assigned_agent_id") else ""
-                p = t.get("priority", 0)
-                prio = f" @{p}" if p else ""
-                print(f"  [{t['status']}] {t['id']}{assigned}{prio} — {t['description'][:50]}")
-    finally:
-        _close(engine)
-
-
-# ------------------------------------------------------------------ #
-# get-all-tasks
-# ------------------------------------------------------------------ #
-
-def cmd_get_all_tasks(args):
-    engine = _replica_engine_from_args(args)
-    try:
-        result = engine.get_all_tasks()
-        tasks = result.get("tasks", [])
-        if args.json_output:
-            _print_json(result)
-        elif not tasks:
-            print("Task registry is empty")
-        else:
-            print(f"{len(tasks)} task(s) in registry:")
-            for t in tasks:
-                assigned = f" → {t['assigned_agent_id']}" if t.get("assigned_agent_id") else ""
-                p = t.get("priority", 0)
-                prio = f" @{p}" if p else ""
-                print(f"  [{t['status']}] {t['id']}{assigned}{prio} — {t['description'][:50]}")
+            _print_tree(result)
     finally:
         _close(engine)
 
@@ -199,54 +193,6 @@ def cmd_create_subtask(args):
             p = getattr(args, "priority", 0)
             if p:
                 print(f"  Priority: {p}")
-    finally:
-        _close(engine)
-
-
-# ------------------------------------------------------------------ #
-# get-subtasks
-# ------------------------------------------------------------------ #
-
-def cmd_get_subtasks(args):
-    engine = _replica_engine_from_args(args)
-    try:
-        result = engine.get_subtasks(args.parent_task_id)
-        subtasks = result.get("subtasks", [])
-        if args.json_output:
-            _print_json(result)
-        elif not subtasks:
-            print(f"No subtasks for {args.parent_task_id}")
-        else:
-            print(f"{len(subtasks)} subtask(s) under {args.parent_task_id}:")
-            for t in subtasks:
-                assigned = f" → {t['assigned_agent_id']}" if t.get("assigned_agent_id") else ""
-                print(f"  [{t['status']}] {t['id']}{assigned} — {t['description'][:50]}")
-    finally:
-        _close(engine)
-
-
-# ------------------------------------------------------------------ #
-# get-task-tree
-# ------------------------------------------------------------------ #
-
-def cmd_get_task_tree(args):
-    engine = _replica_engine_from_args(args)
-    try:
-        result = engine.get_task_tree(args.root_task_id)
-        if args.json_output:
-            _print_json(result)
-        elif result.get("error"):
-            print(f"Error: {result['error']}")
-        else:
-            def _print_tree(task, indent=0):
-                prefix = "  " * indent
-                status = task.get("status", "?")
-                p = task.get("priority", 0)
-                prio = f" @{p}" if p else ""
-                print(f"{prefix}[{status}] {task['id']}{prio} — {task.get('description', '')[:50]}")
-                for child in task.get("subtasks", []):
-                    _print_tree(child, indent + 1)
-            _print_tree(result)
     finally:
         _close(engine)
 

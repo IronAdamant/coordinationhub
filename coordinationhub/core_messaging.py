@@ -31,7 +31,7 @@ class MessagingMixin:
     ) -> dict[str, Any]:
         """Send a message to another agent."""
         result = _msg.send_message(self._connect, from_agent_id, to_agent_id, message_type, payload)
-        self._event_bus.publish(
+        self._publish_event(
             "message.received",
             {
                 "message_id": result.get("message_id"),
@@ -81,7 +81,7 @@ class MessagingMixin:
                     "waited_s": _time.time() - start,
                 }
 
-        event = self._event_bus.wait_for_event(
+        event = self._hybrid_wait(
             ["agent.deregistered"],
             filter_fn=lambda e: e.get("agent_id") == agent_id,
             timeout=timeout_s,

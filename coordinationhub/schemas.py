@@ -97,10 +97,10 @@ TOOL_SCHEMAS_IDENTITY: dict[str, dict] = {
             },
         },
     },
-    "get_lineage": {
+    "get_agent_relations": {
         "description": (
-            "Get the ancestor chain (parent → grandparent) and all descendants "
-            "(direct children, grandchildren) of a given agent."
+            "Get the ancestor chain and descendants (mode='lineage') or "
+            "agents that share the same parent (mode='siblings') for a given agent."
         ),
         "parameters": {
             "type": "object",
@@ -109,21 +109,10 @@ TOOL_SCHEMAS_IDENTITY: dict[str, dict] = {
                     "type": "string",
                     "description": "Agent to query",
                 },
-            },
-            "required": ["agent_id"],
-        },
-    },
-    "get_siblings": {
-        "description": (
-            "Get all agents that share the same parent as the given agent. "
-            "Useful for coordination before taking a shared action."
-        ),
-        "parameters": {
-            "type": "object",
-            "properties": {
-                "agent_id": {
+                "mode": {
                     "type": "string",
-                    "description": "Agent whose siblings to find",
+                    "description": "'lineage' (default) or 'siblings'",
+                    "default": "lineage",
                 },
             },
             "required": ["agent_id"],
@@ -291,45 +280,38 @@ TOOL_SCHEMAS_LOCKING: dict[str, dict] = {
             },
         },
     },
-    "release_agent_locks": {
+    "admin_locks": {
         "description": (
-            "Release all locks held by a given agent (including region locks). "
-            "Used during agent deregistration or when an agent dies unexpectedly."
+            "Administrative lock operations. "
+            "action='release_by_agent' releases all locks for an agent. "
+            "action='reap_expired' clears expired locks. "
+            "action='reap_stale' marks stale agents stopped and cleans their locks."
         ),
         "parameters": {
             "type": "object",
             "properties": {
+                "action": {
+                    "type": "string",
+                    "enum": ["release_by_agent", "reap_expired", "reap_stale"],
+                    "description": "Administrative action to perform",
+                },
                 "agent_id": {
                     "type": "string",
-                    "description": "Agent whose locks to release",
+                    "description": "Agent whose locks to release (required for release_by_agent)",
+                    "default": None,
                 },
-            },
-            "required": ["agent_id"],
-        },
-    },
-    "reap_expired_locks": {
-        "description": (
-            "Clear all expired locks from the lock table."
-        ),
-        "parameters": {
-            "type": "object",
-            "properties": {},
-        },
-    },
-    "reap_stale_agents": {
-        "description": (
-            "Mark stale agents as stopped and release their locks. "
-            "An agent is stale if its heartbeat is older than the timeout."
-        ),
-        "parameters": {
-            "type": "object",
-            "properties": {
+                "grace_seconds": {
+                    "type": "number",
+                    "description": "Grace period for reap_expired",
+                    "default": 0.0,
+                },
                 "timeout": {
                     "type": "number",
                     "description": "Seconds after which an agent is stale (default: 600)",
                     "default": 600.0,
                 },
             },
+            "required": ["action"],
         },
     },
 }
@@ -410,25 +392,9 @@ TOOL_SCHEMAS_COORDINATION: dict[str, dict] = {
             "required": ["broadcast_id", "agent_id"],
         },
     },
-    "get_broadcast_status": {
+    "wait_for_broadcast_acks": {
         "description": (
-            "Get the current acknowledgment status for a broadcast. "
-            "Returns the list of agents that have acknowledged it."
-        ),
-        "parameters": {
-            "type": "object",
-            "properties": {
-                "broadcast_id": {
-                    "type": "integer",
-                    "description": "ID of the broadcast to query",
-                },
-            },
-            "required": ["broadcast_id"],
-        },
-    },
-    "await_broadcast_acks": {
-        "description": (
-            "Poll until all expected acknowledgments are received or timeout expires. "
+            "Poll until all expected broadcast acknowledgments are received or timeout expires. "
             "Use after broadcast with require_ack=True to wait for recipients."
         ),
         "parameters": {
@@ -873,44 +839,20 @@ TOOL_SCHEMAS_VISIBILITY: dict[str, dict] = {
     },
     "run_assessment": {
         "description": (
-            "Run an assessment suite against the loaded coordination graph. "
-            "Loads the suite JSON file, scores all traces on the defined metrics, "
-            "outputs a report, and stores results in SQLite for historical comparison. "
-            "Use graph_agent_id to filter traces to a specific agent role."
+            "Run an assessment suite or score the current live session. "
+            "If suite_path is provided, loads the JSON suite file and scores it. "
+            "If suite_path is omitted, synthesizes a live session trace from DB state "
+            "(agents, notifications, lineage) — no hand-authored suite required. "
+            "Stores results in SQLite and returns a Markdown or JSON report."
         ),
         "parameters": {
             "type": "object",
             "properties": {
                 "suite_path": {
                     "type": "string",
-                    "description": "Path to the JSON test suite file",
-                },
-                "format": {
-                    "type": "string",
-                    "description": "Output format: 'markdown' (default) or 'json'",
-                    "default": "markdown",
-                },
-                "graph_agent_id": {
-                    "type": "string",
-                    "description": "Optional: filter traces to those involving this graph agent role",
+                    "description": "Path to the JSON test suite file (omit for live session scoring)",
                     "default": None,
                 },
-            },
-            "required": ["suite_path"],
-        },
-    },
-    "assess_current_session": {
-        "description": (
-            "Score the current live session against the loaded coordination graph. "
-            "Synthesizes an assessment trace from DB state (agents, change "
-            "notifications, lineage) — no hand-authored suite file required. "
-            "Requires a coordination graph to be loaded first via "
-            "load_coordination_spec. Scores all 5 metrics, stores results in "
-            "assessment_results, and returns a Markdown or JSON report."
-        ),
-        "parameters": {
-            "type": "object",
-            "properties": {
                 "format": {
                     "type": "string",
                     "description": "Output format: 'markdown' (default) or 'json'",
@@ -1040,50 +982,50 @@ TOOL_SCHEMAS_TASKS: dict[str, dict] = {
             "required": ["task_id", "status"],
         },
     },
-    "get_task": {
-        "description": "Get a single task by ID.",
+    "query_tasks": {
+        "description": (
+            "Unified task query. query_type='task' fetches one task by ID. "
+            "query_type='child' fetches tasks created by an agent. "
+            "query_type='by_agent' fetches tasks assigned to an agent. "
+            "query_type='all' fetches every task. "
+            "query_type='subtasks' fetches direct subtasks of a task. "
+            "query_type='tree' fetches a task and its nested subtasks."
+        ),
         "parameters": {
             "type": "object",
             "properties": {
+                "query_type": {
+                    "type": "string",
+                    "enum": ["task", "child", "by_agent", "all", "subtasks", "tree"],
+                    "description": "Type of query to perform",
+                },
                 "task_id": {
                     "type": "string",
-                    "description": "Task to retrieve",
+                    "description": "Task ID (required for query_type='task')",
+                    "default": None,
                 },
-            },
-            "required": ["task_id"],
-        },
-    },
-    "get_child_tasks": {
-        "description": "Get all tasks created by a given agent.",
-        "parameters": {
-            "type": "object",
-            "properties": {
                 "parent_agent_id": {
                     "type": "string",
-                    "description": "Agent whose child tasks to retrieve",
+                    "description": "Agent ID (required for query_type='child')",
+                    "default": None,
                 },
-            },
-            "required": ["parent_agent_id"],
-        },
-    },
-    "get_tasks_by_agent": {
-        "description": "Get all tasks assigned to a given agent.",
-        "parameters": {
-            "type": "object",
-            "properties": {
                 "assigned_agent_id": {
                     "type": "string",
-                    "description": "Agent whose assigned tasks to retrieve",
+                    "description": "Agent ID (required for query_type='by_agent')",
+                    "default": None,
+                },
+                "parent_task_id": {
+                    "type": "string",
+                    "description": "Parent task ID (required for query_type='subtasks')",
+                    "default": None,
+                },
+                "root_task_id": {
+                    "type": "string",
+                    "description": "Root task ID (required for query_type='tree')",
+                    "default": None,
                 },
             },
-            "required": ["assigned_agent_id"],
-        },
-    },
-    "get_all_tasks": {
-        "description": "Get all tasks in the task registry.",
-        "parameters": {
-            "type": "object",
-            "properties": {},
+            "required": ["query_type"],
         },
     },
     "create_subtask": {
@@ -1125,32 +1067,7 @@ TOOL_SCHEMAS_TASKS: dict[str, dict] = {
             "required": ["task_id", "parent_task_id", "parent_agent_id", "description"],
         },
     },
-    "get_subtasks": {
-        "description": "Get all direct subtasks of a given task.",
-        "parameters": {
-            "type": "object",
-            "properties": {
-                "parent_task_id": {
-                    "type": "string",
-                    "description": "ID of the parent task whose subtasks to retrieve",
-                },
-            },
-            "required": ["parent_task_id"],
-        },
-    },
-    "get_task_tree": {
-        "description": "Get a task with all its subtasks recursively as a nested tree.",
-        "parameters": {
-            "type": "object",
-            "properties": {
-                "root_task_id": {
-                    "type": "string",
-                    "description": "ID of the root task to build the tree from",
-                },
-            },
-            "required": ["root_task_id"],
-        },
-    },
+
     "wait_for_task": {
         "description": (
             "Poll until a task reaches a terminal state (completed or failed) "
@@ -1337,6 +1254,27 @@ TOOL_SCHEMAS_HANDOFFS: dict[str, dict] = {
             },
         },
     },
+    "wait_for_handoff": {
+        "description": (
+            "Wait until a handoff is completed or timeout expires. "
+            "Uses the event bus for low-latency notification."
+        ),
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "handoff_id": {
+                    "type": "integer",
+                    "description": "Handoff ID to wait for",
+                },
+                "timeout_s": {
+                    "type": "number",
+                    "default": 30.0,
+                    "description": "Maximum seconds to wait",
+                },
+            },
+            "required": ["handoff_id"],
+        },
+    },
 }
 
 
@@ -1374,20 +1312,27 @@ TOOL_SCHEMAS_DEPS: dict[str, dict] = {
             "required": ["dependent_agent_id", "depends_on_agent_id"],
         },
     },
-    "check_dependencies": {
+    "manage_dependencies": {
         "description": (
-            "Check whether an agent has unsatisfied cross-agent dependencies. "
-            "Returns blocked:true if any dependency is not satisfied."
+            "Unified dependency query. "
+            "mode='check' returns blocked status and unsatisfied list. "
+            "mode='blockers' returns the same info (alias). "
+            "mode='assert' returns a structured can_start boolean."
         ),
         "parameters": {
             "type": "object",
             "properties": {
+                "mode": {
+                    "type": "string",
+                    "enum": ["check", "blockers", "assert"],
+                    "description": "Query mode",
+                },
                 "agent_id": {
                     "type": "string",
                     "description": "Agent to check dependencies for",
                 },
             },
-            "required": ["agent_id"],
+            "required": ["mode", "agent_id"],
         },
     },
     "satisfy_dependency": {
@@ -1401,35 +1346,6 @@ TOOL_SCHEMAS_DEPS: dict[str, dict] = {
                 },
             },
             "required": ["dep_id"],
-        },
-    },
-    "get_blockers": {
-        "description": "Alias for check_dependencies — get unsatisfied blockers for an agent.",
-        "parameters": {
-            "type": "object",
-            "properties": {
-                "agent_id": {
-                    "type": "string",
-                    "description": "Agent to check blockers for",
-                },
-            },
-            "required": ["agent_id"],
-        },
-    },
-    "assert_can_start": {
-        "description": (
-            "Structured check before starting significant work. "
-            "Returns can_start:false with blocker details if dependencies are unmet."
-        ),
-        "parameters": {
-            "type": "object",
-            "properties": {
-                "agent_id": {
-                    "type": "string",
-                    "description": "Agent about to start work",
-                },
-            },
-            "required": ["agent_id"],
         },
     },
     "get_all_dependencies": {

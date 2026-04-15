@@ -69,13 +69,10 @@ def create_parser() -> argparse.ArgumentParser:
     p.add_argument("--all", action="store_true", dest="include_stale")
     p.add_argument("--stale-timeout", type=float, default=600.0)
 
-    # lineage
-    p = sub.add_parser("lineage", parents=[shared], help="Get agent ancestors and descendants")
+    # agent-relations
+    p = sub.add_parser("agent-relations", parents=[shared], help="Get agent lineage or siblings")
     p.add_argument("agent_id", help="Agent to query")
-
-    # siblings
-    p = sub.add_parser("siblings", parents=[shared], help="Get agent's sibling agents")
-    p.add_argument("agent_id", help="Agent whose siblings to find")
+    p.add_argument("--mode", default="lineage", choices=["lineage", "siblings"], help="Relation type to fetch")
 
     # acquire-lock
     p = sub.add_parser("acquire-lock", parents=[shared], help="Acquire a document lock")
@@ -114,16 +111,12 @@ def create_parser() -> argparse.ArgumentParser:
     p = sub.add_parser("list-locks", parents=[shared], help="List all active locks")
     p.add_argument("--agent-id", default=None, help="Filter to locks held by this agent")
 
-    # release-agent-locks
-    p = sub.add_parser("release-agent-locks", parents=[shared], help="Release all locks held by an agent")
-    p.add_argument("agent_id", help="Agent whose locks to release")
-
-    # reap-expired-locks
-    sub.add_parser("reap-expired-locks", parents=[shared], help="Clear all expired locks")
-
-    # reap-stale-agents
-    p = sub.add_parser("reap-stale-agents", parents=[shared], help="Mark stale agents as stopped")
-    p.add_argument("--timeout", type=float, default=600.0)
+    # admin-locks
+    p = sub.add_parser("admin-locks", parents=[shared], help="Administrative lock operations")
+    p.add_argument("action", choices=["release_by_agent", "reap_expired", "reap_stale"], help="Action to perform")
+    p.add_argument("--agent-id", default=None, help="Agent whose locks to release (for release_by_agent)")
+    p.add_argument("--grace-seconds", type=float, default=0.0, help="Grace period for reap_expired")
+    p.add_argument("--timeout", type=float, default=600.0, help="Stale timeout for reap_stale")
 
     # broadcast
     p = sub.add_parser("broadcast", parents=[shared], help="Announce intention to siblings")
@@ -141,10 +134,11 @@ def create_parser() -> argparse.ArgumentParser:
     p.add_argument("broadcast_id", type=int, help="Broadcast ID to acknowledge")
     p.add_argument("agent_id", help="Agent acknowledging the broadcast")
 
-    # broadcast-status
-    p = sub.add_parser("broadcast-status", parents=[shared],
-                       help="Get broadcast acknowledgment status")
-    p.add_argument("broadcast_id", type=int, help="Broadcast ID to query")
+    # wait-for-broadcast-acks
+    p = sub.add_parser("wait-for-broadcast-acks", parents=[shared],
+                       help="Wait until all broadcast acknowledgments are received")
+    p.add_argument("broadcast_id", type=int, help="Broadcast ID to wait for")
+    p.add_argument("--timeout", type=float, default=30.0, help="Timeout in seconds (default: 30)")
 
     # acknowledge-handoff
     p = sub.add_parser("acknowledge-handoff", parents=[shared], help="Acknowledge a handoff")
@@ -164,6 +158,11 @@ def create_parser() -> argparse.ArgumentParser:
     p.add_argument("--status", default=None, help="Filter by status (pending/acknowledged/completed/cancelled)")
     p.add_argument("--from-agent-id", default=None, dest="from_agent_id", help="Filter by sender")
     p.add_argument("--limit", type=int, default=50)
+
+    # wait-for-handoff
+    p = sub.add_parser("wait-for-handoff", parents=[shared], help="Wait until a handoff is completed")
+    p.add_argument("handoff_id", type=int, help="Handoff ID to wait for")
+    p.add_argument("--timeout", type=float, default=30.0, help="Timeout in seconds (default: 30)")
 
     # wait-for-locks
     p = sub.add_parser("wait-for-locks", parents=[shared], help="Poll until locks are released")
@@ -239,26 +238,14 @@ def create_parser() -> argparse.ArgumentParser:
     p.add_argument("agent_id", nargs="?", default=None, help="Root agent (default: oldest root)")
 
     # assess
-    p = sub.add_parser("assess", parents=[shared], help="Run an assessment suite")
-    p.add_argument("--suite", dest="suite_path", required=True, help="Path to the JSON test suite file")
+    p = sub.add_parser("assess", parents=[shared], help="Run an assessment suite or score the live session")
+    p.add_argument("--suite", dest="suite_path", default=None, help="Path to the JSON test suite file (omit for live session)")
     p.add_argument("--format", default="markdown", choices=["markdown", "json"],
                    help="Output format (default: markdown)")
     p.add_argument("--output", default=None, dest="output_path",
                    help="Write report to file instead of stdout")
     p.add_argument("--graph-agent-id", dest="graph_agent_id", default=None,
                    help="Filter traces to this graph agent role (e.g. planner, executor)")
-
-    # assess-session
-    p = sub.add_parser(
-        "assess-session", parents=[shared],
-        help="Score the current live session (no suite file needed)",
-    )
-    p.add_argument("--format", default="markdown", choices=["markdown", "json"],
-                   help="Output format (default: markdown)")
-    p.add_argument("--output", default=None,
-                   help="Write report to file instead of stdout")
-    p.add_argument("--graph-agent-id", dest="graph_agent_id", default=None,
-                   help="Filter traces to this graph agent role")
     p.add_argument("--scope", default="project", choices=["project", "all"],
                    help="'project' (default) limits to current worktree; 'all' scores every agent")
 
@@ -318,16 +305,13 @@ def create_parser() -> argparse.ArgumentParser:
                    help="Task ID blocking this task")
     p.add_argument("--error", default=None, help="Error message (records to dead letter queue)")
 
-    p = sub.add_parser("get-task", parents=[shared], help="Get a single task by ID")
-    p.add_argument("task_id", help="Task to retrieve")
-
-    p = sub.add_parser("get-child-tasks", parents=[shared], help="Get all tasks created by an agent")
-    p.add_argument("parent_agent_id", help="Agent whose child tasks to retrieve")
-
-    p = sub.add_parser("get-tasks-by-agent", parents=[shared], help="Get all tasks assigned to an agent")
-    p.add_argument("assigned_agent_id", help="Agent whose assigned tasks to retrieve")
-
-    sub.add_parser("get-all-tasks", parents=[shared], help="Get all tasks in the registry")
+    p = sub.add_parser("query-tasks", parents=[shared], help="Unified task query")
+    p.add_argument("query_type", choices=["task", "child", "by_agent", "all", "subtasks", "tree"], help="Query type")
+    p.add_argument("--task-id", default=None, help="Task ID (for query_type='task')")
+    p.add_argument("--parent-agent-id", default=None, help="Agent ID (for query_type='child')")
+    p.add_argument("--assigned-agent-id", default=None, help="Agent ID (for query_type='by_agent')")
+    p.add_argument("--parent-task-id", default=None, help="Parent task ID (for query_type='subtasks')")
+    p.add_argument("--root-task-id", default=None, help="Root task ID (for query_type='tree')")
 
     p = sub.add_parser("create-subtask", parents=[shared], help="Create a subtask under an existing parent task")
     p.add_argument("task_id", help="Unique subtask ID (e.g. parent_task_id.0)")
@@ -337,12 +321,6 @@ def create_parser() -> argparse.ArgumentParser:
     p.add_argument("--depends-on", nargs="+", default=None, dest="depends_on",
                    help="Task IDs that must complete first")
     p.add_argument("--priority", type=int, default=0, help="Subtask priority (higher values execute first; default 0)")
-
-    p = sub.add_parser("get-subtasks", parents=[shared], help="Get all direct subtasks of a task")
-    p.add_argument("parent_task_id", help="ID of the parent task whose subtasks to retrieve")
-
-    p = sub.add_parser("get-task-tree", parents=[shared], help="Get a task with all subtasks recursively")
-    p.add_argument("root_task_id", help="ID of the root task to build the tree from")
 
     # --- DEAD LETTER QUEUE ---
     p = sub.add_parser("retry-task", parents=[shared], help="Retry a task from the dead letter queue")
@@ -389,17 +367,12 @@ def create_parser() -> argparse.ArgumentParser:
                    choices=["task_completed", "agent_registered", "agent_stopped"],
                    help="Condition for dependency satisfaction (default: task_completed)")
 
-    p = sub.add_parser("check-dependencies", parents=[shared], help="Check if an agent's dependencies are satisfied")
+    p = sub.add_parser("manage-dependencies", parents=[shared], help="Unified dependency query")
+    p.add_argument("mode", choices=["check", "blockers", "assert"], help="Query mode")
     p.add_argument("agent_id", help="Agent whose dependencies to check")
 
     p = sub.add_parser("satisfy-dependency", parents=[shared], help="Mark a dependency as satisfied")
     p.add_argument("dep_id", type=int, help="Dependency ID to mark as satisfied")
-
-    p = sub.add_parser("get-blockers", parents=[shared], help="Get blocking dependencies for an agent")
-    p.add_argument("agent_id", help="Agent to check blockers for")
-
-    p = sub.add_parser("assert-can-start", parents=[shared], help="Assert whether an agent can start work")
-    p.add_argument("agent_id", help="Agent to check start eligibility for")
 
     p = sub.add_parser("get-all-dependencies", parents=[shared], help="List all declared dependencies")
     p.add_argument("--dependent-agent-id", default=None, dest="dependent_agent_id",
@@ -485,18 +458,19 @@ def create_parser() -> argparse.ArgumentParser:
 _COMMANDS = {
     "serve": "cmd_serve", "serve-mcp": "cmd_serve_mcp", "serve-sse": "cmd_serve_sse", "status": "cmd_status",
     "register": "cmd_register", "heartbeat": "cmd_heartbeat", "deregister": "cmd_deregister",
-    "list-agents": "cmd_list_agents", "lineage": "cmd_lineage", "siblings": "cmd_siblings",
+    "list-agents": "cmd_list_agents", "agent-relations": "cmd_agent_relations",
     "acquire-lock": "cmd_acquire_lock", "release-lock": "cmd_release_lock",
     "refresh-lock": "cmd_refresh_lock", "lock-status": "cmd_lock_status",
     "list-locks": "cmd_list_locks",
-    "release-agent-locks": "cmd_release_agent_locks", "reap-expired-locks": "cmd_reap_expired_locks",
-    "reap-stale-agents": "cmd_reap_stale_agents", "broadcast": "cmd_broadcast",
+    "admin-locks": "cmd_admin_locks", "broadcast": "cmd_broadcast",
     "acknowledge-broadcast": "cmd_acknowledge_broadcast",
-    "broadcast-status": "cmd_broadcast_status",
+    "wait-for-broadcast-acks": "cmd_wait_for_broadcast_acks",
+
     "acknowledge-handoff": "cmd_acknowledge_handoff",
     "complete-handoff": "cmd_complete_handoff",
     "cancel-handoff": "cmd_cancel_handoff",
     "get-handoffs": "cmd_get_handoffs",
+    "wait-for-handoff": "cmd_wait_for_handoff",
     "wait-for-locks": "cmd_wait_for_locks", "notify-change": "cmd_notify_change",
     "get-notifications": "cmd_get_notifications", "prune-notifications": "cmd_prune_notifications",
     "wait-for-notifications": "cmd_wait_for_notifications",
@@ -504,7 +478,7 @@ _COMMANDS = {
     "load-spec": "cmd_load_spec", "validate-spec": "cmd_validate_spec",
     "scan-project": "cmd_scan_project", "dashboard": "cmd_dashboard",
     "agent-status": "cmd_agent_status", "assess": "cmd_assess",
-    "assess-session": "cmd_assess_session",
+
     "agent-tree": "cmd_agent_tree",
     "doctor": "cmd_doctor",
     "init": "cmd_init",
@@ -516,21 +490,15 @@ _COMMANDS = {
     "create-task": "cmd_create_task",
     "assign-task": "cmd_assign_task",
     "update-task-status": "cmd_update_task_status",
-    "get-task": "cmd_get_task",
-    "get-child-tasks": "cmd_get_child_tasks",
-    "get-tasks-by-agent": "cmd_get_tasks_by_agent",
-    "get-all-tasks": "cmd_get_all_tasks",
+    "query-tasks": "cmd_query_tasks",
     "create-subtask": "cmd_create_subtask",
-    "get-subtasks": "cmd_get_subtasks",
-    "get-task-tree": "cmd_get_task_tree",
+
     "declare-work-intent": "cmd_declare_work_intent",
     "get-work-intents": "cmd_get_work_intents",
     "clear-work-intent": "cmd_clear_work_intent",
     "declare-dependency": "cmd_declare_dependency",
-    "check-dependencies": "cmd_check_dependencies",
+    "manage-dependencies": "cmd_manage_dependencies",
     "satisfy-dependency": "cmd_satisfy_dependency",
-    "get-blockers": "cmd_get_blockers",
-    "assert-can-start": "cmd_assert_can_start",
     "get-all-dependencies": "cmd_get_all_dependencies",
     "retry-task": "cmd_retry_task",
     "dead-letter-queue": "cmd_dead_letter_queue",

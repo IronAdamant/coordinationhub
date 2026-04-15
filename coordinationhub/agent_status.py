@@ -57,19 +57,22 @@ def get_agent_status_tool(
         ).fetchone()
         if agent_row is None:
             return {"error": f"Agent not found: {agent_id}"}
+        agent_row = dict(agent_row)
         resp_row = conn.execute(
             "SELECT * FROM agent_responsibilities WHERE agent_id = ?", (agent_id,)
         ).fetchone()
+        resp = dict(resp_row) if resp_row else {}
         lineage = lineage_fn(agent_id)
         owned_files = conn.execute(
             "SELECT document_path, task_description FROM file_ownership "
             "WHERE assigned_agent_id = ?", (agent_id,)
         ).fetchall()
+        owned_files = [dict(f) for f in owned_files]
         locks = conn.execute(
             "SELECT document_path, lock_type FROM document_locks WHERE locked_by = ?",
             (agent_id,)
         ).fetchall()
-    resp = dict(resp_row) if resp_row else {}
+        locks = [dict(l) for l in locks]
     responsibilities = json.loads(resp.get("responsibilities") or "[]") if resp else []
     # owned_files_with_tasks: Agent ID -> file -> task description
     owned_files_with_tasks = [
@@ -297,16 +300,16 @@ def get_file_agent_map_tool(
                 LEFT JOIN agent_responsibilities ar ON fo.assigned_agent_id = ar.agent_id
                 ORDER BY fo.assigned_agent_id, fo.document_path
             """).fetchall()
-    entries = []
-    for row in rows:
-        resp = dict(row)
-        responsibilities = json.loads(resp.get("responsibilities") or "[]") if resp.get("responsibilities") else []
-        entries.append({
-            "document_path": row["document_path"],
-            "assigned_agent_id": row["assigned_agent_id"],
-            "graph_agent_id": row["graph_agent_id"] or "unknown",
-            "role": row["role"] or "unknown",
-            "responsibilities": responsibilities,
-            "task_description": row["task_description"],
-        })
-    return {"files": entries, "total": len(entries)}
+        entries = []
+        for row in rows:
+            resp = dict(row)
+            responsibilities = json.loads(resp.get("responsibilities") or "[]") if resp.get("responsibilities") else []
+            entries.append({
+                "document_path": resp["document_path"],
+                "assigned_agent_id": resp["assigned_agent_id"],
+                "graph_agent_id": resp["graph_agent_id"] or "unknown",
+                "role": resp["role"] or "unknown",
+                "responsibilities": responsibilities,
+                "task_description": resp["task_description"],
+            })
+        return {"files": entries, "total": len(entries)}

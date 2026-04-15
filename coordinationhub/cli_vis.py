@@ -358,33 +358,7 @@ def cmd_assess(args):
     engine = _engine_from_args(args)
     try:
         result = engine.run_assessment(
-            args.suite_path,
-            format=args.format,
-            graph_agent_id=getattr(args, "graph_agent_id", None),
-        )
-        if "error" in result:
-            print(f"Error: {result['error']}", file=sys.stderr)
-            return
-        if args.output:
-            Path(args.output).write_text(result.get("report", json.dumps(result, indent=2)), encoding="utf-8")
-            print(f"Report written to {args.output}")
-        else:
-            if result.get("report"):
-                print(result["report"])
-            else:
-                _print_json(result)
-    finally:
-        _close(engine)
-
-
-# ------------------------------------------------------------------ #
-# assess-session
-# ------------------------------------------------------------------ #
-
-def cmd_assess_session(args):
-    engine = _engine_from_args(args)
-    try:
-        result = engine.assess_current_session(
+            suite_path=getattr(args, "suite_path", None),
             format=args.format,
             graph_agent_id=getattr(args, "graph_agent_id", None),
             scope=getattr(args, "scope", "project"),
@@ -392,12 +366,13 @@ def cmd_assess_session(args):
         if "error" in result:
             print(f"Error: {result['error']}", file=sys.stderr)
             return
-        if args.output:
-            Path(args.output).write_text(
+        output_path = getattr(args, "output", None) or getattr(args, "output_path", None)
+        if output_path:
+            Path(output_path).write_text(
                 result.get("report", json.dumps(result, indent=2)),
                 encoding="utf-8",
             )
-            print(f"Report written to {args.output}")
+            print(f"Report written to {output_path}")
         else:
             if result.get("report"):
                 print(result["report"])

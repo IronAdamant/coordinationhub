@@ -24,34 +24,57 @@ class DependencyMixin:
         condition: str = "task_completed",
     ) -> dict[str, Any]:
         """Declare that dependent_agent needs depends_on_agent to finish first."""
-        return _deps.declare_dependency(
+        result = _deps.declare_dependency(
             self._connect, dependent_agent_id, depends_on_agent_id,
             depends_on_task_id, condition,
         )
+        self._publish_event(
+            "dependency.declared",
+            {
+                "dep_id": result.get("dep_id"),
+                "dependent_agent_id": dependent_agent_id,
+                "depends_on_agent_id": depends_on_agent_id,
+                "depends_on_task_id": depends_on_task_id,
+                "condition": condition,
+            },
+        )
+        return result
 
-    def check_dependencies(self, agent_id: str) -> dict[str, Any]:
-        """Check unsatisfied dependencies for an agent."""
-        unsatisfied = _deps.check_dependencies(self._connect, agent_id)
-        return {
-            "agent_id": agent_id,
-            "blocked": len(unsatisfied) > 0,
-            "unsatisfied": unsatisfied,
-        }
+    def manage_dependencies(
+        self,
+        mode: str,
+        agent_id: str,
+    ) -> dict[str, Any]:
+        """Unified dependency query: check | blockers | assert."""
+        if mode == "check":
+            unsatisfied = _deps.check_dependencies(self._connect, agent_id)
+            return {
+                "agent_id": agent_id,
+                "blocked": len(unsatisfied) > 0,
+                "unsatisfied": unsatisfied,
+            }
+        if mode == "blockers":
+            unsatisfied = _deps.check_dependencies(self._connect, agent_id)
+            return {
+                "agent_id": agent_id,
+                "blocked": len(unsatisfied) > 0,
+                "unsatisfied": unsatisfied,
+            }
+        if mode == "assert":
+            unsatisfied = _deps.check_dependencies(self._connect, agent_id)
+            if unsatisfied:
+                return {"can_start": False, "blockers": unsatisfied}
+            return {"can_start": True}
+        return {"error": f"Unknown mode: {mode!r}"}
 
     def satisfy_dependency(self, dep_id: int) -> dict[str, Any]:
         """Mark a dependency as satisfied."""
-        return _deps.satisfy_dependency(self._connect, dep_id)
-
-    def get_blockers(self, agent_id: str) -> dict[str, Any]:
-        """Alias for check_dependencies."""
-        return self.check_dependencies(agent_id)
-
-    def assert_can_start(self, agent_id: str) -> dict[str, Any]:
-        """Structured check before starting work. Returns can_start bool."""
-        result = self.check_dependencies(agent_id)
-        if result["blocked"]:
-            return {"can_start": False, "blockers": result["unsatisfied"]}
-        return {"can_start": True}
+        result = _deps.satisfy_dependency(self._connect, dep_id)
+        self._publish_event(
+            "dependency.satisfied",
+            {"dep_id": dep_id},
+        )
+        return result
 
     def get_all_dependencies(
         self, dependent_agent_id: str | None = None,

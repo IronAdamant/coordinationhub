@@ -231,6 +231,8 @@ def report_subagent_spawned(
             ).fetchone()
 
         spawn_id = row["task_id"] if row else None
+        description = row["description"] if row else None
+        prompt = row["prompt"] if row else None
 
         if spawn_id:
             conn.execute(
@@ -243,8 +245,8 @@ def report_subagent_spawned(
             "parent_agent_id": parent_agent_id,
             "child_agent_id": child_agent_id,
             "spawn_id": spawn_id,
-            "description": row["description"] if row else None,
-            "prompt": row["prompt"] if row else None,
+            "description": description,
+            "prompt": prompt,
         }
 
 

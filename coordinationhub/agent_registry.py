@@ -72,16 +72,16 @@ def get_descendants_status(
             """,
             (ancestor_id,),
         ).fetchall()
-    return [
-        {
-            "depth": row["depth"],
-            "agent_id": row["descendant_id"],
-            "status": row["status"],
-            "last_heartbeat": row["last_heartbeat"],
-            "current_task": row["current_task"],
-        }
-        for row in rows
-    ]
+        return [
+            {
+                "depth": row["depth"],
+                "agent_id": row["descendant_id"],
+                "status": row["status"],
+                "last_heartbeat": row["last_heartbeat"],
+                "current_task": row["current_task"],
+            }
+            for row in rows
+        ]
 
 
 # ------------------------------------------------------------------ #
