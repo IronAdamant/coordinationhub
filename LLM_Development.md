@@ -1,11 +1,84 @@
 # LLM_Development.md — CoordinationHub
 
-**Version:** <!-- GEN:version -->0.7.1<!-- /GEN -->
+**Version:** <!-- GEN:version -->0.7.2<!-- /GEN -->
 **Last updated:** 2026-04-15
 
 ## Change Log
 
 All significant changes to the CoordinationHub project are documented here in reverse chronological order.
+
+---
+
+## 2026-04-15 — v0.7.2 Dashboard Fix + Clarity Pass + Zero-Dep CI
+
+### Motivation
+
+Three concurrent issues surfaced after v0.7.1 shipped:
+
+1. The web dashboard rendered a wall of raw JavaScript source under "Active Locks" every time it loaded. Every screenshot of the dashboard in the wild was broken.
+2. The dashboard panels gave a human reader no indication of what they represented or when they would populate.
+3. The CI workflows carried a Node.js 20 deprecation warning on `actions/checkout@v4`, `actions/setup-python@v5`, and `stefanzweifel/git-auto-commit-action@v5` that was scheduled to break by September 2026.
+
+### Change 1 — Dashboard script-tag bug (plugins/dashboard/dashboard.py)
+
+**Bug**: A stray `})();` followed by `</script>` at line 272–273 of the embedded dashboard HTML prematurely closed both the IIFE and the `<script>` block. Every render function below that point (`escapeHTML`, `ageAgo`, `renderAgentTree`, `renderTasks`, `renderIntents`, `renderHandoffs`, `renderDependencies`, `renderLocks`) became plain HTML text inside the document body instead of being declared on window. The data-fetching IIFE above those lines ran fine, then called undefined renderers, so every panel except the headers was empty; meanwhile the function source leaked as visible text beneath "Active Locks".
+
+**Fix**: delete the two stray lines so the script spans from its opening `<script>` on line 220 to a single closing `</script>` at the end. One IIFE, one script block.
+
+### Change 2 — Dashboard clarity pass (plugins/dashboard/dashboard.py + dashboard_html.py + get_dashboard_data)
+
+**Gap**: empty panels read "No handoffs recorded" / "No active work intents" / "No dependencies declared" without any indication of what those sections meant, what tool call would populate them, or how to interpret the status badges and lock types.
+
+**Fix**:
+
+- Header gains a one-line description of what the dashboard represents ("Live view of the multi-agent swarm working on this project — who is alive, what they are doing, which files they hold, and where they are blocked.").
+- Every panel gets a blurb below the title explaining when it populates, using concrete references to the MCP tool calls (e.g. "An agent calls `manage_work_intents(action='declare')` to reserve a file for a short TTL").
+- Empty-state messages replaced with actionable hints describing the exact tool call that would fill each section.
+- Agent-tree nodes widen from 160×44 to 240×58; ID truncation grows from 20 to 30 chars; `current_task` truncation grows from 26 to 56 chars; a small `N lock(s)` badge appears in the bottom-right of each node when the agent holds any locks.
+- `get_dashboard_data` now `LEFT JOIN`s `agent_responsibilities` so the tree receives `current_task` values. Previously `current_task` was always `NULL` in the dashboard payload because it lives in the responsibilities table, not `agents`. The agent-tree panel showed only agent IDs with no task text even though the CLI `agent-tree` command rendered tasks fine.
+- `get_dashboard_data` also `LEFT JOIN`s `file_ownership` so the locks payload carries `owner_agent_id`. The dashboard uses this to render a `⚠ owned by <agent>` marker whenever a lock owner differs from the file owner, matching the CLI `agent-tree` tree output.
+- Active Locks panel promoted to full-width; groups by path; each row shows "held Xs ago · TTL Ys".
+- Legends under the Agent Tree header (green/grey/red status dots) and under the Active Locks header (exclusive / shared chips) explain the colour coding.
+
+### Change 3 — dashboard_html.py split
+
+**Gap**: the clarity pass took `plugins/dashboard/dashboard.py` from ~483 to 552 code LOC, breaking the project's 500-code-LOC-per-file rule (CLAUDE.md, GLOBAL_AGENTS.md).
+
+**Fix**: the `DASHBOARD_HTML` constant (~478 code LOC of pure CSS + HTML + JS template) moved into a sibling `dashboard_html.py`. `dashboard.py` now contains only the Python logic (data aggregator + `_serve_dashboard` / `_serve_api_dashboard` handlers) and re-exports `DASHBOARD_HTML` via `from .dashboard_html import DASHBOARD_HTML`. Net result: `dashboard.py` is 82 code LOC, `dashboard_html.py` is 478 code LOC; every existing `from .dashboard import DASHBOARD_HTML` continues to work unchanged.
+
+### Change 4 — Zero-dep CI (.github/workflows/test.yml + publish.yml)
+
+**Gap**: GitHub flagged three marketplace actions as Node.js 20 deprecated with removal scheduled Sept 16 2026: `actions/checkout@v4`, `actions/setup-python@v5`, and `stefanzweifel/git-auto-commit-action@v5`. `pypa/gh-action-pypi-publish@release/v1` was not flagged but did not match the project's zero-third-party-dep ethos either.
+
+**Fix**: replaced every marketplace action with an inline shell step using tools pre-installed on `ubuntu-latest`:
+
+- `actions/checkout@v4` → `git init`, `git remote add origin`, `git -c protocol.version=2 fetch --depth=1 origin $SHA`, `git checkout --force FETCH_HEAD`. Works for push events, same-repo PRs, and fork PRs (GitHub syncs `refs/pull/N/head` into the base repo).
+- `actions/setup-python@v5` → a short shell step that globs `/opt/hostedtoolcache/Python/<ver>.*/x64` (runner pre-installs 3.10 / 3.11 / 3.12 / 3.13 / 3.14) and appends `$PY_DIR/bin` to `$GITHUB_PATH`.
+- `stefanzweifel/git-auto-commit-action@v5` → inline `git diff --quiet` gate, `git add` / `commit` / `push`, with `origin` rewritten to `https://x-access-token:${GITHUB_TOKEN}@github.com/${REPO}.git` and `permissions: contents: write` granted at job scope.
+- `pypa/gh-action-pypi-publish@release/v1` → curl-based OIDC JWT exchange against `https://pypi.org/_/oidc/mint-token` + `pip install twine` + `twine upload`. Trusted publishing is preserved; no PyPI API token secret is added.
+
+Runtime tool chain now uses only what `ubuntu-latest` ships (git, curl, python, pip), plus `build` and `twine` pip-installed at job time. Both workflows ran green end-to-end after the switch.
+
+### Change 5 — README showcase + screenshots tracked
+
+**Gap**: no visual of the dashboard in the README or on PyPI. `screenshots/` was blanket-excluded from git by `.gitignore`.
+
+**Fix**: dropped the blanket `screenshots/` rule in `.gitignore` and replaced it with narrow patterns that ignore only ad-hoc scratch drops (`screenshots/tmp/`, `screenshots/pasted*`, `screenshots/screencapture*`, `*.xcf`, `*.psd`). Added a curated `screenshots/dashboard.png` of the refreshed dashboard in its empty state — which reads as a visual tour of every primitive the hub exposes — and embedded it near the top of `README.md`. Because `pyproject.toml` sets `readme = "README.md"`, the image propagates into the PyPI long description too.
+
+### Verification
+
+- 392 tests pass, 1 skipped (same baseline as v0.7.1).
+- `python scripts/gen_docs.py --check` clean across all five doc targets.
+- Every file in `coordinationhub/` is ≤ 500 code LOC (largest: `core_locking.py` at 496, `dashboard_html.py` at 478).
+- Schemas ↔ dispatch ↔ CLI handlers all in sync.
+- Both workflows (`Tests` on push, `Publish to PyPI` on release) run without any third-party GitHub Actions.
+
+### Counts
+
+| Version | Tools | CLI Commands | Schema |
+|---------|-------|--------------|--------|
+| v0.7.2 | 50 | 74 | 20 |
+| v0.7.1 | 50 | 74 | 20 |
 
 ---
 

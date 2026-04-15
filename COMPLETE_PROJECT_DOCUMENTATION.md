@@ -1,7 +1,37 @@
 # CoordinationHub — Complete Project Documentation
 
-**Version:** <!-- GEN:version -->0.7.1<!-- /GEN -->
+**Version:** <!-- GEN:version -->0.7.2<!-- /GEN -->
 **Last updated:** 2026-04-15
+
+## v0.7.2 Changelog — Dashboard Fix + Clarity Pass + Zero-Dep CI
+
+### Motivation
+
+The web dashboard had a latent HTML bug that silently broke every section below the Agent Tree. Simultaneously, the dashboard lacked enough context for a human reader to interpret an idle panel, and the CI workflows carried a Node.js 20 deprecation that was scheduled to break in September 2026. This release fixes all three.
+
+### Changes
+
+- **Dashboard script-tag bug** (`plugins/dashboard/dashboard.py`): a stray `})();` followed by `</script>` in the middle of the JS body prematurely closed the IIFE and the `<script>` block. Every render function below it (`escapeHTML`, `ageAgo`, `renderAgentTree`, `renderTasks`, `renderIntents`, `renderHandoffs`, `renderDependencies`, `renderLocks`) became plain HTML text, which is why "Active Locks" rendered a wall of raw JavaScript source instead of the locks list in every pre-v0.7.2 screenshot. Fix: delete the two stray lines so the script spans the full body.
+- **Dashboard clarity pass** (`plugins/dashboard/dashboard.py` + new `plugins/dashboard/dashboard_html.py`):
+  - Header gets a one-line description of what the dashboard represents.
+  - Every panel gets a blurb under the title explaining when it populates (meta-tool call, lifecycle event, or hook firing).
+  - Agent-tree nodes widen from 160×44 to 240×58, fit full IDs up to 30 chars and full tasks up to 56 chars, and show a `N lock(s)` badge when the agent holds any. Empty-task agents render `(no current task)` in italic rather than blank.
+  - `get_dashboard_data` now `LEFT JOIN`s `agent_responsibilities` so the tree receives `current_task` (previously always `NULL` because the value lives in a sibling table).
+  - Active Locks promoted to full-width, groups by path, shows lock age + remaining TTL, and flags boundary crossings (`⚠ owned by <agent>`) when the locked file is owned by a different agent in `file_ownership`.
+  - Legends under the Agent Tree and Active Locks headers explain the status-dot colors and the exclusive/shared lock chips.
+  - Empty-state messages tell the reader which MCP tool or hook fires to populate each panel.
+- **Zero-dep CI** (`.github/workflows/test.yml`, `.github/workflows/publish.yml`): removed every marketplace action. `actions/checkout@v4` → `git init` + `fetch --depth=1 <SHA>` + `checkout FETCH_HEAD`; `actions/setup-python@v5` → `ls /opt/hostedtoolcache/Python/<ver>*/x64/bin >> $GITHUB_PATH`; `stefanzweifel/git-auto-commit-action@v5` → inline `git diff/add/commit/push` with a GITHUB_TOKEN-rewritten remote URL; `pypa/gh-action-pypi-publish@release/v1` → `curl` against GitHub's OIDC provider → `curl` to `pypi.org/_/oidc/mint-token` → `twine upload`. OIDC trusted publishing is preserved; no PyPI API token secret is introduced. Sidesteps the Node.js 20 deprecation on every flagged action.
+- **File-size rule restored** (`plugins/dashboard/dashboard_html.py`): the clarity pass pushed `dashboard.py` to 552 code LOC. Extracted the ~478-LOC `DASHBOARD_HTML` template into a sibling module; `dashboard.py` is now 82 code LOC (data aggregator + HTTP handlers) and re-exports `DASHBOARD_HTML` so existing import sites are unchanged.
+- **README showcase** (`screenshots/dashboard.png`, `README.md`, `.gitignore`): dropped the blanket `screenshots/` exclude from `.gitignore` in favour of narrow patterns that ignore only ad-hoc scratch drops (`screenshots/tmp/`, `pasted*`, `screencapture*`, `*.xcf`, `*.psd`). Added a curated `dashboard.png` screenshot and embedded it near the top of `README.md` so the PyPI long description and the GitHub repo landing page get a visual showcase.
+
+### Counts
+
+| Version | Tools | CLI Commands | Schema |
+|---------|-------|--------------|--------|
+| v0.7.2 | 50 | 74 | 20 |
+| v0.7.1 | 50 | 74 | 20 |
+
+---
 
 ## v0.7.1 Changelog — Polish Pass (File-Size Rule Enforcement + Doc Parity)
 
