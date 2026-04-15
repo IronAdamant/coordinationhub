@@ -51,7 +51,13 @@ def get_dashboard_data(connect: ConnectFn) -> dict[str, Any]:
 
     return {
         "agents": _dict(conn.execute(
-            "SELECT * FROM agents WHERE status != 'stopped' ORDER BY started_at"
+            """
+            SELECT a.*, r.current_task, r.role, r.graph_agent_id
+            FROM agents a
+            LEFT JOIN agent_responsibilities r ON r.agent_id = a.agent_id
+            WHERE a.status != 'stopped'
+            ORDER BY a.started_at
+            """
         ).fetchall()),
         "tasks": _dict(conn.execute(
             "SELECT * FROM tasks ORDER BY created_at DESC"
@@ -66,7 +72,12 @@ def get_dashboard_data(connect: ConnectFn) -> dict[str, Any]:
             "SELECT * FROM agent_dependencies ORDER BY created_at DESC"
         ).fetchall()),
         "locks": _dict(conn.execute(
-            "SELECT * FROM document_locks ORDER BY locked_at DESC"
+            """
+            SELECT l.*, o.assigned_agent_id AS owner_agent_id
+            FROM document_locks l
+            LEFT JOIN file_ownership o ON o.document_path = l.document_path
+            ORDER BY l.locked_at DESC
+            """
         ).fetchall()),
     }
 
@@ -84,16 +95,20 @@ DASHBOARD_HTML = r"""<!DOCTYPE html>
 <style>
   * { box-sizing: border-box; margin: 0; padding: 0; }
   body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background: #0f1117; color: #e6e8ed; min-height: 100vh; }
-  header { background: #1a1d27; border-bottom: 1px solid #2d3148; padding: 12px 24px; display: flex; justify-content: space-between; align-items: center; }
-  header h1 { font-size: 18px; font-weight: 600; color: #8b5cf6; }
-  header .status { font-size: 12px; color: #6b7280; }
+  header { background: #1a1d27; border-bottom: 1px solid #2d3148; padding: 12px 24px; display: flex; justify-content: space-between; align-items: center; gap: 16px; }
+  header .brand h1 { font-size: 18px; font-weight: 600; color: #8b5cf6; }
+  header .brand p { font-size: 12px; color: #94a3b8; margin-top: 2px; }
+  header .status { font-size: 12px; color: #6b7280; text-align: right; }
   .dashboard { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; padding: 16px; }
   .panel { background: #1a1d27; border: 1px solid #2d3148; border-radius: 8px; padding: 16px; }
-  .panel h2 { font-size: 13px; font-weight: 600; color: #8b5cf6; text-transform: uppercase; letter-spacing: 0.05em; margin-bottom: 12px; border-bottom: 1px solid #2d3148; padding-bottom: 8px; }
+  .panel h2 { font-size: 13px; font-weight: 600; color: #8b5cf6; text-transform: uppercase; letter-spacing: 0.05em; margin-bottom: 4px; }
+  .panel .panel-blurb { font-size: 12px; color: #6b7280; margin-bottom: 10px; padding-bottom: 8px; border-bottom: 1px solid #2d3148; }
   .panel.full-width { grid-column: 1 / -1; }
+  .legend { font-size: 11px; color: #6b7280; display: inline-flex; gap: 10px; flex-wrap: wrap; margin-left: 8px; }
+  .legend .chip { display: inline-block; padding: 1px 6px; border-radius: 8px; font-size: 10px; }
 
   /* Agent Tree */
-  .agent-tree-container { height: 280px; overflow: auto; }
+  .agent-tree-container { height: 340px; overflow: auto; }
   .agent-tree-container svg { display: block; }
 
   /* Task Board */
@@ -163,22 +178,33 @@ DASHBOARD_HTML = r"""<!DOCTYPE html>
 </head>
 <body>
 <header>
-  <h1>CoordinationHub</h1>
-  <div class="status" id="timestamp">Loading...</div>
+  <div class="brand">
+    <h1>CoordinationHub</h1>
+    <p>Live view of the multi-agent swarm working on this project — who is alive, what they are doing, which files they hold, and where they are blocked.</p>
+  </div>
+  <div class="status" id="timestamp">Loading&hellip;</div>
 </header>
 
 <div class="dashboard">
   <!-- Agent Tree -->
   <div class="panel full-width">
-    <h2>Agent Tree</h2>
+    <h2>Agent Tree
+      <span class="legend">
+        <span><span class="chip" style="background:#1c2b1e;color:#4ade80;">&#9679;</span> active (heartbeat &lt; 10min)</span>
+        <span><span class="chip" style="background:#2a2d3a;color:#6b7280;">&#9679;</span> stopped</span>
+        <span><span class="chip" style="background:#2d1e1e;color:#f87171;">&#9679;</span> stale / unknown</span>
+      </span>
+    </h2>
+    <div class="panel-blurb">Each box is one agent. Parent&rarr;child edges show spawn lineage. The small grey line under the agent ID is the agent's current task.</div>
     <div class="agent-tree-container" id="agent-tree-container">
-      <svg id="agent-tree-svg" width="100%" height="260"></svg>
+      <svg id="agent-tree-svg" width="100%" height="320"></svg>
     </div>
   </div>
 
   <!-- Task Board -->
   <div class="panel">
     <h2>Task Registry</h2>
+    <div class="panel-blurb">Shared work board. Any agent can create a task; an orchestrator assigns it to a worker. Status flows pending &rarr; in_progress &rarr; completed/blocked.</div>
     <table class="task-table" id="task-table">
       <thead><tr>
         <th>Task ID</th><th>Status</th><th>Assigned</th><th>Description</th>
@@ -191,6 +217,7 @@ DASHBOARD_HTML = r"""<!DOCTYPE html>
   <!-- Work Intents -->
   <div class="panel">
     <h2>Work Intent Board</h2>
+    <div class="panel-blurb">Soft "I am about to touch this file" signals. Non-binding — agents use them to avoid colliding before acquiring a hard lock.</div>
     <div class="intent-grid" id="intent-grid"></div>
     <div class="timestamp" id="intent-timestamp"></div>
   </div>
@@ -198,6 +225,7 @@ DASHBOARD_HTML = r"""<!DOCTYPE html>
   <!-- Handoffs -->
   <div class="panel">
     <h2>Handoffs</h2>
+    <div class="panel-blurb">Explicit "I am done with this scope — please take over" events, acknowledged by the receiving agent(s).</div>
     <div class="handoff-list" id="handoff-list"></div>
     <div class="timestamp" id="handoff-timestamp"></div>
   </div>
@@ -205,13 +233,20 @@ DASHBOARD_HTML = r"""<!DOCTYPE html>
   <!-- Dependencies -->
   <div class="panel">
     <h2>Agent Dependencies</h2>
+    <div class="panel-blurb">"Agent X is waiting on agent Y to finish task T." Red = still blocked, green = satisfied.</div>
     <div class="dep-list" id="dep-list"></div>
     <div class="timestamp" id="dep-timestamp"></div>
   </div>
 
   <!-- Active Locks -->
-  <div class="panel">
-    <h2>Active Locks</h2>
+  <div class="panel full-width">
+    <h2>Active Locks
+      <span class="legend">
+        <span><span class="chip lock-exclusive">exclusive</span> one writer</span>
+        <span><span class="chip lock-shared">shared</span> multiple readers</span>
+      </span>
+    </h2>
+    <div class="panel-blurb">TTL-based file locks. If a lock crosses a file owned by another agent, the table flags it with &#9888; boundary.</div>
     <div class="lock-list" id="lock-list"></div>
     <div class="timestamp" id="lock-timestamp"></div>
   </div>
@@ -303,8 +338,17 @@ DASHBOARD_HTML = r"""<!DOCTYPE html>
     var roots = [];
     var agentMap = {};
 
+    // Roll up per-agent lock counts so each node can surface them.
+    var lockCounts = {};
+    var locks = data.locks || [];
+    for (var li = 0; li < locks.length; li++) {
+      var owner = locks[li].locked_by;
+      lockCounts[owner] = (lockCounts[owner] || 0) + 1;
+    }
+
     for (var i = 0; i < agents.length; i++) {
       var a = agents[i];
+      a.lock_count = lockCounts[a.agent_id] || 0;
       agentMap[a.agent_id] = a;
       var parentId = a.parent_id;
       if (!parentId) {
@@ -320,10 +364,10 @@ DASHBOARD_HTML = r"""<!DOCTYPE html>
       roots.push(agents[0].agent_id);
     }
 
-    var NODE_W = 160;
-    var NODE_H = 44;
-    var H_GAP = 40;
-    var V_GAP = 50;
+    var NODE_W = 240;
+    var NODE_H = 58;
+    var H_GAP = 60;
+    var V_GAP = 18;
     var PADDING = 24;
 
     var positions = {};
@@ -393,14 +437,22 @@ DASHBOARD_HTML = r"""<!DOCTYPE html>
       var p = positions[id];
       var statusCls = a.status === 'active' ? 'status-active' : (a.status === 'stopped' ? 'status-stopped' : 'status-unknown');
       var taskText = (a.current_task || '');
-      if (taskText.length > 18) taskText = taskText.substring(0, 18) + '\u2026';
+      var MAX_TASK = 56;
+      if (taskText.length > MAX_TASK) taskText = taskText.substring(0, MAX_TASK - 1) + '\u2026';
+      var MAX_ID = 30;
+      var idText = id.length > MAX_ID ? id.substring(0, MAX_ID - 1) + '\u2026' : id;
 
       rects.push('<g class="agent-node" transform="translate(' + p.x + ',' + p.y + ')">');
       rects.push('  <rect width="' + NODE_W + '" height="' + NODE_H + '"/>');
-      rects.push('  <circle class="status-dot ' + statusCls + '" cx="12" cy="12" r="5"/>');
-      rects.push('  <text x="24" y="18" font-weight="600" fill="#e6e8ed">' + escapeHTML(id.substring(0, 20)) + '</text>');
+      rects.push('  <circle class="status-dot ' + statusCls + '" cx="12" cy="14" r="5"/>');
+      rects.push('  <text x="24" y="19" font-weight="600" fill="#e6e8ed">' + escapeHTML(idText) + '</text>');
       if (taskText) {
-        rects.push('  <text x="8" y="34" font-size="10" fill="#6b7280">' + escapeHTML(taskText.substring(0, 26)) + '</text>');
+        rects.push('  <text x="10" y="38" font-size="10.5" fill="#94a3b8">' + escapeHTML(taskText) + '</text>');
+      } else {
+        rects.push('  <text x="10" y="38" font-size="10.5" font-style="italic" fill="#4b5563">(no current task)</text>');
+      }
+      if (a.lock_count) {
+        rects.push('  <text x="' + (NODE_W - 10) + '" y="51" font-size="9.5" fill="#6b7280" text-anchor="end">' + a.lock_count + ' lock' + (a.lock_count > 1 ? 's' : '') + '</text>');
       }
       rects.push('</g>');
     }
@@ -413,7 +465,7 @@ DASHBOARD_HTML = r"""<!DOCTYPE html>
     var tbody = document.getElementById('task-tbody');
     var tasks = data.tasks || [];
     if (tasks.length === 0) {
-      tbody.innerHTML = '<tr><td colspan="4" class="empty">No tasks registered</td></tr>';
+      tbody.innerHTML = '<tr><td colspan="4" class="empty">No tasks in the registry. Call create_task(parent_agent_id, description) from any agent to populate this board.</td></tr>';
     } else {
       var html = [];
       for (var i = 0; i < tasks.length; i++) {
@@ -435,7 +487,7 @@ DASHBOARD_HTML = r"""<!DOCTYPE html>
     var grid = document.getElementById('intent-grid');
     var intents = data.work_intents || [];
     if (intents.length === 0) {
-      grid.innerHTML = '<div class="empty">No active work intents</div>';
+      grid.innerHTML = '<div class="empty">No active intents. An agent calls manage_work_intents(action="declare") to reserve a file for a short TTL before starting cooperative work.</div>';
     } else {
       var html = [];
       for (var i = 0; i < intents.length; i++) {
@@ -457,7 +509,7 @@ DASHBOARD_HTML = r"""<!DOCTYPE html>
     var list = document.getElementById('handoff-list');
     var handoffs = data.handoffs || [];
     if (handoffs.length === 0) {
-      list.innerHTML = '<div class="empty">No handoffs recorded</div>';
+      list.innerHTML = '<div class="empty">No handoffs. A handoff is created when one agent is done with a scope and explicitly passes it to one or more named agents (who then acknowledge).</div>';
     } else {
       var html = [];
       for (var i = 0; i < handoffs.length; i++) {
@@ -482,7 +534,7 @@ DASHBOARD_HTML = r"""<!DOCTYPE html>
     var list = document.getElementById('dep-list');
     var deps = data.dependencies || [];
     if (deps.length === 0) {
-      list.innerHTML = '<div class="empty">No dependencies declared</div>';
+      list.innerHTML = '<div class="empty">No blocking relationships. An agent declares one with manage_dependencies(action="declare") to wait on another agent\'s task or lifecycle.</div>';
     } else {
       var html = [];
       for (var i = 0; i < deps.length; i++) {
@@ -509,19 +561,39 @@ DASHBOARD_HTML = r"""<!DOCTYPE html>
     var list = document.getElementById('lock-list');
     var locks = data.locks || [];
     if (locks.length === 0) {
-      list.innerHTML = '<div class="empty">No active locks</div>';
+      list.innerHTML = '<div class="empty">No active locks. Locks appear when an agent calls acquire_lock before writing to a file.</div>';
     } else {
-      var html = [];
+      // Bucket locks by path so the same file groups cleanly.
+      var byPath = {};
+      var order = [];
       for (var i = 0; i < locks.length; i++) {
         var l = locks[i];
-        var lt = l.lock_type || 'exclusive';
-        var ltCls = lt === 'exclusive' ? 'lock-exclusive' : 'lock-shared';
-        html.push('<div class="lock-item">');
-        html.push('<span class="lock-path">' + escapeHTML(l.document_path) + '</span>');
-        html.push('<div style="display:flex;gap:6px;align-items:center;">');
-        html.push('<span class="lock-agent">' + escapeHTML(l.locked_by) + '</span>');
-        html.push('<span class="lock-type ' + ltCls + '">' + escapeHTML(lt) + '</span>');
-        html.push('</div></div>');
+        if (!byPath[l.document_path]) { byPath[l.document_path] = []; order.push(l.document_path); }
+        byPath[l.document_path].push(l);
+      }
+      var html = [];
+      for (var pi = 0; pi < order.length; pi++) {
+        var path = order[pi];
+        var group = byPath[path];
+        for (var gi = 0; gi < group.length; gi++) {
+          var l = group[gi];
+          var lt = l.lock_type || 'exclusive';
+          var ltCls = lt === 'exclusive' ? 'lock-exclusive' : 'lock-shared';
+          var heldFor = ageAgo(l.locked_at);
+          var ttlLeft = Math.max(0, Math.round((l.locked_at + (l.lock_ttl || 300)) - (Date.now() / 1000)));
+          var crossing = l.owner_agent_id && l.owner_agent_id !== l.locked_by;
+          html.push('<div class="lock-item">');
+          html.push('<span class="lock-path">' + escapeHTML(path);
+          if (crossing) {
+            html.push(' <span style="color:#fbbf24;font-size:11px;" title="this file is owned by ' + escapeHTML(l.owner_agent_id) + '">\u26a0 owned by ' + escapeHTML(l.owner_agent_id) + '</span>');
+          }
+          html.push('</span>');
+          html.push('<div style="display:flex;gap:8px;align-items:center;">');
+          html.push('<span style="color:#4b5563;font-size:11px;">held ' + heldFor + ' \u00b7 TTL ' + ttlLeft + 's</span>');
+          html.push('<span class="lock-agent">' + escapeHTML(l.locked_by) + '</span>');
+          html.push('<span class="lock-type ' + ltCls + '">' + escapeHTML(lt) + '</span>');
+          html.push('</div></div>');
+        }
       }
       list.innerHTML = html.join('');
     }

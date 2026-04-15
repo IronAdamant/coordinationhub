@@ -362,7 +362,7 @@ coordinationhub/
     assessment_scorers.py — Assessment metric scorers for CoordinationHub (~258 LOC)
   plugins/dashboard/
     __init__.py         — Dashboard plugin for CoordinationHub (~15 LOC)
-    dashboard.py        — Web dashboard for CoordinationHub — zero external dependencies (~481 LOC)
+    dashboard.py        — Web dashboard for CoordinationHub — zero external dependencies (~552 LOC)
   plugins/graph/
     __init__.py         — Graph plugin for CoordinationHub (~31 LOC)
     graphs.py           — Declarative coordination graph: loader, validator, in-memory representation (~309 LOC)
