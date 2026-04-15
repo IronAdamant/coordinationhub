@@ -1,6 +1,6 @@
 # CoordinationHub — Complete Project Documentation
 
-**Version:** <!-- GEN:version -->0.6.6<!-- /GEN -->
+**Version:** <!-- GEN:version -->0.7.0<!-- /GEN -->
 **Last updated:** 2026-04-15
 
 ## v0.6.7 Changelog — Phase 14 Critical Fixes (Scope Normalization + Connection Robustness)
