@@ -269,8 +269,6 @@ DASHBOARD_HTML = r"""<!DOCTYPE html>
   setInterval(function() {
     if (!useSSE) poll();
   }, POLL_INTERVAL);
-})();
-</script>
 
   function escapeHTML(str) {
     if (str === null || str === undefined) return '';

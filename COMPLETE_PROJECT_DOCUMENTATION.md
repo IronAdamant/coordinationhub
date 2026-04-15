@@ -945,7 +945,7 @@ keep it in sync; CI checks for drift on every push.
 | `coordinationhub/plugins/assessment/assessment.py` | 322 | Assessment runner for CoordinationHub coordination test suites |
 | `coordinationhub/plugins/assessment/assessment_scorers.py` | 258 | Assessment metric scorers for CoordinationHub |
 | `coordinationhub/plugins/dashboard/__init__.py` | 15 | Dashboard plugin for CoordinationHub |
-| `coordinationhub/plugins/dashboard/dashboard.py` | 483 | Web dashboard for CoordinationHub — zero external dependencies |
+| `coordinationhub/plugins/dashboard/dashboard.py` | 481 | Web dashboard for CoordinationHub — zero external dependencies |
 | `coordinationhub/plugins/graph/__init__.py` | 31 | Graph plugin for CoordinationHub |
 | `coordinationhub/plugins/graph/graphs.py` | 309 | Declarative coordination graph: loader, validator, in-memory representation |
 | `coordinationhub/plugins/registry.py` | 41 | Plugin registry for CoordinationHub |
@@ -1048,7 +1048,7 @@ coordinationhub/
     assessment_scorers.py — Assessment metric scorers for CoordinationHub (~258 LOC)
   plugins/dashboard/
     __init__.py         — Dashboard plugin for CoordinationHub (~15 LOC)
-    dashboard.py        — Web dashboard for CoordinationHub — zero external dependencies (~483 LOC)
+    dashboard.py        — Web dashboard for CoordinationHub — zero external dependencies (~481 LOC)
   plugins/graph/
     __init__.py         — Graph plugin for CoordinationHub (~31 LOC)
     graphs.py           — Declarative coordination graph: loader, validator, in-memory representation (~309 LOC)
