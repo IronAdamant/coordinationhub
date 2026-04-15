@@ -28,6 +28,7 @@ Available generators:
     mcp-tools         Table of all MCP tools with descriptions.
     test-count        Integer test count from pytest --collect-only.
     tool-count        Integer count from len(TOOL_SCHEMAS).
+    cli-count         Integer count from len(cli._COMMANDS).
     version           Version string from pyproject.toml.
 """
 
@@ -124,6 +125,16 @@ def _import_schemas():
 
 def get_tool_count() -> int:
     return len(_import_schemas())
+
+
+def get_cli_count() -> int:
+    """Return the number of CLI subcommands declared in coordinationhub.cli."""
+    sys.path.insert(0, str(REPO_ROOT))
+    try:
+        from coordinationhub.cli import _COMMANDS
+        return len(_COMMANDS)
+    finally:
+        sys.path.pop(0)
 
 
 def get_mcp_tools() -> list[tuple[str, str]]:
@@ -250,6 +261,7 @@ def build_generators() -> dict[str, str]:
         "mcp-tools": render_mcp_tools(get_mcp_tools()),
         "test-count": str(get_test_count()),
         "tool-count": str(get_tool_count()),
+        "cli-count": str(get_cli_count()),
         "version": get_version(),
     }
 

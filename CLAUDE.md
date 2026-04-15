@@ -18,7 +18,7 @@ coordinationhub/
   agent_registry.py     — Agent lifecycle: register, heartbeat, deregister, lineage management (~292 LOC)
   agent_status.py       — Agent status and file-map query helpers for CoordinationHub (~277 LOC)
   broadcasts.py         — Broadcast acknowledgment primitives for CoordinationHub (~106 LOC)
-  cli.py                — CoordinationHub CLI — command-line interface for all 55 coordination tool methods (~398 LOC)
+  cli.py                — CoordinationHub CLI — command-line interface for all coordination tool methods (~398 LOC)
   cli_agents.py         — Agent identity and lifecycle CLI commands (~121 LOC)
   cli_commands.py       — CoordinationHub CLI command handlers (~97 LOC)
   cli_deps.py           — CLI commands for cross-agent dependency declarations (~77 LOC)
@@ -33,7 +33,7 @@ coordinationhub/
   cli_vis.py            — Change awareness, audit, graph, and assessment CLI commands (~292 LOC)
   conflict_log.py       — Conflict recording and querying for CoordinationHub (~44 LOC)
   context.py            — Context bundle builder for CoordinationHub agent registration responses (~93 LOC)
-  core.py               — CoordinationEngine — thin host class that inherits all mixins (~165 LOC)
+  core.py               — CoordinationEngine — thin host class that inherits all mixins (~162 LOC)
   core_change.py        — ChangeMixin — change notifications, file ownership, conflict audit, status (~182 LOC)
   core_dependencies.py  — DependencyMixin — cross-agent dependency declarations and checks (~120 LOC)
   core_handoffs.py      — HandoffMixin — one-to-many handoff acknowledgment and lifecycle (~117 LOC)
@@ -87,7 +87,7 @@ coordinationhub/
 ```
 <!-- /GEN -->
 
-The `tests/` directory contains the pytest suite (<!-- GEN:test-count -->393<!-- /GEN --> tests across 19 files), including `tests/fixtures/claude_code_events/` contract fixtures.
+The `tests/` directory contains the pytest suite (<!-- GEN:test-count -->393<!-- /GEN --> tests across 23 files), including `tests/fixtures/claude_code_events/` contract fixtures.
 
 ## Module Design
 
@@ -98,7 +98,7 @@ The `tests/` directory contains the pytest suite (<!-- GEN:test-count -->393<!--
 - **Thread-local connection pool**: `db.py` provides a `ConnectionPool` that gives each thread its own reused SQLite connection. WAL mode enabled, 30s busy timeout.
 - **Thread-safe ID generation**: `_storage.py` uses `threading.Lock` + in-memory sequence counters to guarantee unique agent IDs even under concurrent `generate_agent_id()` calls.
 - **CLI helpers consolidated**: `cli_utils.py` provides `print_json`, `engine_from_args`, and `close` shared by all `cli_*.py` modules.
-- **Dispatch separation**: `schemas.py` (all 30 tool schemas as pure data) and `dispatch.py` (dispatch table) are separate modules shared by both HTTP and stdio servers.
+- **Dispatch separation**: `schemas.py` (all <!-- GEN:tool-count -->50<!-- /GEN --> tool schemas as pure data) and `dispatch.py` (dispatch table) are separate modules shared by both HTTP and stdio servers.
 - **Project root detection**: `detect_project_root()` in `paths.py` walks up from CWD looking for `.git`. Used by `CoordinationEngine.__init__`.
 
 ## Key Design Decisions
@@ -114,7 +114,7 @@ The `tests/` directory contains the pytest suite (<!-- GEN:test-count -->393<!--
 - **Coordination URL in context bundle**: Parent agents embed `coordination_url` string. Override via `COORDINATIONHUB_COORDINATION_URL` environment variable.
 - **SQLite WAL mode**: `PRAGMA wal_checkpoint(TRUNCATE)` on engine close ensures no unbounded WAL growth.
 - **Region locking**: `document_locks` uses `id INTEGER PRIMARY KEY AUTOINCREMENT` with `region_start INTEGER` and `region_end INTEGER` columns, allowing multiple locks per file on non-overlapping regions. Shared locks (multiple readers) are enforced — multiple shared locks on the same region are allowed, but an exclusive lock blocks all others. `_regions_overlap()`, `find_conflicting_locks()`, and `find_own_lock()` in `lock_ops.py` handle overlap detection. `acquire_lock` uses `BEGIN IMMEDIATE` for thread-safe concurrent locking.
-- **DB schema versioning**: `db.py` tracks `schema_version` table with `_CURRENT_SCHEMA_VERSION = 3`. `init_schema()` auto-migrates through v1→v2 (document_locks restructure) and v2→v3 (agents.claude_agent_id column). Migration runner preserves existing data. **Every call runs every migration in order** — each one is idempotent via `PRAGMA table_info` checks, so DBs stamped with a version number by buggy earlier init_schema code paths still get their tables repaired. Indexes are created after migrations so they always reference the latest column set. This is load-bearing: an earlier bug stamped `schema_version=3` on DBs where the tables were still at v1, causing every hook call to crash silently for hours on Review Fourteen's test project.
+- **DB schema versioning**: `db.py` tracks a `schema_version` table; `_CURRENT_SCHEMA_VERSION` is kept in sync with the latest `_migrate_*` function (currently 20). `init_schema()` auto-migrates forward. The full chain covers the document_locks restructure (v2), the `claude_agent_id` column (v3), task hierarchy and priority columns (v11–v12), the dead-letter queue (v13), HA leases and spawner tables (v14–v15), stop-request tracking (v16), scoped responsibilities (v17), broadcast journal (v18), expected-count tracking (v19), and the spawner/subagent table merge (v20). Migration runner preserves existing data. **Every call runs every migration in order** — each one is idempotent via `PRAGMA table_info` checks, so DBs stamped with a version number by buggy earlier init_schema code paths still get their tables repaired. Indexes are created after migrations so they always reference the latest column set. This is load-bearing: an earlier bug stamped a version on DBs where the tables had not actually been migrated, causing every hook call to crash silently for hours on Review Fourteen's test project.
 - **CLI auto-reap**: `cmd_list_agents` and `cmd_dashboard` both call `reap_stale_agents(timeout=...)` before querying so their output converges on the same state — Review Fourteen found them drifting when one reaped and the other did not.
 - **Claude Code agent ID mapping**: `agents.claude_agent_id` stores the raw hex ID that Claude Code assigns to spawned sub-agents. During SubagentStart, the hook stores this mapping. During PreToolUse/PostToolUse, `_resolve_agent_id` looks up the mapping to return the `hub.cc.*` child ID instead of the raw hex — preventing ghost agent duplication and hierarchy disconnection.
 - **SubagentStop resolves via claude_agent_id**: `handle_subagent_stop` uses `_resolve_agent_id` (not `_subagent_id`) to find the correct `hub.cc.*` child ID from the raw Claude hex ID. This ensures `deregister_agent` sets `status='stopped'` on the correct agent record. Falls back to `_subagent_id` derivation if no mapping exists.
@@ -127,18 +127,26 @@ The `tests/` directory contains the pytest suite (<!-- GEN:test-count -->393<!--
 
 ## <!-- GEN:tool-count -->50<!-- /GEN --> MCP Tools + 3 Setup Commands
 
-Identity: `register_agent`, `heartbeat`, `deregister_agent`, `list_agents`, `get_lineage`, `get_siblings`
-Locking: `acquire_lock`, `release_lock`, `refresh_lock`, `get_lock_status`, `list_locks`, `release_agent_locks`, `reap_expired_locks`, `reap_stale_agents`
+Identity: `register_agent`, `heartbeat`, `deregister_agent`, `list_agents`, `get_agent_relations`
+Locking: `acquire_lock`, `release_lock`, `refresh_lock`, `get_lock_status`, `list_locks`, `admin_locks`
 Coordination: `broadcast`, `wait_for_locks`, `await_agent`
-Messaging: `send_message`, `get_messages`, `mark_messages_read`
-Change: `notify_change`, `get_notifications`, `prune_notifications`
+Broadcast: `acknowledge_broadcast`, `wait_for_broadcast_acks`
+Messaging: `send_message`, `manage_messages`
+Change: `notify_change`, `get_notifications`
 Audit: `get_conflicts`, `get_contention_hotspots`, `status`
-Graph & Visibility (0.3.1): `load_coordination_spec`, `validate_graph`, `scan_project`, `get_agent_status`, `get_file_agent_map`, `update_agent_status`, `run_assessment`, `assess_current_session`, `get_agent_tree`
-Tasks (0.6.7): `wait_for_task`, `get_available_tasks`, `suggest_task_assignments`
-Dependencies (0.6.7): `declare_dependency`, `check_dependencies`, `satisfy_dependency`, `wait_for_dependency`, `get_blockers`, `assert_can_start`, `get_all_dependencies`
-Handoffs (0.6.7): `acknowledge_handoff`, `complete_handoff`, `cancel_handoff`, `get_handoffs`, `await_handoff_acks`, `await_handoff_completion`
+Graph & Visibility: `load_coordination_spec`, `scan_project`, `get_agent_status`, `get_file_agent_map`, `update_agent_status`, `get_agent_tree`, `run_assessment`
+Tasks: `create_task`, `create_subtask`, `assign_task`, `update_task_status`, `query_tasks`, `wait_for_task`, `get_available_tasks`, `task_failures`
+Dependencies: `manage_dependencies`
+Work Intent: `manage_work_intents`
+Handoffs: `wait_for_handoff`
+HA Leases: `acquire_coordinator_lease`, `manage_leases`
+Spawner: `spawn_subagent`, `report_subagent_spawned`, `get_pending_spawns`, `request_subagent_deregistration`, `await_subagent_registration`, `await_subagent_stopped`, `is_subagent_stop_requested`
 
-**Tool count is dynamic** — `status()` returns `len(TOOL_DISPATCH)` (currently 35), not a hardcoded number.
+Setup commands (CLI-only): `init`, `doctor`, `watch`.
+
+Several tools are meta-tools that dispatch on an `action` argument (`manage_messages`, `manage_dependencies`, `manage_work_intents`, `manage_leases`, `admin_locks`, `query_tasks`, `task_failures`). This keeps the MCP surface small (see `tests/test_tool_count.py` — target ≤ 50) while preserving fine-grained operations.
+
+**Tool count is dynamic** — `status()` returns `len(TOOL_DISPATCH)`, not a hardcoded number. See `COMPLETE_PROJECT_DOCUMENTATION.md` for the full auto-generated tool table with descriptions.
 
 ## Dev Commands
 
@@ -201,27 +209,31 @@ To disable hooks temporarily, add `"disableAllHooks": true` to `~/.claude/settin
 
 ```bash
 python -m pytest tests/ -v
-# <!-- GEN:test-count -->393<!-- /GEN --> tests across 19 test files:
-#   test_agent_lifecycle.py  — 21 tests
-#   test_locking.py          — 40 tests (includes smart reap)
+# <!-- GEN:test-count -->393<!-- /GEN --> tests across 23 test files:
+#   test_agent_lifecycle.py  — 26 tests
+#   test_locking.py          — 46 tests (includes smart reap)
 #   test_notifications.py    — 8 tests
 #   test_conflicts.py        — 16 tests
 #   test_coordination.py     — 7 tests
-#   test_visibility.py       — 30 tests
-#   test_event_bus.py        — 12 tests
-#   test_lock_cache.py       — 14 tests
+#   test_visibility.py       — 31 tests
+#   test_event_bus.py        — 5 tests
+#   test_lock_cache.py       — 9 tests
 #   test_graphs.py           — 22 tests
-#   test_assessment.py       — 33 tests (includes 9 DB→trace converter tests)
+#   test_assessment.py       — 33 tests (includes DB→trace converter tests)
 #   test_integration.py      — 15 tests (HTTP transport)
 #   test_core.py             — 28 tests (graph delegation, path utils, agent ID)
 #   test_cli.py              — 14 tests (parser, list-agents/dashboard consistency)
 #   test_concurrent.py       — 8 tests (threading: locks, registration, notifications)
 #   test_scenario.py         — 13 tests (end-to-end multi-agent + live session assessment)
 #   test_hooks.py            — 66 tests (hook handlers, agent ID mapping, file ownership, event contract, UserPromptSubmit, PreToolUse[Agent] correlation)
-#   test_hooks_base.py       — 18 tests (BaseHook lifecycle, Kimi/Claude adapters)
+#   test_hooks_base.py       — 8 tests (BaseHook lifecycle, Kimi/Claude adapters)
 #   test_setup.py            — 8 tests (doctor, init, hook merge)
-#   test_db_migration.py     — 7 tests (legacy DB, stuck-version recovery, fresh install)
-#   load_test.py             — Load/stress test (100 agents × 50 files)
+#   test_db_migration.py     — 9 tests (legacy DB, stuck-version recovery, fresh install)
+#   test_db_safety.py        — 14 tests (connection hardening for standalone modules)
+#   test_multiprocess_sync.py — 1 test (cross-process event journal)
+#   test_spawner.py          — 5 tests (HA coordinator spawn registry)
+#   test_tool_count.py       — 1 test (asserts MCP surface ≤ 50)
+#   load_test.py             — Load/stress test (100 agents × 50 files, not pytest-collected)
 ```
 
 Always run the test suite before and after changes.

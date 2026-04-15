@@ -1,4 +1,4 @@
-"""CoordinationHub CLI — command-line interface for all 55 coordination tool methods.
+"""CoordinationHub CLI — command-line interface for all coordination tool methods.
 
 Delegates to cli_commands.py for all command handlers.
 """

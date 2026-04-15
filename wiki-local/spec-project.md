@@ -245,34 +245,45 @@ Multiple locks per file are allowed for non-overlapping regions. Shared locks on
 
 ---
 
-## MCP Tools (30 total — v0.4.0)
+## MCP Tools (<!-- GEN:tool-count -->50<!-- /GEN --> total)
+
+The full auto-generated table with descriptions is in `COMPLETE_PROJECT_DOCUMENTATION.md`. Several tools are meta-tools that dispatch on an `action` parameter (`manage_messages`, `manage_dependencies`, `manage_work_intents`, `manage_leases`, `admin_locks`, `query_tasks`, `task_failures`) — see `tests/test_tool_count.py` (target ≤ 50).
 
 ### Identity & Registration
 
-`register_agent`, `heartbeat`, `deregister_agent`, `list_agents`, `get_lineage`, `get_siblings`
+`register_agent`, `heartbeat`, `deregister_agent`, `list_agents`, `get_agent_relations`
 
 ### Document Locking
 
-`acquire_lock`, `release_lock`, `refresh_lock`, `get_lock_status`, `list_locks`,
-`release_agent_locks`, `reap_expired_locks`, `reap_stale_agents`
+`acquire_lock`, `release_lock`, `refresh_lock`, `get_lock_status`, `list_locks`, `admin_locks`
 
 ### Coordination Actions
 
-`broadcast` — checks lock state only, no message forwarding
-`wait_for_locks`
+`broadcast`, `acknowledge_broadcast`, `wait_for_broadcast_acks`, `wait_for_locks`, `await_agent`, `wait_for_handoff`
+
+### Messaging
+
+`send_message`, `manage_messages`
 
 ### Change Awareness
 
-`notify_change`, `get_notifications`, `prune_notifications`
+`notify_change`, `get_notifications` (engine methods `prune_notifications` and `wait_for_notifications` are CLI-only)
 
 ### Audit
 
 `get_conflicts`, `get_contention_hotspots`, `status`
 
-### Graph & Visibility (8 tools in 0.3.1)
+### Graph & Visibility
 
-`load_coordination_spec`, `validate_graph`, `scan_project`,
-`get_agent_status`, `get_file_agent_map`, `update_agent_status`, `run_assessment`, `get_agent_tree`
+`load_coordination_spec`, `scan_project`, `get_agent_status`, `get_file_agent_map`, `update_agent_status`, `run_assessment`, `get_agent_tree` (the legacy `validate_graph` remains a CLI/engine method)
+
+### Tasks, Dependencies, Work Intent
+
+`create_task`, `create_subtask`, `assign_task`, `update_task_status`, `query_tasks`, `wait_for_task`, `get_available_tasks`, `task_failures`, `manage_dependencies`, `manage_work_intents`
+
+### HA Leases & Spawner
+
+`acquire_coordinator_lease`, `manage_leases`, `spawn_subagent`, `report_subagent_spawned`, `get_pending_spawns`, `request_subagent_deregistration`, `await_subagent_registration`, `await_subagent_stopped`, `is_subagent_stop_requested`
 
 ---
 
@@ -286,7 +297,7 @@ coordinationhub/
   agent_registry.py     — Agent lifecycle: register, heartbeat, deregister, lineage management (~292 LOC)
   agent_status.py       — Agent status and file-map query helpers for CoordinationHub (~277 LOC)
   broadcasts.py         — Broadcast acknowledgment primitives for CoordinationHub (~106 LOC)
-  cli.py                — CoordinationHub CLI — command-line interface for all 55 coordination tool methods (~398 LOC)
+  cli.py                — CoordinationHub CLI — command-line interface for all coordination tool methods (~398 LOC)
   cli_agents.py         — Agent identity and lifecycle CLI commands (~121 LOC)
   cli_commands.py       — CoordinationHub CLI command handlers (~97 LOC)
   cli_deps.py           — CLI commands for cross-agent dependency declarations (~77 LOC)
@@ -301,7 +312,7 @@ coordinationhub/
   cli_vis.py            — Change awareness, audit, graph, and assessment CLI commands (~292 LOC)
   conflict_log.py       — Conflict recording and querying for CoordinationHub (~44 LOC)
   context.py            — Context bundle builder for CoordinationHub agent registration responses (~93 LOC)
-  core.py               — CoordinationEngine — thin host class that inherits all mixins (~165 LOC)
+  core.py               — CoordinationEngine — thin host class that inherits all mixins (~162 LOC)
   core_change.py        — ChangeMixin — change notifications, file ownership, conflict audit, status (~182 LOC)
   core_dependencies.py  — DependencyMixin — cross-agent dependency declarations and checks (~120 LOC)
   core_handoffs.py      — HandoffMixin — one-to-many handoff acknowledgment and lifecycle (~117 LOC)
@@ -355,7 +366,7 @@ coordinationhub/
 ```
 <!-- /GEN -->
 
-`tests/` contains <!-- GEN:test-count -->393<!-- /GEN --> tests across 16 files plus `fixtures/claude_code_events/` (hook contract fixtures).
+`tests/` contains <!-- GEN:test-count -->393<!-- /GEN --> tests across 23 files plus `fixtures/claude_code_events/` (hook contract fixtures).
 
 Top-level project files: `pyproject.toml`, `coordination_spec.yaml`/`.json` (example specs), `README.md`, `CLAUDE.md`, `COMPLETE_PROJECT_DOCUMENTATION.md`, `LLM_Development.md`, and `wiki-local/` (this spec, glossary, index).
 

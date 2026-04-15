@@ -1,11 +1,179 @@
 # LLM_Development.md — CoordinationHub
 
 **Version:** <!-- GEN:version -->0.7.0<!-- /GEN -->
-**Last updated:** 2026-04-14
+**Last updated:** 2026-04-15
 
 ## Change Log
 
 All significant changes to the CoordinationHub project are documented here in reverse chronological order.
+
+---
+
+## 2026-04-15 — v0.7.0 Multi-Agent Consolidation (Tool Surface Reduction + Cross-Process Event Sync)
+
+### Motivation
+
+With 83 MCP tools, discovery and usability had become a bottleneck for multi-agent workflows. Worse, the in-memory `EventBus` meant that every `wait_for_task`, `await_handoff_completion`, and `wait_for_notifications` call timed out when talking to a remote `coordinationhub serve` process. This release consolidates duplicated APIs, fixes cross-process synchronization, and hardens DB connection patterns.
+
+### Change 1 — Tool consolidation from 83 → 50 (dispatch.py + all core_/cli_ modules)
+
+**Gap**: Seven separate dependency tools, six task query tools, and scattered DLQ/lock-admin/broadcast utilities made the surface overwhelming.
+
+**Fix**: Collapsed overlapping tools into unified commands:
+- `manage_dependencies` — replaces `declare_dependency`, `check_dependencies`, `satisfy_dependency`, `wait_for_dependency`, `get_blockers`, `assert_can_start`, `get_all_dependencies`
+- `query_tasks` — replaces `get_task`, `get_child_tasks`, `get_tasks_by_agent`, `get_all_tasks`, `get_subtasks`, `get_task_tree`
+- `task_failures` — replaces `retry_task`, `get_dead_letter_tasks`, `get_task_failure_history`
+- `admin_locks` — replaces `release_agent_locks`, `reap_expired_locks`, `reap_stale_agents`
+- `wait_for_broadcast_acks` — absorbs `get_broadcast_status` and `await_broadcast_acks`
+- `wait_for_handoff` — absorbs `get_handoffs`, `await_handoff_acks`, `await_handoff_completion`
+- `get_agent_relations` — absorbs `get_lineage` and `get_siblings`
+- `run_assessment` — now optionally takes `suite_path`; when omitted, synthesizes assessment from live DB state (old `assess_current_session` behavior)
+
+### Change 2 — Cross-process event synchronization (core.py + event_bus.py + db.py)
+
+**Gap**: `EventBus` is pure in-memory. A task completed in one process never reached a waiter in another process.
+
+**Fix**: Dual-write event journal.
+- New `coordination_events` table with `topic`, `payload_json`, `created_at`
+- `_publish_event()` writes to both the in-memory bus (fast same-process path) and the SQLite journal (cross-process fallback)
+- `_hybrid_wait()` first tries the memory bus, then polls the journal
+- Two critical bugs were fixed during validation:
+  - `_publish_event` was missing `conn.commit()`, so journal rows were invisible to other connections
+  - `_hybrid_wait` constructed parameters as `topics + (since,)` where `topics` is a `list`, causing a silent `TypeError` that was swallowed by a broad `except` and always returning timeout
+
+### Change 3 — Connection safety hardening (tasks.py + dependencies.py + handoffs.py + broadcasts.py)
+
+**Gap**: Several modules performed `fetchone()`/`fetchall()` inside a `with connect() as conn:` block and then accessed `sqlite3.Row` columns after the block exited. This can raise `ProgrammingError` or return stale data.
+
+**Fix**: Mechanical refactor — every query result is converted to `dict(row)` or `[dict(r) for r in rows]` before the `with` block ends. Added `tests/test_db_safety.py` which monkey-patches `sqlite3.Row.__getitem__` to raise on post-close access.
+
+### Change 4 — Implicit graph fallback (plugins/graph/graphs.py + core_visibility.py)
+
+**Gap**: `scan_project` and `run_assessment` failed hard if no `coordination_spec.yaml` was present.
+
+**Fix**: `build_implicit_graph(connect)` derives a minimal `CoordinationGraph` from the live `agents` table (root orchestrator + inferred child roles + inferred handoffs). `scan_project` and `run_assessment` now call `_effective_graph()` which returns the loaded graph if present, otherwise the implicit one.
+
+### Change 5 — Naming cleanup (core_tasks.py + core_spawner.py)
+
+**Fix**: Updated docstrings to disambiguate:
+- `tasks` table → "task registry / work board"
+- `pending_tasks` table → "spawn queue"
+
+### New Tests
+
+- `tests/test_tool_count.py` — regression guard asserting `len(TOOL_DISPATCH) <= 50`
+- `tests/test_multiprocess_sync.py` — spawns `coordinationhub serve` in a subprocess and validates that `wait_for_task` returns successfully across processes
+- `tests/test_db_safety.py` — 14 connection-safety torture tests
+- `tests/test_visibility.py` — implicit graph scan without spec file
+
+### Counts
+
+| Version | Tools | CLI Commands | Schema |
+|---------|-------|--------------|--------|
+| v0.7.0 | 50 | ~55 | 20 |
+| v0.6.7 | 83 | 79 | 20 |
+
+---
+
+## 2026-04-15 — v0.6.7 Phase 14 Critical Fixes (Scope Normalization + Connection Robustness)
+
+### Motivation
+
+Phase 14 DistributedRecipeCurationSwarm stress test exercised every major primitive under heavy multi-agent contention. Six issues were identified and fixed.
+
+### Change 1 — Scope/path normalization (core_locking.py)
+
+**Bug**: Absolute scopes (e.g., `/home/user/project/src/`) failed to match relative lock paths (e.g., `src/services/file.js`).
+
+**Fix**: `_check_scope_violation()` now normalizes scope prefixes with `normalize_path()` before comparing against the lock path.
+
+### Change 2 — SQLite connection robustness (db.py + core_locking.py)
+
+**Bug**: Closed DB connections under lock contention caused `Cannot operate on a closed database`.
+
+**Fix**: `ConnectionPool.connect()` now validates connections with a health-check `SELECT 1` and recreates them if closed. The `acquire_lock()` retry loop no longer closes the pool connection.
+
+### Change 3 — Dependency auto-satisfaction (dependencies.py)
+
+**Bug**: `check_dependencies()` reported completed tasks as unsatisfied.
+
+**Fix**: `check_dependencies()` now auto-satisfies dependencies whose conditions are already met (completed tasks, stopped agents, active agents) and performs all queries inside the connection context.
+
+### Change 4 — wait_for_dependency helper (dependencies.py + core_dependencies.py)
+
+**Gap**: Callers had to poll manually for dependency satisfaction.
+
+**Fix**: New `wait_for_dependency(dependent_agent_id, timeout_s)` helper that polls until a dependency is satisfied or timeout expires.
+
+### Change 5 — assess_current_session without graph (core_visibility.py)
+
+**Gap**: Ad-hoc swarms with no `coordination_spec.yaml` couldn't be scored.
+
+**Fix**: Removed the hard error when no graph is loaded. `assess_current_session` now scores from live DB state; graph-dependent metrics return 0.0 when no graph is present.
+
+### Change 6 — Task assignment hints (tasks.py + core_tasks.py)
+
+**Gap**: No automated way to match idle agents with available tasks.
+
+**Fix**: New `suggest_task_assignments()` method returns available tasks matched with idle agents (agents with no pending/in_progress tasks).
+
+### Change 7 — Handoff completion tracking (core_handoffs.py + core_locking.py)
+
+**Gap**: Multi-recipient handoffs required polling `get_handoffs` to detect completion.
+
+**Fix**: `acknowledge_handoff` and `complete_handoff` now publish `handoff.ack` / `handoff.completed` events. New helpers: `await_handoff_acks(handoff_id, expected_agents, timeout_s)` and `await_handoff_completion(handoff_id, timeout_s)`.
+
+### Counts
+
+| Version | Tools | CLI Commands | Schema |
+|---------|-------|--------------|--------|
+| v0.6.7 | 83 | 79 | 20 |
+| v0.6.6 | 79 | 79 | 20 |
+
+---
+
+## 2026-04-14 — v0.6.6 Hook Abstraction + Plugin Architecture
+
+### Motivation
+
+Standalone modules (`assessment.py`, `graphs.py`, `dashboard.py`) and IDE-specific hooks were tightly coupled and hard to extend. This release introduces a plugin registry and a shared hook abstraction.
+
+### Change 1 — Plugin architecture (plugins/)
+
+**Gap**: Assessment, graph, and dashboard code lived at the project root with no extension point.
+
+**Fix**: Created `plugins/` package:
+- `plugins/assessment/` — moved `assessment.py` and `assessment_scorers.py`
+- `plugins/dashboard/` — moved `dashboard.py`
+- `plugins/graph/` — moved `graphs.py`
+- `plugins/registry.py` — runtime plugin discovery and registration
+- `plugins/__init__.py` — `register_plugin()` / `list_plugins()` helpers
+
+### Change 2 — Hook abstraction (hooks/base.py)
+
+**Gap**: `hooks/claude_code.py` was the only hook and was monolithic.
+
+**Fix**: Introduced `BaseHook` abstract class with lifecycle methods (`on_agent_start`, `on_agent_stop`, `on_task_created`, etc.). Refactored `claude_code.py` to inherit from `BaseHook`. Added `hooks/kimi_cli.py` and `hooks/cursor.py` for Kimi CLI and Cursor integrations.
+
+### Change 3 — Performance foundations (event_bus.py + lock_cache.py)
+
+**Gap**: Every coordination event required a DB round-trip.
+
+**Fix**: Added in-memory `EventBus` for fast intra-process pub-sub. Added `LockCache` so engine startup warms lock state from the DB once, then serves hot reads from memory.
+
+### New Tests
+
+- `tests/test_event_bus.py`
+- `tests/test_lock_cache.py`
+- `tests/test_hooks_base.py`
+- `tests/load_test.py`
+
+### Counts
+
+| Version | Tools | CLI Commands | Schema |
+|---------|-------|--------------|--------|
+| v0.6.6 | 79 | 79 | 20 |
+| v0.6.5 | 79 | 79 | 19 |
 
 ---
 
@@ -991,7 +1159,7 @@ Block markers for multi-line content:
 | `coordinationhub/agent_registry.py` | 292 | Agent lifecycle: register, heartbeat, deregister, lineage management |
 | `coordinationhub/agent_status.py` | 277 | Agent status and file-map query helpers for CoordinationHub |
 | `coordinationhub/broadcasts.py` | 106 | Broadcast acknowledgment primitives for CoordinationHub |
-| `coordinationhub/cli.py` | 398 | CoordinationHub CLI — command-line interface for all 55 coordination tool methods |
+| `coordinationhub/cli.py` | 398 | CoordinationHub CLI — command-line interface for all coordination tool methods |
 | `coordinationhub/cli_agents.py` | 121 | Agent identity and lifecycle CLI commands |
 | `coordinationhub/cli_commands.py` | 97 | CoordinationHub CLI command handlers |
 | `coordinationhub/cli_deps.py` | 77 | CLI commands for cross-agent dependency declarations |
@@ -1006,7 +1174,7 @@ Block markers for multi-line content:
 | `coordinationhub/cli_vis.py` | 292 | Change awareness, audit, graph, and assessment CLI commands |
 | `coordinationhub/conflict_log.py` | 44 | Conflict recording and querying for CoordinationHub |
 | `coordinationhub/context.py` | 93 | Context bundle builder for CoordinationHub agent registration responses |
-| `coordinationhub/core.py` | 165 | CoordinationEngine — thin host class that inherits all mixins |
+| `coordinationhub/core.py` | 162 | CoordinationEngine — thin host class that inherits all mixins |
 | `coordinationhub/core_change.py` | 182 | ChangeMixin — change notifications, file ownership, conflict audit, status |
 | `coordinationhub/core_dependencies.py` | 120 | DependencyMixin — cross-agent dependency declarations and checks |
 | `coordinationhub/core_handoffs.py` | 117 | HandoffMixin — one-to-many handoff acknowledgment and lifecycle |

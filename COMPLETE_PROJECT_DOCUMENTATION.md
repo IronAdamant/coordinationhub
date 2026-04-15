@@ -3,6 +3,48 @@
 **Version:** <!-- GEN:version -->0.7.0<!-- /GEN -->
 **Last updated:** 2026-04-15
 
+## v0.7.0 Changelog — Multi-Agent Consolidation (Tool Surface Reduction + Cross-Process Event Sync)
+
+### Motivation
+
+The CoordinationHub MCP tool surface had grown to 83 tools, making discovery and usability difficult for multi-agent workloads. Additionally, the in-memory `EventBus` meant that `wait_for_task` and other wait primitives timed out when callers talked to a remote `coordinationhub serve` process. This release consolidates duplicated APIs, fixes cross-process synchronization gaps, and hardens connection patterns.
+
+### Changes
+
+- **Tool consolidation** (`dispatch.py`, `schemas.py`, all `core_*.py` and `cli_*.py`):
+  - Merged 7 dependency tools into `manage_dependencies`
+  - Merged 6 task query tools into `query_tasks`
+  - Merged DLQ tools into `task_failures`
+  - Merged lock cleanup tools into `admin_locks`
+  - Merged broadcast/handoff wait-status getters into unified wait tools
+  - Merged lineage queries into `get_agent_relations`
+  - Merged `assess_current_session` into `run_assessment`
+  - Final tool count: **50** (down from 83)
+- **Cross-process event synchronization** (`core.py`, `event_bus.py`, `db.py`):
+  - Added `coordination_events` SQLite journal table
+  - `_publish_event()` dual-writes to in-memory bus and SQLite journal
+  - `_hybrid_wait()` fast-paths via memory, then polls the journal for cross-process visibility
+  - Fixed missing `conn.commit()` in journal writes that made events invisible to other processes
+  - Fixed silent `tuple+list` TypeError in `_hybrid_wait` polling loop
+- **Connection safety hardening** (`tasks.py`, `dependencies.py`, `handoffs.py`, `broadcasts.py`):
+  - All `fetchone()` / `fetchall()` results converted to plain `dict` before exiting `with` blocks
+  - Added `tests/test_db_safety.py` torture test that monkey-patches `sqlite3.Row` to raise on post-close access
+- **Implicit graph fallback** (`plugins/graph/graphs.py`, `core_visibility.py`):
+  - `build_implicit_graph()` constructs a minimal coordination graph from live agent registrations
+  - `scan_project` and `run_assessment` fall back to the implicit graph when no `coordination_spec.yaml` exists
+- **Naming cleanup** (`core_tasks.py`, `core_spawner.py`):
+  - Clarified `tasks` table = "task registry / work board"
+  - Clarified `pending_tasks` table = "spawn queue"
+
+### Counts
+
+| Version | Tools | CLI Commands | Schema |
+|---------|-------|--------------|--------|
+| v0.7.0 | 50 | ~55 | 20 |
+| v0.6.7 | 83 | 79 | 20 |
+
+---
+
 ## v0.6.7 Changelog — Phase 14 Critical Fixes (Scope Normalization + Connection Robustness)
 
 ### Motivation
@@ -32,6 +74,40 @@ Phase 14 DistributedRecipeCurationSwarm stress test (`findings/cch_kimi_review_4
 |---------|-------|--------------|--------|
 | v0.6.7 | 83 | 79 | 20 |
 | v0.6.6 | 79 | 79 | 20 |
+
+---
+
+## v0.6.6 Changelog — Hook Abstraction + Plugin Architecture
+
+### Motivation
+
+The codebase had grown a collection of standalone modules (`assessment.py`, `graphs.py`, `dashboard.py`) and IDE-specific hooks (`claude_code.py`) that were tightly coupled and hard to extend. This release introduces a proper plugin system and a shared hook abstraction so that new IDE integrations and new plugins can be added without touching core code.
+
+### Changes
+
+- **Plugin architecture** (`plugins/`):
+  - Moved `assessment.py` and `assessment_scorers.py` into `plugins/assessment/`
+  - Moved `dashboard.py` into `plugins/dashboard/`
+  - Moved `graphs.py` into `plugins/graph/`
+  - Added `plugins/registry.py` for runtime plugin discovery
+  - Added `plugins/__init__.py` with `register_plugin()` / `list_plugins()` helpers
+- **Hook abstraction** (`hooks/base.py`):
+  - Introduced `BaseHook` abstract class defining the lifecycle: `on_agent_start`, `on_agent_stop`, `on_task_created`, etc.
+  - Refactored `hooks/claude_code.py` to inherit from `BaseHook`
+  - Added `hooks/kimi_cli.py` and `hooks/cursor.py` implementing `BaseHook` for Kimi CLI and Cursor IDE integrations
+- **Performance foundations** (`event_bus.py`, `lock_cache.py`):
+  - Added in-memory `EventBus` pub-sub for fast intra-process event propagation
+  - Added `LockCache` for warm-starting lock state without DB round-trips on engine start
+- **Testing**:
+  - Added `tests/test_event_bus.py`, `tests/test_lock_cache.py`, `tests/test_hooks_base.py`
+  - Added `tests/load_test.py` for basic concurrency benchmarking
+
+### Counts
+
+| Version | Tools | CLI Commands | Schema |
+|---------|-------|--------------|--------|
+| v0.6.6 | 79 | 79 | 20 |
+| v0.6.5 | 79 | 79 | 19 |
 
 ---
 
@@ -786,7 +862,7 @@ keep it in sync; CI checks for drift on every push.
 | `coordinationhub/agent_registry.py` | 292 | Agent lifecycle: register, heartbeat, deregister, lineage management |
 | `coordinationhub/agent_status.py` | 277 | Agent status and file-map query helpers for CoordinationHub |
 | `coordinationhub/broadcasts.py` | 106 | Broadcast acknowledgment primitives for CoordinationHub |
-| `coordinationhub/cli.py` | 398 | CoordinationHub CLI — command-line interface for all 55 coordination tool methods |
+| `coordinationhub/cli.py` | 398 | CoordinationHub CLI — command-line interface for all coordination tool methods |
 | `coordinationhub/cli_agents.py` | 121 | Agent identity and lifecycle CLI commands |
 | `coordinationhub/cli_commands.py` | 97 | CoordinationHub CLI command handlers |
 | `coordinationhub/cli_deps.py` | 77 | CLI commands for cross-agent dependency declarations |
@@ -801,7 +877,7 @@ keep it in sync; CI checks for drift on every push.
 | `coordinationhub/cli_vis.py` | 292 | Change awareness, audit, graph, and assessment CLI commands |
 | `coordinationhub/conflict_log.py` | 44 | Conflict recording and querying for CoordinationHub |
 | `coordinationhub/context.py` | 93 | Context bundle builder for CoordinationHub agent registration responses |
-| `coordinationhub/core.py` | 165 | CoordinationEngine — thin host class that inherits all mixins |
+| `coordinationhub/core.py` | 162 | CoordinationEngine — thin host class that inherits all mixins |
 | `coordinationhub/core_change.py` | 182 | ChangeMixin — change notifications, file ownership, conflict audit, status |
 | `coordinationhub/core_dependencies.py` | 120 | DependencyMixin — cross-agent dependency declarations and checks |
 | `coordinationhub/core_handoffs.py` | 117 | HandoffMixin — one-to-many handoff acknowledgment and lifecycle |
@@ -849,7 +925,7 @@ keep it in sync; CI checks for drift on every push.
 | `coordinationhub/work_intent.py` | 77 | Work intent board primitives for CoordinationHub |
 <!-- /GEN -->
 
-**Total: <!-- GEN:test-count -->393<!-- /GEN --> tests across 16 test files.**
+**Total: <!-- GEN:test-count -->393<!-- /GEN --> tests across 23 test files.**
 
 ---
 
@@ -863,7 +939,7 @@ coordinationhub/
   agent_registry.py     — Agent lifecycle: register, heartbeat, deregister, lineage management (~292 LOC)
   agent_status.py       — Agent status and file-map query helpers for CoordinationHub (~277 LOC)
   broadcasts.py         — Broadcast acknowledgment primitives for CoordinationHub (~106 LOC)
-  cli.py                — CoordinationHub CLI — command-line interface for all 55 coordination tool methods (~398 LOC)
+  cli.py                — CoordinationHub CLI — command-line interface for all coordination tool methods (~398 LOC)
   cli_agents.py         — Agent identity and lifecycle CLI commands (~121 LOC)
   cli_commands.py       — CoordinationHub CLI command handlers (~97 LOC)
   cli_deps.py           — CLI commands for cross-agent dependency declarations (~77 LOC)
@@ -878,7 +954,7 @@ coordinationhub/
   cli_vis.py            — Change awareness, audit, graph, and assessment CLI commands (~292 LOC)
   conflict_log.py       — Conflict recording and querying for CoordinationHub (~44 LOC)
   context.py            — Context bundle builder for CoordinationHub agent registration responses (~93 LOC)
-  core.py               — CoordinationEngine — thin host class that inherits all mixins (~165 LOC)
+  core.py               — CoordinationEngine — thin host class that inherits all mixins (~162 LOC)
   core_change.py        — ChangeMixin — change notifications, file ownership, conflict audit, status (~182 LOC)
   core_dependencies.py  — DependencyMixin — cross-agent dependency declarations and checks (~120 LOC)
   core_handoffs.py      — HandoffMixin — one-to-many handoff acknowledgment and lifecycle (~117 LOC)
@@ -932,14 +1008,14 @@ coordinationhub/
 ```
 <!-- /GEN -->
 
-The `tests/` directory holds <!-- GEN:test-count -->393<!-- /GEN --> tests across 16 files,
+The `tests/` directory holds <!-- GEN:test-count -->393<!-- /GEN --> tests across 23 files,
 plus `tests/fixtures/claude_code_events/` for hook contract fixtures.
 
 **Module design principles:**
 - Zero internal deps in sub-modules: each receives `connect: ConnectFn` from the caller.
 - Storage layer isolated in `_storage.py`: both `core.py` and CLI entry points depend on it; sub-modules have no path to `core`.
 - Thread-local connection pool: `db.py` gives each thread its own SQLite connection (WAL mode, 30s busy timeout).
-- Dispatch separation: `schemas.py` (all 30 tool schemas as pure data) and `dispatch.py` (dispatch table) shared by HTTP + stdio servers.
+- Dispatch separation: `schemas.py` (all <!-- GEN:tool-count -->50<!-- /GEN --> tool schemas as pure data) and `dispatch.py` (dispatch table) shared by HTTP + stdio servers.
 - `connect` callable pattern: `agent_registry.py`, `lock_ops.py`, `conflict_log.py`, `notifications.py`, `scan.py`, `agent_status.py` all receive `connect` rather than importing `_db.connect`.
 
 ---
@@ -1399,7 +1475,7 @@ Air-gapped install: `pip install coordinationhub --no-deps`.
 
 ```bash
 python -m pytest tests/ -v
-# <!-- GEN:test-count -->393<!-- /GEN --> tests across 16 test files
+# <!-- GEN:test-count -->393<!-- /GEN --> tests across 23 test files
 ```
 
 ---

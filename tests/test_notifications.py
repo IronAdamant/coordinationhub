@@ -47,7 +47,7 @@ class TestNotifications:
 class TestCoordinationUrls:
     def test_context_bundle_has_url(self, engine, registered_agent):
         """Context bundle includes a single coordination_url string, not a dict."""
-        ctx = engine._context_bundle(registered_agent)
+        ctx = engine._build_context_bundle(registered_agent, None)
         assert "coordination_url" in ctx
         assert isinstance(ctx["coordination_url"], str)
         assert ctx["coordination_url"].startswith("http://")

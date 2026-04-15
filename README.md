@@ -128,20 +128,26 @@ Agents don't message each other directly. Instead they communicate through the s
 
 ## MCP Tools (<!-- GEN:tool-count -->50<!-- /GEN -->)
 
+Several tools are meta-tools that dispatch on an `action` parameter (`manage_messages`, `manage_dependencies`, `manage_work_intents`, `manage_leases`, `admin_locks`, `query_tasks`, `task_failures`). This keeps the MCP surface small — see `tests/test_tool_count.py` (target ≤ 50). The full auto-generated table with descriptions is in [`COMPLETE_PROJECT_DOCUMENTATION.md`](COMPLETE_PROJECT_DOCUMENTATION.md#mcp-tools).
+
 | Category | Tools |
 |----------|-------|
-| **Identity** | `register_agent`, `heartbeat`, `deregister_agent`, `list_agents`, `get_lineage`, `get_siblings` |
-| **Locking** | `acquire_lock`, `release_lock`, `refresh_lock`, `get_lock_status`, `list_locks`, `release_agent_locks`, `reap_expired_locks`, `reap_stale_agents` |
+| **Identity** | `register_agent`, `heartbeat`, `deregister_agent`, `list_agents`, `get_agent_relations` |
+| **Locking** | `acquire_lock`, `release_lock`, `refresh_lock`, `get_lock_status`, `list_locks`, `admin_locks` |
 | **Coordination** | `broadcast`, `wait_for_locks`, `await_agent` |
-| **Handoffs** | `acknowledge_handoff`, `complete_handoff`, `cancel_handoff`, `get_handoffs`, `await_handoff_acks`, `await_handoff_completion` |
-| **Messaging** | `send_message`, `get_messages`, `mark_messages_read` |
-| **Changes** | `notify_change`, `get_notifications`, `prune_notifications`, `wait_for_notifications` |
+| **Broadcast** | `acknowledge_broadcast`, `wait_for_broadcast_acks` |
+| **Messaging** | `send_message`, `manage_messages` |
+| **Changes** | `notify_change`, `get_notifications` |
 | **Audit** | `get_conflicts`, `get_contention_hotspots`, `status` |
-| **Visibility** | `load_coordination_spec`, `validate_graph`, `scan_project`, `get_agent_status`, `get_file_agent_map`, `update_agent_status`, `run_assessment`, `assess_current_session`, [`get_agent_tree`](#agent-tree-view) |
-| **Tasks** | `create_task`, `assign_task`, `update_task_status`, `get_task`, `get_child_tasks`, `get_tasks_by_agent`, `get_all_tasks`, `create_subtask`, `get_subtasks`, `get_task_tree`, `wait_for_task`, `get_available_tasks`, `suggest_task_assignments`, `retry_task`, `get_dead_letter_tasks`, `get_task_failure_history` |
-| **Dependencies** | `declare_dependency`, `check_dependencies`, `satisfy_dependency`, `wait_for_dependency`, `get_blockers`, `assert_can_start`, `get_all_dependencies` |
+| **Visibility** | `load_coordination_spec`, `scan_project`, `get_agent_status`, `get_file_agent_map`, `update_agent_status`, `run_assessment`, [`get_agent_tree`](#agent-tree-view) |
+| **Tasks** | `create_task`, `create_subtask`, `assign_task`, `update_task_status`, `query_tasks`, `wait_for_task`, `get_available_tasks`, `task_failures` |
+| **Dependencies** | `manage_dependencies` |
+| **Work Intent** | `manage_work_intents` |
+| **Handoffs** | `wait_for_handoff` |
+| **HA Leases** | `acquire_coordinator_lease`, `manage_leases` |
+| **Spawner** | `spawn_subagent`, `report_subagent_spawned`, `get_pending_spawns`, `request_subagent_deregistration`, `await_subagent_registration`, `await_subagent_stopped`, `is_subagent_stop_requested` |
 
-## CLI Commands (61)
+## CLI Commands (<!-- GEN:cli-count -->74<!-- /GEN -->)
 
 ```bash
 # Setup & diagnostics
@@ -239,7 +245,7 @@ coordinationhub/
   cli.py              — CLI parser + dispatch
   cli_setup.py        — doctor, init, watch commands
   hooks/claude_code.py — Claude Code session hooks
-  tests/              — <!-- GEN:test-count -->393<!-- /GEN --> tests across 16 files
+  tests/              — <!-- GEN:test-count -->393<!-- /GEN --> tests across 23 files
 ```
 
 ## Zero-Dependency Guarantee

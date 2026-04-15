@@ -12,7 +12,7 @@ A globally unique identifier of the form `hub.12345.0` (root agent: namespace.PI
 
 ## Agent Lineage
 
-The parent→child→grandchild relationship tree between agents. Tracked via the `lineage` table and queryable via `get_lineage` and `get_siblings` tools.
+The parent→child→grandchild relationship tree between agents. Tracked via the `lineage` table and queryable via the `get_agent_relations` tool (with `mode='lineage'` or `mode='siblings'`).
 
 ## Cascade Orphaning
 
@@ -68,7 +68,7 @@ The prefix of an agent ID before the PID. Default: `hub`. Allows multiple indepe
 
 ## Notification Pruning
 
-Cleanup of old notifications via `prune_notifications`. Supports age-based deletion (`max_age_seconds`) and count-based deletion (keep newest `max_entries`). Prevents unbounded table growth.
+Cleanup of old notifications via the `prune_notifications` engine method / `prune-notifications` CLI command. Supports age-based deletion (`max_age_seconds`) and count-based deletion (keep newest `max_entries`). Prevents unbounded table growth. Not exposed as an MCP tool — pruning is a maintenance-only operation.
 
 ## Orphaning
 
@@ -84,11 +84,11 @@ The directory containing a `.git` folder, detected by walking up from CWD. Used 
 
 ## Reaping
 
-The process of marking stale agents as stopped and releasing their locks. Triggered by `reap_stale_agents` or automatically during `heartbeat`. Cascade orphans children before stopping the parent.
+The process of marking stale agents as stopped and releasing their locks. Triggered by the `reap_stale_agents` engine method (exposed through the `admin_locks` MCP tool and the `list-agents` CLI auto-reap path). Cascade orphans children before stopping the parent.
 
 ## Stale Agent
 
-An agent whose `last_heartbeat` is older than `stale_timeout` (default: 600 seconds). Reaped by `reap_stale_agents`. Its locks are released and its children are orphaned.
+An agent whose `last_heartbeat` is older than `stale_timeout` (default: 600 seconds). Reaped by `reap_stale_agents` (engine) / `admin_locks` with `action='reap_stale_agents'` (MCP). Its locks are released and its children are orphaned.
 
 ## TTL (Time-To-Live)
 

@@ -195,11 +195,3 @@ class CoordinationEngine(
         replica._connect = self._storage.read_only_connection  # type: ignore[method-assign]
         return replica
 
-    # ------------------------------------------------------------------ #
-    # Backward-compatibility: _context_bundle was called with (agent_id)
-    # in the old monolithic core.py. The new method takes (agent_id, parent_id).
-    # ------------------------------------------------------------------ #
-
-    def _context_bundle(self, agent_id: str) -> dict[str, Any]:
-        """Deprecated: use _build_context_bundle(agent_id, parent_id=None) instead."""
-        return self._build_context_bundle(agent_id, None)
