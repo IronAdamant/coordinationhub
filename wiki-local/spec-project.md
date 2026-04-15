@@ -301,21 +301,21 @@ coordinationhub/
   cli_vis.py            — Change awareness, audit, graph, and assessment CLI commands (~292 LOC)
   conflict_log.py       — Conflict recording and querying for CoordinationHub (~44 LOC)
   context.py            — Context bundle builder for CoordinationHub agent registration responses (~93 LOC)
-  core.py               — CoordinationEngine — thin host class that inherits all mixins (~164 LOC)
-  core_change.py        — ChangeMixin — change notifications, file ownership, conflict audit, status (~155 LOC)
-  core_dependencies.py  — DependencyMixin — cross-agent dependency declarations and checks (~83 LOC)
-  core_handoffs.py      — HandoffMixin — one-to-many handoff acknowledgment and lifecycle (~74 LOC)
+  core.py               — CoordinationEngine — thin host class that inherits all mixins (~165 LOC)
+  core_change.py        — ChangeMixin — change notifications, file ownership, conflict audit, status (~182 LOC)
+  core_dependencies.py  — DependencyMixin — cross-agent dependency declarations and checks (~120 LOC)
+  core_handoffs.py      — HandoffMixin — one-to-many handoff acknowledgment and lifecycle (~117 LOC)
   core_identity.py      — IdentityMixin — agent lifecycle and lineage management (~95 LOC)
-  core_leases.py        — LeaseMixin — HA coordinator lease management (~128 LOC)
+  core_leases.py        — LeaseMixin — HA coordinator lease management (~146 LOC)
   core_locking.py       — Locking and coordination methods for CoordinationEngine (~496 LOC)
-  core_messaging.py     — MessagingMixin — inter-agent messages and await (~82 LOC)
-  core_spawner.py       — SpawnerMixin — HA coordinator sub-agent spawn management (~192 LOC)
-  core_tasks.py         — TaskMixin — shared task registry with hierarchy support (~173 LOC)
+  core_messaging.py     — MessagingMixin — inter-agent messages and await (~121 LOC)
+  core_spawner.py       — SpawnerMixin — HA coordinator sub-agent spawn management (~193 LOC)
+  core_tasks.py         — TaskMixin — shared task registry with hierarchy support (~193 LOC)
   core_visibility.py    — VisibilityMixin — coordination graph, project scan, agent status, assessment (~127 LOC)
-  core_work_intent.py   — WorkIntentMixin — cooperative work intent board (~26 LOC)
+  core_work_intent.py   — WorkIntentMixin — cooperative work intent board (~45 LOC)
   db.py                 — SQLite schema, migrations, and connection pool for CoordinationHub (~565 LOC)
   dependencies.py       — Cross-agent dependency declaration and satisfaction tracking (~140 LOC)
-  dispatch.py           — Tool dispatch table for CoordinationHub (~76 LOC)
+  dispatch.py           — Tool dispatch table for CoordinationHub (~57 LOC)
   event_bus.py          — Lightweight thread-safe in-memory pub-sub event bus for CoordinationHub (~73 LOC)
   handoffs.py           — Handoff recording and acknowledgement primitives for CoordinationHub (~96 LOC)
   leases.py             — Zero-deps lease primitives for HA coordinator leadership (~197 LOC)
@@ -328,10 +328,10 @@ coordinationhub/
   paths.py              — Path normalization and project-root detection utilities (~38 LOC)
   pending_tasks.py      — Pending sub-agent task storage for CoordinationHub (~106 LOC)
   scan.py               — File ownership scan for CoordinationHub (~198 LOC)
-  schemas.py            — Tool schemas for CoordinationHub — all 31 MCP tools (~1644 LOC)
+  schemas.py            — Tool schemas for CoordinationHub — all 50 MCP tools (~1260 LOC)
   spawner.py            — Zero-deps spawner primitives for HA coordinator sub-agent registry (~318 LOC)
   task_failures.py      — Task failure tracking and dead letter queue for CoordinationHub (~95 LOC)
-  tasks.py              — Task registry primitives for CoordinationHub (~289 LOC)
+  tasks.py              — Task registry primitives for CoordinationHub (work board) (~289 LOC)
   work_intent.py        — Work intent board primitives for CoordinationHub (~77 LOC)
   hooks/
     __init__.py         — Hooks package — Claude Code integration via stdin/stdout event protocol (~1 LOC)
@@ -351,11 +351,11 @@ coordinationhub/
     dashboard.py        — Web dashboard for CoordinationHub — zero external dependencies (~483 LOC)
   plugins/graph/
     __init__.py         — Graph plugin for CoordinationHub (~31 LOC)
-    graphs.py           — Declarative coordination graph: loader, validator, in-memory representation (~307 LOC)
+    graphs.py           — Declarative coordination graph: loader, validator, in-memory representation (~309 LOC)
 ```
 <!-- /GEN -->
 
-`tests/` contains <!-- GEN:test-count -->390<!-- /GEN --> tests across 16 files plus `fixtures/claude_code_events/` (hook contract fixtures).
+`tests/` contains <!-- GEN:test-count -->393<!-- /GEN --> tests across 16 files plus `fixtures/claude_code_events/` (hook contract fixtures).
 
 Top-level project files: `pyproject.toml`, `coordination_spec.yaml`/`.json` (example specs), `README.md`, `CLAUDE.md`, `COMPLETE_PROJECT_DOCUMENTATION.md`, `LLM_Development.md`, and `wiki-local/` (this spec, glossary, index).
 

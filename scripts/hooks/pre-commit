@@ -1,0 +1,5 @@
+#!/bin/sh
+# Auto-regenerate machine-owned docs before each local commit.
+set -e
+python scripts/gen_docs.py
+git add README.md CLAUDE.md COMPLETE_PROJECT_DOCUMENTATION.md LLM_Development.md wiki-local/spec-project.md

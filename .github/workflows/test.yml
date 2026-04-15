@@ -33,7 +33,18 @@ jobs:
           fi
           echo "Version consistent: $PYPROJECT_VER"
 
+      - name: Regenerate docs
+        run: python scripts/gen_docs.py
+
+      - name: Auto-commit regenerated docs
+        if: matrix.python-version == '3.12' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository)
+        uses: stefanzweifel/git-auto-commit-action@v5
+        with:
+          commit_message: "chore: regenerate docs"
+          file_pattern: "README.md CLAUDE.md COMPLETE_PROJECT_DOCUMENTATION.md LLM_Development.md wiki-local/spec-project.md"
+
       - name: Check doc generation is up to date
+        if: matrix.python-version == '3.12' && github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name != github.repository
         run: python scripts/gen_docs.py --check
 
       - name: Run tests

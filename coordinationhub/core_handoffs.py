@@ -62,29 +62,70 @@ class HandoffMixin:
         self,
         handoff_id: int,
         timeout_s: float = 30.0,
+        agent_id: str | None = None,
+        mode: str = "completion",
     ) -> dict[str, Any]:
-        """Wait until a handoff is acknowledged and completed or timeout expires.
+        """Unified handoff operation: status | ack | complete | cancel | completion-wait.
 
-        Uses the event bus for low-latency notification.
-        Returns {"timed_out": False, "handoff_id": ...} on success,
-        or {"timed_out": True, ...} on timeout.
+        mode='status' with timeout_s=0 returns the handoff record (replaces getter).
+        mode='ack' acknowledges the handoff.
+        mode='complete' marks it completed.
+        mode='cancel' cancels it.
+        mode='completion' waits for completion (default).
         """
-        start = time.time()
-
-        # Fast-path: already completed
-        with self._connect() as conn:
-            row = conn.execute(
-                "SELECT status FROM handoffs WHERE id = ?",
-                (handoff_id,),
-            ).fetchone()
-        if row and row["status"] == "completed":
-            return {"timed_out": False, "handoff_id": handoff_id}
-
-        event = self._hybrid_wait(
-            ["handoff.completed"],
-            filter_fn=lambda e: e.get("handoff_id") == handoff_id,
-            timeout=timeout_s,
-        )
-        if event:
-            return {"timed_out": False, "handoff_id": handoff_id}
-        return {"timed_out": True, "handoff_id": handoff_id}
+        if mode == "status":
+            with self._connect() as conn:
+                row = conn.execute(
+                    "SELECT * FROM handoffs WHERE id = ?", (handoff_id,)
+                ).fetchone()
+                if not row:
+                    return {"error": f"Handoff {handoff_id} not found"}
+                d = dict(row)
+                import json
+                d["to_agents"] = json.loads(d["to_agents"]) if d.get("to_agents") else []
+                return d
+        if mode == "ack":
+            if not agent_id:
+                return {"error": "agent_id is required for ack"}
+            result = _handoffs.acknowledge_handoff(self._connect, handoff_id, agent_id)
+            if result.get("acknowledged"):
+                self._publish_event(
+                    "handoff.ack",
+                    {"handoff_id": handoff_id, "agent_id": agent_id},
+                )
+            return result
+        if mode == "complete":
+            result = _handoffs.complete_handoff(self._connect, handoff_id)
+            if result.get("completed"):
+                self._publish_event(
+                    "handoff.completed",
+                    {"handoff_id": handoff_id},
+                )
+            return result
+        if mode == "cancel":
+            result = _handoffs.cancel_handoff(self._connect, handoff_id)
+            if result.get("cancelled"):
+                self._publish_event(
+                    "handoff.cancelled",
+                    {"handoff_id": handoff_id},
+                )
+            return result
+        if mode == "completion":
+            start = time.time()
+            # Fast-path: already completed
+            with self._connect() as conn:
+                row = conn.execute(
+                    "SELECT status FROM handoffs WHERE id = ?",
+                    (handoff_id,),
+                ).fetchone()
+                if row and row["status"] == "completed":
+                    return {"timed_out": False, "handoff_id": handoff_id}
+            event = self._hybrid_wait(
+                ["handoff.completed"],
+                filter_fn=lambda e: e.get("handoff_id") == handoff_id,
+                timeout=timeout_s,
+            )
+            if event:
+                return {"timed_out": False, "handoff_id": handoff_id}
+            return {"timed_out": True, "handoff_id": handoff_id}
+        return {"error": f"Unknown mode: {mode!r}"}

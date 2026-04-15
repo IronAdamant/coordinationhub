@@ -801,21 +801,21 @@ keep it in sync; CI checks for drift on every push.
 | `coordinationhub/cli_vis.py` | 292 | Change awareness, audit, graph, and assessment CLI commands |
 | `coordinationhub/conflict_log.py` | 44 | Conflict recording and querying for CoordinationHub |
 | `coordinationhub/context.py` | 93 | Context bundle builder for CoordinationHub agent registration responses |
-| `coordinationhub/core.py` | 164 | CoordinationEngine — thin host class that inherits all mixins |
-| `coordinationhub/core_change.py` | 155 | ChangeMixin — change notifications, file ownership, conflict audit, status |
-| `coordinationhub/core_dependencies.py` | 83 | DependencyMixin — cross-agent dependency declarations and checks |
-| `coordinationhub/core_handoffs.py` | 74 | HandoffMixin — one-to-many handoff acknowledgment and lifecycle |
+| `coordinationhub/core.py` | 165 | CoordinationEngine — thin host class that inherits all mixins |
+| `coordinationhub/core_change.py` | 182 | ChangeMixin — change notifications, file ownership, conflict audit, status |
+| `coordinationhub/core_dependencies.py` | 120 | DependencyMixin — cross-agent dependency declarations and checks |
+| `coordinationhub/core_handoffs.py` | 117 | HandoffMixin — one-to-many handoff acknowledgment and lifecycle |
 | `coordinationhub/core_identity.py` | 95 | IdentityMixin — agent lifecycle and lineage management |
-| `coordinationhub/core_leases.py` | 128 | LeaseMixin — HA coordinator lease management |
+| `coordinationhub/core_leases.py` | 146 | LeaseMixin — HA coordinator lease management |
 | `coordinationhub/core_locking.py` | 496 | Locking and coordination methods for CoordinationEngine |
-| `coordinationhub/core_messaging.py` | 82 | MessagingMixin — inter-agent messages and await |
-| `coordinationhub/core_spawner.py` | 192 | SpawnerMixin — HA coordinator sub-agent spawn management |
-| `coordinationhub/core_tasks.py` | 173 | TaskMixin — shared task registry with hierarchy support |
+| `coordinationhub/core_messaging.py` | 121 | MessagingMixin — inter-agent messages and await |
+| `coordinationhub/core_spawner.py` | 193 | SpawnerMixin — HA coordinator sub-agent spawn management |
+| `coordinationhub/core_tasks.py` | 193 | TaskMixin — shared task registry with hierarchy support |
 | `coordinationhub/core_visibility.py` | 127 | VisibilityMixin — coordination graph, project scan, agent status, assessment |
-| `coordinationhub/core_work_intent.py` | 26 | WorkIntentMixin — cooperative work intent board |
+| `coordinationhub/core_work_intent.py` | 45 | WorkIntentMixin — cooperative work intent board |
 | `coordinationhub/db.py` | 565 | SQLite schema, migrations, and connection pool for CoordinationHub |
 | `coordinationhub/dependencies.py` | 140 | Cross-agent dependency declaration and satisfaction tracking |
-| `coordinationhub/dispatch.py` | 76 | Tool dispatch table for CoordinationHub |
+| `coordinationhub/dispatch.py` | 57 | Tool dispatch table for CoordinationHub |
 | `coordinationhub/event_bus.py` | 73 | Lightweight thread-safe in-memory pub-sub event bus for CoordinationHub |
 | `coordinationhub/handoffs.py` | 96 | Handoff recording and acknowledgement primitives for CoordinationHub |
 | `coordinationhub/hooks/__init__.py` | 1 | Hooks package — Claude Code integration via stdin/stdout event protocol |
@@ -839,17 +839,17 @@ keep it in sync; CI checks for drift on every push.
 | `coordinationhub/plugins/dashboard/__init__.py` | 15 | Dashboard plugin for CoordinationHub |
 | `coordinationhub/plugins/dashboard/dashboard.py` | 483 | Web dashboard for CoordinationHub — zero external dependencies |
 | `coordinationhub/plugins/graph/__init__.py` | 31 | Graph plugin for CoordinationHub |
-| `coordinationhub/plugins/graph/graphs.py` | 307 | Declarative coordination graph: loader, validator, in-memory representation |
+| `coordinationhub/plugins/graph/graphs.py` | 309 | Declarative coordination graph: loader, validator, in-memory representation |
 | `coordinationhub/plugins/registry.py` | 41 | Plugin registry for CoordinationHub |
 | `coordinationhub/scan.py` | 198 | File ownership scan for CoordinationHub |
-| `coordinationhub/schemas.py` | 1644 | Tool schemas for CoordinationHub — all 31 MCP tools |
+| `coordinationhub/schemas.py` | 1260 | Tool schemas for CoordinationHub — all 50 MCP tools |
 | `coordinationhub/spawner.py` | 318 | Zero-deps spawner primitives for HA coordinator sub-agent registry |
 | `coordinationhub/task_failures.py` | 95 | Task failure tracking and dead letter queue for CoordinationHub |
-| `coordinationhub/tasks.py` | 289 | Task registry primitives for CoordinationHub |
+| `coordinationhub/tasks.py` | 289 | Task registry primitives for CoordinationHub (work board) |
 | `coordinationhub/work_intent.py` | 77 | Work intent board primitives for CoordinationHub |
 <!-- /GEN -->
 
-**Total: <!-- GEN:test-count -->390<!-- /GEN --> tests across 16 test files.**
+**Total: <!-- GEN:test-count -->393<!-- /GEN --> tests across 16 test files.**
 
 ---
 
@@ -878,21 +878,21 @@ coordinationhub/
   cli_vis.py            — Change awareness, audit, graph, and assessment CLI commands (~292 LOC)
   conflict_log.py       — Conflict recording and querying for CoordinationHub (~44 LOC)
   context.py            — Context bundle builder for CoordinationHub agent registration responses (~93 LOC)
-  core.py               — CoordinationEngine — thin host class that inherits all mixins (~164 LOC)
-  core_change.py        — ChangeMixin — change notifications, file ownership, conflict audit, status (~155 LOC)
-  core_dependencies.py  — DependencyMixin — cross-agent dependency declarations and checks (~83 LOC)
-  core_handoffs.py      — HandoffMixin — one-to-many handoff acknowledgment and lifecycle (~74 LOC)
+  core.py               — CoordinationEngine — thin host class that inherits all mixins (~165 LOC)
+  core_change.py        — ChangeMixin — change notifications, file ownership, conflict audit, status (~182 LOC)
+  core_dependencies.py  — DependencyMixin — cross-agent dependency declarations and checks (~120 LOC)
+  core_handoffs.py      — HandoffMixin — one-to-many handoff acknowledgment and lifecycle (~117 LOC)
   core_identity.py      — IdentityMixin — agent lifecycle and lineage management (~95 LOC)
-  core_leases.py        — LeaseMixin — HA coordinator lease management (~128 LOC)
+  core_leases.py        — LeaseMixin — HA coordinator lease management (~146 LOC)
   core_locking.py       — Locking and coordination methods for CoordinationEngine (~496 LOC)
-  core_messaging.py     — MessagingMixin — inter-agent messages and await (~82 LOC)
-  core_spawner.py       — SpawnerMixin — HA coordinator sub-agent spawn management (~192 LOC)
-  core_tasks.py         — TaskMixin — shared task registry with hierarchy support (~173 LOC)
+  core_messaging.py     — MessagingMixin — inter-agent messages and await (~121 LOC)
+  core_spawner.py       — SpawnerMixin — HA coordinator sub-agent spawn management (~193 LOC)
+  core_tasks.py         — TaskMixin — shared task registry with hierarchy support (~193 LOC)
   core_visibility.py    — VisibilityMixin — coordination graph, project scan, agent status, assessment (~127 LOC)
-  core_work_intent.py   — WorkIntentMixin — cooperative work intent board (~26 LOC)
+  core_work_intent.py   — WorkIntentMixin — cooperative work intent board (~45 LOC)
   db.py                 — SQLite schema, migrations, and connection pool for CoordinationHub (~565 LOC)
   dependencies.py       — Cross-agent dependency declaration and satisfaction tracking (~140 LOC)
-  dispatch.py           — Tool dispatch table for CoordinationHub (~76 LOC)
+  dispatch.py           — Tool dispatch table for CoordinationHub (~57 LOC)
   event_bus.py          — Lightweight thread-safe in-memory pub-sub event bus for CoordinationHub (~73 LOC)
   handoffs.py           — Handoff recording and acknowledgement primitives for CoordinationHub (~96 LOC)
   leases.py             — Zero-deps lease primitives for HA coordinator leadership (~197 LOC)
@@ -905,10 +905,10 @@ coordinationhub/
   paths.py              — Path normalization and project-root detection utilities (~38 LOC)
   pending_tasks.py      — Pending sub-agent task storage for CoordinationHub (~106 LOC)
   scan.py               — File ownership scan for CoordinationHub (~198 LOC)
-  schemas.py            — Tool schemas for CoordinationHub — all 31 MCP tools (~1644 LOC)
+  schemas.py            — Tool schemas for CoordinationHub — all 50 MCP tools (~1260 LOC)
   spawner.py            — Zero-deps spawner primitives for HA coordinator sub-agent registry (~318 LOC)
   task_failures.py      — Task failure tracking and dead letter queue for CoordinationHub (~95 LOC)
-  tasks.py              — Task registry primitives for CoordinationHub (~289 LOC)
+  tasks.py              — Task registry primitives for CoordinationHub (work board) (~289 LOC)
   work_intent.py        — Work intent board primitives for CoordinationHub (~77 LOC)
   hooks/
     __init__.py         — Hooks package — Claude Code integration via stdin/stdout event protocol (~1 LOC)
@@ -928,11 +928,11 @@ coordinationhub/
     dashboard.py        — Web dashboard for CoordinationHub — zero external dependencies (~483 LOC)
   plugins/graph/
     __init__.py         — Graph plugin for CoordinationHub (~31 LOC)
-    graphs.py           — Declarative coordination graph: loader, validator, in-memory representation (~307 LOC)
+    graphs.py           — Declarative coordination graph: loader, validator, in-memory representation (~309 LOC)
 ```
 <!-- /GEN -->
 
-The `tests/` directory holds <!-- GEN:test-count -->390<!-- /GEN --> tests across 16 files,
+The `tests/` directory holds <!-- GEN:test-count -->393<!-- /GEN --> tests across 16 files,
 plus `tests/fixtures/claude_code_events/` for hook contract fixtures.
 
 **Module design principles:**
@@ -1168,7 +1168,7 @@ CREATE TABLE assessment_results (
 
 ---
 
-## MCP Tools (<!-- GEN:tool-count -->68<!-- /GEN --> total)
+## MCP Tools (<!-- GEN:tool-count -->50<!-- /GEN --> total)
 
 Full list auto-generated from `coordinationhub/schemas.py`:
 
@@ -1193,13 +1193,10 @@ Full list auto-generated from `coordinationhub/schemas.py`:
 | `await_agent` | Wait for an agent to complete (deregister) before proceeding |
 | `notify_change` | Record a change event so other agents can poll for it |
 | `get_notifications` | Poll for change notifications since a timestamp |
-| `prune_notifications` | Clean up old notifications by age or entry count |
-| `wait_for_notifications` | Long-poll for new notifications until one arrives or timeout expires |
 | `get_conflicts` | Query the conflict log for lock steals and ownership violations |
 | `get_contention_hotspots` | Rank files by lock contention frequency |
 | `status` | Get a summary of the coordination system state: registered agents, active locks, pending notifications, conflicts, an... |
 | `load_coordination_spec` | Reload the coordination spec from disk |
-| `validate_graph` | Validate the currently loaded coordination graph schema |
 | `scan_project` | Perform a file ownership scan of the worktree_root |
 | `get_agent_status` | Get full status for a specific agent: current task, responsibilities (from the coordination graph), owned files, line... |
 | `get_file_agent_map` | Get a map of all tracked files to their assigned Agent ID and responsibility summary |
@@ -1207,8 +1204,7 @@ Full list auto-generated from `coordinationhub/schemas.py`:
 | `run_assessment` | Run an assessment suite or score the current live session |
 | `get_agent_tree` | Get the hierarchical agent tree with live work status |
 | `send_message` | Send a direct message to another agent |
-| `get_messages` | Get messages sent to an agent |
-| `mark_messages_read` | Mark messages as read |
+| `manage_messages` | Unified messaging: send \| get \| mark_read |
 | `create_task` | Create a new task in the shared task registry |
 | `assign_task` | Assign a task to a specific agent |
 | `update_task_status` | Update a task's status |
@@ -1216,26 +1212,12 @@ Full list auto-generated from `coordinationhub/schemas.py`:
 | `create_subtask` | Create a subtask under an existing parent task |
 | `wait_for_task` | Poll until a task reaches a terminal state (completed or failed) or the timeout expires |
 | `get_available_tasks` | Return tasks whose depends_on are all satisfied (completed) and that are not currently claimed |
-| `declare_work_intent` | Declare intent to work on a file before acquiring a lock |
-| `get_work_intents` | Get all live (non-expired) work intents |
-| `clear_work_intent` | Clear an agent's declared work intent (e.g |
-| `acknowledge_handoff` | Acknowledge receipt of a handoff |
-| `complete_handoff` | Mark a handoff as completed (called by the originating agent) |
-| `cancel_handoff` | Cancel a handoff (abort before completion) |
-| `get_handoffs` | Get handoffs with optional status and sender filtering |
-| `wait_for_handoff` | Wait until a handoff is completed or timeout expires |
-| `declare_dependency` | Declare that dependent_agent needs depends_on_agent to finish task X (or any task by that agent) before starting work |
-| `manage_dependencies` | Unified dependency query |
-| `satisfy_dependency` | Mark a dependency as satisfied (called after condition is met) |
-| `get_all_dependencies` | Get all declared dependencies, optionally filtered by dependent agent |
-| `retry_task` | Retry a task from the dead letter queue |
-| `get_dead_letter_tasks` | Get all tasks currently in the dead letter queue |
-| `get_task_failure_history` | Get the failure history for a task |
+| `manage_work_intents` | Unified work intent management: declare \| get \| clear |
+| `wait_for_handoff` | Unified handoff operation |
+| `manage_dependencies` | Unified dependency management |
+| `task_failures` | Unified dead-letter queue operations |
 | `acquire_coordinator_lease` | Attempt to acquire the coordinator leadership lease (COORDINATOR_LEADER) |
-| `refresh_coordinator_lease` | Refresh the coordinator leadership lease TTL |
-| `release_coordinator_lease` | Release the coordinator leadership lease |
-| `get_leader` | Return the current coordinator lease holder, or null if the lease is unheld/expired |
-| `claim_leadership` | Claim coordinator leadership when the current leader has failed |
+| `manage_leases` | Unified lease management |
 | `spawn_subagent` | Register intent to spawn a sub-agent and return its spawn ID |
 | `report_subagent_spawned` | Report that a sub-agent has been spawned by an external system |
 | `get_pending_spawns` | Get pending (or all) spawn requests for a parent agent |
@@ -1417,7 +1399,7 @@ Air-gapped install: `pip install coordinationhub --no-deps`.
 
 ```bash
 python -m pytest tests/ -v
-# <!-- GEN:test-count -->390<!-- /GEN --> tests across 16 test files
+# <!-- GEN:test-count -->393<!-- /GEN --> tests across 16 test files
 ```
 
 ---

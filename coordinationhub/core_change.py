@@ -74,8 +74,36 @@ class ChangeMixin:
         since: float | None = None,
         exclude_agent: str | None = None,
         limit: int = 100,
+        agent_id: str | None = None,
+        timeout_s: float = 0.0,
+        poll_interval_s: float = 2.0,
+        prune_max_age_seconds: float | None = None,
+        prune_max_entries: int | None = None,
     ) -> dict[str, Any]:
-        """Get change notifications, optionally filtered by time and agent."""
+        """Get change notifications, optionally filtered by time and agent.
+
+        If timeout_s > 0, long-polls for new notifications instead of returning
+        immediately. This replaces the old wait_for_notifications tool.
+        If prune_max_age_seconds or prune_max_entries is provided, also prunes
+        old notifications before returning (replaces prune_notifications).
+        """
+        if prune_max_age_seconds is not None or prune_max_entries is not None:
+            _cn.prune_notifications(self._connect, prune_max_age_seconds, prune_max_entries)
+        if timeout_s > 0:
+            start = time.time()
+            event = self._hybrid_wait(
+                ["notification.created"],
+                filter_fn=lambda e: e.get("agent_id") != exclude_agent if exclude_agent else True,
+                timeout=timeout_s,
+            )
+            if event is None:
+                return {"notifications": [], "timed_out": True}
+            since_val = event.get("created_at", start) - 1.0
+            result = _cn.get_notifications(
+                self._connect, since=since_val, exclude_agent=exclude_agent, limit=limit
+            )
+            result["timed_out"] = False
+            return result
         return _cn.get_notifications(self._connect, since, exclude_agent, limit)
 
     def prune_notifications(

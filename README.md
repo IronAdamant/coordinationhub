@@ -126,7 +126,7 @@ Every agent gets a unique ID. Files are locked by agent ID. The root agent (your
 
 Agents don't message each other directly. Instead they communicate through the shared database: lock a file, write to it, notify that it changed, release the lock. Other agents poll for notifications to see what happened.
 
-## MCP Tools (<!-- GEN:tool-count -->68<!-- /GEN -->)
+## MCP Tools (<!-- GEN:tool-count -->50<!-- /GEN -->)
 
 | Category | Tools |
 |----------|-------|
@@ -239,7 +239,7 @@ coordinationhub/
   cli.py              — CLI parser + dispatch
   cli_setup.py        — doctor, init, watch commands
   hooks/claude_code.py — Claude Code session hooks
-  tests/              — <!-- GEN:test-count -->390<!-- /GEN --> tests across 16 files
+  tests/              — <!-- GEN:test-count -->393<!-- /GEN --> tests across 16 files
 ```
 
 ## Zero-Dependency Guarantee

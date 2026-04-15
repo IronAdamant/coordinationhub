@@ -16,6 +16,26 @@ from . import work_intent as _wi
 class WorkIntentMixin:
     """Cooperative work intent declarations before lock acquisition."""
 
+    def manage_work_intents(
+        self,
+        action: str,
+        agent_id: str,
+        document_path: str | None = None,
+        intent: str | None = None,
+        ttl: float = 60.0,
+    ) -> dict[str, Any]:
+        """Unified work intent management: declare | get | clear."""
+        if action == "declare":
+            if not document_path or not intent:
+                return {"error": "document_path and intent are required for declare"}
+            return _wi.upsert_intent(self._connect, agent_id, document_path, intent, ttl)
+        if action == "get":
+            intents = _wi.get_live_intents(self._connect, agent_id)
+            return {"intents": intents, "count": len(intents)}
+        if action == "clear":
+            return _wi.clear_intent(self._connect, agent_id)
+        return {"error": f"Unknown action: {action!r}"}
+
     def declare_work_intent(
         self,
         agent_id: str,

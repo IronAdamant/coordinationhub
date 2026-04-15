@@ -32,9 +32,8 @@ TOOL_DISPATCH: dict[str, tuple[str, list[str]]] = {
     "await_agent": ("await_agent", ["agent_id", "timeout_s"]),
     # Change awareness
     "notify_change": ("notify_change", ["document_path", "change_type", "agent_id"]),
-    "get_notifications": ("get_notifications", ["since", "exclude_agent", "limit"]),
-    "prune_notifications": ("prune_notifications", ["max_age_seconds", "max_entries"]),
-    "wait_for_notifications": ("wait_for_notifications", ["agent_id", "timeout_s", "poll_interval_s", "exclude_agent"]),
+    "get_notifications": ("get_notifications", ["since", "exclude_agent", "limit", "agent_id", "timeout_s", "poll_interval_s", "prune_max_age_seconds", "prune_max_entries"]),
+
     # Audit
     "get_conflicts": ("get_conflicts", ["document_path", "agent_id", "limit"]),
     "get_contention_hotspots": ("get_contention_hotspots", ["limit"]),
@@ -42,7 +41,7 @@ TOOL_DISPATCH: dict[str, tuple[str, list[str]]] = {
     "status": ("status", []),
     # Graph & Visibility
     "load_coordination_spec": ("load_coordination_spec", ["path"]),
-    "validate_graph": ("validate_graph", []),
+
     "scan_project": ("scan_project", ["worktree_root", "extensions"]),
     "get_agent_status": ("get_agent_status", ["agent_id"]),
     "get_file_agent_map": ("get_file_agent_map", ["agent_id"]),
@@ -51,8 +50,7 @@ TOOL_DISPATCH: dict[str, tuple[str, list[str]]] = {
     "run_assessment": ("run_assessment", ["suite_path", "format", "graph_agent_id", "scope"]),
     # Messaging
     "send_message": ("send_message", ["from_agent_id", "to_agent_id", "message_type", "payload"]),
-    "get_messages": ("get_messages", ["agent_id", "unread_only", "limit"]),
-    "mark_messages_read": ("mark_messages_read", ["agent_id", "message_ids"]),
+    "manage_messages": ("manage_messages", ["action", "agent_id", "from_agent_id", "to_agent_id", "message_type", "payload", "unread_only", "limit", "message_ids"]),
     # Task Registry
     "create_task": ("create_task", ["task_id", "parent_agent_id", "description", "depends_on", "priority"]),
     "assign_task": ("assign_task", ["task_id", "assigned_agent_id"]),
@@ -62,31 +60,16 @@ TOOL_DISPATCH: dict[str, tuple[str, list[str]]] = {
     "wait_for_task": ("wait_for_task", ["task_id", "timeout_s", "poll_interval_s"]),
     "get_available_tasks": ("get_available_tasks", ["agent_id"]),
     # Dead Letter Queue
-    "retry_task": ("retry_task", ["task_id"]),
-    "get_dead_letter_tasks": ("get_dead_letter_tasks", ["limit"]),
-    "get_task_failure_history": ("get_task_failure_history", ["task_id"]),
+    "task_failures": ("task_failures", ["action", "task_id", "limit"]),
     # Work Intent Board
-    "declare_work_intent": ("declare_work_intent", ["agent_id", "document_path", "intent", "ttl"]),
-    "get_work_intents": ("get_work_intents", ["agent_id"]),
-    "clear_work_intent": ("clear_work_intent", ["agent_id"]),
+    "manage_work_intents": ("manage_work_intents", ["action", "agent_id", "document_path", "intent", "ttl"]),
     # Handoffs
-    "acknowledge_handoff": ("acknowledge_handoff", ["handoff_id", "agent_id"]),
-    "complete_handoff": ("complete_handoff", ["handoff_id"]),
-    "cancel_handoff": ("cancel_handoff", ["handoff_id"]),
-    "get_handoffs": ("get_handoffs", ["status", "from_agent_id", "limit"]),
-    "wait_for_handoff": ("wait_for_handoff", ["handoff_id", "timeout_s"]),
+    "wait_for_handoff": ("wait_for_handoff", ["handoff_id", "timeout_s", "agent_id", "mode"]),
     # Dependencies
-    "declare_dependency": ("declare_dependency", ["dependent_agent_id", "depends_on_agent_id",
-                                                    "depends_on_task_id", "condition"]),
-    "manage_dependencies": ("manage_dependencies", ["mode", "agent_id"]),
-    "satisfy_dependency": ("satisfy_dependency", ["dep_id"]),
-    "get_all_dependencies": ("get_all_dependencies", ["dependent_agent_id"]),
+    "manage_dependencies": ("manage_dependencies", ["mode", "agent_id", "dependent_agent_id", "depends_on_agent_id", "depends_on_task_id", "condition", "dep_id", "timeout_s", "poll_interval_s"]),
     # Leases — HA Coordinator Leadership
     "acquire_coordinator_lease": ("acquire_coordinator_lease", ["agent_id", "ttl"]),
-    "refresh_coordinator_lease": ("refresh_coordinator_lease", ["agent_id"]),
-    "release_coordinator_lease": ("release_coordinator_lease", ["agent_id"]),
-    "get_leader": ("get_leader", []),
-    "claim_leadership": ("claim_leadership", ["agent_id", "ttl"]),
+    "manage_leases": ("manage_leases", ["action", "agent_id", "ttl"]),
     # Spawner — Sub-Agent Registry
     "spawn_subagent": ("spawn_subagent", ["parent_agent_id", "subagent_type", "description", "prompt", "source"]),
     "report_subagent_spawned": ("report_subagent_spawned", ["parent_agent_id", "subagent_type", "child_agent_id", "source"]),

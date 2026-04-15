@@ -1,4 +1,4 @@
-"""Task registry primitives for CoordinationHub.
+"""Task registry primitives for CoordinationHub (work board).
 
 Supports a shared task board where parent agents assign work to child agents
 via task IDs. Task summaries enable compression chains: child writes a summary
@@ -24,7 +24,7 @@ def create_task(
     depends_on: list[str] | None = None,
     priority: int = 0,
 ) -> dict[str, Any]:
-    """Create a new task in the registry."""
+    """Create a new task in the task registry (work board)."""
     now = time.time()
     with connect() as conn:
         cursor = conn.execute(

@@ -1,4 +1,4 @@
-"""Tool schemas for CoordinationHub — all 31 MCP tools.
+"""Tool schemas for CoordinationHub — all 50 MCP tools.
 
 Organized by functional group for navigation.  These are pure data
 declarations with no logic.
@@ -465,90 +465,50 @@ TOOL_SCHEMAS_COORDINATION: dict[str, dict] = {
 
 
 # ------------------------------------------------------------------ #
-# Messaging (3 tools)
+# Messaging (2 tools)
 # ------------------------------------------------------------------ #
 
 TOOL_SCHEMAS_MESSAGING: dict[str, dict] = {
     "send_message": {
         "description": (
             "Send a direct message to another agent. "
-            "Messages are stored and can be retrieved via get_messages. "
+            "Messages are stored and can be retrieved via manage_messages. "
             "Use for query/response patterns between agents."
         ),
         "parameters": {
             "type": "object",
             "properties": {
-                "from_agent_id": {
-                    "type": "string",
-                    "description": "Agent sending the message",
-                },
-                "to_agent_id": {
-                    "type": "string",
-                    "description": "Agent to receive the message",
-                },
-                "message_type": {
-                    "type": "string",
-                    "description": "Type of message (e.g. 'query', 'response', 'notification')",
-                },
-                "payload": {
-                    "type": "object",
-                    "description": "Optional JSON payload with message data",
-                },
+                "from_agent_id": {"type": "string", "description": "Agent sending the message"},
+                "to_agent_id": {"type": "string", "description": "Agent to receive the message"},
+                "message_type": {"type": "string", "description": "Type of message (e.g. 'query', 'response', 'notification')"},
+                "payload": {"type": "object", "description": "Optional JSON payload with message data"},
             },
             "required": ["from_agent_id", "to_agent_id", "message_type"],
         },
     },
-    "get_messages": {
-        "description": (
-            "Get messages sent to an agent. "
-            "Returns all messages or only unread ones if unread_only=True."
-        ),
+    "manage_messages": {
+        "description": "Unified messaging: send | get | mark_read. Use action='get' to retrieve messages.",
         "parameters": {
             "type": "object",
             "properties": {
-                "agent_id": {
-                    "type": "string",
-                    "description": "Agent to get messages for",
-                },
-                "unread_only": {
-                    "type": "boolean",
-                    "description": "Only return unread messages (default: False)",
-                    "default": False,
-                },
-                "limit": {
-                    "type": "integer",
-                    "description": "Maximum messages to return (default: 50)",
-                    "default": 50,
-                },
+                "action": {"type": "string", "enum": ["send", "get", "mark_read"], "description": "Messaging action"},
+                "agent_id": {"type": "string", "description": "Agent ID for get/mark_read"},
+                "from_agent_id": {"type": "string", "description": "Required for send"},
+                "to_agent_id": {"type": "string", "description": "Required for send"},
+                "message_type": {"type": "string", "description": "Required for send"},
+                "payload": {"type": "object", "description": "Optional payload for send"},
+                "unread_only": {"type": "boolean", "default": False, "description": "Only unread messages for get"},
+                "limit": {"type": "integer", "default": 50, "description": "Max messages for get"},
+                "message_ids": {"type": "array", "items": {"type": "integer"}, "description": "Specific IDs for mark_read"},
             },
-            "required": ["agent_id"],
-        },
-    },
-    "mark_messages_read": {
-        "description": (
-            "Mark messages as read. If message_ids is not provided, marks all unread messages."
-        ),
-        "parameters": {
-            "type": "object",
-            "properties": {
-                "agent_id": {
-                    "type": "string",
-                    "description": "Agent marking messages as read",
-                },
-                "message_ids": {
-                    "type": "array",
-                    "items": {"type": "integer"},
-                    "description": "Specific message IDs to mark as read (default: all unread)",
-                },
-            },
-            "required": ["agent_id"],
+            "required": ["action", "agent_id"],
         },
     },
 }
 
 
 # ------------------------------------------------------------------ #
-# Change Awareness (3 tools)
+# Change Awareness (2 tools)
 # ------------------------------------------------------------------ #
 
 TOOL_SCHEMAS_CHANGE: dict[str, dict] = {
@@ -560,18 +520,9 @@ TOOL_SCHEMAS_CHANGE: dict[str, dict] = {
         "parameters": {
             "type": "object",
             "properties": {
-                "document_path": {
-                    "type": "string",
-                    "description": "Path to the changed document",
-                },
-                "change_type": {
-                    "type": "string",
-                    "description": "Type of change (e.g. 'created', 'modified', 'deleted')",
-                },
-                "agent_id": {
-                    "type": "string",
-                    "description": "Agent that made the change",
-                },
+                "document_path": {"type": "string", "description": "Path to the changed document"},
+                "change_type": {"type": "string", "description": "Type of change (e.g. 'created', 'modified', 'deleted')"},
+                "agent_id": {"type": "string", "description": "Agent that made the change"},
             },
             "required": ["document_path", "change_type", "agent_id"],
         },
@@ -579,81 +530,21 @@ TOOL_SCHEMAS_CHANGE: dict[str, dict] = {
     "get_notifications": {
         "description": (
             "Poll for change notifications since a timestamp. "
-            "Exclude your own agent_id to see only other-agents' changes."
+            "If timeout_s > 0, long-polls until new notifications arrive. "
+            "If prune_max_age_seconds or prune_max_entries is provided, prunes old data first."
         ),
         "parameters": {
             "type": "object",
             "properties": {
-                "since": {
-                    "type": "number",
-                    "description": "Unix timestamp to poll from (default: last 5 minutes)",
-                    "default": None,
-                },
-                "exclude_agent": {
-                    "type": "string",
-                    "description": "Agent ID to exclude from results",
-                    "default": None,
-                },
-                "limit": {
-                    "type": "integer",
-                    "description": "Maximum number of notifications to return",
-                    "default": 100,
-                },
+                "since": {"type": "number", "description": "Unix timestamp to poll from", "default": None},
+                "exclude_agent": {"type": "string", "description": "Agent ID to exclude", "default": None},
+                "limit": {"type": "integer", "description": "Maximum notifications", "default": 100},
+                "agent_id": {"type": "string", "description": "Waiter identity when timeout_s > 0", "default": None},
+                "timeout_s": {"type": "number", "description": "Long-poll timeout (0 = immediate)", "default": 0.0},
+                "poll_interval_s": {"type": "number", "description": "Poll interval", "default": 2.0},
+                "prune_max_age_seconds": {"type": "number", "description": "Prune before returning", "default": None},
+                "prune_max_entries": {"type": "integer", "description": "Prune before returning", "default": None},
             },
-        },
-    },
-    "prune_notifications": {
-        "description": (
-            "Clean up old notifications by age or entry count. "
-            "Call periodically to prevent unbounded growth."
-        ),
-        "parameters": {
-            "type": "object",
-            "properties": {
-                "max_age_seconds": {
-                    "type": "number",
-                    "description": "Delete notifications older than this many seconds",
-                    "default": None,
-                },
-                "max_entries": {
-                    "type": "integer",
-                    "description": "Keep at most this many notifications, deleting oldest",
-                    "default": None,
-                },
-            },
-        },
-    },
-    "wait_for_notifications": {
-        "description": (
-            "Long-poll for new notifications until one arrives or timeout expires. "
-            "Use this instead of polling get_notifications in a loop. "
-            "Returns notifications when new ones arrive, or {\"timed_out\": True} "
-            "if the timeout expires with no new notifications."
-        ),
-        "parameters": {
-            "type": "object",
-            "properties": {
-                "agent_id": {
-                    "type": "string",
-                    "description": "Agent ID to use as the waiter's identity",
-                },
-                "timeout_s": {
-                    "type": "number",
-                    "description": "Maximum seconds to wait (default: 30)",
-                    "default": 30.0,
-                },
-                "poll_interval_s": {
-                    "type": "number",
-                    "description": "Polling interval in seconds (default: 2)",
-                    "default": 2.0,
-                },
-                "exclude_agent": {
-                    "type": "string",
-                    "description": "Agent ID to exclude from notifications (default: waiter's own ID)",
-                    "default": None,
-                },
-            },
-            "required": ["agent_id"],
         },
     },
 }
@@ -723,7 +614,7 @@ TOOL_SCHEMAS_AUDIT: dict[str, dict] = {
 
 
 # ------------------------------------------------------------------ #
-# Graph & Visibility (8 tools)
+# Graph & Visibility (7 tools)
 # ------------------------------------------------------------------ #
 
 TOOL_SCHEMAS_VISIBILITY: dict[str, dict] = {
@@ -741,16 +632,6 @@ TOOL_SCHEMAS_VISIBILITY: dict[str, dict] = {
                     "default": None,
                 },
             },
-        },
-    },
-    "validate_graph": {
-        "description": (
-            "Validate the currently loaded coordination graph schema. "
-            "Returns validation errors if invalid, or an empty error list if valid."
-        ),
-        "parameters": {
-            "type": "object",
-            "properties": {},
         },
     },
     "scan_project": {
@@ -1121,63 +1002,18 @@ TOOL_SCHEMAS_TASKS: dict[str, dict] = {
 # ------------------------------------------------------------------ #
 
 TOOL_SCHEMAS_INTENT: dict[str, dict] = {
-    "declare_work_intent": {
-        "description": (
-            "Declare intent to work on a file before acquiring a lock. "
-            "Other agents checking work_intent receive a proximity_warning "
-            "(not a denial) when acquiring a conflicting lock. "
-            "Intent expires after ttl seconds."
-        ),
+    "manage_work_intents": {
+        "description": "Unified work intent management: declare | get | clear.",
         "parameters": {
             "type": "object",
             "properties": {
-                "agent_id": {
-                    "type": "string",
-                    "description": "Agent declaring the intent",
-                },
-                "document_path": {
-                    "type": "string",
-                    "description": "File path the agent intends to work on",
-                },
-                "intent": {
-                    "type": "string",
-                    "description": "Short description of the work intent (e.g. 'implementing get_agent_tree')",
-                },
-                "ttl": {
-                    "type": "number",
-                    "default": 60.0,
-                    "description": "Seconds until intent expires (default: 60)",
-                },
+                "action": {"type": "string", "enum": ["declare", "get", "clear"], "description": "Intent action"},
+                "agent_id": {"type": "string", "description": "Agent ID"},
+                "document_path": {"type": "string", "description": "Required for declare"},
+                "intent": {"type": "string", "description": "Required for declare"},
+                "ttl": {"type": "number", "default": 60.0, "description": "Seconds until intent expires"},
             },
-            "required": ["agent_id", "document_path", "intent"],
-        },
-    },
-    "get_work_intents": {
-        "description": (
-            "Get all live (non-expired) work intents. "
-            "Optionally filter to a specific agent."
-        ),
-        "parameters": {
-            "type": "object",
-            "properties": {
-                "agent_id": {
-                    "type": "string",
-                    "description": "Filter to intents declared by this agent (default: all agents)",
-                },
-            },
-        },
-    },
-    "clear_work_intent": {
-        "description": "Clear an agent's declared work intent (e.g. after lock is acquired).",
-        "parameters": {
-            "type": "object",
-            "properties": {
-                "agent_id": {
-                    "type": "string",
-                    "description": "Agent whose intent to clear",
-                },
-            },
-            "required": ["agent_id"],
+            "required": ["action", "agent_id"],
         },
     },
 }
@@ -1188,89 +1024,19 @@ TOOL_SCHEMAS_INTENT: dict[str, dict] = {
 # ------------------------------------------------------------------ #
 
 TOOL_SCHEMAS_HANDOFFS: dict[str, dict] = {
-    "acknowledge_handoff": {
-        "description": "Acknowledge receipt of a handoff. Called by each target agent.",
-        "parameters": {
-            "type": "object",
-            "properties": {
-                "handoff_id": {
-                    "type": "integer",
-                    "description": "Handoff ID to acknowledge",
-                },
-                "agent_id": {
-                    "type": "string",
-                    "description": "Agent acknowledging the handoff",
-                },
-            },
-            "required": ["handoff_id", "agent_id"],
-        },
-    },
-    "complete_handoff": {
-        "description": "Mark a handoff as completed (called by the originating agent).",
-        "parameters": {
-            "type": "object",
-            "properties": {
-                "handoff_id": {
-                    "type": "integer",
-                    "description": "Handoff ID to complete",
-                },
-            },
-            "required": ["handoff_id"],
-        },
-    },
-    "cancel_handoff": {
-        "description": "Cancel a handoff (abort before completion).",
-        "parameters": {
-            "type": "object",
-            "properties": {
-                "handoff_id": {
-                    "type": "integer",
-                    "description": "Handoff ID to cancel",
-                },
-            },
-            "required": ["handoff_id"],
-        },
-    },
-    "get_handoffs": {
-        "description": (
-            "Get handoffs with optional status and sender filtering."
-        ),
-        "parameters": {
-            "type": "object",
-            "properties": {
-                "status": {
-                    "type": "string",
-                    "description": "Filter to handoffs with this status (pending/acknowledged/completed/cancelled)",
-                },
-                "from_agent_id": {
-                    "type": "string",
-                    "description": "Filter to handoffs from this agent",
-                },
-                "limit": {
-                    "type": "integer",
-                    "default": 50,
-                    "description": "Maximum handoffs to return (default: 50)",
-                },
-            },
-        },
-    },
     "wait_for_handoff": {
         "description": (
-            "Wait until a handoff is completed or timeout expires. "
-            "Uses the event bus for low-latency notification."
+            "Unified handoff operation. mode='status' returns the handoff record. "
+            "mode='ack' acknowledges. mode='complete' marks completed. "
+            "mode='cancel' cancels. mode='completion' waits for completion."
         ),
         "parameters": {
             "type": "object",
             "properties": {
-                "handoff_id": {
-                    "type": "integer",
-                    "description": "Handoff ID to wait for",
-                },
-                "timeout_s": {
-                    "type": "number",
-                    "default": 30.0,
-                    "description": "Maximum seconds to wait",
-                },
+                "handoff_id": {"type": "integer", "description": "Handoff ID"},
+                "timeout_s": {"type": "number", "default": 30.0, "description": "Wait timeout"},
+                "agent_id": {"type": "string", "description": "Required for ack mode", "default": None},
+                "mode": {"type": "string", "enum": ["status", "ack", "complete", "cancel", "completion"], "default": "completion", "description": "Handoff action"},
             },
             "required": ["handoff_id"],
         },
@@ -1283,136 +1049,48 @@ TOOL_SCHEMAS_HANDOFFS: dict[str, dict] = {
 # ------------------------------------------------------------------ #
 
 TOOL_SCHEMAS_DEPS: dict[str, dict] = {
-    "declare_dependency": {
-        "description": (
-            "Declare that dependent_agent needs depends_on_agent to finish "
-            "task X (or any task by that agent) before starting work."
-        ),
-        "parameters": {
-            "type": "object",
-            "properties": {
-                "dependent_agent_id": {
-                    "type": "string",
-                    "description": "Agent that has the dependency",
-                },
-                "depends_on_agent_id": {
-                    "type": "string",
-                    "description": "Agent that must complete first",
-                },
-                "depends_on_task_id": {
-                    "type": "string",
-                    "description": "Specific task ID (omit for 'any task by that agent')",
-                },
-                "condition": {
-                    "type": "string",
-                    "default": "task_completed",
-                    "description": "Condition: task_completed, agent_registered, or agent_stopped",
-                },
-            },
-            "required": ["dependent_agent_id", "depends_on_agent_id"],
-        },
-    },
     "manage_dependencies": {
         "description": (
-            "Unified dependency query. "
-            "mode='check' returns blocked status and unsatisfied list. "
-            "mode='blockers' returns the same info (alias). "
-            "mode='assert' returns a structured can_start boolean."
+            "Unified dependency management. mode='declare' creates a dependency. "
+            "mode='check'/'blockers'/'assert' queries blockers. "
+            "mode='satisfy' marks one satisfied. mode='list' lists all. "
+            "mode='wait' polls until a dep_id is satisfied."
         ),
         "parameters": {
             "type": "object",
             "properties": {
-                "mode": {
-                    "type": "string",
-                    "enum": ["check", "blockers", "assert"],
-                    "description": "Query mode",
-                },
-                "agent_id": {
-                    "type": "string",
-                    "description": "Agent to check dependencies for",
-                },
+                "mode": {"type": "string", "enum": ["declare", "check", "blockers", "assert", "satisfy", "list", "wait"], "description": "Action mode"},
+                "agent_id": {"type": "string", "description": "Agent for check/blockers/assert/list", "default": None},
+                "dependent_agent_id": {"type": "string", "description": "Required for declare", "default": None},
+                "depends_on_agent_id": {"type": "string", "description": "Required for declare", "default": None},
+                "depends_on_task_id": {"type": "string", "description": "Optional for declare", "default": None},
+                "condition": {"type": "string", "default": "task_completed", "description": "Condition for declare"},
+                "dep_id": {"type": "integer", "description": "Required for satisfy/wait", "default": None},
+                "timeout_s": {"type": "number", "default": 60.0, "description": "Wait timeout"},
+                "poll_interval_s": {"type": "number", "default": 2.0, "description": "Wait poll interval"},
             },
-            "required": ["mode", "agent_id"],
-        },
-    },
-    "satisfy_dependency": {
-        "description": "Mark a dependency as satisfied (called after condition is met).",
-        "parameters": {
-            "type": "object",
-            "properties": {
-                "dep_id": {
-                    "type": "integer",
-                    "description": "Dependency ID to satisfy",
-                },
-            },
-            "required": ["dep_id"],
-        },
-    },
-    "get_all_dependencies": {
-        "description": "Get all declared dependencies, optionally filtered by dependent agent.",
-        "parameters": {
-            "type": "object",
-            "properties": {
-                "dependent_agent_id": {
-                    "type": "string",
-                    "description": "Filter to dependencies declared by this agent",
-                },
-            },
+            "required": ["mode"],
         },
     },
 }
 
 
 TOOL_SCHEMAS_DLQ: dict[str, dict] = {
-    "retry_task": {
+    "task_failures": {
         "description": (
-            "Retry a task from the dead letter queue. "
-            "Resets the task to 'pending' status so it can be reassigned and retried. "
-            "Only tasks in dead_letter status can be retried."
+            "Unified dead-letter queue operations. "
+            "action='retry' resurrects a task. "
+            "action='list_dead_letter' lists DLQ tasks. "
+            "action='history' gets failure history for a task."
         ),
         "parameters": {
             "type": "object",
             "properties": {
-                "task_id": {
-                    "type": "string",
-                    "description": "Task ID to retry from the dead letter queue",
-                },
+                "action": {"type": "string", "enum": ["retry", "list_dead_letter", "history"], "description": "DLQ action"},
+                "task_id": {"type": "string", "description": "Required for retry/history", "default": None},
+                "limit": {"type": "integer", "default": 50, "description": "Max results for list_dead_letter"},
             },
-            "required": ["task_id"],
-        },
-    },
-    "get_dead_letter_tasks": {
-        "description": (
-            "Get all tasks currently in the dead letter queue. "
-            "Tasks enter the DLQ after exceeding max_retries failure attempts. "
-            "Use retry_task to resurrect a task from the DLQ."
-        ),
-        "parameters": {
-            "type": "object",
-            "properties": {
-                "limit": {
-                    "type": "integer",
-                    "description": "Maximum number of dead letter tasks to return (default 50)",
-                    "default": 50,
-                },
-            },
-        },
-    },
-    "get_task_failure_history": {
-        "description": (
-            "Get the failure history for a task. "
-            "Returns all recorded failure attempts including error messages, "
-            "attempt counts, and whether the task entered dead_letter status."
-        ),
-        "parameters": {
-            "type": "object",
-            "properties": {
-                "task_id": {
-                    "type": "string",
-                    "description": "Task ID whose failure history to retrieve",
-                },
-            },
-            "required": ["task_id"],
+            "required": ["action"],
         },
     },
 }
@@ -1422,92 +1100,30 @@ TOOL_SCHEMAS_LEASES: dict[str, dict] = {
     "acquire_coordinator_lease": {
         "description": (
             "Attempt to acquire the coordinator leadership lease (COORDINATOR_LEADER). "
-            "If acquired, this agent becomes the active coordinator. "
-            "The lease has a short TTL (default 10s) and must be refreshed via "
-            "refresh_coordinator_lease before it expires. "
-            "If leadership is held by another agent, returns the current holder."
+            "If acquired, this agent becomes the active coordinator."
         ),
         "parameters": {
             "type": "object",
             "properties": {
-                "agent_id": {
-                    "type": "string",
-                    "description": "Agent ID attempting to acquire the lease",
-                },
-                "ttl": {
-                    "type": "number",
-                    "description": "Lease TTL in seconds (default: 10)",
-                },
+                "agent_id": {"type": "string", "description": "Agent ID attempting to acquire the lease"},
+                "ttl": {"type": "number", "description": "Lease TTL in seconds (default: 10)"},
             },
             "required": ["agent_id"],
         },
     },
-    "refresh_coordinator_lease": {
+    "manage_leases": {
         "description": (
-            "Refresh the coordinator leadership lease TTL. "
-            "Must be called before the lease expires to maintain leadership. "
-            "Returns an error if this agent is not the current lease holder."
+            "Unified lease management. action='acquire' | 'refresh' | 'release' | "
+            "'get' (returns current leader) | 'claim' (failover claim)."
         ),
         "parameters": {
             "type": "object",
             "properties": {
-                "agent_id": {
-                    "type": "string",
-                    "description": "Agent ID refreshing the lease",
-                },
+                "action": {"type": "string", "enum": ["acquire", "refresh", "release", "get", "claim"], "description": "Lease action"},
+                "agent_id": {"type": "string", "description": "Agent ID"},
+                "ttl": {"type": "number", "description": "TTL for acquire/claim", "default": None},
             },
-            "required": ["agent_id"],
-        },
-    },
-    "release_coordinator_lease": {
-        "description": (
-            "Release the coordinator leadership lease. "
-            "Returns an error if this agent is not the current lease holder. "
-            "After release, another agent can acquire leadership via "
-            "acquire_coordinator_lease."
-        ),
-        "parameters": {
-            "type": "object",
-            "properties": {
-                "agent_id": {
-                    "type": "string",
-                    "description": "Agent ID releasing the lease",
-                },
-            },
-            "required": ["agent_id"],
-        },
-    },
-    "get_leader": {
-        "description": (
-            "Return the current coordinator lease holder, or null if the "
-            "lease is unheld/expired."
-        ),
-        "parameters": {
-            "type": "object",
-            "properties": {},
-        },
-    },
-    "claim_leadership": {
-        "description": (
-            "Claim coordinator leadership when the current leader has failed. "
-            "Succeeds only if the current lease is expired or unheld — "
-            "it is NOT taken from a live holder. "
-            "Use after detecting a failed leader (missed heartbeat or lease expiry). "
-            "After claiming, rebuild any in-memory state from the DB."
-        ),
-        "parameters": {
-            "type": "object",
-            "properties": {
-                "agent_id": {
-                    "type": "string",
-                    "description": "Agent ID attempting to claim leadership",
-                },
-                "ttl": {
-                    "type": "number",
-                    "description": "Lease TTL in seconds (default: 10)",
-                },
-            },
-            "required": ["agent_id"],
+            "required": ["action", "agent_id"],
         },
     },
 }
