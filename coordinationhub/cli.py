@@ -253,7 +253,17 @@ def create_parser() -> argparse.ArgumentParser:
     sub.add_parser("doctor", parents=[shared], help="Validate CoordinationHub setup and diagnose issues")
 
     # init
-    sub.add_parser("init", parents=[shared], help="Set up CoordinationHub: create DB, configure hooks")
+    p = sub.add_parser("init", parents=[shared], help="Set up CoordinationHub: create DB, configure hooks")
+    p.add_argument("--auto-dashboard", action="store_true",
+                   help="Also install a SessionStart hook that auto-launches the SSE dashboard at http://127.0.0.1:9898")
+    p.add_argument("--monitor-skill", action="store_true",
+                   help="Also install the 'coordinationhub-monitor' skill at ~/.claude/skills/ for LLMs to watch the swarm")
+
+    # auto-start-dashboard (used by the SessionStart hook from `init --auto-dashboard`)
+    p = sub.add_parser("auto-start-dashboard", parents=[shared],
+                       help="Idempotently launch the SSE dashboard if not already running")
+    p.add_argument("--host", default="127.0.0.1")
+    p.add_argument("--port", type=int, default=9898)
 
     # watch
     p = sub.add_parser("watch", parents=[shared], help="Live-refresh agent tree (Ctrl+C to stop)")
@@ -482,6 +492,7 @@ _COMMANDS = {
     "agent-tree": "cmd_agent_tree",
     "doctor": "cmd_doctor",
     "init": "cmd_init",
+    "auto-start-dashboard": "cmd_auto_start_dashboard",
     "watch": "cmd_watch",
     "await-agent": "cmd_await_agent",
     "send-message": "cmd_send_message",

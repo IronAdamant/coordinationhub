@@ -91,3 +91,139 @@ class TestFillHookCommand:
         filled = _fill_hook_command(_HOOKS_CONFIG, "/opt/special/python3.12")
         cmd = filled["SessionStart"][0]["hooks"][0]["command"]
         assert cmd == "/opt/special/python3.12 -m coordinationhub.hooks.claude_code"
+
+
+class TestAutoStartDashboard:
+    """Validate the SessionStart-hook helper that idempotently launches serve-sse."""
+
+    def test_skips_when_port_bound(self):
+        """If something is already listening on the target port, return 0 immediately."""
+        import socket
+        from types import SimpleNamespace
+        from coordinationhub.cli_setup import cmd_auto_start_dashboard
+
+        # Bind a real socket so cmd_auto_start_dashboard sees the port as taken.
+        srv = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        srv.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        srv.bind(("127.0.0.1", 0))
+        srv.listen(1)
+        port = srv.getsockname()[1]
+        try:
+            args = SimpleNamespace(host="127.0.0.1", port=port)
+            with patch("subprocess.Popen") as popen:
+                rc = cmd_auto_start_dashboard(args)
+            assert rc == 0
+            popen.assert_not_called()
+        finally:
+            srv.close()
+
+    def test_spawns_serve_sse_when_port_free(self, tmp_path, monkeypatch):
+        """When the port is free, cmd_auto_start_dashboard spawns serve-sse detached."""
+        from types import SimpleNamespace
+        from coordinationhub.cli_setup import cmd_auto_start_dashboard
+
+        # Pin the log directory to a tmp path so the test doesn't touch ~
+        monkeypatch.setattr("pathlib.Path.home", lambda: tmp_path)
+
+        # Use an ephemeral port that we know is unbound.
+        # (Bind+release to discover a likely-free port.)
+        import socket
+        s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        s.bind(("127.0.0.1", 0))
+        port = s.getsockname()[1]
+        s.close()
+
+        args = SimpleNamespace(host="127.0.0.1", port=port)
+        with patch("subprocess.Popen") as popen:
+            rc = cmd_auto_start_dashboard(args)
+        assert rc == 0
+        popen.assert_called_once()
+        # Verify the subprocess invocation uses the right CLI
+        argv = popen.call_args[0][0]
+        assert "coordinationhub" in argv
+        assert "serve-sse" in argv
+        assert "--no-browser" in argv
+        assert str(port) in argv
+        # Verify the log file was opened under the patched home
+        assert (tmp_path / ".coordinationhub" / "dashboard.log").exists()
+
+
+class TestInitOptInFlags:
+    """Validate the --auto-dashboard and --monitor-skill flags on `init`."""
+
+    def test_install_auto_dashboard_hook_appends_to_session_start(self, tmp_path, monkeypatch):
+        from coordinationhub import cli_setup
+
+        # Pin the settings path under tmp
+        settings_path = tmp_path / ".claude" / "settings.json"
+        settings_path.parent.mkdir(parents=True)
+        settings_path.write_text(json.dumps({"hooks": {"SessionStart": [
+            {"matcher": "", "hooks": [{"type": "command", "command": "/usr/bin/python3 -m coordinationhub.hooks.claude_code", "timeout": 10}]}
+        ]}}, indent=2))
+        monkeypatch.setattr(cli_setup, "_CLAUDE_SETTINGS_PATH", settings_path)
+
+        cli_setup._install_auto_dashboard_hook("/usr/bin/python3")
+
+        settings = json.loads(settings_path.read_text())
+        ss = settings["hooks"]["SessionStart"]
+        # Original hook preserved
+        assert any("hooks.claude_code" in h["command"]
+                   for block in ss for h in block.get("hooks", []))
+        # New hook added
+        assert any("auto-start-dashboard" in h["command"]
+                   for block in ss for h in block.get("hooks", []))
+
+    def test_install_auto_dashboard_hook_idempotent(self, tmp_path, monkeypatch):
+        from coordinationhub import cli_setup
+
+        settings_path = tmp_path / ".claude" / "settings.json"
+        settings_path.parent.mkdir(parents=True)
+        settings_path.write_text(json.dumps({"hooks": {"SessionStart": []}}))
+        monkeypatch.setattr(cli_setup, "_CLAUDE_SETTINGS_PATH", settings_path)
+
+        cli_setup._install_auto_dashboard_hook("/usr/bin/python3")
+        cli_setup._install_auto_dashboard_hook("/usr/bin/python3")  # second call
+
+        settings = json.loads(settings_path.read_text())
+        ss = settings["hooks"]["SessionStart"]
+        auto_hooks = [h for block in ss for h in block.get("hooks", [])
+                      if "auto-start-dashboard" in h["command"]]
+        assert len(auto_hooks) == 1, f"expected 1 auto-dashboard hook, got {len(auto_hooks)}"
+
+    def test_install_auto_dashboard_hook_updates_python_path(self, tmp_path, monkeypatch):
+        from coordinationhub import cli_setup
+
+        settings_path = tmp_path / ".claude" / "settings.json"
+        settings_path.parent.mkdir(parents=True)
+        settings_path.write_text(json.dumps({"hooks": {"SessionStart": []}}))
+        monkeypatch.setattr(cli_setup, "_CLAUDE_SETTINGS_PATH", settings_path)
+
+        cli_setup._install_auto_dashboard_hook("/old/python3")
+        cli_setup._install_auto_dashboard_hook("/new/python3")
+
+        settings = json.loads(settings_path.read_text())
+        cmd = next(h["command"] for block in settings["hooks"]["SessionStart"]
+                   for h in block.get("hooks", []) if "auto-start-dashboard" in h["command"])
+        assert cmd.startswith("/new/python3 ")
+
+    def test_install_monitor_skill_writes_skill_file(self, tmp_path, monkeypatch):
+        from coordinationhub import cli_setup
+
+        # Patch the install target dir under tmp_path so we don't touch real ~
+        monkeypatch.setattr(cli_setup, "_SKILL_DIR", tmp_path / "skills" / "coordinationhub-monitor")
+
+        cli_setup._install_monitor_skill()
+
+        skill_path = tmp_path / "skills" / "coordinationhub-monitor" / "SKILL.md"
+        assert skill_path.exists(), f"expected SKILL.md at {skill_path}"
+
+        body = skill_path.read_text()
+        # Frontmatter present
+        assert body.startswith("---\n")
+        assert "name: coordinationhub-monitor" in body
+        # Description triggers on relevant phrases
+        assert "monitor" in body.lower()
+        # Read-only role enforced
+        assert "Never write" in body or "read-only" in body.lower()
+        # Cadence and source-of-truth URL spelled out
+        assert "127.0.0.1:9898" in body

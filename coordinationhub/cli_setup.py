@@ -20,6 +20,10 @@ from .cli_utils import print_json as _print_json
 _CLAUDE_SETTINGS_PATH = Path.home() / ".claude" / "settings.json"
 
 _HOOK_CMD_TEMPLATE = "{python} -m coordinationhub.hooks.claude_code"
+_AUTO_DASHBOARD_CMD_TEMPLATE = "{python} -m coordinationhub auto-start-dashboard"
+
+_SKILL_DIR = Path.home() / ".claude" / "skills" / "coordinationhub-monitor"
+_SKILL_TEMPLATE_PATH = Path(__file__).parent / "data" / "monitor_skill.md"
 
 _HOOKS_CONFIG = {
     "SessionStart": [{"matcher": "", "hooks": [{"type": "command", "command": "", "timeout": 10, "statusMessage": "Registering with CoordinationHub"}]}],
@@ -279,10 +283,75 @@ def cmd_init(args):
             all_ok = False
         print(f"  [{icon:4s}] {r['name']}: {r['message']}")
 
+    # Step 6 (opt-in): auto-dashboard SessionStart hook
+    if getattr(args, "auto_dashboard", False):
+        _install_auto_dashboard_hook(python_path)
+
+    # Step 7 (opt-in): coordinationhub-monitor skill
+    if getattr(args, "monitor_skill", False):
+        _install_monitor_skill()
+
     if all_ok:
         print("\nSetup complete. CoordinationHub is ready.")
     else:
         print("\nSetup complete with warnings. Check the failures above.")
+
+
+def _install_auto_dashboard_hook(python_path: str) -> None:
+    """Append a SessionStart hook that auto-starts the SSE dashboard.
+
+    Idempotent — if the hook already references ``auto-start-dashboard``,
+    the command string is updated in place rather than duplicated.
+    """
+    cmd = _AUTO_DASHBOARD_CMD_TEMPLATE.format(python=python_path)
+    if not _CLAUDE_SETTINGS_PATH.exists():
+        # The main init step always writes settings.json before this is called
+        return
+    settings = json.loads(_CLAUDE_SETTINGS_PATH.read_text(encoding="utf-8"))
+    hooks = settings.setdefault("hooks", {})
+    session_start = hooks.setdefault("SessionStart", [])
+
+    # Update existing entry if present
+    for matcher_block in session_start:
+        for hook in matcher_block.get("hooks", []):
+            if "auto-start-dashboard" in hook.get("command", ""):
+                hook["command"] = cmd
+                _CLAUDE_SETTINGS_PATH.write_text(
+                    json.dumps(settings, indent=2) + "\n", encoding="utf-8",
+                )
+                print(f"\nAuto-dashboard hook updated: {cmd}")
+                return
+
+    # Append a fresh matcher block — doesn't disturb the existing
+    # claude_code.py hook that registers the root agent.
+    session_start.append({
+        "matcher": "",
+        "hooks": [{
+            "type": "command",
+            "command": cmd,
+            "timeout": 5,
+            "statusMessage": "Starting CoordinationHub dashboard",
+        }],
+    })
+    _CLAUDE_SETTINGS_PATH.write_text(
+        json.dumps(settings, indent=2) + "\n", encoding="utf-8",
+    )
+    print("\nAuto-dashboard hook installed.")
+    print(f"  Command: {cmd}")
+    print("  Every Claude Code session start will idempotently launch the dashboard")
+    print("  at http://127.0.0.1:9898 (skipped if the port is already bound).")
+
+
+def _install_monitor_skill() -> None:
+    """Copy the coordinationhub-monitor SKILL.md into ~/.claude/skills/."""
+    _SKILL_DIR.mkdir(parents=True, exist_ok=True)
+    target = _SKILL_DIR / "SKILL.md"
+    target.write_text(_SKILL_TEMPLATE_PATH.read_text(encoding="utf-8"), encoding="utf-8")
+    print("\nMonitor skill installed.")
+    print(f"  Location: {target}")
+    print("  Invoke by asking an LLM to 'watch the swarm' or 'monitor the agents'.")
+    print("  The skill instructs the LLM to poll http://127.0.0.1:9898/api/dashboard-data")
+    print("  every 30 s and surface boundary crossings, blocked tasks, and stale agents.")
 
 
 def _install_ide_hooks(project_root: Path, python_path: str) -> None:
@@ -334,6 +403,68 @@ def _merge_hooks(existing: dict, new: dict) -> dict:
                 existing_matchers.append(new_matcher)
 
     return merged
+
+
+# ------------------------------------------------------------------ #
+# auto-start-dashboard
+# ------------------------------------------------------------------ #
+
+def cmd_auto_start_dashboard(args) -> int:
+    """Idempotently start the SSE dashboard server.
+
+    Designed to be invoked from the Claude Code SessionStart hook installed
+    by ``coordinationhub init --auto-dashboard``. Exits silently when:
+
+    - The configured host:port is already bound (dashboard is up, or another
+      service has the port).
+    - ``serve-sse`` cannot be spawned (e.g. coordinationhub not on PATH).
+
+    Returns the exit code (0 in all normal paths so the hook never blocks
+    a session start).
+    """
+    import socket
+
+    host = getattr(args, "host", "127.0.0.1")
+    port = getattr(args, "port", 9898)
+
+    # Probe — if anything is listening we're done.
+    s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    s.settimeout(0.3)
+    try:
+        s.connect((host, port))
+        return 0  # something already serving on this port
+    except OSError:
+        pass
+    finally:
+        try:
+            s.close()
+        except Exception:
+            pass
+
+    # Spawn ``serve-sse`` as a detached daemon.
+    log_dir = Path.home() / ".coordinationhub"
+    log_dir.mkdir(parents=True, exist_ok=True)
+    log_path = log_dir / "dashboard.log"
+
+    try:
+        log_handle = open(log_path, "ab")
+    except OSError:
+        return 0  # filesystem refused — fail silently to keep the hook fast
+
+    try:
+        subprocess.Popen(
+            [
+                sys.executable, "-m", "coordinationhub", "serve-sse",
+                "--no-browser", "--host", host, "--port", str(port),
+            ],
+            stdout=log_handle,
+            stderr=log_handle,
+            stdin=subprocess.DEVNULL,
+            start_new_session=True,
+        )
+    except OSError:
+        return 0  # spawn failed — still don't block the session
+    return 0
 
 
 # ------------------------------------------------------------------ #

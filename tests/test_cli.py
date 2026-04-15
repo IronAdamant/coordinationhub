@@ -25,7 +25,7 @@ EXPECTED_COMMANDS = {
     "get-conflicts", "contention-hotspots",
     "load-spec", "validate-spec", "scan-project", "dashboard",
     "agent-status", "assess", "agent-tree",
-    "doctor", "init", "watch",
+    "doctor", "init", "watch", "auto-start-dashboard",
     "await-agent", "send-message", "get-messages", "mark-messages-read",
     "create-task", "assign-task", "update-task-status", "query-tasks",
     "create-subtask",

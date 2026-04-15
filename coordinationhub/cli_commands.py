@@ -54,6 +54,7 @@ from .cli_vis import (
     cmd_agent_tree,
 )
 from .cli_setup import (
+    cmd_auto_start_dashboard,
     cmd_doctor,
     cmd_init,
     cmd_watch,

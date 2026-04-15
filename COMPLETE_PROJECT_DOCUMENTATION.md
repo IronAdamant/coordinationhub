@@ -1,7 +1,45 @@
 # CoordinationHub — Complete Project Documentation
 
-**Version:** <!-- GEN:version -->0.7.4<!-- /GEN -->
+**Version:** <!-- GEN:version -->0.7.5<!-- /GEN -->
 **Last updated:** 2026-04-15
+
+## v0.7.5 Changelog — Dashboard Pan/Zoom + JS Bug Fix + Opt-In Auto-Dashboard / Monitor Skill
+
+### Motivation
+
+A latent dashboard JavaScript bug — a missing closing paren in a `html.push(...)` call introduced in v0.7.2's clarity pass — went out the door in v0.7.2, v0.7.3, and v0.7.4. Every dashboard load against a database with at least one active lock crashed the JS at parse time, leaving the page stuck on "Loading…" forever. The bug was caught by a browser console error during a screenshot session against the RecipeLab_alt swarm. While fixing it, the agent tree gained full pan + zoom controls and wider nodes so realistic task descriptions don't truncate. Two opt-in turnkey integrations also landed: a SessionStart hook that idempotently auto-launches the dashboard, and a `coordinationhub-monitor` Claude Code skill that turns any LLM into a read-only swarm watcher.
+
+### Fixes
+
+- **Dashboard JS syntax bug** (`plugins/dashboard/dashboard_html.py`): the `renderLocks` boundary-marker block read `html.push('<span class="lock-path">' + escapeHTML(path);` — missing the closing `)` on the `push()` call. Three releases shipped this; every dashboard load with locks died. Fixed and added `tests/test_dashboard_html.py` with three guards: exactly one `<script>` block in `DASHBOARD_HTML`, at least six panel containers, and `node --check` of the extracted JS body (the third skips when Node isn't installed, so CI doesn't suddenly require it). The `node --check` test is verified to fail when the bug is restored.
+- **Pan + zoom on the agent tree**: the SVG tree now renders inside a `<g class="tree-root" transform="translate scale">` group whose transform is updated by mouse-wheel zoom (anchored at cursor), click+drag pan, and three buttons in the top-right corner of the panel (`−` / `⌖` fit-to-view / `+`) plus a live percentage label. Zoom range 0.2× to 4×. State persists across the 5-second SSE refreshes. First render auto-fits.
+- **Wider agent nodes**: `NODE_W` 240→320, `NODE_H` 58→70, `H_GAP` 60→90, `V_GAP` 18→24, `MAX_TASK` 56→76 chars, `MAX_ID` 30→38 chars. Realistic task descriptions like "Verify paprika/csv/json round-trip parity on the 200-recipe corpus" now display in full.
+
+### New: opt-in turnkey integrations
+
+- **`coordinationhub init --auto-dashboard`**: appends a `SessionStart` hook to `~/.claude/settings.json` that runs `coordinationhub auto-start-dashboard` on every Claude Code session start. The new `auto-start-dashboard` CLI subcommand probes the configured port (default 9898), exits quickly if anything is already listening, and otherwise spawns `serve-sse --no-browser` as a detached daemon (logs to `~/.coordinationhub/dashboard.log`). Idempotent — re-running `init --auto-dashboard` updates the python interpreter in the existing hook entry rather than duplicating it.
+- **`coordinationhub init --monitor-skill`**: copies `coordinationhub/data/monitor_skill.md` into `~/.claude/skills/coordinationhub-monitor/SKILL.md`. The skill instructs an LLM acting on it to poll `http://127.0.0.1:9898/api/dashboard-data` every 30 s and surface five priority signals: boundary-crossing locks, blocked tasks, stale agents, long-lived work intents with no follow-through, and unsatisfied dependencies past their wait window. Hard rules in the skill body forbid the LLM from writing code or calling MCP coordination tools — read-only role only.
+- **`coordinationhub auto-start-dashboard`**: new CLI subcommand exposed for the hook above. Always returns exit 0 to keep the hook fast and never block a session start.
+
+The skill template is shipped as package data via `[tool.setuptools.package-data] coordinationhub = ["py.typed", "data/*.md"]`, so a fresh `pip install coordinationhub` includes it.
+
+### Verification
+
+- 403 tests pass (was 394; +3 dashboard-HTML guards, +6 opt-in flag tests), 1 skipped.
+- `python scripts/gen_docs.py --check` clean.
+- `node --check` of the served JS is clean.
+- Pan + zoom verified live against the RecipeLab_alt 6-agent swarm.
+- `--auto-dashboard` end-to-end smoke tested: `coordinationhub auto-start-dashboard` on a free port spawns `serve-sse` detached; on a bound port returns 0 without spawning.
+- `--monitor-skill` end-to-end smoke tested: `_install_monitor_skill` writes a SKILL.md under the patched skills dir with frontmatter, the read-only mandate, and the dashboard URL.
+
+### Counts
+
+| Version | Tools | CLI Commands | Schema |
+|---------|-------|--------------|--------|
+| v0.7.5 | 50 | 75 | 20 |
+| v0.7.4 | 50 | 74 | 20 |
+
+---
 
 ## v0.7.4 Changelog — Drop Server Self-Registration + `python -m coordinationhub`
 
@@ -984,14 +1022,14 @@ keep it in sync; CI checks for drift on every push.
 | `coordinationhub/agent_registry.py` | 292 | Agent lifecycle: register, heartbeat, deregister, lineage management |
 | `coordinationhub/agent_status.py` | 277 | Agent status and file-map query helpers for CoordinationHub |
 | `coordinationhub/broadcasts.py` | 106 | Broadcast acknowledgment primitives for CoordinationHub |
-| `coordinationhub/cli.py` | 398 | CoordinationHub CLI — command-line interface for all coordination tool methods |
+| `coordinationhub/cli.py` | 407 | CoordinationHub CLI — command-line interface for all coordination tool methods |
 | `coordinationhub/cli_agents.py` | 121 | Agent identity and lifecycle CLI commands |
-| `coordinationhub/cli_commands.py` | 97 | CoordinationHub CLI command handlers |
+| `coordinationhub/cli_commands.py` | 98 | CoordinationHub CLI command handlers |
 | `coordinationhub/cli_deps.py` | 77 | CLI commands for cross-agent dependency declarations |
 | `coordinationhub/cli_intent.py` | 45 | CLI commands for the work intent board |
 | `coordinationhub/cli_leases.py` | 150 | CLI commands for HA coordinator lease management |
 | `coordinationhub/cli_locks.py` | 323 | Document locking and coordination CLI commands |
-| `coordinationhub/cli_setup.py` | 287 | CLI commands for setup and diagnostics: doctor, init, watch |
+| `coordinationhub/cli_setup.py` | 386 | CLI commands for setup and diagnostics: doctor, init, watch |
 | `coordinationhub/cli_spawner.py` | 115 | CLI commands for HA coordinator spawner — sub-agent registry management |
 | `coordinationhub/cli_sse.py` | 35 | CLI commands for SSE dashboard server |
 | `coordinationhub/cli_tasks.py` | 239 | CLI commands for the task registry |
@@ -1038,7 +1076,7 @@ keep it in sync; CI checks for drift on every push.
 | `coordinationhub/plugins/assessment/assessment_scorers.py` | 258 | Assessment metric scorers for CoordinationHub |
 | `coordinationhub/plugins/dashboard/__init__.py` | 15 | Dashboard plugin for CoordinationHub |
 | `coordinationhub/plugins/dashboard/dashboard.py` | 82 | Web dashboard for CoordinationHub — zero external dependencies |
-| `coordinationhub/plugins/dashboard/dashboard_html.py` | 478 | Self-contained HTML for the CoordinationHub dashboard |
+| `coordinationhub/plugins/dashboard/dashboard_html.py` | 607 | Self-contained HTML for the CoordinationHub dashboard |
 | `coordinationhub/plugins/graph/__init__.py` | 31 | Graph plugin for CoordinationHub |
 | `coordinationhub/plugins/graph/graphs.py` | 309 | Declarative coordination graph: loader, validator, in-memory representation |
 | `coordinationhub/plugins/registry.py` | 41 | Plugin registry for CoordinationHub |
@@ -1064,7 +1102,7 @@ keep it in sync; CI checks for drift on every push.
 | `coordinationhub/work_intent.py` | 77 | Work intent board primitives for CoordinationHub |
 <!-- /GEN -->
 
-**Total: <!-- GEN:test-count -->395<!-- /GEN --> tests across 23 test files.**
+**Total: <!-- GEN:test-count -->404<!-- /GEN --> tests across 23 test files.**
 
 ---
 
@@ -1079,14 +1117,14 @@ coordinationhub/
   agent_registry.py     — Agent lifecycle: register, heartbeat, deregister, lineage management (~292 LOC)
   agent_status.py       — Agent status and file-map query helpers for CoordinationHub (~277 LOC)
   broadcasts.py         — Broadcast acknowledgment primitives for CoordinationHub (~106 LOC)
-  cli.py                — CoordinationHub CLI — command-line interface for all coordination tool methods (~398 LOC)
+  cli.py                — CoordinationHub CLI — command-line interface for all coordination tool methods (~407 LOC)
   cli_agents.py         — Agent identity and lifecycle CLI commands (~121 LOC)
-  cli_commands.py       — CoordinationHub CLI command handlers (~97 LOC)
+  cli_commands.py       — CoordinationHub CLI command handlers (~98 LOC)
   cli_deps.py           — CLI commands for cross-agent dependency declarations (~77 LOC)
   cli_intent.py         — CLI commands for the work intent board (~45 LOC)
   cli_leases.py         — CLI commands for HA coordinator lease management (~150 LOC)
   cli_locks.py          — Document locking and coordination CLI commands (~323 LOC)
-  cli_setup.py          — CLI commands for setup and diagnostics: doctor, init, watch (~287 LOC)
+  cli_setup.py          — CLI commands for setup and diagnostics: doctor, init, watch (~386 LOC)
   cli_spawner.py        — CLI commands for HA coordinator spawner — sub-agent registry management (~115 LOC)
   cli_sse.py            — CLI commands for SSE dashboard server (~35 LOC)
   cli_tasks.py          — CLI commands for the task registry (~239 LOC)
@@ -1143,7 +1181,7 @@ coordinationhub/
   plugins/dashboard/
     __init__.py         — Dashboard plugin for CoordinationHub (~15 LOC)
     dashboard.py        — Web dashboard for CoordinationHub — zero external dependencies (~82 LOC)
-    dashboard_html.py   — Self-contained HTML for the CoordinationHub dashboard (~478 LOC)
+    dashboard_html.py   — Self-contained HTML for the CoordinationHub dashboard (~607 LOC)
   plugins/graph/
     __init__.py         — Graph plugin for CoordinationHub (~31 LOC)
     graphs.py           — Declarative coordination graph: loader, validator, in-memory representation (~309 LOC)
@@ -1166,7 +1204,7 @@ coordinationhub/
 ```
 <!-- /GEN -->
 
-The `tests/` directory holds <!-- GEN:test-count -->395<!-- /GEN --> tests across 23 files,
+The `tests/` directory holds <!-- GEN:test-count -->404<!-- /GEN --> tests across 23 files,
 plus `tests/fixtures/claude_code_events/` for hook contract fixtures.
 
 **Module design principles:**
@@ -1633,7 +1671,7 @@ Air-gapped install: `pip install coordinationhub --no-deps`.
 
 ```bash
 python -m pytest tests/ -v
-# <!-- GEN:test-count -->395<!-- /GEN --> tests across 23 test files
+# <!-- GEN:test-count -->404<!-- /GEN --> tests across 23 test files
 ```
 
 ---

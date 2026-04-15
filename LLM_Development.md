@@ -1,11 +1,130 @@
 # LLM_Development.md — CoordinationHub
 
-**Version:** <!-- GEN:version -->0.7.4<!-- /GEN -->
+**Version:** <!-- GEN:version -->0.7.5<!-- /GEN -->
 **Last updated:** 2026-04-15
 
 ## Change Log
 
 All significant changes to the CoordinationHub project are documented here in reverse chronological order.
+
+---
+
+## 2026-04-15 — v0.7.5 Dashboard Pan/Zoom + JS Bug Fix + Opt-In Auto-Dashboard / Monitor Skill
+
+### Motivation
+
+A latent dashboard JavaScript bug — a missing closing paren in a `html.push(...)` call — was introduced during the v0.7.2 dashboard clarity pass and shipped through v0.7.2, v0.7.3, and v0.7.4. Every dashboard load against a database with at least one active lock crashed the JS at parse time with `Uncaught SyntaxError: missing ) after argument list`, leaving the page stuck on "Loading…" forever. The bug was caught by a browser console error during a screenshot session against the RecipeLab_alt swarm. While fixing it, the agent tree was also extended with full pan + zoom controls and the agent nodes were widened so realistic task descriptions don't truncate.
+
+### Fix 1 — Dashboard JavaScript syntax bug (plugins/dashboard/dashboard_html.py)
+
+**Bug**: the boundary-crossing marker block in `renderLocks` read
+
+```
+html.push('<span class="lock-path">' + escapeHTML(path);
+```
+
+— missing the closing `)` on the `push()` call. The intent was to push only the opener, then conditionally append the boundary marker and the closer, but the typo left `push(` unterminated. JavaScript's parser failed at the next semicolon, killing the entire IIFE before any render function ran. Three releases shipped this; the dashboard worked with empty databases (no `renderLocks` rendering needed) but died the moment any lock existed.
+
+**Fix**: add the missing `)`:
+
+```
+html.push('<span class="lock-path">' + escapeHTML(path));
+```
+
+**Regression guard**: new `tests/test_dashboard_html.py` with three checks:
+
+1. `test_single_script_block` — exactly one `<script>` and one `</script>` in `DASHBOARD_HTML` (catches the v0.7.1-style premature `</script>` regression too).
+2. `test_balanced_panel_markup` — at least six `class="panel"` containers exist.
+3. `test_js_parses_with_node` — extracts the `<script>` body and runs it through `node --check`. Skipped when Node isn't on `PATH` so this doesn't make Node a hard CI dependency. Verified to FAIL when the v0.7.2 typo is restored.
+
+### Fix 2 — Agent tree pan + zoom
+
+**Gap**: the agent tree SVG used `viewBox` set to its content's bounding box, with `overflow: auto` on the container — meaning the user could only browse-scroll a clipped region with no way to zoom out. With realistic swarms (6+ agents on a project with deep lineage), nodes routinely fell off-screen.
+
+**Fix**: render all node + edge SVG inside a `<g class="tree-root" transform="translate(panX,panY) scale(zoom)">` group. The SVG's outer `viewBox` is fixed to the panel's pixel size; only the inner group transforms. Three event handlers update the transform:
+
+- `wheel` on the SVG — zoom with anchor at cursor position. `factor = 1.15` per notch. Clamped to `[0.2, 4.0]`.
+- `mousedown` + window-level `mousemove` + `mouseup` — click-and-drag pan, with a `panning` CSS class flipping the cursor to `grabbing`.
+- Three buttons (`−` / `⌖` fit-to-view / `+`) in a top-right overlay div, plus a live percentage label.
+
+Pan + zoom state is module-level (`var treeState = {zoom, panX, panY}`) and persists across the 5-second SSE refreshes. `fitTreeToView` computes the largest zoom that fits the rendered content's bounding box (with 5% margin) and centers it; called automatically on the very first render and whenever the user clicks the fit button.
+
+**Hoisting bug caught during dev**: the first attempt declared `treeState` near the bottom of the IIFE, alongside the helper functions. Function declarations are hoisted, but `var treeState = {...}` only hoists the declaration (to `undefined`), not the initialization. Because `startSSE()` runs immediately at IIFE top-level and SSE delivers the first event almost instantly, `renderAgentTree` was firing BEFORE the `treeState = {...}` line executed, raising `TypeError: cannot read properties of undefined`. Moved the initialization to the top of the IIFE.
+
+### Fix 3 — Wider agent nodes
+
+**Gap**: nodes were 240×58 with 56-char task and 30-char id truncation. Realistic task descriptions like "Verify paprika/csv/json round-trip parity on the 200-recipe corpus" lost their second half.
+
+**Fix**: bumped `NODE_W` 240→320, `NODE_H` 58→70, `H_GAP` 60→90, `V_GAP` 18→24, `PADDING` 24→28, `MAX_TASK` 56→76, `MAX_ID` 30→38. Internal text positions adjusted to use the larger box (status dot 12,14→14,16; id text 24,19→28,21; task text 10,38→12,44; lock count y=51→61). Tasks like "Migrate allergenDatabase.js to v2 schema (label-set normalization)" now display in full.
+
+### Side benefit
+
+Because the dashboard JS was syntax-erroring before any render, every "demo screenshot" in v0.7.2 / v0.7.3 / v0.7.4 either showed an empty Loading state or worked only because the seeded scenario happened to have no active locks at screenshot time. The new `test_dashboard_html.py::test_js_parses_with_node` would have caught the regression before it shipped. All future dashboard edits run through `node --check` automatically (when Node is on PATH).
+
+### New: opt-in turnkey integrations
+
+Two opt-in flags on `coordinationhub init` make multi-agent monitoring zero-touch:
+
+#### --auto-dashboard
+
+Adds a `SessionStart` matcher block to `~/.claude/settings.json` whose command is `coordinationhub auto-start-dashboard`. The new `auto-start-dashboard` CLI subcommand:
+
+1. Probes `127.0.0.1:9898` (configurable via `--host`/`--port`).
+2. If the port is bound, returns 0 immediately — something is already serving (could be a previous coordinationhub session, or an unrelated service that the user wants left alone).
+3. If the port is free, opens `~/.coordinationhub/dashboard.log` for append, then spawns `python -m coordinationhub serve-sse --no-browser` via `subprocess.Popen(stdin=DEVNULL, start_new_session=True)`. The detached process survives the hook's quick exit; its logs go to the dashboard.log file.
+4. Always returns 0 — a slow or failed dashboard launch must never block a Claude Code session start.
+
+The `_install_auto_dashboard_hook` helper merges the new hook into `settings.json` carefully:
+
+- Doesn't touch the existing `coordinationhub.hooks.claude_code` SessionStart entry (the one that registers the root agent and stamps its current_task).
+- Identifies its own hook by the substring `auto-start-dashboard` and updates the python interpreter path in place if already installed (so re-running `init --auto-dashboard` after a venv switch does the right thing).
+- Otherwise appends a fresh matcher block with a 5 s timeout and a `Starting CoordinationHub dashboard` status message.
+
+Tests in `tests/test_setup.py::TestAutoStartDashboard` cover both the port-bound path (using a live `socket.socket` to actually occupy the port and asserting `Popen` was NOT called) and the port-free path (asserting the spawned argv contains `serve-sse`, `--no-browser`, and the chosen port). `TestInitOptInFlags` covers the JSON-merge helper for hook installation, idempotence, and python-path updates.
+
+#### --monitor-skill
+
+Copies a markdown file from `coordinationhub/data/monitor_skill.md` into `~/.claude/skills/coordinationhub-monitor/SKILL.md`. The skill is exposed via `[tool.setuptools.package-data] coordinationhub = ["py.typed", "data/*.md"]` in `pyproject.toml` so a fresh `pip install coordinationhub` carries it.
+
+The skill body follows Claude Code's standard frontmatter format:
+
+```
+---
+name: coordinationhub-monitor
+description: Monitor a multi-agent CoordinationHub swarm — surface boundary-crossing locks, blocked tasks, stale agents, and unconverted work intents. Use when watching multiple Claude Code subagents on a shared codebase, or when the user asks you to "watch the swarm" / "monitor the agents" / "tail the dashboard".
+---
+```
+
+The body instructs an LLM acting on the skill to:
+
+1. Treat itself as a **read-only** observer. Hard rules forbid writing code, calling MCP coordination tools (`acquire_lock`, `register_agent`, `create_task`, `notify_change`, …), or analysing code quality.
+2. Poll `http://127.0.0.1:9898/api/dashboard-data` every 30 seconds. The endpoint returns a single JSON document with the same six panels the dashboard shows.
+3. Surface five priority signals, in priority order: boundary-crossing locks (where `owner_agent_id` ≠ `locked_by`), blocked tasks, stale agents (heartbeat > 5 min behind the swarm's most recent), long-lived work intents with no follow-through (declared > 2 min ago and the agent doesn't hold any matching lock), and unsatisfied dependencies past their wait window.
+4. Output one short bulletted report per cycle, no more than 5 lines. Drop cadence to 60 s after two consecutive empty cycles. Exit when the swarm has converged or the dashboard becomes unreachable.
+
+The skill is invoked when the user says "watch the swarm" / "monitor the agents" / "tail the dashboard", or when running multiple Claude Code subagents in parallel. `TestInitOptInFlags::test_install_monitor_skill_writes_skill_file` covers the install path (frontmatter present, read-only mandate present, dashboard URL present).
+
+#### CLI surface
+
+The new `auto-start-dashboard` subcommand brings the CLI from 74 to 75 commands. The `init` subparser gained `--auto-dashboard` and `--monitor-skill` flags; both default off, so existing users get no surprise process or skill on their next session. The `EXPECTED_COMMANDS` set in `tests/test_cli.py` was updated to include `auto-start-dashboard`.
+
+### Verification
+
+- 403 tests pass (was 394; +3 dashboard-HTML guards, +6 opt-in flag tests), 1 skipped.
+- `python scripts/gen_docs.py --check` clean across all five doc targets.
+- `node --check` of the served `<script>` body is clean.
+- Pan + zoom verified live against the RecipeLab_alt 6-agent swarm.
+- `coordinationhub init --auto-dashboard` end-to-end: hook appears in `~/.claude/settings.json` SessionStart array; running `coordinationhub auto-start-dashboard` once on a free port spawns a detached `serve-sse` daemon (visible in `ps -ef` until killed); running it again with the port now bound returns 0 without spawning.
+- `coordinationhub init --monitor-skill` end-to-end: SKILL.md appears at `~/.claude/skills/coordinationhub-monitor/SKILL.md` with the expected frontmatter and body.
+- Updated `screenshots/dashboard.png` shows the live RecipeLab_alt swarm with realistic file paths, full-text tasks, and zoom controls visible.
+- README rewritten for human-readability — 60-second quickstart at the top including the new opt-in flags, panel-layout table tied to the screenshot, and full technical reference (MCP tool table, CLI command reference, architecture, hook contract) pushed below the fold.
+
+### Counts
+
+| Version | Tools | CLI Commands | Schema |
+|---------|-------|--------------|--------|
+| v0.7.5 | 50 | 75 | 20 |
+| v0.7.4 | 50 | 74 | 20 |
 
 ---
 
@@ -1413,14 +1532,14 @@ Block markers for multi-line content:
 | `coordinationhub/agent_registry.py` | 292 | Agent lifecycle: register, heartbeat, deregister, lineage management |
 | `coordinationhub/agent_status.py` | 277 | Agent status and file-map query helpers for CoordinationHub |
 | `coordinationhub/broadcasts.py` | 106 | Broadcast acknowledgment primitives for CoordinationHub |
-| `coordinationhub/cli.py` | 398 | CoordinationHub CLI — command-line interface for all coordination tool methods |
+| `coordinationhub/cli.py` | 407 | CoordinationHub CLI — command-line interface for all coordination tool methods |
 | `coordinationhub/cli_agents.py` | 121 | Agent identity and lifecycle CLI commands |
-| `coordinationhub/cli_commands.py` | 97 | CoordinationHub CLI command handlers |
+| `coordinationhub/cli_commands.py` | 98 | CoordinationHub CLI command handlers |
 | `coordinationhub/cli_deps.py` | 77 | CLI commands for cross-agent dependency declarations |
 | `coordinationhub/cli_intent.py` | 45 | CLI commands for the work intent board |
 | `coordinationhub/cli_leases.py` | 150 | CLI commands for HA coordinator lease management |
 | `coordinationhub/cli_locks.py` | 323 | Document locking and coordination CLI commands |
-| `coordinationhub/cli_setup.py` | 287 | CLI commands for setup and diagnostics: doctor, init, watch |
+| `coordinationhub/cli_setup.py` | 386 | CLI commands for setup and diagnostics: doctor, init, watch |
 | `coordinationhub/cli_spawner.py` | 115 | CLI commands for HA coordinator spawner — sub-agent registry management |
 | `coordinationhub/cli_sse.py` | 35 | CLI commands for SSE dashboard server |
 | `coordinationhub/cli_tasks.py` | 239 | CLI commands for the task registry |
@@ -1467,7 +1586,7 @@ Block markers for multi-line content:
 | `coordinationhub/plugins/assessment/assessment_scorers.py` | 258 | Assessment metric scorers for CoordinationHub |
 | `coordinationhub/plugins/dashboard/__init__.py` | 15 | Dashboard plugin for CoordinationHub |
 | `coordinationhub/plugins/dashboard/dashboard.py` | 82 | Web dashboard for CoordinationHub — zero external dependencies |
-| `coordinationhub/plugins/dashboard/dashboard_html.py` | 478 | Self-contained HTML for the CoordinationHub dashboard |
+| `coordinationhub/plugins/dashboard/dashboard_html.py` | 607 | Self-contained HTML for the CoordinationHub dashboard |
 | `coordinationhub/plugins/graph/__init__.py` | 31 | Graph plugin for CoordinationHub |
 | `coordinationhub/plugins/graph/graphs.py` | 309 | Declarative coordination graph: loader, validator, in-memory representation |
 | `coordinationhub/plugins/registry.py` | 41 | Plugin registry for CoordinationHub |
@@ -1496,7 +1615,7 @@ Block markers for multi-line content:
 
 Inline markers for single values (render invisibly in Markdown):
 ```markdown
-This project has <!-- GEN:test-count -->395<!-- /GEN --> tests.
+This project has <!-- GEN:test-count -->404<!-- /GEN --> tests.
 ```
 
 Unknown marker names raise an error during rewrite (catches typos).

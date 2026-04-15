@@ -31,8 +31,18 @@ DASHBOARD_HTML = r"""<!DOCTYPE html>
   .legend .chip { display: inline-block; padding: 1px 6px; border-radius: 8px; font-size: 10px; }
 
   /* Agent Tree */
-  .agent-tree-container { height: 340px; overflow: auto; }
-  .agent-tree-container svg { display: block; }
+  .agent-tree-container { position: relative; height: 340px; overflow: hidden; cursor: grab; user-select: none; }
+  .agent-tree-container.panning { cursor: grabbing; }
+  .agent-tree-container svg { display: block; width: 100%; height: 100%; }
+  .tree-controls { position: absolute; top: 10px; right: 10px; display: flex; gap: 4px; z-index: 2; }
+  .tree-controls button {
+    background: #1e212d; border: 1px solid #2d3148; color: #94a3b8;
+    width: 28px; height: 28px; border-radius: 4px; cursor: pointer;
+    font-size: 14px; font-weight: 600; line-height: 1; padding: 0;
+    display: flex; align-items: center; justify-content: center;
+  }
+  .tree-controls button:hover { background: #2a2d3a; color: #e6e8ed; border-color: #4b5563; }
+  .tree-controls .zoom-level { font-size: 11px; color: #6b7280; margin-right: 6px; align-self: center; min-width: 32px; text-align: right; }
 
   /* Task Board */
   .task-table { width: 100%; border-collapse: collapse; font-size: 13px; }
@@ -118,9 +128,15 @@ DASHBOARD_HTML = r"""<!DOCTYPE html>
         <span><span class="chip" style="background:#2d1e1e;color:#f87171;">&#9679;</span> stale / unknown</span>
       </span>
     </h2>
-    <div class="panel-blurb">Each box is one agent. Parent&rarr;child edges show spawn lineage. The small grey line under the agent ID is the agent's current task.</div>
+    <div class="panel-blurb">Each box is one agent. Parent&rarr;child edges show spawn lineage. The small grey line under the agent ID is the agent's current task. Drag to pan, mouse-wheel to zoom, or use the controls.</div>
     <div class="agent-tree-container" id="agent-tree-container">
-      <svg id="agent-tree-svg" width="100%" height="320"></svg>
+      <div class="tree-controls">
+        <span class="zoom-level" id="tree-zoom-level">100%</span>
+        <button id="tree-zoom-out" title="Zoom out" type="button">&minus;</button>
+        <button id="tree-fit" title="Fit tree to view" type="button">&#9974;</button>
+        <button id="tree-zoom-in" title="Zoom in" type="button">+</button>
+      </div>
+      <svg id="agent-tree-svg" preserveAspectRatio="xMidYMid meet"></svg>
     </div>
   </div>
 
@@ -178,6 +194,13 @@ DASHBOARD_HTML = r"""<!DOCTYPE html>
 <script>
 (function() {
   var POLL_INTERVAL = 5000;
+
+  // Agent-tree pan + zoom state — initialised here so any function that
+  // runs early (e.g. the very first SSE-delivered render) sees a live
+  // object rather than ``undefined`` from a hoisted-but-unassigned ``var``.
+  var treeState = { zoom: null, panX: 0, panY: 0 };
+  var treeContentBox = { w: 0, h: 0, viewW: 0, viewH: 0 };
+  var ZOOM_MIN = 0.2, ZOOM_MAX = 4.0;
   var apiBase = '/api';
   var es = null;
   var useSSE = true;
@@ -287,11 +310,11 @@ DASHBOARD_HTML = r"""<!DOCTYPE html>
       roots.push(agents[0].agent_id);
     }
 
-    var NODE_W = 240;
-    var NODE_H = 58;
-    var H_GAP = 60;
-    var V_GAP = 18;
-    var PADDING = 24;
+    var NODE_W = 320;
+    var NODE_H = 70;
+    var H_GAP = 90;
+    var V_GAP = 24;
+    var PADDING = 28;
 
     var positions = {};
     var visibleIds = [];
@@ -333,9 +356,28 @@ DASHBOARD_HTML = r"""<!DOCTYPE html>
       maxY = Math.max(maxY, p.y + NODE_H);
     }
 
-    svg.setAttribute('viewBox', '0 0 ' + Math.max(maxX + PADDING, 600) + ' ' + Math.max(maxY + PADDING, 260));
+    // Set viewBox to the SVG's actual pixel size so 1 viewBox unit == 1 CSS pixel.
+    // The inner ``<g class="tree-root">`` group is what scales/translates for
+    // pan + zoom; the viewBox itself stays put as a stable viewport.
+    var viewW = Math.max(svg.clientWidth || 800, 200);
+    var viewH = Math.max(svg.clientHeight || 320, 200);
+    svg.setAttribute('viewBox', '0 0 ' + viewW + ' ' + viewH);
 
-    var rects = ['<rect class="agent-edge" x="0" y="0" width="' + (maxX + PADDING) + '" height="' + (maxY + PADDING) + '" fill="none"/>'];
+    // Track the rendered tree's content bounding box so the "fit" button can
+    // recompute zoom + pan to fit everything in view.
+    treeContentBox.w = maxX + PADDING;
+    treeContentBox.h = maxY + PADDING;
+    treeContentBox.viewW = viewW;
+    treeContentBox.viewH = viewH;
+
+    // First render — initialize zoom/pan to fit-to-view.
+    if (treeState.zoom === null) {
+      fitTreeToView(false);
+    }
+
+    var rects = [
+      '<g class="tree-root" transform="translate(' + treeState.panX + ',' + treeState.panY + ') scale(' + treeState.zoom + ')">'
+    ];
 
     // Draw edges first (behind nodes)
     for (var id in positions) {
@@ -360,28 +402,128 @@ DASHBOARD_HTML = r"""<!DOCTYPE html>
       var p = positions[id];
       var statusCls = a.status === 'active' ? 'status-active' : (a.status === 'stopped' ? 'status-stopped' : 'status-unknown');
       var taskText = (a.current_task || '');
-      var MAX_TASK = 56;
+      var MAX_TASK = 76;
       if (taskText.length > MAX_TASK) taskText = taskText.substring(0, MAX_TASK - 1) + '\u2026';
-      var MAX_ID = 30;
+      var MAX_ID = 38;
       var idText = id.length > MAX_ID ? id.substring(0, MAX_ID - 1) + '\u2026' : id;
 
       rects.push('<g class="agent-node" transform="translate(' + p.x + ',' + p.y + ')">');
       rects.push('  <rect width="' + NODE_W + '" height="' + NODE_H + '"/>');
-      rects.push('  <circle class="status-dot ' + statusCls + '" cx="12" cy="14" r="5"/>');
-      rects.push('  <text x="24" y="19" font-weight="600" fill="#e6e8ed">' + escapeHTML(idText) + '</text>');
+      rects.push('  <circle class="status-dot ' + statusCls + '" cx="14" cy="16" r="5"/>');
+      rects.push('  <text x="28" y="21" font-weight="600" fill="#e6e8ed">' + escapeHTML(idText) + '</text>');
       if (taskText) {
-        rects.push('  <text x="10" y="38" font-size="10.5" fill="#94a3b8">' + escapeHTML(taskText) + '</text>');
+        rects.push('  <text x="12" y="44" font-size="10.5" fill="#94a3b8">' + escapeHTML(taskText) + '</text>');
       } else {
-        rects.push('  <text x="10" y="38" font-size="10.5" font-style="italic" fill="#4b5563">(no current task)</text>');
+        rects.push('  <text x="12" y="44" font-size="10.5" font-style="italic" fill="#4b5563">(no current task)</text>');
       }
       if (a.lock_count) {
-        rects.push('  <text x="' + (NODE_W - 10) + '" y="51" font-size="9.5" fill="#6b7280" text-anchor="end">' + a.lock_count + ' lock' + (a.lock_count > 1 ? 's' : '') + '</text>');
+        rects.push('  <text x="' + (NODE_W - 12) + '" y="61" font-size="9.5" fill="#6b7280" text-anchor="end">' + a.lock_count + ' lock' + (a.lock_count > 1 ? 's' : '') + '</text>');
       }
       rects.push('</g>');
     }
+    rects.push('</g>');
 
     svg.innerHTML = rects.join('');
+    updateZoomLabel();
   }
+
+  // ---- Agent tree pan + zoom ----
+  // (treeState / treeContentBox / ZOOM_MIN / ZOOM_MAX are declared at the
+  // top of this IIFE so render functions called from the first SSE event
+  // see a live object instead of ``undefined``.)
+
+  function applyTreeTransform() {
+    var svg = document.getElementById('agent-tree-svg');
+    if (!svg) return;
+    var g = svg.querySelector('.tree-root');
+    if (!g) return;
+    g.setAttribute('transform',
+      'translate(' + treeState.panX + ',' + treeState.panY + ') scale(' + treeState.zoom + ')');
+    updateZoomLabel();
+  }
+
+  function updateZoomLabel() {
+    var lbl = document.getElementById('tree-zoom-level');
+    if (lbl && treeState.zoom !== null) {
+      lbl.textContent = Math.round(treeState.zoom * 100) + '%';
+    }
+  }
+
+  function setZoom(newZoom, anchorX, anchorY) {
+    newZoom = Math.max(ZOOM_MIN, Math.min(ZOOM_MAX, newZoom));
+    if (treeState.zoom === null) treeState.zoom = 1;
+    if (anchorX === undefined) {
+      var svg = document.getElementById('agent-tree-svg');
+      anchorX = svg.clientWidth / 2;
+      anchorY = svg.clientHeight / 2;
+    }
+    // Keep anchor point under cursor stable while zoom changes
+    treeState.panX = anchorX - (anchorX - treeState.panX) * (newZoom / treeState.zoom);
+    treeState.panY = anchorY - (anchorY - treeState.panY) * (newZoom / treeState.zoom);
+    treeState.zoom = newZoom;
+    applyTreeTransform();
+  }
+
+  function fitTreeToView(applyNow) {
+    if (!treeContentBox.w || !treeContentBox.h) return;
+    var marginPct = 0.05;
+    var fitZoom = Math.min(
+      (treeContentBox.viewW * (1 - marginPct * 2)) / treeContentBox.w,
+      (treeContentBox.viewH * (1 - marginPct * 2)) / treeContentBox.h,
+      1.0
+    );
+    treeState.zoom = Math.max(ZOOM_MIN, fitZoom);
+    treeState.panX = (treeContentBox.viewW - treeContentBox.w * treeState.zoom) / 2;
+    treeState.panY = (treeContentBox.viewH - treeContentBox.h * treeState.zoom) / 2;
+    if (applyNow !== false) applyTreeTransform();
+  }
+
+  function bindTreeControls() {
+    var container = document.getElementById('agent-tree-container');
+    var svg = document.getElementById('agent-tree-svg');
+    if (!container || !svg) return;
+
+    // Wheel zoom — anchored at cursor position
+    svg.addEventListener('wheel', function(e) {
+      e.preventDefault();
+      var rect = svg.getBoundingClientRect();
+      var ax = e.clientX - rect.left;
+      var ay = e.clientY - rect.top;
+      var factor = e.deltaY < 0 ? 1.15 : 1 / 1.15;
+      setZoom((treeState.zoom || 1) * factor, ax, ay);
+    }, { passive: false });
+
+    // Click + drag to pan
+    var dragOrigin = null;
+    svg.addEventListener('mousedown', function(e) {
+      if (e.button !== 0) return;
+      dragOrigin = { x: e.clientX - treeState.panX, y: e.clientY - treeState.panY };
+      container.classList.add('panning');
+    });
+    window.addEventListener('mousemove', function(e) {
+      if (!dragOrigin) return;
+      treeState.panX = e.clientX - dragOrigin.x;
+      treeState.panY = e.clientY - dragOrigin.y;
+      applyTreeTransform();
+    });
+    window.addEventListener('mouseup', function() {
+      dragOrigin = null;
+      container.classList.remove('panning');
+    });
+
+    // Buttons
+    document.getElementById('tree-zoom-in').addEventListener('click', function() {
+      setZoom((treeState.zoom || 1) * 1.25);
+    });
+    document.getElementById('tree-zoom-out').addEventListener('click', function() {
+      setZoom((treeState.zoom || 1) / 1.25);
+    });
+    document.getElementById('tree-fit').addEventListener('click', function() {
+      fitTreeToView();
+    });
+  }
+
+  bindTreeControls();
 
   // ---- Task Board ----
   function renderTasks(data) {
@@ -506,7 +648,7 @@ DASHBOARD_HTML = r"""<!DOCTYPE html>
           var ttlLeft = Math.max(0, Math.round((l.locked_at + (l.lock_ttl || 300)) - (Date.now() / 1000)));
           var crossing = l.owner_agent_id && l.owner_agent_id !== l.locked_by;
           html.push('<div class="lock-item">');
-          html.push('<span class="lock-path">' + escapeHTML(path);
+          html.push('<span class="lock-path">' + escapeHTML(path));
           if (crossing) {
             html.push(' <span style="color:#fbbf24;font-size:11px;" title="this file is owned by ' + escapeHTML(l.owner_agent_id) + '">\u26a0 owned by ' + escapeHTML(l.owner_agent_id) + '</span>');
           }
