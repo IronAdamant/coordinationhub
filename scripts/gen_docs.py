@@ -217,8 +217,15 @@ def render_mcp_tools(tools: list[tuple[str, str]]) -> str:
 #   | Path | LOC | ... |
 #   <!-- /GEN -->
 
+# The negative lookahead on the body prevents a malformed or prose-embedded
+# ``<!-- GEN:name -->`` token (with no matching closer before a real marker's
+# closer) from greedily swallowing unrelated content across intervening
+# markers.  If the body ever contains another ``<!-- GEN:`` or ``<!-- /GEN``
+# token, the match fails and the regex engine moves on.
 BLOCK_RE = re.compile(
-    r"<!-- GEN:(?P<name>[\w-]+) -->(?P<body>.*?)<!-- /GEN -->",
+    r"<!-- GEN:(?P<name>[\w-]+) -->"
+    r"(?P<body>(?:(?!<!-- /?GEN).)*?)"
+    r"<!-- /GEN -->",
     re.DOTALL,
 )
 

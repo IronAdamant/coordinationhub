@@ -1320,7 +1320,7 @@ Block markers for multi-line content:
 | `coordinationhub/cli_locks.py` | 323 | Document locking and coordination CLI commands |
 | `coordinationhub/cli_setup.py` | 287 | CLI commands for setup and diagnostics: doctor, init, watch |
 | `coordinationhub/cli_spawner.py` | 115 | CLI commands for HA coordinator spawner — sub-agent registry management |
-| `coordinationhub/cli_sse.py` | 29 | CLI commands for SSE dashboard server |
+| `coordinationhub/cli_sse.py` | 35 | CLI commands for SSE dashboard server |
 | `coordinationhub/cli_tasks.py` | 239 | CLI commands for the task registry |
 | `coordinationhub/cli_utils.py` | 31 | Shared CLI helper functions used by all cli_* sub-modules |
 | `coordinationhub/cli_vis.py` | 292 | Change awareness, audit, graph, and assessment CLI commands |
@@ -1353,7 +1353,7 @@ Block markers for multi-line content:
 | `coordinationhub/leases.py` | 197 | Zero-deps lease primitives for HA coordinator leadership |
 | `coordinationhub/lock_cache.py` | 180 | In-memory lock cache for CoordinationHub |
 | `coordinationhub/lock_ops.py` | 191 | Shared lock primitives used by both local locks and coordination locks |
-| `coordinationhub/mcp_server.py` | 252 | HTTP-based MCP server for CoordinationHub — zero external dependencies |
+| `coordinationhub/mcp_server.py` | 253 | HTTP-based MCP server for CoordinationHub — zero external dependencies |
 | `coordinationhub/mcp_stdio.py` | 142 | Stdio-based MCP server for CoordinationHub using the ``mcp`` Python package |
 | `coordinationhub/messages.py` | 90 | Inter-agent messaging primitives for CoordinationHub |
 | `coordinationhub/notifications.py` | 136 | Change notification storage and retrieval for CoordinationHub |
@@ -1394,7 +1394,7 @@ Block markers for multi-line content:
 
 Inline markers for single values (render invisibly in Markdown):
 ```markdown
-This project has <!-- GEN:test-count -->393<!-- /GEN --> tests.
+This project has <!-- GEN:test-count -->394<!-- /GEN --> tests.
 ```
 
 Unknown marker names raise an error during rewrite (catches typos).

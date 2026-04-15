@@ -26,6 +26,39 @@ class TestAgentRegistration:
         result = engine.register_agent(child, parent_id=registered_agent)
         assert result["agent_id"] == child
 
+    def test_register_agent_tolerates_null_responsibilities_row(
+        self, engine, registered_agent
+    ):
+        """``update_agent_status`` inserts an ``agent_responsibilities`` row
+        without setting the nullable ``responsibilities`` column. The next
+        ``register_agent`` call on the SAME agent id (or a re-registration
+        after restart on a dirty DB) builds a context bundle that queries
+        that row — which must not crash on ``json.loads(None)``.
+
+        Regression: before v0.7.3, ``context.py`` used
+        ``json.loads(resp.get("responsibilities", "[]"))`` — and
+        ``dict.get(key, default)`` returns ``None`` (NOT the default) when
+        the key is present but the value is ``None``, so this raised
+        ``TypeError: the JSON object must be str, bytes or bytearray, not
+        NoneType``.
+        """
+        # Populate the agent_responsibilities row for the already-registered
+        # agent, leaving the ``responsibilities`` column at its NULL default.
+        engine.update_agent_status(
+            agent_id=registered_agent,
+            current_task="some current task with a NULL responsibilities column",
+        )
+        # Re-register the same agent — register_agent is idempotent on the
+        # agents table and always builds a fresh context bundle. The bundle
+        # query hits the existing NULL-responsibilities row for this agent.
+        result = engine.register_agent(registered_agent)
+        assert result["agent_id"] == registered_agent
+        # With a responsibilities row present, the bundle also returns the
+        # populated fields
+        assert result.get("current_task") == (
+            "some current task with a NULL responsibilities column"
+        )
+
     def test_register_unknown_parent_raises(self, engine):
         with pytest.raises(ValueError, match="Parent agent not found"):
             engine.generate_agent_id("nonexistent.parent.0")

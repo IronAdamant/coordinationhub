@@ -308,7 +308,7 @@ coordinationhub/
   cli_locks.py          — Document locking and coordination CLI commands (~323 LOC)
   cli_setup.py          — CLI commands for setup and diagnostics: doctor, init, watch (~287 LOC)
   cli_spawner.py        — CLI commands for HA coordinator spawner — sub-agent registry management (~115 LOC)
-  cli_sse.py            — CLI commands for SSE dashboard server (~29 LOC)
+  cli_sse.py            — CLI commands for SSE dashboard server (~35 LOC)
   cli_tasks.py          — CLI commands for the task registry (~239 LOC)
   cli_utils.py          — Shared CLI helper functions used by all cli_* sub-modules (~31 LOC)
   cli_vis.py            — Change awareness, audit, graph, and assessment CLI commands (~292 LOC)
@@ -336,7 +336,7 @@ coordinationhub/
   leases.py             — Zero-deps lease primitives for HA coordinator leadership (~197 LOC)
   lock_cache.py         — In-memory lock cache for CoordinationHub (~180 LOC)
   lock_ops.py           — Shared lock primitives used by both local locks and coordination locks (~191 LOC)
-  mcp_server.py         — HTTP-based MCP server for CoordinationHub — zero external dependencies (~252 LOC)
+  mcp_server.py         — HTTP-based MCP server for CoordinationHub — zero external dependencies (~253 LOC)
   mcp_stdio.py          — Stdio-based MCP server for CoordinationHub using the ``mcp`` Python package (~142 LOC)
   messages.py           — Inter-agent messaging primitives for CoordinationHub (~90 LOC)
   notifications.py      — Change notification storage and retrieval for CoordinationHub (~136 LOC)
@@ -386,7 +386,7 @@ coordinationhub/
 ```
 <!-- /GEN -->
 
-`tests/` contains <!-- GEN:test-count -->393<!-- /GEN --> tests across 23 files plus `fixtures/claude_code_events/` (hook contract fixtures).
+`tests/` contains <!-- GEN:test-count -->394<!-- /GEN --> tests across 23 files plus `fixtures/claude_code_events/` (hook contract fixtures).
 
 Top-level project files: `pyproject.toml`, `coordination_spec.yaml`/`.json` (example specs), `README.md`, `CLAUDE.md`, `COMPLETE_PROJECT_DOCUMENTATION.md`, `LLM_Development.md`, and `wiki-local/` (this spec, glossary, index).
 

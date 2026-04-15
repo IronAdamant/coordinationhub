@@ -73,7 +73,12 @@ def build_context_bundle(
             "SELECT document_path FROM file_ownership WHERE assigned_agent_id = ?", (agent_id,)
         ).fetchall()
         owned_files = [dict(f) for f in owned_files]
-    responsibilities = json.loads(resp.get("responsibilities", "[]")) if resp else []
+    # ``dict.get(key, default)`` returns ``None`` (not the default) when the key
+    # is present with a NULL value — which is exactly what happens after
+    # ``update_agent_status`` inserts an agent_responsibilities row without
+    # setting the nullable ``responsibilities`` column. Use ``or "[]"`` so both
+    # missing keys and NULL values fall through to an empty list.
+    responsibilities = json.loads(resp.get("responsibilities") or "[]") if resp else []
     bundle: dict[str, Any] = {
         "agent_id": agent_id,
         "parent_id": parent_id,

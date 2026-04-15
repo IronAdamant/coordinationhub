@@ -13,7 +13,13 @@ def cmd_serve_sse(args):
     port = getattr(args, "port", 9898)
     no_browser = getattr(args, "no_browser", False)
 
-    server = CoordinationHubMCPServer(host=host, port=port)
+    server = CoordinationHubMCPServer(
+        storage_dir=getattr(args, "storage_dir", None),
+        project_root=getattr(args, "project_root", None),
+        namespace=getattr(args, "namespace", "hub"),
+        host=host,
+        port=port,
+    )
 
     # Open browser in background thread so it doesn't block server start
     if not no_browser:

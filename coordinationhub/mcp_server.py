@@ -13,6 +13,7 @@ import json
 import logging
 import threading
 import time as _time
+from pathlib import Path
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from socketserver import ThreadingMixIn
 from typing import Any
@@ -228,8 +229,8 @@ class CoordinationHubMCPServer:
         self._host = host
         self._port = port
         self._engine = CoordinationEngine(
-            storage_dir=storage_dir and __import__("pathlib").Path(storage_dir),
-            project_root=project_root and __import__("pathlib").Path(project_root),
+            storage_dir=Path(storage_dir) if storage_dir else None,
+            project_root=Path(project_root) if project_root else None,
             namespace=namespace,
         )
         self._httpd: ThreadedHTTPServer | None = None
