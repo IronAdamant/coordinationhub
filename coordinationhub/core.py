@@ -110,6 +110,7 @@ class CoordinationEngine(
                     "INSERT INTO coordination_events (topic, payload_json, created_at) VALUES (?, ?, ?)",
                     (topic, _json.dumps(payload, default=str), time.time()),
                 )
+                conn.commit()
         except Exception:
             # Best-effort journal write; don't let event bus fail on DB issues
             pass
@@ -152,7 +153,7 @@ class CoordinationEngine(
                         f"""SELECT topic, payload_json, created_at FROM coordination_events
                             WHERE topic IN ({placeholders}) AND created_at > ?
                             ORDER BY created_at ASC""",
-                        topics + (since,),
+                        tuple(topics) + (since,),
                     ).fetchall()
             except Exception:
                 rows = []

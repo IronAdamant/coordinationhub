@@ -342,6 +342,7 @@ def build_implicit_graph(connect) -> CoordinationGraph:
         rows = conn.execute(
             "SELECT agent_id, parent_id FROM agents WHERE status = 'active'"
         ).fetchall()
+        rows = [dict(r) for r in rows]
 
     # Always include an orchestrator node for the root
     agents.append({
@@ -350,6 +351,8 @@ def build_implicit_graph(connect) -> CoordinationGraph:
         "responsibilities": ["coordinate", "orchestrate", "monitor"],
     })
     agent_ids.add("orchestrator")
+
+    active_agent_ids = {r["agent_id"] for r in rows}
 
     for row in rows:
         agent_id = row["agent_id"]
@@ -380,7 +383,7 @@ def build_implicit_graph(connect) -> CoordinationGraph:
             "condition": "task_assigned",
         })
         # Add handoff from parent to child if parent is also active
-        if parent_id in {r["agent_id"] for r in rows}:
+        if parent_id in active_agent_ids:
             handoffs.append({
                 "from": parent_id,
                 "to": graph_id,

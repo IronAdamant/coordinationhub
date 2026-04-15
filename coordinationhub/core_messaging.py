@@ -22,6 +22,46 @@ class MessagingMixin:
     # Messaging
     # ------------------------------------------------------------------ #
 
+    def manage_messages(
+        self,
+        action: str,
+        agent_id: str,
+        from_agent_id: str | None = None,
+        to_agent_id: str | None = None,
+        message_type: str | None = None,
+        payload: dict[str, Any] | None = None,
+        unread_only: bool = False,
+        limit: int = 50,
+        message_ids: list[int] | None = None,
+    ) -> dict[str, Any]:
+        """Unified messaging: send | get | mark_read."""
+        if action == "send":
+            if not from_agent_id or not to_agent_id or not message_type:
+                return {"error": "from_agent_id, to_agent_id, and message_type are required for send"}
+            result = _msg.send_message(self._connect, from_agent_id, to_agent_id, message_type, payload)
+            self._publish_event(
+                "message.received",
+                {
+                    "message_id": result.get("message_id"),
+                    "from_agent_id": from_agent_id,
+                    "to_agent_id": to_agent_id,
+                    "message_type": message_type,
+                },
+            )
+            return result
+        if action == "get":
+            messages = _msg.get_messages(self._connect, agent_id, unread_only, limit)
+            for msg in messages:
+                if msg.get("message_type") == "broadcast_ack_request":
+                    p = msg.get("payload") or {}
+                    broadcast_id = p.get("broadcast_id")
+                    if broadcast_id is not None:
+                        _bc.acknowledge_broadcast(self._connect, broadcast_id, agent_id)
+            return {"messages": messages, "count": len(messages)}
+        if action == "mark_read":
+            return _msg.mark_messages_read(self._connect, agent_id, message_ids)
+        return {"error": f"Unknown action: {action!r}"}
+
     def send_message(
         self,
         from_agent_id: str,

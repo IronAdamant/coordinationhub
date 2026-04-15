@@ -15,6 +15,18 @@ from coordinationhub.plugins.graph import graphs as _graphs
 class TestFileOwnershipScan:
     """Tests for scan_project and file_ownership table."""
 
+    def test_scan_project_without_spec_uses_implicit_graph(self, engine, registered_agent, tmp_path):
+        """scan_project should work even when no coordination spec is loaded."""
+        # Ensure no graph is loaded
+        from coordinationhub.plugins.graph import graphs as _graphs
+        _graphs.clear_graph()
+        assert _graphs.get_graph() is None
+
+        (tmp_path / "a.py").write_text("# a")
+        result = engine.scan_project(worktree_root=str(tmp_path))
+        assert result["scanned"] >= 1
+        assert result["owned"] >= 1
+
     def test_scan_project_creates_ownership_entries(self, engine, registered_agent, tmp_path):
         """Scanning should create file_ownership entries for all tracked files."""
         # Create some test files

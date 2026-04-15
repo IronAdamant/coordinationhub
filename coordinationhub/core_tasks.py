@@ -141,6 +141,27 @@ class TaskMixin:
     # Dead Letter Queue
     # ------------------------------------------------------------------ #
 
+    def task_failures(
+        self,
+        action: str,
+        task_id: str | None = None,
+        limit: int = 50,
+    ) -> dict[str, Any]:
+        """Unified dead-letter queue operations: retry | list_dead_letter | history."""
+        if action == "retry":
+            if not task_id:
+                return {"error": "task_id is required for retry"}
+            return _tf.retry_from_dead_letter(self._connect, task_id)
+        if action == "list_dead_letter":
+            tasks = _tf.get_dead_letter_tasks(self._connect, limit)
+            return {"dead_letter_tasks": tasks, "count": len(tasks)}
+        if action == "history":
+            if not task_id:
+                return {"error": "task_id is required for history"}
+            history = _tf.get_task_failure_history(self._connect, task_id)
+            return {"task_id": task_id, "history": history, "count": len(history)}
+        return {"error": f"Unknown action: {action!r}"}
+
     def retry_task(self, task_id: str) -> dict[str, Any]:
         """Retry a task from the dead letter queue.
 
