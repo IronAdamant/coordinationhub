@@ -4,24 +4,75 @@ on:
   release:
     types: [published]
 
+# No third-party actions — uses only tools pre-installed on
+# ubuntu-latest (git, python, pip, curl) plus `build` + `twine`
+# from PyPA, installed at job time.  OIDC trusted publishing is
+# preserved by manually exchanging the GitHub OIDC JWT for a
+# short-lived PyPI API token against https://pypi.org/_/oidc/mint-token.
+
 jobs:
   publish:
     runs-on: ubuntu-latest
     environment: pypi
     permissions:
       id-token: write
+      contents: read
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout (git clone)
+        env:
+          REPO: ${{ github.repository }}
+          SHA: ${{ github.sha }}
+        run: |
+          set -euxo pipefail
+          git init -q
+          git config --global --add safe.directory "$PWD"
+          git remote add origin "https://github.com/${REPO}.git"
+          git -c protocol.version=2 fetch --depth=1 origin "$SHA"
+          git checkout --force FETCH_HEAD
 
-      - uses: actions/setup-python@v5
-        with:
-          python-version: "3.12"
-
-      - name: Install build tools
-        run: pip install build
+      - name: Select Python 3.12 from tool cache
+        run: |
+          set -euo pipefail
+          PY_DIR=$(ls -d /opt/hostedtoolcache/Python/3.12.*/x64 2>/dev/null | sort -V | tail -1)
+          if [ -z "$PY_DIR" ] || [ ! -x "$PY_DIR/bin/python" ]; then
+            echo "::error::Python 3.12 not found in /opt/hostedtoolcache/Python"
+            ls -la /opt/hostedtoolcache/Python/ || true
+            exit 1
+          fi
+          echo "$PY_DIR/bin" >> "$GITHUB_PATH"
+          "$PY_DIR/bin/python" --version
 
       - name: Build package
-        run: python -m build
+        run: |
+          pip install --disable-pip-version-check build
+          python -m build
 
-      - name: Publish to PyPI
-        uses: pypa/gh-action-pypi-publish@release/v1
+      - name: Publish to PyPI via OIDC trusted publishing
+        run: |
+          set -euo pipefail
+
+          # Ask the GitHub Actions OIDC provider for a JWT scoped to PyPI
+          OIDC_JWT=$(curl -sSL --fail \
+            -H "Authorization: bearer ${ACTIONS_ID_TOKEN_REQUEST_TOKEN}" \
+            "${ACTIONS_ID_TOKEN_REQUEST_URL}&audience=pypi" \
+            | python -c "import sys, json; print(json.load(sys.stdin)['value'])")
+
+          if [ -z "$OIDC_JWT" ]; then
+            echo "::error::Failed to obtain GitHub OIDC JWT"
+            exit 1
+          fi
+
+          # Exchange the JWT for a short-lived PyPI API token
+          PYPI_TOKEN=$(curl -sSL --fail -X POST https://pypi.org/_/oidc/mint-token \
+            -H "Content-Type: application/json" \
+            -d "{\"token\": \"${OIDC_JWT}\"}" \
+            | python -c "import sys, json; print(json.load(sys.stdin)['token'])")
+
+          if [ -z "$PYPI_TOKEN" ]; then
+            echo "::error::Failed to mint PyPI token from OIDC JWT"
+            exit 1
+          fi
+
+          pip install --disable-pip-version-check twine
+          TWINE_USERNAME=__token__ TWINE_PASSWORD="${PYPI_TOKEN}" \
+            python -m twine upload --disable-progress-bar --non-interactive dist/*

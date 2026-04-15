@@ -6,19 +6,48 @@ on:
   pull_request:
     branches: [main]
 
+# No third-party actions — every step uses tools pre-installed on
+# ubuntu-latest (git, python, pip, curl) so the workflow has zero
+# marketplace dependencies.  Matches the project's zero-third-party-dep
+# ethos and sidesteps the Node.js 20 deprecation of actions/checkout,
+# actions/setup-python, and stefanzweifel/git-auto-commit-action.
+
 jobs:
   test:
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
     strategy:
       matrix:
         python-version: ["3.10", "3.11", "3.12"]
 
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout (git clone)
+        env:
+          REPO: ${{ github.repository }}
+          SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: |
+          set -euxo pipefail
+          git init -q
+          git config --global --add safe.directory "$PWD"
+          git remote add origin "https://github.com/${REPO}.git"
+          git -c protocol.version=2 fetch --depth=1 origin "$SHA"
+          git checkout --force FETCH_HEAD
 
-      - uses: actions/setup-python@v5
-        with:
-          python-version: ${{ matrix.python-version }}
+      - name: Select Python ${{ matrix.python-version }} from tool cache
+        env:
+          PY_VERSION: ${{ matrix.python-version }}
+        run: |
+          set -euo pipefail
+          PY_DIR=$(ls -d "/opt/hostedtoolcache/Python/${PY_VERSION}."*/x64 2>/dev/null | sort -V | tail -1)
+          if [ -z "$PY_DIR" ] || [ ! -x "$PY_DIR/bin/python" ]; then
+            echo "::error::Python ${PY_VERSION} not found in /opt/hostedtoolcache/Python"
+            ls -la /opt/hostedtoolcache/Python/ || true
+            exit 1
+          fi
+          echo "$PY_DIR/bin" >> "$GITHUB_PATH"
+          echo "Selected: $PY_DIR/bin/python"
+          "$PY_DIR/bin/python" --version
 
       - name: Install package and test deps
         run: pip install -e ".[dev]"
@@ -38,10 +67,23 @@ jobs:
 
       - name: Auto-commit regenerated docs
         if: matrix.python-version == '3.12' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository)
-        uses: stefanzweifel/git-auto-commit-action@v5
-        with:
-          commit_message: "chore: regenerate docs"
-          file_pattern: "README.md CLAUDE.md COMPLETE_PROJECT_DOCUMENTATION.md LLM_Development.md wiki-local/spec-project.md"
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
+          PUSH_BRANCH: ${{ github.head_ref || github.ref_name }}
+        run: |
+          set -euo pipefail
+          DOC_FILES="README.md CLAUDE.md COMPLETE_PROJECT_DOCUMENTATION.md LLM_Development.md wiki-local/spec-project.md"
+          if git diff --quiet -- $DOC_FILES; then
+            echo "No doc drift to commit."
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -- $DOC_FILES
+          git commit -m "chore: regenerate docs"
+          git remote set-url origin "https://x-access-token:${GITHUB_TOKEN}@github.com/${REPO}.git"
+          git push origin "HEAD:refs/heads/${PUSH_BRANCH}"
 
       - name: Check doc generation is up to date
         if: matrix.python-version == '3.12' && github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name != github.repository
