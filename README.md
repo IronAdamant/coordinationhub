@@ -6,6 +6,10 @@ CoordinationHub is a lightweight MCP server that coordinates multiple AI coding 
 
 Built for Claude Code, compatible with any MCP client. Zero third-party dependencies. Python stdlib only.
 
+![CoordinationHub dashboard](screenshots/dashboard.png)
+
+*The built-in web dashboard (`coordinationhub serve-sse`) shows the agent tree, task registry, work intent board, handoffs, dependencies, and active locks live — fed by the same SQLite store the hooks write to.*
+
 ## The Problem
 
 When you spawn multiple AI agents on the same project, they can silently overwrite each other's changes. There's no way to know which agent is editing which file, no protection against two agents touching the same code, and no visibility into what's happening across your swarm.

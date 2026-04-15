@@ -23,4 +23,12 @@ findings/
 plan/
 *-checklist.md
 *-plan.md
-screenshots/
+
+# Screenshots: track curated showcase images, ignore ad-hoc scratch drops
+# (things that start with "pasted" or "screencapture", .xcf/.psd source files,
+# and anything under screenshots/tmp/).
+screenshots/tmp/
+screenshots/pasted*
+screenshots/screencapture*
+screenshots/*.xcf
+screenshots/*.psd
