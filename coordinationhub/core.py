@@ -3,7 +3,8 @@
 Wires together storage, lifecycle, and all capability mixins.
 Each mixin is in its own file under coordinationhub/.
 
-LockingMixin:     core_locking.py     — lock acquisition, release, broadcast, wait
+LockingMixin:     core_locking.py     — lock acquire/release/refresh/list/admin
+BroadcastMixin:   core_broadcasts.py  — broadcast, handoff dispatch, wait_for_locks
 IdentityMixin:    core_identity.py    — agent registration, heartbeat, lineage
 MessagingMixin:   core_messaging.py  — inter-agent messages, await
 TaskMixin:        core_tasks.py       — task registry with hierarchy
@@ -26,6 +27,7 @@ from ._storage import CoordinationStorage
 from .event_bus import EventBus
 from .lock_cache import LockCache
 from .core_locking import LockingMixin
+from .core_broadcasts import BroadcastMixin
 from .core_identity import IdentityMixin
 from .core_messaging import MessagingMixin
 from .core_tasks import TaskMixin
@@ -42,6 +44,7 @@ from .plugins.graph import graphs as _g
 
 class CoordinationEngine(
     LockingMixin,
+    BroadcastMixin,
     IdentityMixin,
     MessagingMixin,
     TaskMixin,

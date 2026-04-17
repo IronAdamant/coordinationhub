@@ -300,14 +300,16 @@ coordinationhub/
   agent_registry.py     — Agent lifecycle: register, heartbeat, deregister, lineage management (~292 LOC)
   agent_status.py       — Agent status and file-map query helpers for CoordinationHub (~277 LOC)
   broadcasts.py         — Broadcast acknowledgment primitives for CoordinationHub (~106 LOC)
-  cli.py                — CoordinationHub CLI — command-line interface for all coordination tool methods (~407 LOC)
+  cli.py                — CoordinationHub CLI — command-line interface for all coordination tool methods (~98 LOC)
   cli_agents.py         — Agent identity and lifecycle CLI commands (~121 LOC)
   cli_commands.py       — CoordinationHub CLI command handlers (~98 LOC)
   cli_deps.py           — CLI commands for cross-agent dependency declarations (~77 LOC)
   cli_intent.py         — CLI commands for the work intent board (~45 LOC)
   cli_leases.py         — CLI commands for HA coordinator lease management (~150 LOC)
   cli_locks.py          — Document locking and coordination CLI commands (~323 LOC)
-  cli_setup.py          — CLI commands for setup and diagnostics: doctor, init, watch (~386 LOC)
+  cli_parser.py         — Argument parser for the CoordinationHub CLI (~356 LOC)
+  cli_setup.py          — CLI commands for setup and diagnostics: ``init``, ``doctor``, ``watch`` (~255 LOC)
+  cli_setup_doctor.py   — Diagnostic checks for ``coordinationhub doctor`` (~147 LOC)
   cli_spawner.py        — CLI commands for HA coordinator spawner — sub-agent registry management (~115 LOC)
   cli_sse.py            — CLI commands for SSE dashboard server (~35 LOC)
   cli_tasks.py          — CLI commands for the task registry (~239 LOC)
@@ -315,13 +317,14 @@ coordinationhub/
   cli_vis.py            — Change awareness, audit, graph, and assessment CLI commands (~292 LOC)
   conflict_log.py       — Conflict recording and querying for CoordinationHub (~44 LOC)
   context.py            — Context bundle builder for CoordinationHub agent registration responses (~93 LOC)
-  core.py               — CoordinationEngine — thin host class that inherits all mixins (~162 LOC)
+  core.py               — CoordinationEngine — thin host class that inherits all mixins (~165 LOC)
+  core_broadcasts.py    — BroadcastMixin — broadcast, handoff dispatch, and cross-agent waits (~184 LOC)
   core_change.py        — ChangeMixin — change notifications, file ownership, conflict audit, status (~182 LOC)
   core_dependencies.py  — DependencyMixin — cross-agent dependency declarations and checks (~120 LOC)
   core_handoffs.py      — HandoffMixin — one-to-many handoff acknowledgment and lifecycle (~117 LOC)
   core_identity.py      — IdentityMixin — agent lifecycle and lineage management (~95 LOC)
   core_leases.py        — LeaseMixin — HA coordinator lease management (~146 LOC)
-  core_locking.py       — Locking and coordination methods for CoordinationEngine (~496 LOC)
+  core_locking.py       — Locking methods for CoordinationEngine (~334 LOC)
   core_messaging.py     — MessagingMixin — inter-agent messages and await (~121 LOC)
   core_spawner.py       — SpawnerMixin — HA coordinator sub-agent spawn management (~193 LOC)
   core_tasks.py         — TaskMixin — shared task registry with hierarchy support (~193 LOC)
@@ -364,7 +367,9 @@ coordinationhub/
   plugins/dashboard/
     __init__.py         — Dashboard plugin for CoordinationHub (~15 LOC)
     dashboard.py        — Web dashboard for CoordinationHub — zero external dependencies (~82 LOC)
-    dashboard_html.py   — Self-contained HTML for the CoordinationHub dashboard (~607 LOC)
+    dashboard_css.py    — CSS for the CoordinationHub dashboard (~91 LOC)
+    dashboard_html.py   — Self-contained HTML for the CoordinationHub dashboard (~98 LOC)
+    dashboard_js.py     — Client-side JavaScript for the CoordinationHub dashboard (~437 LOC)
   plugins/graph/
     __init__.py         — Graph plugin for CoordinationHub (~31 LOC)
     graphs.py           — Declarative coordination graph: loader, validator, in-memory representation (~309 LOC)
@@ -387,7 +392,7 @@ coordinationhub/
 ```
 <!-- /GEN -->
 
-`tests/` contains <!-- GEN:test-count -->404<!-- /GEN --> tests across 23 files plus `fixtures/claude_code_events/` (hook contract fixtures).
+`tests/` contains <!-- GEN:test-count -->404<!-- /GEN --> tests across 24 files plus `fixtures/claude_code_events/` (hook contract fixtures).
 
 Top-level project files: `pyproject.toml`, `coordination_spec.yaml`/`.json` (example specs), `README.md`, `CLAUDE.md`, `COMPLETE_PROJECT_DOCUMENTATION.md`, `LLM_Development.md`, and `wiki-local/` (this spec, glossary, index).
 

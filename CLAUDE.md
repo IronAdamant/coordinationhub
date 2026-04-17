@@ -19,14 +19,16 @@ coordinationhub/
   agent_registry.py     — Agent lifecycle: register, heartbeat, deregister, lineage management (~292 LOC)
   agent_status.py       — Agent status and file-map query helpers for CoordinationHub (~277 LOC)
   broadcasts.py         — Broadcast acknowledgment primitives for CoordinationHub (~106 LOC)
-  cli.py                — CoordinationHub CLI — command-line interface for all coordination tool methods (~407 LOC)
+  cli.py                — CoordinationHub CLI — command-line interface for all coordination tool methods (~98 LOC)
   cli_agents.py         — Agent identity and lifecycle CLI commands (~121 LOC)
   cli_commands.py       — CoordinationHub CLI command handlers (~98 LOC)
   cli_deps.py           — CLI commands for cross-agent dependency declarations (~77 LOC)
   cli_intent.py         — CLI commands for the work intent board (~45 LOC)
   cli_leases.py         — CLI commands for HA coordinator lease management (~150 LOC)
   cli_locks.py          — Document locking and coordination CLI commands (~323 LOC)
-  cli_setup.py          — CLI commands for setup and diagnostics: doctor, init, watch (~386 LOC)
+  cli_parser.py         — Argument parser for the CoordinationHub CLI (~356 LOC)
+  cli_setup.py          — CLI commands for setup and diagnostics: ``init``, ``doctor``, ``watch`` (~255 LOC)
+  cli_setup_doctor.py   — Diagnostic checks for ``coordinationhub doctor`` (~147 LOC)
   cli_spawner.py        — CLI commands for HA coordinator spawner — sub-agent registry management (~115 LOC)
   cli_sse.py            — CLI commands for SSE dashboard server (~35 LOC)
   cli_tasks.py          — CLI commands for the task registry (~239 LOC)
@@ -34,13 +36,14 @@ coordinationhub/
   cli_vis.py            — Change awareness, audit, graph, and assessment CLI commands (~292 LOC)
   conflict_log.py       — Conflict recording and querying for CoordinationHub (~44 LOC)
   context.py            — Context bundle builder for CoordinationHub agent registration responses (~93 LOC)
-  core.py               — CoordinationEngine — thin host class that inherits all mixins (~162 LOC)
+  core.py               — CoordinationEngine — thin host class that inherits all mixins (~165 LOC)
+  core_broadcasts.py    — BroadcastMixin — broadcast, handoff dispatch, and cross-agent waits (~184 LOC)
   core_change.py        — ChangeMixin — change notifications, file ownership, conflict audit, status (~182 LOC)
   core_dependencies.py  — DependencyMixin — cross-agent dependency declarations and checks (~120 LOC)
   core_handoffs.py      — HandoffMixin — one-to-many handoff acknowledgment and lifecycle (~117 LOC)
   core_identity.py      — IdentityMixin — agent lifecycle and lineage management (~95 LOC)
   core_leases.py        — LeaseMixin — HA coordinator lease management (~146 LOC)
-  core_locking.py       — Locking and coordination methods for CoordinationEngine (~496 LOC)
+  core_locking.py       — Locking methods for CoordinationEngine (~334 LOC)
   core_messaging.py     — MessagingMixin — inter-agent messages and await (~121 LOC)
   core_spawner.py       — SpawnerMixin — HA coordinator sub-agent spawn management (~193 LOC)
   core_tasks.py         — TaskMixin — shared task registry with hierarchy support (~193 LOC)
@@ -83,7 +86,9 @@ coordinationhub/
   plugins/dashboard/
     __init__.py         — Dashboard plugin for CoordinationHub (~15 LOC)
     dashboard.py        — Web dashboard for CoordinationHub — zero external dependencies (~82 LOC)
-    dashboard_html.py   — Self-contained HTML for the CoordinationHub dashboard (~607 LOC)
+    dashboard_css.py    — CSS for the CoordinationHub dashboard (~91 LOC)
+    dashboard_html.py   — Self-contained HTML for the CoordinationHub dashboard (~98 LOC)
+    dashboard_js.py     — Client-side JavaScript for the CoordinationHub dashboard (~437 LOC)
   plugins/graph/
     __init__.py         — Graph plugin for CoordinationHub (~31 LOC)
     graphs.py           — Declarative coordination graph: loader, validator, in-memory representation (~309 LOC)
@@ -106,12 +111,14 @@ coordinationhub/
 ```
 <!-- /GEN -->
 
-The `tests/` directory contains the pytest suite (<!-- GEN:test-count -->404<!-- /GEN --> tests across 23 files), including `tests/fixtures/claude_code_events/` contract fixtures.
+The `tests/` directory contains the pytest suite (<!-- GEN:test-count -->404<!-- /GEN --> tests across 24 files), including `tests/fixtures/claude_code_events/` contract fixtures.
 
 ## Module Design
 
 - **Zero internal deps in sub-modules**: `agent_registry.py`, `lock_ops.py`, `conflict_log.py`, `notifications.py`, `scan.py`, `agent_status.py` all receive `connect: ConnectFn` from the caller. They have no internal imports from each other.
-- **LockingMixin in `core_locking.py`**: All locking and coordination methods (`acquire_lock`, `release_lock`, `refresh_lock`, `get_lock_status`, `list_locks`, `release_agent_locks`, `reap_expired_locks`, `reap_stale_agents`, `broadcast`, `wait_for_locks`) live in `LockingMixin`. `CoordinationEngine` inherits from `LockingMixin`, keeping `core.py` focused on identity, change awareness, audit, and graph/visibility.
+- **LockingMixin in `core_locking.py` + BroadcastMixin in `core_broadcasts.py`**: `LockingMixin` owns the core lock primitives (`acquire_lock`, `release_lock`, `refresh_lock`, `get_lock_status`, `list_locks`, `admin_locks`, plus the `release_agent_locks`/`reap_expired_locks`/`reap_stale_agents` aliases). `BroadcastMixin` owns the cross-agent coordination primitives (`broadcast`, `acknowledge_broadcast`, `get_broadcast_status`, `wait_for_broadcast_acks`, `_handoff`, `wait_for_locks`). They were split from a single file so each module stays under the 500-LOC budget; `CoordinationEngine` inherits from both, so callers see a single surface.
+- **CLI parser in `cli_parser.py`, dispatch in `cli.py`**: `cli_parser.create_parser()` builds the full argparse tree via topical `_add_*` helpers. `cli.py` holds only the `_COMMANDS` dispatch table and `main()` entry point. Keeps both modules well under 500 LOC.
+- **Dashboard asset split**: `plugins/dashboard/dashboard_html.py` is a ~100-LOC assembler that concatenates the static HTML template with `DASHBOARD_CSS` (from `dashboard_css.py`) and `DASHBOARD_JS` (from `dashboard_js.py`). Existing `from .dashboard import DASHBOARD_HTML` imports continue to work.
 - **Storage layer isolated in `_storage.py`**: `CoordinationStorage` owns the SQLite pool, path resolution, and schema init. Both `core.py` and CLI entry points depend on it.
 - **Canonical schemas in `db_schemas.py` only**: All table definitions and indexes live in `db_schemas._SCHEMAS` and `db_schemas._INDEXES` (re-exported from `db` for back-compat). Migration functions and the `init_schema()` driver live in `db_migrations.py`. Sub-modules do not define their own schemas — `init_schema()` creates everything.
 - **Thread-local connection pool**: `db.py` provides a `ConnectionPool` that gives each thread its own reused SQLite connection. WAL mode enabled, 30s busy timeout.
@@ -228,8 +235,8 @@ To disable hooks temporarily, add `"disableAllHooks": true` to `~/.claude/settin
 
 ```bash
 python -m pytest tests/ -v
-# <!-- GEN:test-count -->404<!-- /GEN --> tests across 23 test files:
-#   test_agent_lifecycle.py  — 26 tests
+# <!-- GEN:test-count -->404<!-- /GEN --> tests across 24 test files:
+#   test_agent_lifecycle.py  — 27 tests
 #   test_locking.py          — 46 tests (includes smart reap)
 #   test_notifications.py    — 8 tests
 #   test_conflicts.py        — 16 tests
@@ -239,18 +246,19 @@ python -m pytest tests/ -v
 #   test_lock_cache.py       — 9 tests
 #   test_graphs.py           — 22 tests
 #   test_assessment.py       — 33 tests (includes DB→trace converter tests)
-#   test_integration.py      — 15 tests (HTTP transport)
+#   test_integration.py      — 16 tests (HTTP transport)
 #   test_core.py             — 28 tests (graph delegation, path utils, agent ID)
 #   test_cli.py              — 14 tests (parser, list-agents/dashboard consistency)
 #   test_concurrent.py       — 8 tests (threading: locks, registration, notifications)
 #   test_scenario.py         — 13 tests (end-to-end multi-agent + live session assessment)
 #   test_hooks.py            — 66 tests (hook handlers, agent ID mapping, file ownership, event contract, UserPromptSubmit, PreToolUse[Agent] correlation)
 #   test_hooks_base.py       — 8 tests (BaseHook lifecycle, Kimi/Claude adapters)
-#   test_setup.py            — 8 tests (doctor, init, hook merge)
+#   test_setup.py            — 14 tests (doctor, init, hook merge, auto-dashboard, monitor skill)
 #   test_db_migration.py     — 9 tests (legacy DB, stuck-version recovery, fresh install)
 #   test_db_safety.py        — 14 tests (connection hardening for standalone modules)
 #   test_multiprocess_sync.py — 1 test (cross-process event journal)
 #   test_spawner.py          — 5 tests (HA coordinator spawn registry)
+#   test_dashboard_html.py   — 3 tests (single <script> block, panel count, optional node --check)
 #   test_tool_count.py       — 1 test (asserts MCP surface ≤ 50)
 #   load_test.py             — Load/stress test (100 agents × 50 files, not pytest-collected)
 ```

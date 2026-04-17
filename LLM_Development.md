@@ -1532,14 +1532,16 @@ Block markers for multi-line content:
 | `coordinationhub/agent_registry.py` | 292 | Agent lifecycle: register, heartbeat, deregister, lineage management |
 | `coordinationhub/agent_status.py` | 277 | Agent status and file-map query helpers for CoordinationHub |
 | `coordinationhub/broadcasts.py` | 106 | Broadcast acknowledgment primitives for CoordinationHub |
-| `coordinationhub/cli.py` | 407 | CoordinationHub CLI — command-line interface for all coordination tool methods |
+| `coordinationhub/cli.py` | 98 | CoordinationHub CLI — command-line interface for all coordination tool methods |
 | `coordinationhub/cli_agents.py` | 121 | Agent identity and lifecycle CLI commands |
 | `coordinationhub/cli_commands.py` | 98 | CoordinationHub CLI command handlers |
 | `coordinationhub/cli_deps.py` | 77 | CLI commands for cross-agent dependency declarations |
 | `coordinationhub/cli_intent.py` | 45 | CLI commands for the work intent board |
 | `coordinationhub/cli_leases.py` | 150 | CLI commands for HA coordinator lease management |
 | `coordinationhub/cli_locks.py` | 323 | Document locking and coordination CLI commands |
-| `coordinationhub/cli_setup.py` | 386 | CLI commands for setup and diagnostics: doctor, init, watch |
+| `coordinationhub/cli_parser.py` | 356 | Argument parser for the CoordinationHub CLI |
+| `coordinationhub/cli_setup.py` | 255 | CLI commands for setup and diagnostics: ``init``, ``doctor``, ``watch`` |
+| `coordinationhub/cli_setup_doctor.py` | 147 | Diagnostic checks for ``coordinationhub doctor`` |
 | `coordinationhub/cli_spawner.py` | 115 | CLI commands for HA coordinator spawner — sub-agent registry management |
 | `coordinationhub/cli_sse.py` | 35 | CLI commands for SSE dashboard server |
 | `coordinationhub/cli_tasks.py` | 239 | CLI commands for the task registry |
@@ -1547,13 +1549,14 @@ Block markers for multi-line content:
 | `coordinationhub/cli_vis.py` | 292 | Change awareness, audit, graph, and assessment CLI commands |
 | `coordinationhub/conflict_log.py` | 44 | Conflict recording and querying for CoordinationHub |
 | `coordinationhub/context.py` | 93 | Context bundle builder for CoordinationHub agent registration responses |
-| `coordinationhub/core.py` | 162 | CoordinationEngine — thin host class that inherits all mixins |
+| `coordinationhub/core.py` | 165 | CoordinationEngine — thin host class that inherits all mixins |
+| `coordinationhub/core_broadcasts.py` | 184 | BroadcastMixin — broadcast, handoff dispatch, and cross-agent waits |
 | `coordinationhub/core_change.py` | 182 | ChangeMixin — change notifications, file ownership, conflict audit, status |
 | `coordinationhub/core_dependencies.py` | 120 | DependencyMixin — cross-agent dependency declarations and checks |
 | `coordinationhub/core_handoffs.py` | 117 | HandoffMixin — one-to-many handoff acknowledgment and lifecycle |
 | `coordinationhub/core_identity.py` | 95 | IdentityMixin — agent lifecycle and lineage management |
 | `coordinationhub/core_leases.py` | 146 | LeaseMixin — HA coordinator lease management |
-| `coordinationhub/core_locking.py` | 496 | Locking and coordination methods for CoordinationEngine |
+| `coordinationhub/core_locking.py` | 334 | Locking methods for CoordinationEngine |
 | `coordinationhub/core_messaging.py` | 121 | MessagingMixin — inter-agent messages and await |
 | `coordinationhub/core_spawner.py` | 193 | SpawnerMixin — HA coordinator sub-agent spawn management |
 | `coordinationhub/core_tasks.py` | 193 | TaskMixin — shared task registry with hierarchy support |
@@ -1586,7 +1589,9 @@ Block markers for multi-line content:
 | `coordinationhub/plugins/assessment/assessment_scorers.py` | 258 | Assessment metric scorers for CoordinationHub |
 | `coordinationhub/plugins/dashboard/__init__.py` | 15 | Dashboard plugin for CoordinationHub |
 | `coordinationhub/plugins/dashboard/dashboard.py` | 82 | Web dashboard for CoordinationHub — zero external dependencies |
-| `coordinationhub/plugins/dashboard/dashboard_html.py` | 607 | Self-contained HTML for the CoordinationHub dashboard |
+| `coordinationhub/plugins/dashboard/dashboard_css.py` | 91 | CSS for the CoordinationHub dashboard |
+| `coordinationhub/plugins/dashboard/dashboard_html.py` | 98 | Self-contained HTML for the CoordinationHub dashboard |
+| `coordinationhub/plugins/dashboard/dashboard_js.py` | 437 | Client-side JavaScript for the CoordinationHub dashboard |
 | `coordinationhub/plugins/graph/__init__.py` | 31 | Graph plugin for CoordinationHub |
 | `coordinationhub/plugins/graph/graphs.py` | 309 | Declarative coordination graph: loader, validator, in-memory representation |
 | `coordinationhub/plugins/registry.py` | 41 | Plugin registry for CoordinationHub |
