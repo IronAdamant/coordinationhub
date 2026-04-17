@@ -1,11 +1,34 @@
 # LLM_Development.md — CoordinationHub
 
-**Version:** <!-- GEN:version -->0.7.5<!-- /GEN -->
-**Last updated:** 2026-04-15
+**Version:** <!-- GEN:version -->0.7.6<!-- /GEN -->
+**Last updated:** 2026-04-17
 
 ## Change Log
 
 All significant changes to the CoordinationHub project are documented here in reverse chronological order.
+
+---
+
+## 2026-04-17 — v0.7.6 Module Split Refactor (No Behavioural Change)
+
+Four modules shipped in v0.7.5 sat over the project's 500-LOC single-responsibility cap: `plugins/dashboard/dashboard_html.py` (670), `cli.py` (568), `core_locking.py` (557), and `cli_setup.py` (504). This release splits each one along a natural internal seam and refreshes `CLAUDE.md` + `COMPLETE_PROJECT_DOCUMENTATION.md` to parity with the current tree. No behavioural change; 403 tests pass + 1 skipped, identical to v0.7.5.
+
+### Splits
+
+- `cli.py` 568 → `cli.py` 111 (dispatch only) + new `cli_parser.py` 464 (topical `_add_*` helpers that build the full argparse tree).
+- `core_locking.py` 557 → `core_locking.py` 370 (lock primitives) + new `core_broadcasts.py` 210 (`BroadcastMixin`: `broadcast`, `acknowledge_broadcast`, `get_broadcast_status`, `wait_for_broadcast_acks`, `_handoff`, `wait_for_locks`). `CoordinationEngine` inherits from both, so the public surface is unchanged.
+- `cli_setup.py` 504 → `cli_setup.py` 330 (init/watch/auto-dashboard) + new `cli_setup_doctor.py` 175 (`_check_*`, `run_doctor`, `cmd_doctor`).
+- `plugins/dashboard/dashboard_html.py` 670 → `dashboard_html.py` 114 (static template + assembly) + new `dashboard_css.py` 103 + new `dashboard_js.py` 485. `DASHBOARD_HTML` is now concatenated at import time from the three modules; `from .dashboard import DASHBOARD_HTML` callers are unaffected.
+
+After the splits, the largest module in `coordinationhub/` is `dashboard_js.py` at 485 LOC. `gen_docs.py --check` is clean.
+
+### Docs parity
+
+`scripts/gen_docs.py` regenerated all auto-managed sections. Manually fixed:
+
+- `CLAUDE.md` / `COMPLETE_PROJECT_DOCUMENTATION.md` / `README.md` / `wiki-local/spec-project.md` test-file count 23 → 24 (`test_dashboard_html.py` was added in v0.7.5 but never folded into the list).
+- Stale per-file counts in `CLAUDE.md`: `test_agent_lifecycle.py` 26→27, `test_integration.py` 15→16, `test_setup.py` 8→14.
+- Module Design bullets in `CLAUDE.md` now describe the four new split boundaries, not just the old storage split.
 
 ---
 

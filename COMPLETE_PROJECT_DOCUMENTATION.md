@@ -1,7 +1,44 @@
 # CoordinationHub — Complete Project Documentation
 
-**Version:** <!-- GEN:version -->0.7.5<!-- /GEN -->
-**Last updated:** 2026-04-15
+**Version:** <!-- GEN:version -->0.7.6<!-- /GEN -->
+**Last updated:** 2026-04-17
+
+## v0.7.6 Changelog — Module Split Refactor (No Behavioural Change)
+
+### Motivation
+
+An assessment of the codebase-as-shipped in v0.7.5 surfaced four modules over the project's 500-LOC single-responsibility cap: `plugins/dashboard/dashboard_html.py` (670), `cli.py` (568), `core_locking.py` (557), and `cli_setup.py` (504). Several smaller annotations in `CLAUDE.md` and `COMPLETE_PROJECT_DOCUMENTATION.md` were also stale (test-file count, per-file test counts, LOC hints drifting ~15–30% below reality). No behavioural change — this is purely a structural refactor and a docs parity pass.
+
+### Splits
+
+- **`cli.py` 568 → `cli.py` 111 + `cli_parser.py` 464.** All argparse construction moved into topical `_add_*` helpers inside a new `cli_parser.py`. `cli.py` now holds only the `_COMMANDS` dispatch table and `main()` entry point. Lazy import of `cli_commands` preserved.
+- **`core_locking.py` 557 → `core_locking.py` 370 + `core_broadcasts.py` 210.** The new `BroadcastMixin` owns `broadcast`, `acknowledge_broadcast`, `get_broadcast_status`, `wait_for_broadcast_acks`, `_handoff`, and `wait_for_locks`. `LockingMixin` keeps `acquire_lock`, `release_lock`, `refresh_lock`, `get_lock_status`, `list_locks`, `admin_locks`, and the `release_agent_locks`/`reap_expired_locks`/`reap_stale_agents` back-compat aliases. `CoordinationEngine` inherits from both so the public surface is unchanged.
+- **`cli_setup.py` 504 → `cli_setup.py` 330 + `cli_setup_doctor.py` 175.** Diagnostic checks (`_check_import`, `_check_hooks_config`, `_check_storage_dir`, `_check_schema_version`, `_check_hook_python`, `run_doctor`, `cmd_doctor`) extracted. `cli_setup` imports and re-exports so callers in `cli_commands` are unaffected.
+- **`plugins/dashboard/dashboard_html.py` 670 → `dashboard_html.py` 114 + `dashboard_css.py` 103 + `dashboard_js.py` 485.** The dashboard page is now assembled at import time from a static HTML template plus the `DASHBOARD_CSS` and `DASHBOARD_JS` constants pulled from their own modules. Existing `from .dashboard import DASHBOARD_HTML` callers keep working because `dashboard.py` still re-exports.
+
+Every file in `coordinationhub/` now sits under the 500-LOC cap; the largest is `dashboard_js.py` at 485.
+
+### Docs parity
+
+- `scripts/gen_docs.py` regenerated the file-inventory and directory-tree blocks in `CLAUDE.md`, `COMPLETE_PROJECT_DOCUMENTATION.md`, `LLM_Development.md`, and `wiki-local/spec-project.md`. `gen_docs.py --check` is clean.
+- Corrected test-file count from 23 → 24 (`test_dashboard_html.py` was added in v0.7.5 but never folded into the per-file list in `CLAUDE.md`).
+- Fixed stale per-file test counts in `CLAUDE.md`: `test_agent_lifecycle.py` 26→27, `test_integration.py` 15→16, `test_setup.py` 8→14.
+- `CLAUDE.md` Module Design section now describes all four new split boundaries (Locking+Broadcast, CLI parser, dashboard assets, and the existing storage split).
+
+### Verification
+
+- 403 tests pass, 1 skipped (unchanged from v0.7.5).
+- `python scripts/gen_docs.py --check` clean.
+- No file in `coordinationhub/` exceeds 500 LOC.
+
+### Counts
+
+| Version | Tools | CLI Commands | Schema |
+|---------|-------|--------------|--------|
+| v0.7.6 | 50 | 75 | 20 |
+| v0.7.5 | 50 | 75 | 20 |
+
+---
 
 ## v0.7.5 Changelog — Dashboard Pan/Zoom + JS Bug Fix + Opt-In Auto-Dashboard / Monitor Skill
 
