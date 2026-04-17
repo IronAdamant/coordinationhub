@@ -1,6 +1,6 @@
 # CoordinationHub — Complete Project Documentation
 
-**Version:** <!-- GEN:version -->0.7.6<!-- /GEN -->
+**Version:** <!-- GEN:version -->0.7.7<!-- /GEN -->
 **Last updated:** 2026-04-17
 
 ## v0.7.6 Changelog — Module Split Refactor (No Behavioural Change)
