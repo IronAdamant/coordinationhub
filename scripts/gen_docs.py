@@ -91,8 +91,11 @@ def scan_package() -> list[dict]:
 
 
 def get_version() -> str:
-    with (REPO_ROOT / "pyproject.toml").open("rb") as f:
-        return tomllib.load(f)["project"]["version"]
+    init_path = REPO_ROOT / "coordinationhub" / "__init__.py"
+    for line in init_path.read_text().splitlines():
+        if line.startswith("__version__"):
+            return line.split("=", 1)[1].strip().strip('"').strip("'")
+    raise RuntimeError(f"__version__ not found in {init_path}")
 
 
 def get_test_count() -> int:

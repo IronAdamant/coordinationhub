@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "coordinationhub"
-version = "0.7.6"
+dynamic = ["version"]
 description = "Declarative multi-agent coordination hub — YAML/JSON graphs, file ownership, live visibility, assessment runner"
 readme = "README.md"
 license = {text = "MIT"}
@@ -38,6 +38,9 @@ coordinationhub = "coordinationhub.cli:main"
 [project.urls]
 Homepage = "https://github.com/IronAdamant/coordinationhub"
 Repository = "https://github.com/IronAdamant/coordinationhub"
+
+[tool.setuptools.dynamic]
+version = {attr = "coordinationhub.__version__"}
 
 [tool.setuptools.packages.find]
 include = ["coordinationhub*"]

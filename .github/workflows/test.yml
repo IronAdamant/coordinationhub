@@ -52,16 +52,6 @@ jobs:
       - name: Install package and test deps
         run: pip install -e ".[dev]"
 
-      - name: Check version consistency
-        run: |
-          PYPROJECT_VER=$(python -c "import sys; f=open('pyproject.toml','rb'); print((__import__('tomllib') if sys.version_info>=(3,11) else __import__('tomli')).load(f)['project']['version'])")
-          INIT_VER=$(python -c "from coordinationhub import __version__; print(__version__)")
-          if [ "$PYPROJECT_VER" != "$INIT_VER" ]; then
-            echo "::error::Version mismatch: pyproject.toml=$PYPROJECT_VER, __init__.py=$INIT_VER"
-            exit 1
-          fi
-          echo "Version consistent: $PYPROJECT_VER"
-
       - name: Regenerate docs
         run: python scripts/gen_docs.py
 
