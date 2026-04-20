@@ -1,11 +1,55 @@
 # LLM_Development.md — CoordinationHub
 
 **Version:** <!-- GEN:version -->0.7.7<!-- /GEN -->
-**Last updated:** 2026-04-17
+**Last updated:** 2026-04-21
 
 ## Change Log
 
 All significant changes to the CoordinationHub project are documented here in reverse chronological order.
+
+---
+
+## 2026-04-21 — Hardening, CLI Refactor, +56 Tests
+
+Post-v0.7.7 cleanup pass: harden the HTTP server, refactor CLI boilerplate with decorators, and close the biggest coverage gaps (CLI, tasks, MCP server). No API changes; all existing tests continue to pass.
+
+### Hardening — `mcp_server.py`
+
+- **Request body size cap**: `MAX_BODY_BYTES = 1_000_000`. Oversized requests return HTTP 413 before any payload is read, preventing memory exhaustion from malicious `Content-Length`.
+- **SSE thread leak fix**: `self.request.settimeout(10.0)` in `_serve_sse_events` so half-open TCP connections break within 10 s instead of hanging for OS-default minutes.
+- **Explicit disconnect exceptions**: catch `socket.timeout`, `BrokenPipeError`, `ConnectionResetError` separately from the generic `Exception` catch-all so the intent is documented.
+- **Removed redundant `import json`** inside `_serve_api_dashboard` (already imported at module level).
+
+### CLI Refactor — `@command` decorator
+
+Every CLI command handler (`cmd_*`) repeated the same 4-line engine lifecycle wrapper:
+
+```python
+engine = _engine_from_args(args)
+try:
+    ...
+finally:
+    _close(engine)
+```
+
+This appeared ~60 times across 8 modules. Added `@command()` and `@command(replica=True)` to `cli_utils.py`; refactored `cli_agents.py`, `cli_locks.py`, `cli_vis.py`, `cli_tasks.py`, `cli_deps.py`, `cli_intent.py`, `cli_leases.py`, `cli_spawner.py`. Net removal of ~180 LOC. `cmd_serve` and `cmd_serve_mcp` (which don't use the engine pattern) are untouched.
+
+Also added debug logging in `close()` instead of silently swallowing all exceptions.
+
+### New Tests
+
+| File | Tests | Coverage Target |
+|------|-------|-----------------|
+| `tests/test_mcp_server.py` | 14 | HTTP handler, SSE, lifecycle, 413 path |
+| `tests/test_tasks.py` | 25 | Task registry, subtasks, DLQ, available tasks, dependency satisfaction |
+| `tests/test_cli_integration.py` | 12 | Decorated CLI handlers: register, heartbeat, lock, task CRUD |
+| `tests/test_plugins.py` | 6 | Plugin registry loading and no-op paths |
+
+Total suite: 403 → 459 passing + 1 skipped. Coverage: 58 % → 68 %.
+
+### Docs parity
+
+`scripts/gen_docs.py` regenerated all machine-owned sections. Manually fixed test-file count 24 → 28 and added the four new test files to the per-file list in `CLAUDE.md`.
 
 ---
 
@@ -1556,20 +1600,20 @@ Block markers for multi-line content:
 | `coordinationhub/agent_status.py` | 277 | Agent status and file-map query helpers for CoordinationHub |
 | `coordinationhub/broadcasts.py` | 106 | Broadcast acknowledgment primitives for CoordinationHub |
 | `coordinationhub/cli.py` | 98 | CoordinationHub CLI — command-line interface for all coordination tool methods |
-| `coordinationhub/cli_agents.py` | 121 | Agent identity and lifecycle CLI commands |
+| `coordinationhub/cli_agents.py` | 102 | Agent identity and lifecycle CLI commands |
 | `coordinationhub/cli_commands.py` | 98 | CoordinationHub CLI command handlers |
-| `coordinationhub/cli_deps.py` | 77 | CLI commands for cross-agent dependency declarations |
-| `coordinationhub/cli_intent.py` | 45 | CLI commands for the work intent board |
-| `coordinationhub/cli_leases.py` | 150 | CLI commands for HA coordinator lease management |
-| `coordinationhub/cli_locks.py` | 323 | Document locking and coordination CLI commands |
+| `coordinationhub/cli_deps.py` | 64 | CLI commands for cross-agent dependency declarations |
+| `coordinationhub/cli_intent.py` | 35 | CLI commands for the work intent board |
+| `coordinationhub/cli_leases.py` | 94 | CLI commands for HA coordinator lease management |
+| `coordinationhub/cli_locks.py` | 265 | Document locking and coordination CLI commands |
 | `coordinationhub/cli_parser.py` | 356 | Argument parser for the CoordinationHub CLI |
 | `coordinationhub/cli_setup.py` | 255 | CLI commands for setup and diagnostics: ``init``, ``doctor``, ``watch`` |
 | `coordinationhub/cli_setup_doctor.py` | 147 | Diagnostic checks for ``coordinationhub doctor`` |
-| `coordinationhub/cli_spawner.py` | 115 | CLI commands for HA coordinator spawner — sub-agent registry management |
+| `coordinationhub/cli_spawner.py` | 97 | CLI commands for HA coordinator spawner — sub-agent registry management |
 | `coordinationhub/cli_sse.py` | 35 | CLI commands for SSE dashboard server |
-| `coordinationhub/cli_tasks.py` | 239 | CLI commands for the task registry |
-| `coordinationhub/cli_utils.py` | 31 | Shared CLI helper functions used by all cli_* sub-modules |
-| `coordinationhub/cli_vis.py` | 292 | Change awareness, audit, graph, and assessment CLI commands |
+| `coordinationhub/cli_tasks.py` | 151 | CLI commands for the task registry |
+| `coordinationhub/cli_utils.py` | 51 | Shared CLI helper functions used by all cli_* sub-modules |
+| `coordinationhub/cli_vis.py` | 192 | Change awareness, audit, graph, and assessment CLI commands |
 | `coordinationhub/conflict_log.py` | 44 | Conflict recording and querying for CoordinationHub |
 | `coordinationhub/context.py` | 93 | Context bundle builder for CoordinationHub agent registration responses |
 | `coordinationhub/core.py` | 165 | CoordinationEngine — thin host class that inherits all mixins |
@@ -1600,7 +1644,7 @@ Block markers for multi-line content:
 | `coordinationhub/leases.py` | 197 | Zero-deps lease primitives for HA coordinator leadership |
 | `coordinationhub/lock_cache.py` | 180 | In-memory lock cache for CoordinationHub |
 | `coordinationhub/lock_ops.py` | 191 | Shared lock primitives used by both local locks and coordination locks |
-| `coordinationhub/mcp_server.py` | 234 | HTTP-based MCP server for CoordinationHub — zero external dependencies |
+| `coordinationhub/mcp_server.py` | 241 | HTTP-based MCP server for CoordinationHub — zero external dependencies |
 | `coordinationhub/mcp_stdio.py` | 133 | Stdio-based MCP server for CoordinationHub using the ``mcp`` Python package |
 | `coordinationhub/messages.py` | 90 | Inter-agent messaging primitives for CoordinationHub |
 | `coordinationhub/notifications.py` | 136 | Change notification storage and retrieval for CoordinationHub |
@@ -1643,7 +1687,7 @@ Block markers for multi-line content:
 
 Inline markers for single values (render invisibly in Markdown):
 ```markdown
-This project has <!-- GEN:test-count -->404<!-- /GEN --> tests.
+This project has <!-- GEN:test-count -->460<!-- /GEN --> tests.
 ```
 
 Unknown marker names raise an error during rewrite (catches typos).

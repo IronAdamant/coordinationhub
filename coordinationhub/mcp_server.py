@@ -11,12 +11,16 @@ from __future__ import annotations
 
 import json
 import logging
+import select
+import socket
 import threading
 import time as _time
 from pathlib import Path
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from socketserver import ThreadingMixIn
 from typing import Any
+
+MAX_BODY_BYTES = 1_000_000  # 1 MB — reject oversized requests
 
 from .core import CoordinationEngine
 from .dispatch import TOOL_DISPATCH
@@ -93,7 +97,6 @@ class MCPRequestHandler(BaseHTTPRequestHandler):
 
     def _serve_api_dashboard(self) -> None:
         """GET /api/dashboard-data — aggregate all tables as JSON."""
-        import json
         data = get_dashboard_data(self.server.engine._connect)
         body = json.dumps(data, default=str).encode("utf-8")
         self.send_response(200)
@@ -104,21 +107,24 @@ class MCPRequestHandler(BaseHTTPRequestHandler):
 
     def _serve_sse_events(self) -> None:
         """GET /events — Server-Sent Events stream of dashboard data every 5s."""
-        import json, time as _time
         self.send_response(200)
         self.send_header("Content-Type", "text/event-stream")
         self.send_header("Cache-Control", "no-cache")
         self.send_header("Connection", "keep-alive")
         self.send_header("X-Accel-Buffering", "no")  # disable nginx buffering
         self.end_headers()
+        # Set a socket timeout so dead connections don't hang forever
+        self.request.settimeout(10.0)
         while True:
             try:
                 data = get_dashboard_data(self.server.engine._connect)
                 payload = json.dumps(data, default=str)
                 self.wfile.write(f"data: {payload}\n\n".encode("utf-8"))
                 self.wfile.flush()
+            except (socket.timeout, BrokenPipeError, ConnectionResetError):
+                break  # client disconnected or timed out
             except Exception:
-                break  # client disconnected
+                break  # any other error — terminate the stream
             _time.sleep(5)
 
     def _handle_list_tools(self) -> None:
@@ -147,6 +153,9 @@ class MCPRequestHandler(BaseHTTPRequestHandler):
             return None
         if content_length <= 0:
             self._send_error_json(400, "Empty request body")
+            return None
+        if content_length > MAX_BODY_BYTES:
+            self._send_error_json(413, f"Request body exceeds {MAX_BODY_BYTES} bytes")
             return None
         raw = self.rfile.read(content_length)
         try:

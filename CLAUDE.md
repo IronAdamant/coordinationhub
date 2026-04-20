@@ -20,20 +20,20 @@ coordinationhub/
   agent_status.py       — Agent status and file-map query helpers for CoordinationHub (~277 LOC)
   broadcasts.py         — Broadcast acknowledgment primitives for CoordinationHub (~106 LOC)
   cli.py                — CoordinationHub CLI — command-line interface for all coordination tool methods (~98 LOC)
-  cli_agents.py         — Agent identity and lifecycle CLI commands (~121 LOC)
+  cli_agents.py         — Agent identity and lifecycle CLI commands (~102 LOC)
   cli_commands.py       — CoordinationHub CLI command handlers (~98 LOC)
-  cli_deps.py           — CLI commands for cross-agent dependency declarations (~77 LOC)
-  cli_intent.py         — CLI commands for the work intent board (~45 LOC)
-  cli_leases.py         — CLI commands for HA coordinator lease management (~150 LOC)
-  cli_locks.py          — Document locking and coordination CLI commands (~323 LOC)
+  cli_deps.py           — CLI commands for cross-agent dependency declarations (~64 LOC)
+  cli_intent.py         — CLI commands for the work intent board (~35 LOC)
+  cli_leases.py         — CLI commands for HA coordinator lease management (~94 LOC)
+  cli_locks.py          — Document locking and coordination CLI commands (~265 LOC)
   cli_parser.py         — Argument parser for the CoordinationHub CLI (~356 LOC)
   cli_setup.py          — CLI commands for setup and diagnostics: ``init``, ``doctor``, ``watch`` (~255 LOC)
   cli_setup_doctor.py   — Diagnostic checks for ``coordinationhub doctor`` (~147 LOC)
-  cli_spawner.py        — CLI commands for HA coordinator spawner — sub-agent registry management (~115 LOC)
+  cli_spawner.py        — CLI commands for HA coordinator spawner — sub-agent registry management (~97 LOC)
   cli_sse.py            — CLI commands for SSE dashboard server (~35 LOC)
-  cli_tasks.py          — CLI commands for the task registry (~239 LOC)
-  cli_utils.py          — Shared CLI helper functions used by all cli_* sub-modules (~31 LOC)
-  cli_vis.py            — Change awareness, audit, graph, and assessment CLI commands (~292 LOC)
+  cli_tasks.py          — CLI commands for the task registry (~151 LOC)
+  cli_utils.py          — Shared CLI helper functions used by all cli_* sub-modules (~51 LOC)
+  cli_vis.py            — Change awareness, audit, graph, and assessment CLI commands (~192 LOC)
   conflict_log.py       — Conflict recording and querying for CoordinationHub (~44 LOC)
   context.py            — Context bundle builder for CoordinationHub agent registration responses (~93 LOC)
   core.py               — CoordinationEngine — thin host class that inherits all mixins (~165 LOC)
@@ -59,7 +59,7 @@ coordinationhub/
   leases.py             — Zero-deps lease primitives for HA coordinator leadership (~197 LOC)
   lock_cache.py         — In-memory lock cache for CoordinationHub (~180 LOC)
   lock_ops.py           — Shared lock primitives used by both local locks and coordination locks (~191 LOC)
-  mcp_server.py         — HTTP-based MCP server for CoordinationHub — zero external dependencies (~234 LOC)
+  mcp_server.py         — HTTP-based MCP server for CoordinationHub — zero external dependencies (~241 LOC)
   mcp_stdio.py          — Stdio-based MCP server for CoordinationHub using the ``mcp`` Python package (~133 LOC)
   messages.py           — Inter-agent messaging primitives for CoordinationHub (~90 LOC)
   notifications.py      — Change notification storage and retrieval for CoordinationHub (~136 LOC)
@@ -111,7 +111,7 @@ coordinationhub/
 ```
 <!-- /GEN -->
 
-The `tests/` directory contains the pytest suite (<!-- GEN:test-count -->404<!-- /GEN --> tests across 24 files), including `tests/fixtures/claude_code_events/` contract fixtures.
+The `tests/` directory contains the pytest suite (<!-- GEN:test-count -->460<!-- /GEN --> tests across 28 files), including `tests/fixtures/claude_code_events/` contract fixtures.
 
 ## Module Design
 
@@ -235,32 +235,36 @@ To disable hooks temporarily, add `"disableAllHooks": true` to `~/.claude/settin
 
 ```bash
 python -m pytest tests/ -v
-# <!-- GEN:test-count -->404<!-- /GEN --> tests across 24 test files:
-#   test_agent_lifecycle.py  — 27 tests
-#   test_locking.py          — 46 tests (includes smart reap)
-#   test_notifications.py    — 8 tests
-#   test_conflicts.py        — 16 tests
-#   test_coordination.py     — 7 tests
-#   test_visibility.py       — 31 tests
-#   test_event_bus.py        — 5 tests
-#   test_lock_cache.py       — 9 tests
-#   test_graphs.py           — 22 tests
-#   test_assessment.py       — 33 tests (includes DB→trace converter tests)
-#   test_integration.py      — 16 tests (HTTP transport)
-#   test_core.py             — 28 tests (graph delegation, path utils, agent ID)
-#   test_cli.py              — 14 tests (parser, list-agents/dashboard consistency)
-#   test_concurrent.py       — 8 tests (threading: locks, registration, notifications)
-#   test_scenario.py         — 13 tests (end-to-end multi-agent + live session assessment)
-#   test_hooks.py            — 66 tests (hook handlers, agent ID mapping, file ownership, event contract, UserPromptSubmit, PreToolUse[Agent] correlation)
-#   test_hooks_base.py       — 8 tests (BaseHook lifecycle, Kimi/Claude adapters)
-#   test_setup.py            — 14 tests (doctor, init, hook merge, auto-dashboard, monitor skill)
-#   test_db_migration.py     — 9 tests (legacy DB, stuck-version recovery, fresh install)
-#   test_db_safety.py        — 14 tests (connection hardening for standalone modules)
-#   test_multiprocess_sync.py — 1 test (cross-process event journal)
-#   test_spawner.py          — 5 tests (HA coordinator spawn registry)
-#   test_dashboard_html.py   — 3 tests (single <script> block, panel count, optional node --check)
-#   test_tool_count.py       — 1 test (asserts MCP surface ≤ 50)
-#   load_test.py             — Load/stress test (100 agents × 50 files, not pytest-collected)
+# <!-- GEN:test-count -->460<!-- /GEN --> tests across 28 test files:
+#   test_agent_lifecycle.py    — 27 tests
+#   test_locking.py            — 46 tests (includes smart reap)
+#   test_notifications.py      — 8 tests
+#   test_conflicts.py          — 16 tests
+#   test_coordination.py       — 7 tests
+#   test_visibility.py         — 31 tests
+#   test_event_bus.py          — 5 tests
+#   test_lock_cache.py         — 9 tests
+#   test_graphs.py             — 22 tests
+#   test_assessment.py         — 33 tests (includes DB→trace converter tests)
+#   test_integration.py        — 16 tests (HTTP transport)
+#   test_core.py               — 28 tests (graph delegation, path utils, agent ID)
+#   test_cli.py                — 14 tests (parser, list-agents/dashboard consistency)
+#   test_cli_integration.py    — 12 tests (decorated CLI handlers: agents, locks, tasks)
+#   test_concurrent.py         — 8 tests (threading: locks, registration, notifications)
+#   test_scenario.py           — 13 tests (end-to-end multi-agent + live session assessment)
+#   test_hooks.py              — 66 tests (hook handlers, agent ID mapping, file ownership, event contract, UserPromptSubmit, PreToolUse[Agent] correlation)
+#   test_hooks_base.py         — 8 tests (BaseHook lifecycle, Kimi/Claude adapters)
+#   test_setup.py              — 14 tests (doctor, init, hook merge, auto-dashboard, monitor skill)
+#   test_db_migration.py       — 9 tests (legacy DB, stuck-version recovery, fresh install)
+#   test_db_safety.py          — 14 tests (connection hardening for standalone modules)
+#   test_multiprocess_sync.py  — 1 test (cross-process event journal)
+#   test_spawner.py            — 5 tests (HA coordinator spawn registry)
+#   test_dashboard_html.py     — 3 tests (single <script> block, panel count, optional node --check)
+#   test_mcp_server.py         — 14 tests (HTTP handler hardening, SSE, lifecycle)
+#   test_tasks.py              — 25 tests (task registry, subtasks, DLQ, available tasks)
+#   test_plugins.py            — 6 tests (plugin registry loading)
+#   test_tool_count.py         — 1 test (asserts MCP surface ≤ 50)
+#   load_test.py               — Load/stress test (100 agents × 50 files, not pytest-collected)
 ```
 
 Always run the test suite before and after changes.
