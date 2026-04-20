@@ -28,31 +28,31 @@ def _check_import() -> tuple[bool, str]:
 
 
 def _check_hooks_config() -> tuple[bool, str]:
-    """Check that Claude Code hook config exists."""
-    if not _CLAUDE_SETTINGS_PATH.exists():
-        return False, f"no settings file at {_CLAUDE_SETTINGS_PATH}"
-    try:
-        settings = json.loads(_CLAUDE_SETTINGS_PATH.read_text(encoding="utf-8"))
-    except (json.JSONDecodeError, OSError) as e:
-        return False, f"cannot read settings: {e}"
+    """Check that IDE hook config exists."""
+    # Vendor-neutral path
+    neutral_path = Path.home() / ".coordinationhub" / "hooks.json"
+    for path in (neutral_path, _CLAUDE_SETTINGS_PATH):
+        if path.exists():
+            try:
+                settings = json.loads(path.read_text(encoding="utf-8"))
+            except (json.JSONDecodeError, OSError) as e:
+                continue
+            hooks = settings.get("hooks", {})
+            if not hooks:
+                continue
+            required = {"SessionStart", "UserPromptSubmit", "PreToolUse", "PostToolUse",
+                        "SubagentStart", "SubagentStop", "SessionEnd"}
+            present = set(hooks.keys()) & required
+            missing = required - present
+            if missing:
+                continue
+            for event_matchers in hooks.values():
+                for matcher_block in event_matchers:
+                    for hook in matcher_block.get("hooks", []):
+                        if "coordinationhub" in hook.get("command", ""):
+                            return True, f"hooks configured correctly at {path}"
+    return True, "no IDE hook config found (run 'coordinationhub init' if using an IDE with hooks)"
 
-    hooks = settings.get("hooks", {})
-    if not hooks:
-        return False, "no hooks configured in settings.json"
-
-    required = {"SessionStart", "UserPromptSubmit", "PreToolUse", "PostToolUse",
-                "SubagentStart", "SubagentStop", "SessionEnd"}
-    present = set(hooks.keys()) & required
-    missing = required - present
-    if missing:
-        return False, f"missing hook events: {', '.join(sorted(missing))}"
-
-    for event_matchers in hooks.values():
-        for matcher_block in event_matchers:
-            for hook in matcher_block.get("hooks", []):
-                if "coordinationhub" in hook.get("command", ""):
-                    return True, "hooks configured correctly"
-    return False, "hooks exist but none reference coordinationhub"
 
 
 def _check_storage_dir() -> tuple[bool, str]:

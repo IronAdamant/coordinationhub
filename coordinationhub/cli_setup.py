@@ -22,12 +22,13 @@ __all__ = ["cmd_doctor", "cmd_init", "cmd_auto_start_dashboard", "cmd_watch", "r
 # Shared constants
 # ------------------------------------------------------------------ #
 
+_NEUTRAL_HOOKS_PATH = Path.home() / ".coordinationhub" / "hooks.json"
 _CLAUDE_SETTINGS_PATH = Path.home() / ".claude" / "settings.json"
 
-_HOOK_CMD_TEMPLATE = "{python} -m coordinationhub.hooks.claude_code"
+_HOOK_CMD_TEMPLATE = "{python} -m coordinationhub.hooks.stdio_adapter"
 _AUTO_DASHBOARD_CMD_TEMPLATE = "{python} -m coordinationhub auto-start-dashboard"
 
-_SKILL_DIR = Path.home() / ".claude" / "skills" / "coordinationhub-monitor"
+_SKILL_DIR = Path.home() / ".coordinationhub" / "skills" / "coordinationhub-monitor"
 _SKILL_TEMPLATE_PATH = Path(__file__).parent / "data" / "monitor_skill.md"
 
 _HOOKS_CONFIG = {
@@ -119,8 +120,17 @@ def cmd_init(args):
     engine.close()
     print("Database initialized.")
 
-    _CLAUDE_SETTINGS_PATH.parent.mkdir(parents=True, exist_ok=True)
+    # Write vendor-neutral hooks config
+    _NEUTRAL_HOOKS_PATH.parent.mkdir(parents=True, exist_ok=True)
+    hooks_config = _fill_hook_command(_HOOKS_CONFIG, python_path)
+    _NEUTRAL_HOOKS_PATH.write_text(
+        json.dumps({"hooks": hooks_config}, indent=2) + "\n", encoding="utf-8"
+    )
+    print(f"Hooks written to {_NEUTRAL_HOOKS_PATH}")
+    print(f"  Python interpreter: {python_path}")
 
+    # Also write to IDE-specific settings if present
+    _CLAUDE_SETTINGS_PATH.parent.mkdir(parents=True, exist_ok=True)
     if _CLAUDE_SETTINGS_PATH.exists():
         try:
             settings = json.loads(_CLAUDE_SETTINGS_PATH.read_text(encoding="utf-8"))
@@ -129,7 +139,6 @@ def cmd_init(args):
     else:
         settings = {}
 
-    hooks_config = _fill_hook_command(_HOOKS_CONFIG, python_path)
     existing_hooks = settings.get("hooks", {})
     merged = _merge_hooks(existing_hooks, hooks_config)
     settings["hooks"] = merged
@@ -137,8 +146,7 @@ def cmd_init(args):
     _CLAUDE_SETTINGS_PATH.write_text(
         json.dumps(settings, indent=2) + "\n", encoding="utf-8"
     )
-    print(f"Hooks written to {_CLAUDE_SETTINGS_PATH}")
-    print(f"  Python interpreter: {python_path}")
+    print(f"Hooks also written to {_CLAUDE_SETTINGS_PATH}")
 
     _install_ide_hooks(project_root or Path.cwd(), python_path)
 
@@ -200,12 +208,12 @@ def _install_auto_dashboard_hook(python_path: str) -> None:
     )
     print("\nAuto-dashboard hook installed.")
     print(f"  Command: {cmd}")
-    print("  Every Claude Code session start will idempotently launch the dashboard")
+    print("  Every IDE session start will idempotently launch the dashboard")
     print("  at http://127.0.0.1:9898 (skipped if the port is already bound).")
 
 
 def _install_monitor_skill() -> None:
-    """Copy the coordinationhub-monitor SKILL.md into ~/.claude/skills/."""
+    """Copy the coordinationhub-monitor SKILL.md into ~/.coordinationhub/skills/."""
     _SKILL_DIR.mkdir(parents=True, exist_ok=True)
     target = _SKILL_DIR / "SKILL.md"
     target.write_text(_SKILL_TEMPLATE_PATH.read_text(encoding="utf-8"), encoding="utf-8")
@@ -214,6 +222,7 @@ def _install_monitor_skill() -> None:
     print("  Invoke by asking an LLM to 'watch the swarm' or 'monitor the agents'.")
     print("  The skill instructs the LLM to poll http://127.0.0.1:9898/api/dashboard-data")
     print("  every 30 s and surface boundary crossings, blocked tasks, and stale agents.")
+    print("  Install path is vendor-neutral; copy to ~/.claude/skills/ if using an IDE that reads from there.")
 
 
 def _install_ide_hooks(project_root: Path, python_path: str) -> None:
@@ -241,15 +250,14 @@ def _install_ide_hooks(project_root: Path, python_path: str) -> None:
 def cmd_auto_start_dashboard(args) -> int:
     """Idempotently start the SSE dashboard server.
 
-    Designed to be invoked from the Claude Code SessionStart hook installed
+    Designed to be invoked from an IDE SessionStart hook installed
     by ``coordinationhub init --auto-dashboard``. Exits silently when:
 
     - The configured host:port is already bound (dashboard is up, or another
       service has the port).
     - ``serve-sse`` cannot be spawned (e.g. coordinationhub not on PATH).
 
-    Returns the exit code (0 in all normal paths so the hook never blocks
-    a session start).
+    Returns the exit code (0 in all normal paths).
     """
     import socket
 

@@ -3,7 +3,7 @@
     {
       "id": "architect",
       "role": "plan and design",
-      "model": "claude-opus-4",
+      "model": "default-model",
       "responsibilities": [
         "design architecture",
         "plan implementation",
@@ -26,7 +26,7 @@
     {
       "id": "finisher",
       "role": "polish, fix, and harden",
-      "model": "claude-opus-4",
+      "model": "default-model",
       "responsibilities": [
         "review code",
         "fix bugs",
@@ -38,7 +38,7 @@
     {
       "id": "explorer",
       "role": "research and investigate",
-      "model": "claude-haiku-4",
+      "model": "light-model",
       "responsibilities": [
         "read code",
         "search codebase",

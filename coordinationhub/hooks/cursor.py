@@ -15,7 +15,7 @@ Expected event shape:
     "prompt": "..."
   }
 
-Cursor does not currently provide a native hook system like Claude Code.
+Cursor does not currently provide a native hook system like the stdio adapter.
 This adapter is designed to be called by:
   - A wrapper script around Cursor tool invocations
   - A sidecar file watcher on a Cursor event log

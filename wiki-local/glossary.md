@@ -60,7 +60,7 @@ An entry in `lock_conflicts` recording that agent B stole a lock held by agent A
 
 ## MCP (Model Context Protocol)
 
-The client-server protocol used by Claude Code, Claude Desktop, and other MCP-aware clients to communicate with tool servers. CoordinationHub implements both stdio and HTTP transports.
+The client-server protocol used by MCP-aware clients (IDEs, CLI tools, desktop apps) to communicate with tool servers. CoordinationHub implements both stdio and HTTP transports.
 
 ## Namespace
 

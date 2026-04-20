@@ -1,1 +1,1 @@
-"""Hooks package — Claude Code integration via stdin/stdout event protocol."""
+"""Hooks package — IDE integration via stdin/stdout event protocol."""

@@ -19,7 +19,7 @@ _SCHEMAS = {
             started_at      REAL NOT NULL,
             last_heartbeat  REAL NOT NULL,
             status          TEXT DEFAULT 'active',
-            claude_agent_id TEXT
+            raw_ide_id TEXT
         )
     """,
     "lineage": """
@@ -267,7 +267,7 @@ _INDEXES = [
     "CREATE INDEX IF NOT EXISTS idx_notif_agent ON change_notifications(agent_id)",
     "CREATE INDEX IF NOT EXISTS idx_file_owner_agent ON file_ownership(assigned_agent_id)",
     "CREATE INDEX IF NOT EXISTS idx_locks_expiry ON document_locks(document_path, locked_at, lock_ttl)",
-    "CREATE INDEX IF NOT EXISTS idx_agents_claude_id ON agents(claude_agent_id)",
+    "CREATE INDEX IF NOT EXISTS idx_agents_raw_ide_id ON agents(raw_ide_id)",
     "CREATE INDEX IF NOT EXISTS idx_pending_tasks_scope_type ON pending_tasks(scope_id, subagent_type, status)",
     "CREATE INDEX IF NOT EXISTS idx_descendant_ancestor ON descendant_registry(ancestor_id)",
     "CREATE INDEX IF NOT EXISTS idx_messages_to ON messages(to_agent_id)",

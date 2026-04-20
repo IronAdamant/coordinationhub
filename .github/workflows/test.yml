@@ -63,7 +63,7 @@ jobs:
           PUSH_BRANCH: ${{ github.head_ref || github.ref_name }}
         run: |
           set -euo pipefail
-          DOC_FILES="README.md CLAUDE.md COMPLETE_PROJECT_DOCUMENTATION.md LLM_Development.md wiki-local/spec-project.md"
+          DOC_FILES="README.md AGENTS.md COMPLETE_PROJECT_DOCUMENTATION.md LLM_Development.md wiki-local/spec-project.md"
           if git diff --quiet -- $DOC_FILES; then
             echo "No doc drift to commit."
             exit 0

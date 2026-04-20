@@ -15,7 +15,7 @@ import time
 from .db_schemas import _SCHEMAS, _INDEXES
 
 
-_CURRENT_SCHEMA_VERSION = 20
+_CURRENT_SCHEMA_VERSION = 21
 
 
 def _get_schema_version(conn: sqlite3.Connection) -> int:
@@ -62,6 +62,24 @@ def _migrate_v2_to_v3(conn: sqlite3.Connection) -> None:
         return
     conn.execute("ALTER TABLE agents ADD COLUMN claude_agent_id TEXT")
     conn.execute("CREATE INDEX IF NOT EXISTS idx_agents_claude_id ON agents(claude_agent_id)")
+
+
+def _migrate_v20_to_v21(conn: sqlite3.Connection) -> None:
+    """Rename claude_agent_id column to raw_ide_id for vendor neutrality.
+
+    The column stores the raw IDE-specific agent ID (e.g. Claude Code hex ID,
+    Kimi CLI session ID, etc.). Renaming makes the schema vendor-neutral.
+    """
+    cols = [row[1] for row in conn.execute("PRAGMA table_info(agents)").fetchall()]
+    if "raw_ide_id" in cols:
+        return
+    if "claude_agent_id" in cols:
+        conn.execute("ALTER TABLE agents RENAME COLUMN claude_agent_id TO raw_ide_id")
+        conn.execute("DROP INDEX IF EXISTS idx_agents_claude_id")
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_agents_raw_ide_id ON agents(raw_ide_id)")
+    else:
+        conn.execute("ALTER TABLE agents ADD COLUMN raw_ide_id TEXT")
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_agents_raw_ide_id ON agents(raw_ide_id)")
 
 
 def _migrate_v10_to_v11(conn: sqlite3.Connection) -> None:
@@ -137,7 +155,7 @@ def _migrate_v17_to_v18(conn: sqlite3.Connection) -> None:
     """Add source column to pending_spawner_tasks and broadcasts tables.
 
     Makes sub-agent spawn tracking agnostic to the spawning system
-    (Claude Code, Kimi CLI, Cursor, etc.) and adds broadcast
+    (Kimi CLI, Cursor, etc.) and adds broadcast
     acknowledgment tracking for delivery confirmation.
     """
     cols = [row[1] for row in conn.execute("PRAGMA table_info(pending_spawner_tasks)").fetchall()]
@@ -234,6 +252,7 @@ _MIGRATIONS = {
     18: _migrate_v17_to_v18,  # source column + broadcasts tables
     19: _migrate_v18_to_v19,  # expected_count column on broadcasts
     20: _migrate_v19_to_v20,  # merge pending_subagent_tasks and pending_spawner_tasks
+    21: _migrate_v20_to_v21,  # rename claude_agent_id -> raw_ide_id
 }
 
 

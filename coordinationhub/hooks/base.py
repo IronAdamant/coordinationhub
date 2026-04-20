@@ -7,7 +7,7 @@ Provides IDE-agnostic coordination logic:
   - Change notifications
   - Sub-agent pending-task correlation
 
-IDE-specific adapters (Claude Code, Kimi CLI, Cursor) subclass BaseHook
+IDE-specific adapters (Kimi CLI, Cursor, etc.) subclass BaseHook
 and map their native event shapes to these methods.
 """
 
@@ -52,7 +52,7 @@ class BaseHook:
 
     def resolve_agent_id(self, session_id: str, raw_ide_id: str | None = None) -> str:
         if raw_ide_id:
-            mapped = self._engine.find_agent_by_claude_id(raw_ide_id)
+            mapped = self._engine.find_agent_by_raw_ide_id(raw_ide_id)
             if mapped:
                 return mapped
             return raw_ide_id
@@ -230,7 +230,7 @@ class BaseHook:
 
         # Dedup by raw IDE ID
         if raw_ide_id:
-            existing = self._engine.find_agent_by_claude_id(raw_ide_id)
+            existing = self._engine.find_agent_by_raw_ide_id(raw_ide_id)
             if existing:
                 self._engine.heartbeat(existing)
                 if pending_desc:
@@ -248,7 +248,7 @@ class BaseHook:
         else:
             kwargs: dict[str, Any] = {"parent_id": parent_id}
             if raw_ide_id:
-                kwargs["claude_agent_id"] = raw_ide_id
+                kwargs["raw_ide_id"] = raw_ide_id
             self._engine.register_agent(child_id, **kwargs)
 
         if pending_desc:

@@ -33,7 +33,7 @@ def _build_v1_db(path: Path) -> None:
     """Create a DB with the pre-v0.3.3 shape.
 
     * No ``schema_version`` table.
-    * ``agents`` without ``claude_agent_id`` column.
+    * ``agents`` without ``raw_ide_id`` column.
     * ``document_locks`` with ``document_path`` as PRIMARY KEY (no
       ``id``, ``region_start``, or ``region_end``).
     """
@@ -81,7 +81,7 @@ class TestLegacyMigration:
 
         agent_cols = _cols(conn, "agents")
         lock_cols = _cols(conn, "document_locks")
-        assert "claude_agent_id" in agent_cols
+        assert "raw_ide_id" in agent_cols
         assert "region_start" in lock_cols
         assert "region_end" in lock_cols
         assert "id" in lock_cols
@@ -162,7 +162,7 @@ class TestStuckVersionRecovery:
         init_schema(conn)
         conn.commit()
 
-        assert "claude_agent_id" in _cols(conn, "agents")
+        assert "raw_ide_id" in _cols(conn, "agents")
         assert "region_start" in _cols(conn, "document_locks")
 
     def test_repair_idempotent(self, tmp_path: Path) -> None:
@@ -246,7 +246,7 @@ class TestFreshInstall:
         assert required <= tables
 
         # Columns added in later versions must be present on a fresh install
-        assert "claude_agent_id" in _cols(conn, "agents")
+        assert "raw_ide_id" in _cols(conn, "agents")
         assert "region_start" in _cols(conn, "document_locks")
         assert "region_end" in _cols(conn, "document_locks")
 

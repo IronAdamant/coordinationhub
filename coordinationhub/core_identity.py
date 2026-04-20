@@ -62,13 +62,13 @@ class IdentityMixin:
         parent_id: str | None = None,
         graph_agent_id: str | None = None,
         worktree_root: str | None = None,
-        claude_agent_id: str | None = None,
+        raw_ide_id: str | None = None,
     ) -> dict[str, Any]:
         """Register a new agent and return its context bundle."""
         worktree = worktree_root or (
             str(self._storage.project_root) if self._storage.project_root else os.getcwd()
         )
-        _ar.register_agent(self._connect, agent_id, worktree, parent_id, claude_agent_id=claude_agent_id)
+        _ar.register_agent(self._connect, agent_id, worktree, parent_id, raw_ide_id=raw_ide_id)
         self._publish_event("agent.registered", {"agent_id": agent_id, "parent_id": parent_id})
         if parent_id is not None:
             with self._connect() as conn:
@@ -119,6 +119,6 @@ class IdentityMixin:
             return {"mode": "siblings", "agent_id": agent_id, "siblings": siblings}
         return _ar.get_lineage(self._connect, agent_id)
 
-    def find_agent_by_claude_id(self, claude_agent_id: str) -> str | None:
-        """Look up a hub.cc.* agent_id by the raw Claude Code hex ID."""
-        return _ar.find_agent_by_claude_id(self._connect, claude_agent_id)
+    def find_agent_by_raw_ide_id(self, raw_ide_id: str) -> str | None:
+        """Look up a hub agent_id by the raw IDE-specific agent ID."""
+        return _ar.find_agent_by_raw_ide_id(self._connect, raw_ide_id)

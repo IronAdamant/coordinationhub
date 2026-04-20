@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
-"""CoordinationHub hook for Claude Code.
+"""CoordinationHub stdio event adapter.
 
 Provides automatic file locking, change notifications, subagent tracking,
-and Stele/Trammel bridging for Claude Code sessions.
+and Stele/Trammel bridging for IDE sessions via stdin/stdout.
 
 Reads hook event JSON from stdin, outputs decision JSON to stdout.
 Fails gracefully (exit 0) if coordinationhub is not importable.
@@ -84,20 +84,20 @@ def _save_event_snapshot(event: dict) -> None:
 
 
 # ---------------------------------------------------------------------------
-# Claude Code hook adapter
+# Stdio event adapter
 # ---------------------------------------------------------------------------
 
 from coordinationhub.hooks.base import BaseHook
 
 
-class ClaudeCodeHook(BaseHook):
-    """Claude Code-specific adapter over BaseHook."""
+class StdioHook(BaseHook):
+    """Stdio event adapter over BaseHook."""
 
     IDE_PREFIX = "cc"
 
     @classmethod
-    def from_cwd(cls, cwd: str) -> "ClaudeCodeHook":
-        project_dir = os.environ.get("CLAUDE_PROJECT_DIR", cwd)
+    def from_cwd(cls, cwd: str) -> "StdioHook":
+        project_dir = os.environ.get("IDE_PROJECT_DIR", cwd)
         return cls(project_root=project_dir)
 
     @staticmethod
@@ -114,22 +114,22 @@ class ClaudeCodeHook(BaseHook):
 
 
 # ---------------------------------------------------------------------------
-# Backward-compatibility wrappers (used by tests and legacy integrations)
+# Module-level helpers (used by tests and external integrations)
 # ---------------------------------------------------------------------------
 
 def _session_agent_id(session_id: str) -> str:
-    return f"hub.{ClaudeCodeHook.IDE_PREFIX}.{session_id[:12] if session_id else 'unknown'}"
+    return f"hub.{StdioHook.IDE_PREFIX}.{session_id[:12] if session_id else 'unknown'}"
 
 
 def _subagent_type(event: dict) -> str:
-    return ClaudeCodeHook._subagent_type(event)
+    return StdioHook._subagent_type(event)
 
 
 def _resolve_agent_id(event: dict, engine=None) -> str:
     session_id = event.get("session_id", "")
     raw_id = event.get("subagent_id") or event.get("agent_id")
     if engine is not None:
-        hook = ClaudeCodeHook(project_root=str(engine._storage.project_root))
+        hook = StdioHook(project_root=str(engine._storage.project_root))
         try:
             return hook.resolve_agent_id(session_id, raw_id)
         finally:
@@ -143,7 +143,7 @@ def _subagent_id(parent_id: str, event: dict, engine=None) -> str:
     agent_type = _subagent_type(event)
     tool_use_id = event.get("tool_use_id", "")
     if engine is not None:
-        hook = ClaudeCodeHook(project_root=str(engine._storage.project_root))
+        hook = StdioHook(project_root=str(engine._storage.project_root))
         try:
             return hook.subagent_id(parent_id, agent_type, tool_use_id)
         finally:
@@ -154,17 +154,17 @@ def _subagent_id(parent_id: str, event: dict, engine=None) -> str:
 
 
 def _get_engine(cwd: str):
-    hook = ClaudeCodeHook(project_root=cwd)
+    hook = StdioHook(project_root=cwd)
     return hook.engine
 
 
 # ---------------------------------------------------------------------------
-# Event handlers (thin wrappers around ClaudeCodeHook)
+# Event handlers (thin wrappers around StdioHook)
 # ---------------------------------------------------------------------------
 
 
 def handle_session_start(event: dict) -> dict | None:
-    hook = ClaudeCodeHook.from_cwd(event.get("cwd", "."))
+    hook = StdioHook.from_cwd(event.get("cwd", "."))
     try:
         hook.on_session_start(event.get("session_id", ""))
     finally:
@@ -173,7 +173,7 @@ def handle_session_start(event: dict) -> dict | None:
 
 
 def handle_user_prompt_submit(event: dict) -> dict | None:
-    hook = ClaudeCodeHook.from_cwd(event.get("cwd", "."))
+    hook = StdioHook.from_cwd(event.get("cwd", "."))
     try:
         hook.on_user_prompt(event.get("session_id", ""), event.get("prompt", ""))
     finally:
@@ -188,7 +188,7 @@ def handle_pre_agent(event: dict) -> dict | None:
     if not tool_use_id or not subagent_type:
         return None
 
-    hook = ClaudeCodeHook.from_cwd(event.get("cwd", "."))
+    hook = StdioHook.from_cwd(event.get("cwd", "."))
     try:
         hook.stash_subagent_description(
             session_id=event.get("session_id", ""),
@@ -207,12 +207,12 @@ def handle_pre_write(event: dict) -> dict | None:
     if not file_path:
         return None
 
-    hook = ClaudeCodeHook.from_cwd(event.get("cwd", "."))
+    hook = StdioHook.from_cwd(event.get("cwd", "."))
     try:
         return hook.on_pre_write(
             session_id=event.get("session_id", ""),
             file_path=file_path,
-            raw_ide_id=ClaudeCodeHook._raw_agent_id(event),
+            raw_ide_id=StdioHook._raw_agent_id(event),
         )
     finally:
         hook.close()
@@ -223,12 +223,12 @@ def handle_post_write(event: dict) -> dict | None:
     if not file_path:
         return None
 
-    hook = ClaudeCodeHook.from_cwd(event.get("cwd", "."))
+    hook = StdioHook.from_cwd(event.get("cwd", "."))
     try:
         hook.on_post_write(
             session_id=event.get("session_id", ""),
             file_path=file_path,
-            raw_ide_id=ClaudeCodeHook._raw_agent_id(event),
+            raw_ide_id=StdioHook._raw_agent_id(event),
         )
     finally:
         hook.close()
@@ -244,12 +244,12 @@ def handle_post_stele_index(event: dict) -> dict | None:
     if not paths:
         return None
 
-    hook = ClaudeCodeHook.from_cwd(event.get("cwd", "."))
+    hook = StdioHook.from_cwd(event.get("cwd", "."))
     try:
         hook.on_post_index(
             session_id=event.get("session_id", ""),
             paths=[str(p) for p in paths],
-            raw_ide_id=ClaudeCodeHook._raw_agent_id(event),
+            raw_ide_id=StdioHook._raw_agent_id(event),
         )
     finally:
         hook.close()
@@ -262,12 +262,12 @@ def handle_post_trammel_claim(event: dict) -> dict | None:
     plan_id = tool_input.get("plan_id", "")
     task = f"trammel:{plan_id}/{step_id}" if plan_id else str(step_id)
 
-    hook = ClaudeCodeHook.from_cwd(event.get("cwd", "."))
+    hook = StdioHook.from_cwd(event.get("cwd", "."))
     try:
         hook.on_task_claim(
             session_id=event.get("session_id", ""),
             task=task,
-            raw_ide_id=ClaudeCodeHook._raw_agent_id(event),
+            raw_ide_id=StdioHook._raw_agent_id(event),
         )
     finally:
         hook.close()
@@ -275,12 +275,12 @@ def handle_post_trammel_claim(event: dict) -> dict | None:
 
 
 def handle_subagent_start(event: dict) -> dict | None:
-    hook = ClaudeCodeHook.from_cwd(event.get("cwd", "."))
+    hook = StdioHook.from_cwd(event.get("cwd", "."))
     try:
         hook.on_subagent_start(
             session_id=event.get("session_id", ""),
-            raw_ide_id=ClaudeCodeHook._raw_agent_id(event),
-            agent_type=ClaudeCodeHook._subagent_type(event),
+            raw_ide_id=StdioHook._raw_agent_id(event),
+            agent_type=StdioHook._subagent_type(event),
             description=event.get("tool_input", {}).get("description") or "",
         )
     finally:
@@ -289,12 +289,12 @@ def handle_subagent_start(event: dict) -> dict | None:
 
 
 def handle_subagent_stop(event: dict) -> dict | None:
-    hook = ClaudeCodeHook.from_cwd(event.get("cwd", "."))
+    hook = StdioHook.from_cwd(event.get("cwd", "."))
     try:
         hook.on_subagent_stop(
             session_id=event.get("session_id", ""),
-            raw_ide_id=ClaudeCodeHook._raw_agent_id(event),
-            agent_type=ClaudeCodeHook._subagent_type(event),
+            raw_ide_id=StdioHook._raw_agent_id(event),
+            agent_type=StdioHook._subagent_type(event),
         )
     finally:
         hook.close()
@@ -302,7 +302,7 @@ def handle_subagent_stop(event: dict) -> dict | None:
 
 
 def handle_session_end(event: dict) -> dict | None:
-    hook = ClaudeCodeHook.from_cwd(event.get("cwd", "."))
+    hook = StdioHook.from_cwd(event.get("cwd", "."))
     try:
         return hook.on_session_end(event.get("session_id", ""))
     finally:

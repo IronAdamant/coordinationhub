@@ -34,7 +34,7 @@ class SpawnerMixin:
         """Register intent to spawn a sub-agent and return its spawn ID.
 
         Adds an entry to the spawn queue (pending_tasks table). The parent
-        agent calls this before the external system (Claude Code, Kimi CLI,
+        agent calls this before the external system (Kimi CLI,
         etc.) spawns the sub-agent. This creates a pending spawn record that
         the spawning system will consume when the agent is actually spawned,
         correlating via ``parent_agent_id``.
@@ -77,7 +77,7 @@ class SpawnerMixin:
     ) -> dict[str, Any]:
         """Report that a sub-agent has been spawned by an external system.
 
-        Any IDE/CLI (Claude Code, Kimi CLI, Cursor, etc.) calls this after
+        Any IDE/CLI (Kimi CLI, Cursor, etc.) calls this after
         spawning a sub-agent via its native mechanism. This consumes the
         pending spawn record and links it to the actual child agent ID.
         """

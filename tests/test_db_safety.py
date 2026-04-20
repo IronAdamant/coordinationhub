@@ -108,7 +108,7 @@ CREATE TABLE agents (
     started_at REAL,
     last_heartbeat REAL,
     stop_requested_at REAL,
-    claude_agent_id TEXT
+    raw_ide_id TEXT
 );
 
 CREATE TABLE agent_responsibilities (

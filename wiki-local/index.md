@@ -17,7 +17,7 @@
 | [../README.md](../README.md) | Quickstart, CLI, MCP setup, architecture |
 | [../COMPLETE_PROJECT_DOCUMENTATION.md](../COMPLETE_PROJECT_DOCUMENTATION.md) | File inventory and data flow |
 | [../LLM_Development.md](../LLM_Development.md) | Chronological change log |
-| [../CLAUDE.md](../CLAUDE.md) | Agent guidance for working in this project |
+| [../AGENTS.md](../AGENTS.md) | Agent guidance for working in this project |
 
 ## Integration
 

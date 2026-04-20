@@ -1,8 +1,8 @@
 """Zero-deps spawner primitives for HA coordinator sub-agent registry.
 
-Tracks a parent agent's intent to spawn a sub-agent before Claude Code
-fires ``SubagentStart``. When the hook fires, it calls ``consume_pending_spawn``
-to mark the pending spawn as ``registered``.
+Tracks a parent agent's intent to spawn a sub-agent before the external
+IDE spawns it. When the spawn is reported back, ``consume_pending_spawn``
+marks the pending record as ``registered``.
 
 Receives connect: ConnectFn from the caller — no internal pool dependency,
 same pattern as ``notifications.py`` and ``conflict_log.py``.
@@ -62,7 +62,7 @@ def stash_pending_spawn(
     """Record a pending sub-agent spawn from a parent agent.
 
     Called by a parent agent that intends to spawn a sub-agent. When
-    the external system (Claude Code, Kimi CLI, etc.) spawns the agent,
+    the external IDE (Kimi CLI, Cursor, etc.) spawns the agent,
     it correlates the spawn with this pending record via
     ``report_subagent_spawned``.
 
@@ -97,8 +97,8 @@ def consume_pending_spawn(
 ) -> dict[str, Any] | None:
     """Mark the oldest pending spawn for this parent + type as registered.
 
-    Called by the Claude Code hook when ``SubagentStart`` fires. The hook
-    has already registered the sub-agent at this point. This call marks
+    Called after the external IDE reports a sub-agent spawn. The agent
+    has already been registered at this point. This call marks
     the pending spawn as ``registered`` so the parent knows the sub-agent
     is alive.
 
@@ -203,7 +203,7 @@ def report_subagent_spawned(
     """Report that a sub-agent has been spawned by an external system.
 
     Consumes the oldest pending spawn for this parent + type and links
-    it to the actual child agent ID. Any IDE/CLI (Claude Code, Kimi,
+    it to the actual child agent ID. Any IDE/CLI (Kimi,
     Cursor, etc.) can call this after spawning a sub-agent via its
     native mechanism.
     """

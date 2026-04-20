@@ -4,7 +4,7 @@ End-to-end tests that simulate realistic multi-agent workflows:
 parent spawns children, they coordinate via locks, one dies,
 orphaning cascades, survivors continue.
 
-``TestHookLevelMultiAgentScenario`` exercises the real Claude Code hook
+``TestHookLevelMultiAgentScenario`` exercises the real IDE hook
 handlers (not the engine API directly) in a concurrent setting,
 reproducing the kind of workflow Review Thirteen surfaced — the
 validation gap between unit tests and real multi-agent load.
@@ -216,9 +216,9 @@ class TestFullLifecycleScenario:
 
 
 class TestHookLevelMultiAgentScenario:
-    """End-to-end tests using the real Claude Code hook handlers.
+    """End-to-end tests using the real IDE hook handlers.
 
-    These tests drive the hooks the way Claude Code would — calling
+    These tests drive the hooks the way IDE would — calling
     ``handle_session_start``, ``handle_subagent_start``, ``handle_pre_write``,
     ``handle_post_write``, ``handle_subagent_stop`` with realistic event
     dicts. They exercise the complete v0.4.0 feature set together: smart
@@ -276,7 +276,7 @@ class TestHookLevelMultiAgentScenario:
         Verifies that all register, write successfully, get attributed
         notifications, claim file ownership, and transition to 'stopped'.
         """
-        from coordinationhub.hooks.claude_code import (
+        from coordinationhub.hooks.stdio_adapter import (
             handle_session_start, handle_subagent_start, handle_subagent_stop,
             handle_pre_write, handle_post_write, _get_engine,
         )
@@ -310,7 +310,7 @@ class TestHookLevelMultiAgentScenario:
             # 1. All sub-agents registered with parent hierarchy
             agents = engine.list_agents(active_only=False)
             hub_ids = [a for a in agents["agents"]
-                       if a.get("claude_agent_id") in raw_ids]
+                       if a.get("raw_ide_id") in raw_ids]
             assert len(hub_ids) == n, f"Expected {n} sub-agents, got {len(hub_ids)}"
 
             # 2. All sub-agents transitioned to 'stopped' via SubagentStop
@@ -350,7 +350,7 @@ class TestHookLevelMultiAgentScenario:
         concurrent contention on a shared file, verified via the hook
         handlers (not the engine API directly).
         """
-        from coordinationhub.hooks.claude_code import (
+        from coordinationhub.hooks.stdio_adapter import (
             handle_session_start, handle_subagent_start, handle_pre_write,
             _get_engine,
         )
@@ -400,7 +400,7 @@ class TestHookLevelMultiAgentScenario:
         expires between PreToolUse and PostToolUse, but the owning agent
         has a recent heartbeat so the lock should survive.
         """
-        from coordinationhub.hooks.claude_code import (
+        from coordinationhub.hooks.stdio_adapter import (
             handle_session_start, handle_pre_write, _get_engine,
         )
 
@@ -425,7 +425,7 @@ class TestHookLevelMultiAgentScenario:
                     (time.time() - 1000, 1.0),
                 )
             # Refresh the owning agent's heartbeat
-            from coordinationhub.hooks.claude_code import _session_agent_id
+            from coordinationhub.hooks.stdio_adapter import _session_agent_id
             root_id = _session_agent_id(session_id)
             engine.heartbeat(root_id)
 
@@ -442,7 +442,7 @@ class TestHookLevelMultiAgentScenario:
     def test_crashed_agent_locks_reaped(self, tmp_path):
         """Crashed agents (stale heartbeats) get their expired locks reaped,
         even with agent_grace_seconds set."""
-        from coordinationhub.hooks.claude_code import (
+        from coordinationhub.hooks.stdio_adapter import (
             handle_session_start, handle_pre_write, _get_engine,
             _session_agent_id,
         )
@@ -491,7 +491,7 @@ class TestHookLevelMultiAgentScenario:
         """
         import json as _json
 
-        from coordinationhub.hooks.claude_code import (
+        from coordinationhub.hooks.stdio_adapter import (
             handle_session_start, handle_subagent_start, handle_post_write,
             handle_subagent_stop, _get_engine, _session_agent_id,
         )
@@ -547,9 +547,9 @@ class TestHookLevelMultiAgentScenario:
                 cwd, session_id, raw_b, file_b, pre=False))
 
             # 4. Resolve the hub.cc.* IDs while the agents are still
-            #    active (find_agent_by_claude_id filters by status).
-            hub_a = engine.find_agent_by_claude_id(raw_a)
-            hub_b = engine.find_agent_by_claude_id(raw_b)
+            #    active (find_agent_by_raw_ide_id filters by status).
+            hub_a = engine.find_agent_by_raw_ide_id(raw_a)
+            hub_b = engine.find_agent_by_raw_ide_id(raw_b)
             assert hub_a is not None
             assert hub_b is not None
 
@@ -626,7 +626,7 @@ class TestHookLevelMultiAgentScenario:
         """
         import json as _json
 
-        from coordinationhub.hooks.claude_code import (
+        from coordinationhub.hooks.stdio_adapter import (
             handle_session_start, handle_subagent_start, handle_post_write,
             handle_subagent_stop, _get_engine,
         )
@@ -676,8 +676,8 @@ class TestHookLevelMultiAgentScenario:
 
             # Tag the live sub-agents with explicit graph roles so the
             # synthesized trace carries role information into scoring.
-            hub_a = engine.find_agent_by_claude_id(raw_a)
-            hub_b = engine.find_agent_by_claude_id(raw_b)
+            hub_a = engine.find_agent_by_raw_ide_id(raw_a)
+            hub_b = engine.find_agent_by_raw_ide_id(raw_b)
             engine.register_agent(hub_a, graph_agent_id="planner")
             engine.register_agent(hub_b, graph_agent_id="builder")
 
@@ -714,7 +714,7 @@ class TestHookLevelMultiAgentScenario:
     def test_assess_current_session_without_graph_returns_error(self, tmp_path):
         """Without a loaded coordination graph, run_assessment with no suite_path returns
         a clear error rather than producing vacuous scores."""
-        from coordinationhub.hooks.claude_code import (
+        from coordinationhub.hooks.stdio_adapter import (
             handle_session_start, _get_engine,
         )
         from coordinationhub.plugins.graph import graphs as _graphs

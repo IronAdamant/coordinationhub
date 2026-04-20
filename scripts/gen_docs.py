@@ -256,7 +256,7 @@ def rewrite_markers(text: str, generators: dict[str, str], source: str) -> str:
 
 DOC_TARGETS = [
     "README.md",
-    "CLAUDE.md",
+    "AGENTS.md",
     "COMPLETE_PROJECT_DOCUMENTATION.md",
     "LLM_Development.md",
     "wiki-local/spec-project.md",

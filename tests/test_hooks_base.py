@@ -5,7 +5,7 @@ from __future__ import annotations
 import pytest
 
 from coordinationhub.hooks.base import BaseHook
-from coordinationhub.hooks.claude_code import ClaudeCodeHook
+from coordinationhub.hooks.stdio_adapter import StdioHook
 from coordinationhub.hooks.kimi_cli import KimiCliHook
 from coordinationhub.hooks.cursor import CursorHook
 
@@ -41,9 +41,9 @@ class TestBaseHookIds:
             hook.close()
 
 
-class TestClaudeCodeHook:
+class TestStdioHook:
     def test_ide_prefix(self, hook_cwd):
-        hook = ClaudeCodeHook(project_root=hook_cwd)
+        hook = StdioHook(project_root=hook_cwd)
         try:
             assert hook.session_agent_id("abc") == "hub.cc.abc"
         finally:

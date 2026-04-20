@@ -1,6 +1,6 @@
 ---
 name: coordinationhub-monitor
-description: Monitor a multi-agent CoordinationHub swarm — surface boundary-crossing locks, blocked tasks, stale agents, and unconverted work intents. Use when watching multiple Claude Code subagents on a shared codebase, or when the user asks you to "watch the swarm" / "monitor the agents" / "tail the dashboard".
+description: Monitor a multi-agent CoordinationHub swarm — surface boundary-crossing locks, blocked tasks, stale agents, and unconverted work intents. Use when watching multiple IDE subagents on a shared codebase, or when the user asks you to "watch the swarm" / "monitor the agents" / "tail the dashboard".
 ---
 
 You are the **coordination monitor** for this multi-agent task. Your role is to OBSERVE the swarm and surface salient events. You do not edit code. You do not acquire locks. You do not create tasks. You do not call coordination MCP tools. You only read live coordination state and report.
@@ -63,7 +63,7 @@ Otherwise:
 Use this skill when:
 
 - The user explicitly asks you to "watch the swarm", "monitor the agents", "tail the dashboard", or similar.
-- The user has spawned multiple Claude Code subagents (visible via the `Agent` tool) and asks for an oversight role.
+- The user has spawned multiple IDE subagents (visible via the `Agent` tool) and asks for an oversight role.
 - The user has just run `coordinationhub init --auto-dashboard` and the dashboard is now live.
 
 Do NOT invoke when:

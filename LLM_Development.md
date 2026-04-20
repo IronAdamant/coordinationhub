@@ -1607,8 +1607,8 @@ Block markers for multi-line content:
 | `coordinationhub/cli_leases.py` | 94 | CLI commands for HA coordinator lease management |
 | `coordinationhub/cli_locks.py` | 265 | Document locking and coordination CLI commands |
 | `coordinationhub/cli_parser.py` | 356 | Argument parser for the CoordinationHub CLI |
-| `coordinationhub/cli_setup.py` | 255 | CLI commands for setup and diagnostics: ``init``, ``doctor``, ``watch`` |
-| `coordinationhub/cli_setup_doctor.py` | 147 | Diagnostic checks for ``coordinationhub doctor`` |
+| `coordinationhub/cli_setup.py` | 261 | CLI commands for setup and diagnostics: ``init``, ``doctor``, ``watch`` |
+| `coordinationhub/cli_setup_doctor.py` | 148 | Diagnostic checks for ``coordinationhub doctor`` |
 | `coordinationhub/cli_spawner.py` | 97 | CLI commands for HA coordinator spawner — sub-agent registry management |
 | `coordinationhub/cli_sse.py` | 35 | CLI commands for SSE dashboard server |
 | `coordinationhub/cli_tasks.py` | 151 | CLI commands for the task registry |
@@ -1630,17 +1630,17 @@ Block markers for multi-line content:
 | `coordinationhub/core_visibility.py` | 127 | VisibilityMixin — coordination graph, project scan, agent status, assessment |
 | `coordinationhub/core_work_intent.py` | 45 | WorkIntentMixin — cooperative work intent board |
 | `coordinationhub/db.py` | 93 | SQLite connection pool and public re-exports for CoordinationHub |
-| `coordinationhub/db_migrations.py` | 222 | Schema-version tracking, migration functions, and the ``init_schema`` driver |
+| `coordinationhub/db_migrations.py` | 238 | Schema-version tracking, migration functions, and the ``init_schema`` driver |
 | `coordinationhub/db_schemas.py` | 287 | Canonical SQLite schema definitions for CoordinationHub |
 | `coordinationhub/dependencies.py` | 140 | Cross-agent dependency declaration and satisfaction tracking |
 | `coordinationhub/dispatch.py` | 57 | Tool dispatch table for CoordinationHub |
 | `coordinationhub/event_bus.py` | 73 | Lightweight thread-safe in-memory pub-sub event bus for CoordinationHub |
 | `coordinationhub/handoffs.py` | 96 | Handoff recording and acknowledgement primitives for CoordinationHub |
-| `coordinationhub/hooks/__init__.py` | 1 | Hooks package — Claude Code integration via stdin/stdout event protocol |
+| `coordinationhub/hooks/__init__.py` | 1 | Hooks package — IDE integration via stdin/stdout event protocol |
 | `coordinationhub/hooks/base.py` | 238 | Base hook abstraction for CoordinationHub |
-| `coordinationhub/hooks/claude_code.py` | 270 | CoordinationHub hook for Claude Code |
 | `coordinationhub/hooks/cursor.py` | 99 | CoordinationHub hook adapter for Cursor |
 | `coordinationhub/hooks/kimi_cli.py` | 100 | CoordinationHub hook adapter for Kimi CLI |
+| `coordinationhub/hooks/stdio_adapter.py` | 270 | CoordinationHub stdio event adapter |
 | `coordinationhub/leases.py` | 197 | Zero-deps lease primitives for HA coordinator leadership |
 | `coordinationhub/lock_cache.py` | 180 | In-memory lock cache for CoordinationHub |
 | `coordinationhub/lock_ops.py` | 191 | Shared lock primitives used by both local locks and coordination locks |

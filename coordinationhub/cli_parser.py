@@ -235,7 +235,7 @@ def _add_setup(sub, shared) -> None:
                    help="Also install a SessionStart hook that auto-launches the SSE dashboard "
                         "at http://127.0.0.1:9898")
     p.add_argument("--monitor-skill", action="store_true",
-                   help="Also install the 'coordinationhub-monitor' skill at ~/.claude/skills/ "
+                   help="Also install the 'coordinationhub-monitor' skill at ~/.coordinationhub/skills/ "
                         "for LLMs to watch the swarm")
 
     p = sub.add_parser("auto-start-dashboard", parents=[shared],
@@ -407,14 +407,14 @@ def _add_spawner(sub, shared) -> None:
     p.add_argument("subagent_type", help="Type of sub-agent to spawn (e.g. Explore, Plan)")
     p.add_argument("--description", default=None, help="Description of the sub-agent's task")
     p.add_argument("--prompt", default=None, help="Prompt or instructions for the sub-agent")
-    p.add_argument("--source", default="external", help="Spawning system (e.g. claude_code, kimi_cli)")
+    p.add_argument("--source", default="external", help="Spawning system (e.g. stdio_adapter, kimi_cli)")
 
     p = sub.add_parser("report-subagent-spawned", parents=[shared],
                        help="Report that a sub-agent was spawned by an external system")
     p.add_argument("parent_agent_id", help="Parent agent ID that spawned the sub-agent")
     p.add_argument("child_agent_id", help="Actual agent ID of the spawned sub-agent")
     p.add_argument("--subagent-type", default=None, help="Type of sub-agent that was spawned")
-    p.add_argument("--source", default="external", help="Spawning system (e.g. claude_code, kimi_cli)")
+    p.add_argument("--source", default="external", help="Spawning system (e.g. stdio_adapter, kimi_cli)")
 
     p = sub.add_parser("list-pending-spawns", parents=[shared],
                        help="List pending sub-agent spawn requests for a parent agent")

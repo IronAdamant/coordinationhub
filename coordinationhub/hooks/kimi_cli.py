@@ -15,7 +15,7 @@ Expected event shape:
     "prompt": "..."
   }
 
-Kimi CLI does not currently provide a native hook system like Claude Code.
+Kimi CLI does not currently provide a native hook system like the stdio adapter.
 This adapter is designed to be called by:
   - A wrapper script around Kimi CLI tool invocations
   - A sidecar file watcher on a Kimi event log

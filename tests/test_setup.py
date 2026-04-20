@@ -60,7 +60,7 @@ class TestMergeHooks:
         existing = {
             "SessionStart": [
                 {"matcher": "", "hooks": [
-                    {"type": "command", "command": "python3 -m coordinationhub.hooks.claude_code", "timeout": 10}
+                    {"type": "command", "command": "python3 -m coordinationhub.hooks.stdio_adapter", "timeout": 10}
                 ]}
             ]
         }
@@ -90,7 +90,7 @@ class TestFillHookCommand:
     def test_uses_absolute_python_path(self):
         filled = _fill_hook_command(_HOOKS_CONFIG, "/opt/special/python3.12")
         cmd = filled["SessionStart"][0]["hooks"][0]["command"]
-        assert cmd == "/opt/special/python3.12 -m coordinationhub.hooks.claude_code"
+        assert cmd == "/opt/special/python3.12 -m coordinationhub.hooks.stdio_adapter"
 
 
 class TestAutoStartDashboard:
@@ -158,7 +158,7 @@ class TestInitOptInFlags:
         settings_path = tmp_path / ".claude" / "settings.json"
         settings_path.parent.mkdir(parents=True)
         settings_path.write_text(json.dumps({"hooks": {"SessionStart": [
-            {"matcher": "", "hooks": [{"type": "command", "command": "/usr/bin/python3 -m coordinationhub.hooks.claude_code", "timeout": 10}]}
+            {"matcher": "", "hooks": [{"type": "command", "command": "/usr/bin/python3 -m coordinationhub.hooks.stdio_adapter", "timeout": 10}]}
         ]}}, indent=2))
         monkeypatch.setattr(cli_setup, "_CLAUDE_SETTINGS_PATH", settings_path)
 
@@ -167,7 +167,7 @@ class TestInitOptInFlags:
         settings = json.loads(settings_path.read_text())
         ss = settings["hooks"]["SessionStart"]
         # Original hook preserved
-        assert any("hooks.claude_code" in h["command"]
+        assert any("hooks.stdio_adapter" in h["command"]
                    for block in ss for h in block.get("hooks", []))
         # New hook added
         assert any("auto-start-dashboard" in h["command"]

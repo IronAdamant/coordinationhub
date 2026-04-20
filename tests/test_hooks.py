@@ -1,4 +1,4 @@
-"""Tests for hooks/claude_code.py — hook handlers with synthetic event dicts."""
+"""Tests for hooks/stdio_adapter.py — hook handlers with synthetic event dicts."""
 
 from __future__ import annotations
 
@@ -9,8 +9,8 @@ import tempfile
 from pathlib import Path
 from unittest.mock import patch
 
-from coordinationhub.hooks.claude_code import (
-    ClaudeCodeHook,
+from coordinationhub.hooks.stdio_adapter import (
+    StdioHook,
     _session_agent_id,
     _subagent_id,
     _subagent_type,
@@ -84,54 +84,54 @@ class TestAgentIdHelpers:
 
 
 class TestResolveAgentIdMapping:
-    """Tests for _resolve_agent_id mapping raw Claude Code IDs to hub.cc.* IDs."""
+    """Tests for _resolve_agent_id mapping raw IDE IDs to hub.cc.* IDs."""
 
-    def test_maps_raw_claude_id_to_hub_child(self, hook_cwd):
-        """SubagentStart registers with claude_agent_id; PreToolUse resolves it."""
+    def test_maps_raw_ide_id_to_hub_child(self, hook_cwd):
+        """SubagentStart registers with raw_ide_id; PreToolUse resolves it."""
         session_id = "sess-12345678"
-        raw_claude_id = "ac70a34bf2d2264d4"
+        raw_ide_id = "ac70a34bf2d2264d4"
 
         # Step 1: SessionStart registers root agent
         handle_session_start(_make_event("SessionStart", cwd=hook_cwd, session_id=session_id))
 
-        # Step 2: SubagentStart registers child with raw Claude ID mapping
+        # Step 2: SubagentStart registers child with raw IDE ID mapping
         event_start = _make_event(
             "SubagentStart", cwd=hook_cwd, session_id=session_id,
             tool_input={"subagent_type": "agent", "description": "test task"},
             tool_use_id="toolu_abc123xyz",
-            subagent_id=raw_claude_id,
+            subagent_id=raw_ide_id,
         )
         handle_subagent_start(event_start)
 
-        # Step 3: PreToolUse with the raw Claude ID should resolve to hub.cc.* child
-        from coordinationhub.hooks.claude_code import _get_engine
+        # Step 3: PreToolUse with the raw IDE ID should resolve to hub.cc.* child
+        from coordinationhub.hooks.stdio_adapter import _get_engine
         engine = _get_engine(hook_cwd)
         try:
-            event_write = {"subagent_id": raw_claude_id, "session_id": session_id}
+            event_write = {"subagent_id": raw_ide_id, "session_id": session_id}
             resolved = _resolve_agent_id(event_write, engine=engine)
             assert resolved.startswith("hub.cc."), f"Expected hub.cc.* ID, got {resolved}"
-            assert resolved != raw_claude_id
+            assert resolved != raw_ide_id
         finally:
             engine.close()
 
     def test_subagent_lock_uses_hub_id(self, hook_cwd):
         """Sub-agent PreToolUse Write acquires lock under hub.cc.* ID, not raw hex."""
         session_id = "sess-12345678"
-        raw_claude_id = "af2d34ada2a39871c"
+        raw_ide_id = "af2d34ada2a39871c"
 
         handle_session_start(_make_event("SessionStart", cwd=hook_cwd, session_id=session_id))
         handle_subagent_start(_make_event(
             "SubagentStart", cwd=hook_cwd, session_id=session_id,
             tool_input={"subagent_type": "coder"},
             tool_use_id="toolu_xyz789abc",
-            subagent_id=raw_claude_id,
+            subagent_id=raw_ide_id,
         ))
 
-        # PreToolUse Write from the sub-agent using raw Claude ID
+        # PreToolUse Write from the sub-agent using raw IDE ID
         result = handle_pre_write(_make_event(
             "PreToolUse", tool_name="Write", cwd=hook_cwd, session_id=session_id,
             tool_input={"file_path": "/tmp/test_subagent_lock.py"},
-            subagent_id=raw_claude_id,
+            subagent_id=raw_ide_id,
         ))
         assert result is not None
         assert result["hookSpecificOutput"]["permissionDecision"] == "allow"
@@ -139,59 +139,59 @@ class TestResolveAgentIdMapping:
     def test_no_ghost_agents(self, hook_cwd):
         """After SubagentStart + PreToolUse, only ONE agent entry for the subagent."""
         session_id = "sess-12345678"
-        raw_claude_id = "a60112d5f3898cadc"
+        raw_ide_id = "a60112d5f3898cadc"
 
         handle_session_start(_make_event("SessionStart", cwd=hook_cwd, session_id=session_id))
         handle_subagent_start(_make_event(
             "SubagentStart", cwd=hook_cwd, session_id=session_id,
             tool_input={"subagent_type": "explorer"},
             tool_use_id="toolu_def456ghi",
-            subagent_id=raw_claude_id,
+            subagent_id=raw_ide_id,
         ))
         handle_pre_write(_make_event(
             "PreToolUse", tool_name="Write", cwd=hook_cwd, session_id=session_id,
             tool_input={"file_path": "/tmp/test_no_ghost.py"},
-            subagent_id=raw_claude_id,
+            subagent_id=raw_ide_id,
         ))
 
-        # Check: no agent registered with the raw Claude ID as agent_id
-        from coordinationhub.hooks.claude_code import _get_engine
+        # Check: no agent registered with the raw IDE ID as agent_id
+        from coordinationhub.hooks.stdio_adapter import _get_engine
         engine = _get_engine(hook_cwd)
         try:
             agents = engine.list_agents(active_only=False)
             agent_ids = [a["agent_id"] for a in agents["agents"]]
-            assert raw_claude_id not in agent_ids, \
-                f"Ghost agent {raw_claude_id} should not exist"
+            assert raw_ide_id not in agent_ids, \
+                f"Ghost agent {raw_ide_id} should not exist"
         finally:
             engine.close()
 
     def test_post_write_uses_hub_id(self, hook_cwd):
         """PostToolUse change notifications use hub.cc.* ID, not raw hex."""
         session_id = "sess-12345678"
-        raw_claude_id = "b1234567890abcdef"
+        raw_ide_id = "b1234567890abcdef"
 
         handle_session_start(_make_event("SessionStart", cwd=hook_cwd, session_id=session_id))
         handle_subagent_start(_make_event(
             "SubagentStart", cwd=hook_cwd, session_id=session_id,
             tool_input={"subagent_type": "writer"},
             tool_use_id="toolu_post123abc",
-            subagent_id=raw_claude_id,
+            subagent_id=raw_ide_id,
         ))
         handle_post_write(_make_event(
             "PostToolUse", tool_name="Write", cwd=hook_cwd, session_id=session_id,
             tool_input={"file_path": "/tmp/test_post_write_id.py"},
-            subagent_id=raw_claude_id,
+            subagent_id=raw_ide_id,
         ))
 
         # Verify notification was recorded under hub.cc.* ID
-        from coordinationhub.hooks.claude_code import _get_engine
+        from coordinationhub.hooks.stdio_adapter import _get_engine
         engine = _get_engine(hook_cwd)
         try:
             notifs = engine.get_notifications()
             matching = [n for n in notifs.get("notifications", [])
-                        if n["agent_id"] == raw_claude_id]
+                        if n["agent_id"] == raw_ide_id]
             assert len(matching) == 0, \
-                f"Notification should NOT use raw ID {raw_claude_id}"
+                f"Notification should NOT use raw ID {raw_ide_id}"
         finally:
             engine.close()
 
@@ -216,7 +216,7 @@ class TestSessionStart:
 class TestPreAgentAndSubagentShape:
     """End-to-end tests for the PreToolUse[Agent] → SubagentStart chain.
 
-    Real Claude Code SubagentStart events don't carry the task
+    Real IDE SubagentStart events don't carry the task
     description — only the preceding PreToolUse[Agent] event does. The
     hook stashes the description in ``pending_subagent_tasks`` on
     PreToolUse and pops it on SubagentStart. These tests validate the
@@ -224,8 +224,8 @@ class TestPreAgentAndSubagentShape:
     FIFO correlation between the two events.
     """
 
-    def _current_task(self, hook_cwd, claude_id):
-        from coordinationhub.hooks.claude_code import _get_engine
+    def _current_task(self, hook_cwd, ide_id):
+        from coordinationhub.hooks.stdio_adapter import _get_engine
         engine = _get_engine(hook_cwd)
         try:
             with engine._connect() as conn:
@@ -233,8 +233,8 @@ class TestPreAgentAndSubagentShape:
                     "SELECT a.agent_id, ar.current_task "
                     "FROM agents a "
                     "LEFT JOIN agent_responsibilities ar ON a.agent_id = ar.agent_id "
-                    "WHERE a.claude_agent_id = ?",
-                    (claude_id,),
+                    "WHERE a.raw_ide_id = ?",
+                    (ide_id,),
                 ).fetchone()
                 if row is None:
                     return None, None
@@ -257,13 +257,13 @@ class TestPreAgentAndSubagentShape:
             },
         }
 
-    def _real_start_event(self, cwd, session_id, claude_id, agent_type="Explore"):
-        """Real Claude Code SubagentStart shape: agent_id + agent_type top-level."""
+    def _real_start_event(self, cwd, session_id, ide_id, agent_type="Explore"):
+        """Real IDE SubagentStart shape: agent_id + agent_type top-level."""
         return {
             "hook_event_name": "SubagentStart",
             "session_id": session_id,
             "cwd": cwd,
-            "agent_id": claude_id,
+            "agent_id": ide_id,
             "agent_type": agent_type,
         }
 
@@ -380,7 +380,7 @@ class TestUserPromptSubmit:
     """UserPromptSubmit stamps the root agent's current_task with the prompt."""
 
     def _current_task(self, hook_cwd, agent_id):
-        from coordinationhub.hooks.claude_code import _get_engine
+        from coordinationhub.hooks.stdio_adapter import _get_engine
         engine = _get_engine(hook_cwd)
         try:
             with engine._connect() as conn:
@@ -547,7 +547,7 @@ class TestPostWrite:
             "PostToolUse", tool_name="Write", cwd=hook_cwd,
             tool_input={"file_path": "/tmp/test_ownership.py"}))
 
-        from coordinationhub.hooks.claude_code import _get_engine
+        from coordinationhub.hooks.stdio_adapter import _get_engine
         engine = _get_engine(hook_cwd)
         try:
             with engine._connect() as conn:
@@ -575,7 +575,7 @@ class TestPostWrite:
             "PostToolUse", tool_name="Write", cwd=hook_cwd, session_id=session_b,
             tool_input={"file_path": "/tmp/test_fww.py"}))
 
-        from coordinationhub.hooks.claude_code import _get_engine, _session_agent_id
+        from coordinationhub.hooks.stdio_adapter import _get_engine, _session_agent_id
         engine = _get_engine(hook_cwd)
         try:
             with engine._connect() as conn:
@@ -609,31 +609,31 @@ class TestSubagentLifecycle:
         result = handle_subagent_stop(event_stop)
         assert result is None
 
-    def test_subagent_stop_sets_status_stopped_via_claude_id(self, hook_cwd):
-        """SubagentStop with raw claude hex ID resolves to hub.cc.* and sets status='stopped'."""
+    def test_subagent_stop_sets_status_stopped_via_ide_id(self, hook_cwd):
+        """SubagentStop with raw IDE hex ID resolves to hub.cc.* and sets status='stopped'."""
         session_id = "sess-12345678"
-        raw_claude_id = "deadbeef12345abcd"
+        raw_ide_id = "deadbeef12345abcd"
 
         handle_session_start(_make_event("SessionStart", cwd=hook_cwd, session_id=session_id))
         handle_subagent_start(_make_event(
             "SubagentStart", cwd=hook_cwd, session_id=session_id,
             tool_input={"subagent_type": "builder", "description": "Build feature"},
             tool_use_id="toolu_stop123abc",
-            subagent_id=raw_claude_id,
+            subagent_id=raw_ide_id,
         ))
 
-        # SubagentStop with only raw claude ID (no tool_use_id) — mirrors production events
+        # SubagentStop with only raw IDE ID (no tool_use_id) — mirrors production events
         handle_subagent_stop(_make_event(
             "SubagentStop", cwd=hook_cwd, session_id=session_id,
-            subagent_id=raw_claude_id,
+            subagent_id=raw_ide_id,
         ))
 
-        from coordinationhub.hooks.claude_code import _get_engine
+        from coordinationhub.hooks.stdio_adapter import _get_engine
         engine = _get_engine(hook_cwd)
         try:
             agents = engine.list_agents(active_only=False)
             child = [a for a in agents["agents"]
-                     if a.get("claude_agent_id") == raw_claude_id]
+                     if a.get("raw_ide_id") == raw_ide_id]
             assert len(child) == 1
             assert child[0]["status"] == "stopped"
         finally:
@@ -642,7 +642,7 @@ class TestSubagentLifecycle:
     def test_background_agent_dedup(self, hook_cwd):
         """run_in_background agents fire SubagentStart twice — second call should heartbeat, not duplicate."""
         session_id = "sess-12345678"
-        raw_claude_id = "ac366dfcabf01578c"
+        raw_ide_id = "ac366dfcabf01578c"
 
         handle_session_start(_make_event("SessionStart", cwd=hook_cwd, session_id=session_id))
 
@@ -650,24 +650,24 @@ class TestSubagentLifecycle:
         handle_subagent_start(_make_event(
             "SubagentStart", cwd=hook_cwd, session_id=session_id,
             tool_input={"subagent_type": "agent", "description": "NutritionEnricher"},
-            subagent_id=raw_claude_id,
+            subagent_id=raw_ide_id,
         ))
 
-        # Second SubagentStart (background completion notification) — same claude_agent_id
+        # Second SubagentStart (background completion notification) — same raw_ide_id
         handle_subagent_start(_make_event(
             "SubagentStart", cwd=hook_cwd, session_id=session_id,
             tool_input={"subagent_type": "agent", "description": "NutritionEnricher"},
-            subagent_id=raw_claude_id,
+            subagent_id=raw_ide_id,
         ))
 
-        from coordinationhub.hooks.claude_code import _get_engine
+        from coordinationhub.hooks.stdio_adapter import _get_engine
         engine = _get_engine(hook_cwd)
         try:
             agents = engine.list_agents(active_only=False)
             matches = [a for a in agents["agents"]
-                       if a.get("claude_agent_id") == raw_claude_id]
+                       if a.get("raw_ide_id") == raw_ide_id]
             assert len(matches) == 1, (
-                f"Expected 1 agent for {raw_claude_id}, got {len(matches)}: "
+                f"Expected 1 agent for {raw_ide_id}, got {len(matches)}: "
                 f"{[m['agent_id'] for m in matches]}"
             )
         finally:
@@ -690,7 +690,7 @@ class TestSessionEnd:
 class TestErrorLogging:
     def test_log_error_creates_log_file(self, tmp_path):
         """_log_error writes to hook.log in the specified directory."""
-        with patch("coordinationhub.hooks.claude_code.Path") as mock_path:
+        with patch("coordinationhub.hooks.stdio_adapter.Path") as mock_path:
             mock_path.home.return_value = tmp_path
             log_dir = tmp_path / ".coordinationhub"
             try:
@@ -763,14 +763,14 @@ class TestBridges:
 # Contract tests — validate handlers against fixture event shapes
 # ---------------------------------------------------------------------------
 
-_FIXTURE_DIR = Path(__file__).parent / "fixtures" / "claude_code_events"
+_FIXTURE_DIR = Path(__file__).parent / "fixtures" / "stdio_events"
 
 # Map fixture filename stem → (handler, needs_session_first, required_fields)
 #
 # ``required_fields`` documents the minimum event shape each handler reads.
 # Each entry is a dot-path into the event dict (e.g. "tool_input.file_path"
 # means ``event["tool_input"]["file_path"]`` must exist and be non-empty).
-# These assertions catch schema drift if Claude Code renames or removes
+# These assertions catch schema drift if IDE renames or removes
 # fields the handlers depend on.
 _FIXTURE_HANDLERS = {
     "SessionStart": (
@@ -822,8 +822,8 @@ def _get_dotted(d: dict, path: str):
 class TestEventContract:
     """Validate hook handlers accept the documented event shape without errors.
 
-    Fixtures in tests/fixtures/claude_code_events/ represent the minimum
-    contract CoordinationHub depends on from Claude Code.  Replace these
+    Fixtures in tests/fixtures/stdio_events/ represent the minimum
+    contract CoordinationHub depends on from IDE.  Replace these
     with real captured events (COORDINATIONHUB_CAPTURE_EVENTS=1) to
     catch schema drift.
     """
@@ -857,9 +857,9 @@ class TestEventContract:
         handler(event)  # should not raise
 
     def test_subagent_id_is_hex_string(self):
-        """SubagentStart fixture's agent_id must match Claude Code's hex format.
+        """SubagentStart fixture's agent_id must match IDE's hex format.
 
-        Real Claude Code SubagentStart events carry the raw hex ID under
+        Real IDE SubagentStart events carry the raw hex ID under
         ``agent_id`` (top-level), not ``subagent_id``. Validated via live
         event capture on 2026-04-11.
         """
@@ -868,7 +868,7 @@ class TestEventContract:
             pytest.skip("No fixture")
         event = json.loads(fixture.read_text())
         agent_id = event.get("agent_id", "")
-        assert len(agent_id) >= 16, "Claude Code agent IDs are long hex strings"
+        assert len(agent_id) >= 16, "IDE agent IDs are long hex strings"
         assert all(c in "0123456789abcdef" for c in agent_id), (
             f"Expected hex characters in agent_id, got {agent_id!r}"
         )
@@ -885,7 +885,7 @@ class TestEventCapture:
         """_save_event_snapshot writes a JSON file under ~/.coordinationhub/event_snapshots/."""
         monkeypatch.setenv("HOME", str(tmp_path))
         # The function uses Path.home() which reads HOME
-        from coordinationhub.hooks.claude_code import _save_event_snapshot
+        from coordinationhub.hooks.stdio_adapter import _save_event_snapshot
         event = {
             "hook_event_name": "PreToolUse",
             "tool_name": "Write",
@@ -903,7 +903,7 @@ class TestEventCapture:
 
     def test_save_event_snapshot_never_raises(self, monkeypatch):
         """Capture failure must never crash the hook."""
-        from coordinationhub.hooks.claude_code import _save_event_snapshot
+        from coordinationhub.hooks.stdio_adapter import _save_event_snapshot
         # Point HOME at a non-writable location — should silently no-op
         monkeypatch.setenv("HOME", "/nonexistent/readonly/path")
         _save_event_snapshot({"hook_event_name": "Test"})  # should not raise

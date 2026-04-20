@@ -1,6 +1,6 @@
 """Pending sub-agent task storage for CoordinationHub.
 
-Claude Code fires ``PreToolUse`` for ``tool_name == "Agent"`` with the
+An IDE fires ``PreToolUse`` for ``tool_name == "Agent"`` with the
 full task description, then fires ``SubagentStart`` for the spawned
 sub-agent with no description at all. These two events need to be
 correlated so the sub-agent's ``current_task`` column reflects what

@@ -38,7 +38,7 @@ TOOL_SCHEMAS_SPAWNER: dict[str, dict] = {
                 },
                 "source": {
                     "type": "string",
-                    "description": "Source system that will perform the spawn (e.g. 'claude_code', 'kimi_cli', 'cursor')",
+                    "description": "Source system that will perform the spawn (e.g. 'stdio_adapter', 'kimi_cli', 'cursor')",
                     "default": "external",
                 },
             },
@@ -48,7 +48,7 @@ TOOL_SCHEMAS_SPAWNER: dict[str, dict] = {
     "report_subagent_spawned": {
         "description": (
             "Report that a sub-agent has been spawned by an external system. "
-            "Any IDE/CLI (Claude Code, Kimi CLI, Cursor, etc.) calls this after "
+            "Any IDE/CLI (stdio_adapter, Kimi CLI, Cursor, etc.) calls this after "
             "spawning a sub-agent via its native mechanism. This consumes the "
             "pending spawn record created by ``spawn_subagent`` and links it to "
             "the actual child agent ID."
@@ -71,7 +71,7 @@ TOOL_SCHEMAS_SPAWNER: dict[str, dict] = {
                 },
                 "source": {
                     "type": "string",
-                    "description": "Source system that performed the spawn (e.g. 'claude_code', 'kimi_cli')",
+                    "description": "Source system that performed the spawn (e.g. 'stdio_adapter', 'kimi_cli')",
                     "default": "external",
                 },
             },
