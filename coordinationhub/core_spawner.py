@@ -159,6 +159,16 @@ class SpawnerMixin:
     # Health Polling + Deregistration Requests
     # ------------------------------------------------------------------ #
 
+    def cancel_spawn(self, spawn_id: str) -> dict[str, Any]:
+        """Cancel a pending spawn.
+
+        T3.19: routes through the engine instead of reaching into
+        ``engine._connect`` + ``_spawner.cancel_spawn`` directly from
+        the CLI. Keeps the engine API surface consistent — every other
+        spawner command already goes through the engine.
+        """
+        return _spawner.cancel_spawn(self._connect, spawn_id)
+
     def request_subagent_deregistration(
         self,
         parent_agent_id: str,

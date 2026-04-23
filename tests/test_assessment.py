@@ -60,6 +60,72 @@ class TestMetricScorers:
         score = score_handoff_latency(trace, MINIMAL_GRAPH)
         assert score == 1.0  # vacuously correct
 
+    def test_handoff_latency_meaningful_condition_tops_trivial(self):
+        """T3.10 regression: a handoff event with a non-trivial condition
+        must score >= one with only ``always`` / ``true``. Pre-fix both
+        branches added 0.5 on top of the 0.5 baseline, so ``always``
+        scored 1.0 same as a meaningful condition — the score was
+        effectively binary.
+        """
+        graph = CoordinationGraph({
+            "agents": [
+                {"id": "planner", "role": "r", "responsibilities": []},
+                {"id": "executor", "role": "r", "responsibilities": []},
+            ],
+            "handoffs": [{"from": "planner", "to": "executor", "condition": "on_plan_ready"}],
+        })
+        meaningful = score_handoff_latency(
+            {"events": [{"type": "handoff", "from": "planner", "to": "executor",
+                         "condition": "on_plan_ready"}]},
+            graph,
+        )
+        trivial = score_handoff_latency(
+            {"events": [{"type": "handoff", "from": "planner", "to": "executor",
+                         "condition": "always"}]},
+            graph,
+        )
+        missing_required = score_handoff_latency(
+            {"events": [{"type": "handoff", "from": "planner", "to": "executor",
+                         "condition": ""}]},
+            graph,
+        )
+        assert meaningful == 1.0
+        assert meaningful > trivial
+        assert trivial > missing_required
+
+
+class TestLeaderStabilityMeasurement:
+    """T3.11: leader stability must be measured from events, not returned
+    as the configured threshold value.
+    """
+
+    def test_returns_measurement_not_threshold(self):
+        """When the trace has no transfer markers, score is 1.0 regardless
+        of the configured threshold (which is only used as a floor warning).
+        """
+        from coordinationhub.plugins.assessment.assessment_scorers import score_leader_stability
+
+        graph = CoordinationGraph({
+            "agents": [{"id": "leader", "role": "r", "responsibilities": []}],
+            "handoffs": [],
+            "assessment": {"leader_stability": {"threshold": 0.8}},
+        })
+        trace = {"events": [{"type": "lock", "path": "x.py"}]}
+        score = score_leader_stability(trace, graph)
+        # Pre-fix: this returned 0.8 verbatim.
+        assert score == 1.0
+
+    def test_transfer_markers_reduce_score(self):
+        """Each transfer/leaseExpired marker lowers the score by 0.25."""
+        from coordinationhub.plugins.assessment.assessment_scorers import score_leader_stability
+
+        trace = {"events": [
+            {"type": "transfer"},
+            {"type": "transfer"},
+        ]}
+        score = score_leader_stability(trace, None)
+        assert score == 0.5  # 1.0 - 2*0.25
+
     def test_score_outcome_verifiability(self):
         trace = {
             "trace_id": "t1",

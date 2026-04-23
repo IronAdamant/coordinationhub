@@ -97,8 +97,16 @@ def main(argv: list[str] | None = None) -> int:
         return 1
     try:
         handler = _get_handler(handler_name)
-        handler(args)
+        rc = handler(args)
+        # T3.16: handlers that return an explicit int propagate it as
+        # the exit code; otherwise a plain success is 0. This lets
+        # individual handlers signal "not found" → 3 or "conflict" → 4
+        # without having to raise.
+        if isinstance(rc, int):
+            return rc
         return 0
+    except SystemExit:
+        raise
     except Exception as exc:
         if getattr(args, "json_output", False):
             print(json.dumps({"error": str(exc)}, indent=2))

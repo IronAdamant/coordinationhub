@@ -80,14 +80,45 @@ def _redact_prompt(text: str) -> str:
     return redacted
 
 
+def _log_hook_error(stage: str, exc: BaseException) -> None:
+    """Append a timestamped error line to ``~/.coordinationhub/hook.log``.
+
+    T3.1: the hook contract is fail-open — we must never raise out of a
+    hook handler because that shows up as a broken tool call in the
+    IDE. When engine startup or a primitive raises, log here and let
+    the caller keep returning fail-open defaults.
+    """
+    try:
+        log_path = Path.home() / ".coordinationhub" / "hook.log"
+        log_path.parent.mkdir(parents=True, exist_ok=True)
+        with log_path.open("a", encoding="utf-8") as f:
+            f.write(
+                f"{time.strftime('%Y-%m-%dT%H:%M:%S')} [{stage}] "
+                f"{type(exc).__name__}: {exc}\n"
+            )
+    except Exception:
+        # If logging itself fails (read-only FS, etc.) there's nothing
+        # useful to do — stay silent rather than crash the hook.
+        pass
+
+
 class BaseHook:
     """IDE-agnostic hook protocol for CoordinationHub."""
 
     IDE_PREFIX = "ide"
 
     def __init__(self, project_root: str | None = None) -> None:
-        self._engine = self._create_engine(project_root)
-        self._engine.start()
+        # T3.1: engine construction + start may raise (DB locked, migration
+        # stuck, pool init failure). The hook contract is fail-open — the
+        # IDE must never see a crash from us. ``self._engine`` stays None
+        # on failure; every downstream method guards against it.
+        self._engine = None
+        try:
+            self._engine = self._create_engine(project_root)
+            self._engine.start()
+        except Exception as exc:
+            self._engine = None
+            _log_hook_error("engine_init", exc)
 
     @classmethod
     def _create_engine(cls, project_root: str | None):
@@ -102,7 +133,14 @@ class BaseHook:
         return self._engine
 
     def close(self) -> None:
-        self._engine.close()
+        # T3.1: close is called from the outer hook's ``finally``. If
+        # ``__init__`` never produced an engine we must be a no-op so the
+        # caller's finally block doesn't raise an AttributeError.
+        if self._engine is not None:
+            try:
+                self._engine.close()
+            except Exception as exc:
+                _log_hook_error("engine_close", exc)
 
     # ------------------------------------------------------------------ #
     # Agent IDs
@@ -121,11 +159,20 @@ class BaseHook:
         return self.session_agent_id(session_id)
 
     def _ensure_registered(self, agent_id: str, parent_id: str | None = None) -> None:
-        agents = self._engine.list_agents(active_only=True)
-        if any(a["agent_id"] == agent_id for a in agents.get("agents", [])):
-            self._engine.heartbeat(agent_id)
+        # T3.3: wrap engine calls in try/except so DB errors stay
+        # inside the hook layer (fail-open). Callers don't check a
+        # return value; the signal is "you tried, we logged if it
+        # failed".
+        if self._engine is None:
             return
-        self._engine.register_agent(agent_id, parent_id=parent_id)
+        try:
+            agents = self._engine.list_agents(active_only=True)
+            if any(a["agent_id"] == agent_id for a in agents.get("agents", [])):
+                self._engine.heartbeat(agent_id)
+                return
+            self._engine.register_agent(agent_id, parent_id=parent_id)
+        except Exception as exc:
+            _log_hook_error("ensure_registered", exc)
 
     def subagent_id(
         self,
@@ -209,11 +256,21 @@ class BaseHook:
     def on_pre_write(
         self, session_id: str, file_path: str, raw_ide_id: str | None = None,
     ) -> dict[str, Any] | None:
+        # T3.4: if the engine is down or acquire_lock raises, fail OPEN
+        # (allow the write). Pre-fix the exception propagated out of
+        # the hook and the IDE saw no decision — effectively fail-
+        # closed because the tool call aborted. Fail-open is the
+        # documented invariant.
+        if self._engine is None:
+            return None
         agent_id = self.resolve_agent_id(session_id, raw_ide_id)
         self._ensure_registered(agent_id)
-        self._engine.reap_expired_locks(agent_grace_seconds=120.0)
-
-        result = self._engine.acquire_lock(file_path, agent_id, ttl=300.0)
+        try:
+            self._engine.reap_expired_locks(agent_grace_seconds=120.0)
+            result = self._engine.acquire_lock(file_path, agent_id, ttl=300.0)
+        except Exception as exc:
+            _log_hook_error("on_pre_write", exc)
+            return None  # fail-open: IDE proceeds without a lock decision
         if result.get("acquired"):
             return {
                 "hookSpecificOutput": {

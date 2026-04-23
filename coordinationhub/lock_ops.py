@@ -153,14 +153,19 @@ def reap_expired_locks(
     now = time.time()
     if agent_grace_seconds > 0:
         # Implicitly refresh expired locks held by agents with recent heartbeats
+        # T3.27: also extend lock_ttl to at least agent_grace_seconds so
+        # a lock with ttl < grace doesn't need to be grace-refreshed on
+        # every tick. Pre-fix, a lock with lock_ttl=0.01 would be
+        # grace-refreshed every 10ms indefinitely (immortal lock bug).
         conn.execute(
-            f"UPDATE {table} SET locked_at = ? "
+            f"UPDATE {table} SET locked_at = ?, "
+            f"    lock_ttl = CASE WHEN lock_ttl < ? THEN ? ELSE lock_ttl END "
             f"WHERE locked_at + lock_ttl < ? "
             f"AND locked_by IN ("
             f"  SELECT agent_id FROM agents "
             f"  WHERE status = 'active' AND last_heartbeat > ?"
             f")",
-            (now, now, now - agent_grace_seconds),
+            (now, agent_grace_seconds, agent_grace_seconds, now, now - agent_grace_seconds),
         )
     # Delete remaining expired locks (crashed/stopped agents, or no grace)
     cursor = conn.execute(

@@ -314,6 +314,59 @@ class TestAuthEnforcement:
             assert resp.status == 200
 
 
+class TestDispatchArgHandling:
+    """T3.5: dispatch preserves explicit None and warns on unknown keys."""
+
+    def test_explicit_none_preserved(self):
+        """A client passing ``{"foo": None}`` must see None propagate to
+        the engine method. Pre-fix None values were stripped alongside
+        missing keys, causing tools whose signature accepts Optional
+        fields to raise spurious "missing arg" TypeErrors.
+        """
+        from coordinationhub.mcp_server import dispatch_tool
+
+        captured: dict = {}
+
+        class _FakeEngine:
+            def register_agent(self, agent_id, parent_id=None, raw_ide_id=None,
+                                worktree_root=None, graph_agent_id=None):
+                captured["parent_id"] = parent_id
+                return {"registered": True}
+
+        result = dispatch_tool(
+            _FakeEngine(),
+            "register_agent",
+            {"agent_id": "a1", "parent_id": None},
+        )
+        assert result["registered"] is True
+        # Key was preserved (even though the value is None).
+        assert "parent_id" in captured
+        assert captured["parent_id"] is None
+
+    def test_unknown_key_logged(self, caplog):
+        """Typo'd args trigger a WARNING with both the unknown key and
+        the allowed-args list so the user can spot the diff.
+        """
+        import logging
+        from coordinationhub.mcp_server import dispatch_tool
+
+        class _FakeEngine:
+            def register_agent(self, agent_id, parent_id=None, raw_ide_id=None,
+                                worktree_root=None, graph_agent_id=None):
+                return {"registered": True}
+
+        with caplog.at_level(logging.WARNING, logger="coordinationhub.mcp_server"):
+            dispatch_tool(
+                _FakeEngine(),
+                "register_agent",
+                {"agent_id": "a1", "parent_ids": "typo"},  # wrong key
+            )
+        messages = [r.getMessage() for r in caplog.records]
+        assert any("parent_ids" in m for m in messages), (
+            f"expected warning mentioning unknown key, got: {messages}"
+        )
+
+
 class TestPromptRedaction:
     """T2.1: prompts redacted before storage in agents.current_task."""
 

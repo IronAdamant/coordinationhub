@@ -89,8 +89,13 @@ class LockingMixin:
 
                     if retry and attempt < max_retries:
                         elapsed_ms = (time.time() - start_time) * 1000
-                        if elapsed_ms + current_backoff_ms <= timeout_ms:
-                            time.sleep(current_backoff_ms / 1000.0)
+                        # T3.26: apply a 0.5x..1.5x random jitter to the
+                        # backoff so N contending agents don't retry in
+                        # synchronized waves.
+                        import random as _random
+                        jittered_ms = current_backoff_ms * _random.uniform(0.5, 1.5)
+                        if elapsed_ms + jittered_ms <= timeout_ms:
+                            time.sleep(jittered_ms / 1000.0)
                             current_backoff_ms *= 2
                             attempt += 1
                             continue
@@ -196,7 +201,16 @@ class LockingMixin:
             return None
         for scope_prefix in scope_paths:
             norm_scope = normalize_path(scope_prefix, self._storage.project_root)
-            if norm_path.startswith(norm_scope) or norm_path == norm_scope.rstrip("/"):
+            # T3.23: compare path components rather than using raw
+            # startswith. Pre-fix ``docs/security`` matched scope
+            # ``docs/sec`` (character prefix, not path prefix). The
+            # canonical boundary is a trailing slash — compare with it
+            # appended so ``docs/sec`` only matches ``docs/sec`` and
+            # ``docs/sec/*``.
+            if norm_path == norm_scope.rstrip("/"):
+                return None
+            scope_with_slash = norm_scope.rstrip("/") + "/"
+            if norm_path.startswith(scope_with_slash):
                 return None
         return {
             "declared_scope": scope_paths,

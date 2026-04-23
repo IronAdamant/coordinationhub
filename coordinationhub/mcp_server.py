@@ -47,13 +47,31 @@ def dispatch_tool(engine: CoordinationEngine, tool_name: str, arguments: dict[st
     Shared by the HTTP and stdio MCP servers so dispatch logic is not
     duplicated. Raises ``ValueError`` for unknown tools, ``TypeError``
     for invalid arguments.
+
+    T3.5: explicit ``None`` values used to be stripped along with
+    missing keys, causing spurious "missing required argument" errors
+    for tools whose signature genuinely accepts ``None``
+    (e.g. ``report_subagent_spawned(subagent_type: str | None)``).
+    Now preserves ``None`` and lets the callee decide.
+
+    Unknown keys are logged at WARNING so callers notice typos (e.g.
+    ``agent_ids`` vs ``agent_id``) instead of silently receiving
+    "missing required argument" later.
     """
     if tool_name not in TOOL_DISPATCH:
         raise ValueError(
             f"Unknown tool: {tool_name!r}. Available: {sorted(TOOL_DISPATCH)}"
         )
     method_name, allowed_args = TOOL_DISPATCH[tool_name]
-    kwargs = {k: v for k, v in arguments.items() if k in allowed_args and v is not None}
+    unknown = set(arguments) - set(allowed_args)
+    if unknown:
+        logger.warning(
+            "tool %r called with unknown argument(s) %s; allowed=%s",
+            tool_name, sorted(unknown), sorted(allowed_args),
+        )
+    # T3.5: keep explicit None so the callee can distinguish "field
+    # intentionally unset" from "field missing entirely".
+    kwargs = {k: v for k, v in arguments.items() if k in allowed_args}
     return getattr(engine, method_name)(**kwargs)
 
 

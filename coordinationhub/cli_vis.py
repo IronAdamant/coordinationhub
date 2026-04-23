@@ -238,12 +238,18 @@ def cmd_assess(engine, args):
         graph_agent_id=getattr(args, "graph_agent_id", None),
         scope=getattr(args, "scope", "project"),
     )
-    if args.json_output:
-        _print_json(result)
-    else:
-        report = result.get("report", "")
-        print(report)
     output_path = getattr(args, "output_path", None)
+    # T3.21: CLI convention is that --output replaces stdout. Previously
+    # both fired (report to stdout AND written to file). If the caller
+    # wants both, they can pass --also-stdout explicitly.
+    also_stdout = getattr(args, "also_stdout", False)
+    write_stdout = output_path is None or also_stdout
+    if write_stdout:
+        if args.json_output:
+            _print_json(result)
+        else:
+            report = result.get("report", "")
+            print(report)
     if output_path:
         # T2.8: validate output path before writing so `--output /etc/passwd`
         # or a symlink pointing outside the project root is rejected.

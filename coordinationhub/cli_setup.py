@@ -379,7 +379,12 @@ def cmd_watch(args):
 
     try:
         while True:
-            os.system("clear" if os.name != "nt" else "cls")
+            # T3.18: ANSI clear-screen + home-cursor instead of
+            # shelling out to ``clear``/``cls`` (subprocess spawn per
+            # iteration + platform-specific command). Works in any VT
+            # terminal including Windows 10+ with ANSI enabled.
+            sys.stdout.write("\x1b[2J\x1b[H")
+            sys.stdout.flush()
 
             engine = _engine_from_args(args)
             try:

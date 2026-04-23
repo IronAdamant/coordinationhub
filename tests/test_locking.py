@@ -732,6 +732,49 @@ class TestBroadcastAcknowledgment:
         assert msgs["messages"][0]["payload"]["message"] == "test"
 
 
+class TestScopeBoundaryPrecision:
+    """T3.23: scope check must compare path components, not character
+    prefixes. Pre-fix ``docs/security`` leaked through a scope of
+    ``docs/sec`` because raw startswith treats ``docs/sec`` as a prefix
+    of ``docs/security/x``.
+    """
+
+    def test_similar_prefix_does_not_satisfy_scope(self, engine):
+        import json
+        import time as _time
+
+        agent = engine.generate_agent_id()
+        engine.register_agent(agent)
+        with engine._connect() as conn:
+            conn.execute(
+                "INSERT INTO agent_responsibilities (agent_id, scope, updated_at) "
+                "VALUES (?, ?, ?)",
+                (agent, json.dumps(["docs/sec"]), _time.time()),
+            )
+
+        # docs/security is NOT inside docs/sec, even though startswith
+        # would say otherwise.
+        result = engine.acquire_lock("docs/security/plan.md", agent)
+        assert result["acquired"] is False
+        assert result.get("error") == "scope_violation"
+
+    def test_exact_scope_dir_accepted(self, engine):
+        import json
+        import time as _time
+
+        agent = engine.generate_agent_id()
+        engine.register_agent(agent)
+        with engine._connect() as conn:
+            conn.execute(
+                "INSERT INTO agent_responsibilities (agent_id, scope, updated_at) "
+                "VALUES (?, ?, ?)",
+                (agent, json.dumps(["src/"]), _time.time()),
+            )
+        # Files inside the scope dir are accepted.
+        result = engine.acquire_lock("src/foo.py", agent)
+        assert result["acquired"] is True
+
+
 class TestBroadcastTargetSnapshot:
     """T1.11: broadcast snapshots target list so pending_acks is computable
     and late-joiners are excluded.

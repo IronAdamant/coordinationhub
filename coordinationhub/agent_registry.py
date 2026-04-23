@@ -89,6 +89,8 @@ def get_descendants_status(
 # Lifecycle operations
 # ------------------------------------------------------------------ #
 
+MAX_AGENTS = 10_000  # T3.9: ceiling on active agents per hub
+
 def register_agent(
     connect: ConnectFn,
     agent_id: str,
@@ -109,15 +111,34 @@ def register_agent(
     generators (in-memory counters, not cross-process safe) would
     overwrite each other's rows. Same-PID re-registrations remain
     idempotent for the common case (agent restart, crash recovery).
+
+    T3.9: if the active-agent count is already at ``MAX_AGENTS``, reject
+    the registration with ``reason='max_agents_reached'``. Prevents a
+    DoS-via-register-flood from hanging the hub on dashboard rendering
+    or memory pressure.
     """
     now = time.time()
     if pid is None:
         pid = os.getpid()
     with connect() as conn:
+        # T3.9: ceiling on active registrations
         existing = conn.execute(
             "SELECT pid, status FROM agents WHERE agent_id = ?",
             (agent_id,),
         ).fetchone()
+        if existing is None:
+            # New registration — check cap before insert
+            active_count = conn.execute(
+                "SELECT COUNT(*) AS n FROM agents WHERE status = 'active'"
+            ).fetchone()["n"]
+            if active_count >= MAX_AGENTS:
+                return {
+                    "registered": False,
+                    "agent_id": agent_id,
+                    "reason": "max_agents_reached",
+                    "max_agents": MAX_AGENTS,
+                    "active_count": active_count,
+                }
         if (
             existing is not None
             and existing["status"] == "active"

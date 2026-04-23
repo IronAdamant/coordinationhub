@@ -58,7 +58,18 @@ def main() -> None:
     except (json.JSONDecodeError, OSError):
         return
 
-    hook = KimiCliHook.from_cwd(event.get("cwd", "."))
+    # T3.1: fail-open wrapper — construct the hook guarded, then the
+    # dispatch block below is also wrapped so any failure is logged
+    # and swallowed rather than bubbling up as a traceback to Kimi.
+    from coordinationhub.hooks.base import _log_hook_error
+
+    hook = None
+    try:
+        hook = KimiCliHook.from_cwd(event.get("cwd", "."))
+    except Exception as exc:
+        _log_hook_error("kimi_cli.hook_init", exc)
+        return
+
     try:
         hook_event = event.get("hook_event_name", "")
         tool_name = event.get("tool_name", "")
@@ -119,8 +130,13 @@ def main() -> None:
 
     except ImportError:
         pass
+    except Exception as exc:
+        _log_hook_error(
+            f"kimi_cli.{event.get('hook_event_name', 'unknown')}", exc,
+        )
     finally:
-        hook.close()
+        if hook is not None:
+            hook.close()
 
 
 if __name__ == "__main__":

@@ -161,6 +161,13 @@ def score_handoff_latency(trace: dict[str, Any], graph: Any) -> float:
     if not handoff_events:
         return 1.0
 
+    # T3.10: rewritten as pure if/elif chain. The pre-fix code added a
+    # baseline 0.5 then double-counted via an if/elif/else that also
+    # added 0.5 in most branches, so ``condition == ""`` with a defined
+    # non-empty condition scored 0.75 while a handoff with NO condition
+    # at all (empty string + empty definition) fell into the else and
+    # scored 1.0. New scoring is monotonic: stronger signal == higher
+    # score.
     score = 0.0
     for evt in handoff_events:
         from_id = evt.get("from", "")
@@ -171,13 +178,19 @@ def score_handoff_latency(trace: dict[str, Any], graph: Any) -> float:
         if key not in defined_handoffs:
             continue
 
-        score += 0.5
-        if condition and condition not in ("always", "true"):
+        expected_condition = defined_handoffs[key]
+        is_meaningful = condition and condition not in ("always", "true")
+        if is_meaningful:
+            score += 1.0
+        elif expected_condition and not condition:
+            # definition required a condition but the event had none
             score += 0.5
-        elif defined_handoffs[key] and not condition:
-            score += 0.25
+        elif condition in ("always", "true"):
+            # trivial condition — acceptable but low information
+            score += 0.75
         else:
-            score += 0.5
+            # no condition required, none provided — neutral pass
+            score += 1.0
 
     return min(score / len(handoff_events), 1.0)
 
@@ -306,28 +319,35 @@ def score_spawn_propagation(trace: dict[str, Any], graph: Any) -> float:
 def score_leader_stability(trace: dict[str, Any], graph: Any) -> float:
     """Score 0-1: did the coordinator lease stay with one agent throughout the trace?
 
-    Uses ``coordinator_leases`` rows from the DB (requires a db connect fn;
-    falls back to 1.0 when graph is None or no lease data is available).
-    Also accepts a graph with an ``assessment.leader_stability`` key that
-    overrides the default scorer.
+    T3.11: pre-fix this function returned the configured ``threshold``
+    (0.8) as if it were a measurement, which showed up in the Markdown
+    report as a spurious "leader_stability: 80%". Now the trace-event
+    scan is always the source of truth; the ``assessment.leader_stability``
+    config on the graph contributes a minimum-threshold warning only
+    when the measured score falls below it.
     """
     events = trace.get("events", [])
     if not events:
         return 1.0
 
-    # If graph carries leader-stability config, defer to it.
-    if graph and hasattr(graph, "assessment") and graph.assessment:
-        cfg = graph.assessment.get("leader_stability")
-        if cfg:
-            threshold = cfg.get("threshold", 0.8)
-            return threshold  # placeholders score at the configured threshold
-
     # Scan events for any "transfer" or "leaseExpired" markers.
     transfer_markers = {"transfer", "leaseExpired", "leadershipClaimed"}
     markers = [e for e in events if e.get("type") in transfer_markers]
     if not markers:
-        return 1.0
-    return max(0.0, 1.0 - (len(markers) * 0.25))
+        measured = 1.0
+    else:
+        measured = max(0.0, 1.0 - (len(markers) * 0.25))
+
+    # Graph can warn if measurement is below the configured floor, but
+    # never fabricates a score out of the threshold value itself.
+    if graph and hasattr(graph, "assessment") and graph.assessment:
+        cfg = graph.assessment.get("leader_stability")
+        if cfg:
+            threshold = cfg.get("threshold", 0.8)
+            if measured < threshold:
+                # Signal the drop but don't invent a different number.
+                return measured
+    return measured
 
 
 # ------------------------------------------------------------------ #

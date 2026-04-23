@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import sys
 from typing import Any
 
 from .cli_utils import print_json as _print_json, command as _command
@@ -20,8 +21,11 @@ def _fmt_lock_result(result: dict[str, Any], document_path: str) -> None:
     else:
         locked_by = result.get("locked_by", "unknown")
         expires = result.get("expires_at", "unknown")
-        print(f"FAILED: {document_path} is locked by {locked_by}")
-        print(f"  Expires: {expires}")
+        # T3.17: print denial to stderr so pipelines don't confuse the
+        # FAILED line with success output. Exit-code 4 is handled by
+        # the caller.
+        print(f"FAILED: {document_path} is locked by {locked_by}", file=sys.stderr)
+        print(f"  Expires: {expires}", file=sys.stderr)
 
 
 # ------------------------------------------------------------------ #
@@ -40,6 +44,12 @@ def cmd_acquire_lock(engine, args):
         _print_json(result)
     else:
         _fmt_lock_result(result, args.document_path)
+    # T3.17: denial → exit code 4 so `if coordinationhub acquire-lock ...`
+    # in shell scripts sees a distinct non-success signal. Success/
+    # release/refresh all fall through to exit 0.
+    if not result.get("acquired") and not result.get("released") and not result.get("refreshed"):
+        return 4
+    return 0
 
 
 # ------------------------------------------------------------------ #

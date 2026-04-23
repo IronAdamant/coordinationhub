@@ -54,6 +54,21 @@ class TestEventBus:
         with pytest.raises(queue.Empty):
             sub.get(timeout=0.01)
 
+    def test_queue_overflow_drops_oldest(self):
+        """T3.25: subscriber queue is bounded; overflow drops oldest."""
+        from coordinationhub.event_bus import _Sub
+        sub = _Sub(sub_id=1, topics=["t"], maxsize=3)
+        sub.put({"n": 1})
+        sub.put({"n": 2})
+        sub.put({"n": 3})
+        assert sub.dropped == 0
+        sub.put({"n": 4})  # overflow
+        assert sub.dropped == 1
+        # The queue now contains {n:2, n:3, n:4} — oldest (n:1) was
+        # dropped to make room.
+        evt = sub.get(timeout=0.01)
+        assert evt["n"] == 2
+
 
 class TestPublishEventDurability:
     """T1.10: _publish_event journals BEFORE firing the in-mem bus; journal

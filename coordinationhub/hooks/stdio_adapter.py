@@ -68,19 +68,47 @@ def _log_error(hook_event: str, exc: Exception) -> None:
 
 
 def _save_event_snapshot(event: dict) -> None:
-    """Save raw hook event JSON for contract test fixtures."""
+    """Save raw hook event JSON for contract test fixtures.
+
+    T3.14: filename now includes microseconds + a 4-char monotonic
+    counter suffix so two events recorded in the same second don't
+    silently overwrite each other. Pre-fix, burst events (common on
+    IDE startup: SessionStart + UserPromptSubmit + PreToolUse in <1s)
+    collided on the 1-second-resolution filename and only the last
+    one landed on disk.
+    """
     try:
         snap_dir = Path.home() / ".coordinationhub" / "event_snapshots"
         snap_dir.mkdir(parents=True, exist_ok=True)
         hook_name = event.get("hook_event_name", "unknown")
         tool_name = event.get("tool_name", "")
         tag = f"{hook_name}_{tool_name}" if tool_name else hook_name
+        # Microsecond resolution + per-process sequence counter for a
+        # collision-proof unique suffix within the same millisecond.
+        now = time.time()
+        micro = int(now * 1_000_000) % 1_000_000
         ts = time.strftime("%Y%m%d_%H%M%S")
-        path = snap_dir / f"{tag}_{ts}.json"
+        seq = _snapshot_seq()
+        path = snap_dir / f"{tag}_{ts}_{micro:06d}_{seq:04d}.json"
         with open(path, "w", encoding="utf-8") as f:
             json.dump(event, f, indent=2, default=str)
     except Exception:
         pass
+
+
+_snapshot_counter = 0
+_snapshot_counter_lock = None
+
+
+def _snapshot_seq() -> int:
+    """Return a monotonic short counter per-process for snapshot filenames."""
+    global _snapshot_counter, _snapshot_counter_lock
+    import threading as _t
+    if _snapshot_counter_lock is None:
+        _snapshot_counter_lock = _t.Lock()
+    with _snapshot_counter_lock:
+        _snapshot_counter = (_snapshot_counter + 1) % 10_000
+        return _snapshot_counter
 
 
 # ---------------------------------------------------------------------------
@@ -317,6 +345,16 @@ def handle_session_end(event: dict) -> dict | None:
 # ---------------------------------------------------------------------------
 
 
+# T3.15: exact MCP tool-name allow-lists for the PostToolUse routers.
+# Add new tool aliases here rather than loosening the match condition.
+_STELE_INDEX_TOOLS = frozenset({
+    "mcp__stele-context__index",
+})
+_TRAMMEL_CLAIM_TOOLS = frozenset({
+    "mcp__trammel__claim_step",
+})
+
+
 def main() -> None:
     try:
         raw = sys.stdin.read()
@@ -350,9 +388,14 @@ def main() -> None:
         elif hook_event == "PostToolUse":
             if tool_name in ("Write", "Edit"):
                 result = handle_post_write(event)
-            elif "stele" in tool_name and "index" in tool_name:
+            # T3.15: exact-match against an allow-list instead of loose
+            # substring checks. Previously ``"stele" in tool_name and
+            # "index" in tool_name`` matched any tool whose name
+            # contained both words in any order (e.g.
+            # ``unstele_reindexer``).
+            elif tool_name in _STELE_INDEX_TOOLS:
                 result = handle_post_stele_index(event)
-            elif "trammel" in tool_name and "claim_step" in tool_name:
+            elif tool_name in _TRAMMEL_CLAIM_TOOLS:
                 result = handle_post_trammel_claim(event)
 
         elif hook_event == "SubagentStart":

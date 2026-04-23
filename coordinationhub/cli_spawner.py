@@ -87,19 +87,26 @@ def cmd_list_pending_spawns(engine, args):
 
 @_command()
 def cmd_cancel_spawn(engine, args):
-    # Direct cancel via spawner primitives
-    result = _spawner.cancel_spawn(
-        connect=engine._connect,
-        spawn_id=args.spawn_id,
-    )
+    # T3.19: route through the engine method instead of reaching into
+    # engine._connect + spawner primitives directly.
+    result = engine.cancel_spawn(args.spawn_id)
     if args.json_output:
         _print_json(result)
     elif result.get("cancelled"):
         print(f"Spawn cancelled: {args.spawn_id}")
     elif result.get("not_found"):
-        print(f"Spawn not found or already consumed: {args.spawn_id}")
+        # T3.16: not-found → exit code 3, message on stderr so scripts
+        # piping stdout don't pick up the error as successful output.
+        import sys as _sys
+        print(
+            f"Spawn not found or already consumed: {args.spawn_id}",
+            file=_sys.stderr,
+        )
+        return 3
     else:
-        print(f"Cancel failed: {result.get('error', 'unknown')}")
+        import sys as _sys
+        print(f"Cancel failed: {result.get('error', 'unknown')}", file=_sys.stderr)
+        return 1
 
 
 # ------------------------------------------------------------------ #

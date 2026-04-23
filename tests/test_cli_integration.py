@@ -438,6 +438,48 @@ class TestLeaseCommands:
             engine.close()
 
 
+class TestCliExitCodes:
+    """T3.16 / T3.17: distinct exit codes for not-found vs error vs
+    denied locks. Pre-fix a blanket ``except Exception`` returned 1 for
+    anything that crashed and 0 for everything else — including
+    ``{"not_found": True}`` return values that weren't exceptions.
+    """
+
+    def test_cancel_nonexistent_spawn_exits_3(self, tmp_path, capsys):
+        from coordinationhub.cli_spawner import cmd_cancel_spawn
+
+        args = _args(storage_dir=str(tmp_path), spawn_id="ghost.spawn.999")
+        rc = cmd_cancel_spawn(args)
+        assert rc == 3
+        captured = capsys.readouterr()
+        # Not-found message goes to stderr so stdout pipes stay clean.
+        assert "not found" in captured.err.lower()
+
+    def test_acquire_lock_denied_exits_4(self, tmp_path, capsys):
+        from coordinationhub.cli_agents import cmd_register
+        from coordinationhub.cli_locks import cmd_acquire_lock
+
+        # Set up two agents; first holds the lock.
+        cmd_register(_args(storage_dir=str(tmp_path), agent_id="holder",
+                            parent_id=None, raw_ide_id=None))
+        cmd_register(_args(storage_dir=str(tmp_path), agent_id="challenger",
+                            parent_id=None, raw_ide_id=None))
+
+        common = dict(
+            storage_dir=str(tmp_path), document_path="contested.py",
+            lock_type="exclusive", ttl=60.0, force=False,
+            region_start=None, region_end=None,
+            retry=False, max_retries=0, backoff_ms=0, timeout_ms=0,
+        )
+        rc1 = cmd_acquire_lock(_args(agent_id="holder", **common))
+        assert rc1 == 0  # holder gets the lock
+
+        rc2 = cmd_acquire_lock(_args(agent_id="challenger", **common))
+        assert rc2 == 4  # challenger is denied → exit 4
+        err = capsys.readouterr().err
+        assert "FAILED" in err  # denial message on stderr, not stdout
+
+
 class TestStatusCommand:
     def test_status_json(self, tmp_path):
         args = _args(storage_dir=str(tmp_path), json_output=True)

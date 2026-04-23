@@ -396,7 +396,17 @@ DASHBOARD_JS = r"""
       var html = [];
       for (var i = 0; i < handoffs.length; i++) {
         var h = handoffs[i];
-        var toAgents = h.to_agents || (typeof h.to_agents === 'string' ? JSON.parse(h.to_agents) : []);
+        // T3.20: parse the to_agents field regardless of truthiness.
+        // Pre-fix ``h.to_agents || JSON.parse(...)`` short-circuited on
+        // a truthy string ('[..]') and left toAgents as the raw string
+        // — toAgents.join() later raised. Now parse strings, fall back
+        // to [] on malformed JSON, and leave arrays unchanged.
+        var toAgents = [];
+        if (Array.isArray(h.to_agents)) {
+          toAgents = h.to_agents;
+        } else if (typeof h.to_agents === 'string' && h.to_agents) {
+          try { toAgents = JSON.parse(h.to_agents); } catch (e) { toAgents = []; }
+        }
         var sat = h.satisfied ? 'completed' : (h.status || 'pending');
         var satCls = 'handoff-' + sat;
         html.push('<div class="handoff-item">');

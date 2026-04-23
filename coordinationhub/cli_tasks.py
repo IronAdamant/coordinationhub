@@ -59,8 +59,11 @@ def cmd_update_task_status(engine, args):
         _print_json(result)
     else:
         print(f"Task updated: {args.task_id} → {args.status}")
-        if getattr(args, "summary", None):
-            print(f"  Summary: {args.summary[:80]}{'...' if len(getattr(args, 'summary', '')) > 80 else ''}")
+        # T3.22: guard against args.summary being None (argparse sets the
+        # attr to None when the flag is unpassed; ``len(None)`` raised).
+        summary = getattr(args, "summary", None) or ""
+        if summary:
+            print(f"  Summary: {summary[:80]}{'...' if len(summary) > 80 else ''}")
 
 
 # ------------------------------------------------------------------ #

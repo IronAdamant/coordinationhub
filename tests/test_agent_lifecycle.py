@@ -122,6 +122,36 @@ class TestAgentRegistration:
         assert result["agents"][0]["stale"] is False
 
 
+class TestMaxAgentsCap:
+    """T3.9: register_agent rejects new rows when MAX_AGENTS is reached."""
+
+    def test_reject_at_cap(self, engine, monkeypatch):
+        from coordinationhub import agent_registry as _ar
+        monkeypatch.setattr(_ar, "MAX_AGENTS", 3)
+
+        engine.register_agent("a1", worktree_root="/tmp")
+        engine.register_agent("a2", worktree_root="/tmp")
+        engine.register_agent("a3", worktree_root="/tmp")
+
+        result = engine.register_agent("a4", worktree_root="/tmp")
+        assert result.get("registered") is False
+        assert result.get("reason") == "max_agents_reached"
+        assert result.get("max_agents") == 3
+
+    def test_reregister_of_existing_not_blocked(self, engine, monkeypatch):
+        """Hitting the cap doesn't block heartbeat-style re-registration
+        of existing agents (so stuck-at-cap hubs can still refresh).
+        """
+        from coordinationhub import agent_registry as _ar
+        monkeypatch.setattr(_ar, "MAX_AGENTS", 2)
+
+        engine.register_agent("a1", worktree_root="/tmp")
+        engine.register_agent("a2", worktree_root="/tmp")
+        # Re-register existing — still at cap, but allowed.
+        result = engine.register_agent("a1", worktree_root="/tmp")
+        assert result.get("registered") is not False
+
+
 class TestListAgentsLivenessFilter:
     """T1.17: active_only=True now defaults to filtering stale rows."""
 

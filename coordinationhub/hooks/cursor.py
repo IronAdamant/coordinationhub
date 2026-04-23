@@ -49,6 +49,11 @@ class CursorHook(BaseHook):
 
 
 def main() -> None:
+    # T3.1: mirror stdio_adapter.main's fail-open contract. Every stage
+    # (read, parse, construct hook, dispatch) is wrapped so an exception
+    # is logged and the IDE sees a silent success — never a traceback.
+    from coordinationhub.hooks.base import _log_hook_error
+
     try:
         raw = sys.stdin.read()
         if not raw.strip():
@@ -57,7 +62,16 @@ def main() -> None:
     except (json.JSONDecodeError, OSError):
         return
 
-    hook = CursorHook.from_cwd(event.get("cwd", "."))
+    # T3.1: construct the hook inside a guarded block. If the engine
+    # can't start (DB stuck, schema migration failure), log and exit
+    # silently — do NOT let the cascade hit the IDE.
+    hook = None
+    try:
+        hook = CursorHook.from_cwd(event.get("cwd", "."))
+    except Exception as exc:
+        _log_hook_error("cursor.hook_init", exc)
+        return
+
     try:
         hook_event = event.get("hook_event_name", "")
         tool_name = event.get("tool_name", "")
@@ -118,8 +132,17 @@ def main() -> None:
 
     except ImportError:
         pass
+    except Exception as exc:
+        # T3.1: any other failure is logged and swallowed so the IDE
+        # sees no traceback.
+        _log_hook_error(
+            f"cursor.{event.get('hook_event_name', 'unknown')}", exc,
+        )
     finally:
-        hook.close()
+        # T3.1: guard against UnboundLocalError when construction failed;
+        # hook.close() is itself fail-safe.
+        if hook is not None:
+            hook.close()
 
 
 if __name__ == "__main__":

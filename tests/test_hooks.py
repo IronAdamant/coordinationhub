@@ -937,3 +937,151 @@ class TestEventCapture:
         # Point HOME at a non-writable location — should silently no-op
         monkeypatch.setenv("HOME", "/nonexistent/readonly/path")
         _save_event_snapshot({"hook_event_name": "Test"})  # should not raise
+
+    def test_snapshot_filenames_unique_within_one_second(self, tmp_path, monkeypatch):
+        """T3.14: two events captured within the same second must land in
+        distinct files. Pre-fix the 1-second-resolution timestamp made
+        the second write overwrite the first.
+        """
+        from coordinationhub.hooks.stdio_adapter import _save_event_snapshot
+        monkeypatch.setattr("pathlib.Path.home", lambda: tmp_path)
+
+        for i in range(5):
+            _save_event_snapshot({
+                "hook_event_name": "PreToolUse",
+                "tool_name": "Write",
+                "session_id": f"sess-{i}",
+            })
+
+        snap_dir = tmp_path / ".coordinationhub" / "event_snapshots"
+        files = list(snap_dir.glob("PreToolUse_Write_*.json"))
+        assert len(files) == 5, (
+            f"expected 5 distinct snapshot files, got {len(files)}: {files}"
+        )
+
+
+class TestToolNameMatching:
+    """T3.15: PostToolUse dispatch uses exact tool-name allow-lists so
+    lookalike tool names (``unstele_reindexer``) don't match
+    ``stele_index`` handlers.
+    """
+
+    def test_stele_index_exact_match(self, hook_cwd):
+        """Real stele index tool name dispatches to handle_post_stele_index."""
+        from coordinationhub.hooks import stdio_adapter
+        event = {
+            "hook_event_name": "PostToolUse",
+            "tool_name": "mcp__stele-context__index",
+            "session_id": "s1",
+            "cwd": hook_cwd,
+            "tool_input": {"paths": []},
+        }
+        # Hook routes via tool_name exact-match; we don't need to check
+        # the actual dispatch, only that the check lives in _STELE_INDEX_TOOLS.
+        assert "mcp__stele-context__index" in stdio_adapter._STELE_INDEX_TOOLS
+
+    def test_lookalike_tool_name_not_matched(self):
+        """A tool whose name contains 'stele' and 'index' but isn't the
+        real one must NOT be in the allow-list.
+        """
+        from coordinationhub.hooks import stdio_adapter
+        assert "unstele_reindexer" not in stdio_adapter._STELE_INDEX_TOOLS
+        assert "steleIndex" not in stdio_adapter._STELE_INDEX_TOOLS
+        assert "trammel_claim_step_v2" not in stdio_adapter._TRAMMEL_CLAIM_TOOLS
+
+
+class TestHookFailOpen:
+    """T3.1-T3.4: hook contract is fail-open. Engine failures must never
+    propagate as tracebacks to the IDE; lock-acquire failures must fall
+    back to ``return None`` (no decision → IDE proceeds) not
+    ``return deny``.
+    """
+
+    def test_hook_with_failed_engine_is_a_no_op(self, hook_cwd, monkeypatch, tmp_path):
+        """If CoordinationEngine.start raises, BaseHook.__init__ records
+        the error and leaves self._engine = None. All downstream methods
+        must be safe no-ops.
+        """
+        from coordinationhub.hooks.base import BaseHook
+
+        monkeypatch.setattr("pathlib.Path.home", lambda: tmp_path)
+
+        class _BoomEngine:
+            def __init__(self, *a, **k):
+                pass
+
+            def start(self):
+                raise RuntimeError("DB unavailable")
+
+            def close(self):
+                pass
+
+        monkeypatch.setattr(
+            BaseHook, "_create_engine",
+            classmethod(lambda cls, project_root: _BoomEngine()),
+        )
+
+        hook = BaseHook(project_root=hook_cwd)
+        assert hook._engine is None
+
+        # None of these should raise even though engine is down
+        hook._ensure_registered("test-agent")
+        result = hook.on_pre_write("sess-1", "/tmp/x.py")
+        assert result is None  # fail-open
+        hook.close()  # must not raise
+
+        # Error was logged to the (redirected) hook.log
+        log = tmp_path / ".coordinationhub" / "hook.log"
+        assert log.exists()
+        content = log.read_text()
+        assert "engine_init" in content
+        assert "DB unavailable" in content
+
+    def test_lock_acquire_failure_fails_open(self, hook_cwd, monkeypatch, tmp_path):
+        """If acquire_lock raises, on_pre_write returns None — the IDE
+        proceeds without a lock decision, never sees a traceback.
+        """
+        from coordinationhub.hooks.base import BaseHook
+        monkeypatch.setattr("pathlib.Path.home", lambda: tmp_path)
+
+        hook = BaseHook(project_root=hook_cwd)
+        try:
+            def _boom(*a, **k):
+                raise RuntimeError("lock subsystem exploded")
+
+            monkeypatch.setattr(hook._engine, "acquire_lock", _boom)
+
+            result = hook.on_pre_write("sess-1", "/tmp/x.py")
+            assert result is None  # fail-open
+
+            log = tmp_path / ".coordinationhub" / "hook.log"
+            assert log.exists()
+            assert "on_pre_write" in log.read_text()
+        finally:
+            hook.close()
+
+    def test_cursor_hook_init_failure_logged_not_raised(self, tmp_path, monkeypatch):
+        """cursor.main() must catch hook-construction failures."""
+        from coordinationhub.hooks import cursor
+
+        monkeypatch.setattr("pathlib.Path.home", lambda: tmp_path)
+
+        class _CrashingCursor:
+            @classmethod
+            def from_cwd(cls, cwd):
+                raise RuntimeError("db_init_boom")
+
+        monkeypatch.setattr(cursor, "CursorHook", _CrashingCursor)
+        # Feed a minimal event
+        import io
+        monkeypatch.setattr(
+            "sys.stdin",
+            io.StringIO('{"hook_event_name": "SessionStart", "session_id": "s1"}'),
+        )
+        # Must not raise
+        cursor.main()
+
+        log = tmp_path / ".coordinationhub" / "hook.log"
+        assert log.exists()
+        assert "cursor.hook_init" in log.read_text()
+        assert "db_init_boom" in log.read_text()
