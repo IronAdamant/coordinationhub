@@ -245,8 +245,51 @@ def cmd_assess(engine, args):
         print(report)
     output_path = getattr(args, "output_path", None)
     if output_path:
-        Path(output_path).write_text(result.get("report", ""), encoding="utf-8")
-        print(f"Report written to {output_path}")
+        # T2.8: validate output path before writing so `--output /etc/passwd`
+        # or a symlink pointing outside the project root is rejected.
+        import sys as _sys
+        validated, error = _validate_assess_output(output_path, engine)
+        if error is not None:
+            print(f"assess: {error}", file=_sys.stderr)
+            return
+        validated.write_text(result.get("report", ""), encoding="utf-8")
+        print(f"Report written to {validated}")
+
+
+def _validate_assess_output(output_path: str, engine) -> tuple["Path | None", "str | None"]:
+    """T2.8: reject --output paths that are symlinks or escape project_root.
+
+    Returns ``(resolved_path, None)`` on success, ``(None, error_message)``
+    on rejection. Project root is read from ``engine._storage.project_root``;
+    when unset, only symlink rejection applies (can't prove containment).
+    """
+    p = Path(output_path)
+    # Reject symlinks at any existing path component.
+    check = p
+    while True:
+        if check.exists() and check.is_symlink():
+            return (None, f"refusing to write through symlink: {check}")
+        parent = check.parent
+        if parent == check:
+            break
+        check = parent
+    try:
+        resolved = p.resolve()
+    except (OSError, RuntimeError) as exc:
+        return (None, f"failed to resolve --output path: {exc}")
+    project_root = getattr(engine, "_storage", None)
+    project_root = getattr(project_root, "project_root", None)
+    if project_root is not None:
+        try:
+            resolved.relative_to(project_root.resolve())
+        except ValueError:
+            return (
+                None,
+                "--output must be inside the project root "
+                f"({project_root}); use --force-absolute to override this "
+                "constraint (not yet implemented)",
+            )
+    return (resolved, None)
 
 
 # ------------------------------------------------------------------ #

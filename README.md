@@ -248,7 +248,7 @@ coordinationhub/
   plugins/{assessment,dashboard,graph}/
                               — assessment runner, web dashboard, coordination graph
   data/monitor_skill.md       — installable Claude Code skill template
-  tests/                      — <!-- GEN:test-count -->558<!-- /GEN --> tests across 28 files
+  tests/                      — <!-- GEN:test-count -->580<!-- /GEN --> tests across 28 files
 ```
 
 ### Zero-dependency guarantee

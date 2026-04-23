@@ -2,15 +2,26 @@
 
 Exposes all CoordinationEngine tool methods over HTTP with JSON request/response.
 Endpoints:
-    GET  /tools   — list available tool schemas
-    GET  /health  — health check
-    POST /call    — invoke a tool by name with arguments
+    GET  /tools   — list available tool schemas (requires auth)
+    GET  /health  — health check (open)
+    POST /call    — invoke a tool by name with arguments (requires auth)
+    GET  /events  — SSE dashboard stream (requires auth)
+    GET  /api/dashboard-data — JSON snapshot (requires auth)
+    GET  /        — HTML dashboard (open, token embedded in response)
+
+T2.1: every endpoint except ``/health`` requires a ``Authorization: Bearer
+<token>`` header. The token is generated at server startup and exposed on
+``CoordinationHubMCPServer.auth_token``; the dashboard HTML embeds it in
+a ``<meta name="coordhub-token" ...>`` tag so the browser can read it and
+use it for same-origin fetches. Cross-origin requests are rejected via
+``Origin`` / ``Host`` header checks (DNS-rebinding defense).
 """
 
 from __future__ import annotations
 
 import json
 import logging
+import secrets
 import select
 import socket
 import threading
@@ -70,9 +81,76 @@ class MCPRequestHandler(BaseHTTPRequestHandler):
         """Send a JSON error response."""
         self._send_json({"error": message}, status=status)
 
+    # -- Auth & origin checks (T2.1) ---------------------------------- #
+
+    def _auth_ok(self) -> bool:
+        """Return True iff request carries the expected bearer token.
+
+        When ``self.server.auth_token`` is an empty string or None, auth
+        is disabled (legacy / test mode). When set, any non-``/health``
+        endpoint must present ``Authorization: Bearer <token>`` matching.
+        """
+        expected = getattr(self.server, "auth_token", None)
+        if not expected:
+            return True
+        header = self.headers.get("Authorization", "")
+        if not header.startswith("Bearer "):
+            return False
+        presented = header[len("Bearer ") :].strip()
+        # constant-time compare via secrets.compare_digest
+        return secrets.compare_digest(presented, expected)
+
+    def _origin_ok(self) -> bool:
+        """Reject cross-origin requests to defend against DNS rebinding.
+
+        When the ``Origin`` header is missing (same-origin browser fetch
+        or a command-line client) we accept. When present, it must match
+        the server's bound host+port. ``Host`` is also checked: if it's
+        a value not on the configured allow-list the request is denied.
+        """
+        expected = getattr(self.server, "allowed_origins", None)
+        if not expected:
+            return True
+        origin = self.headers.get("Origin")
+        if origin is not None and origin not in expected:
+            return False
+        host = self.headers.get("Host")
+        if host is not None:
+            allowed_hosts = getattr(self.server, "allowed_hosts", set())
+            if allowed_hosts and host not in allowed_hosts:
+                return False
+        return True
+
+    def _reject_unauthorized(self) -> None:
+        # Include a WWW-Authenticate hint so curl users know what's expected.
+        body = json.dumps({"error": "unauthorized"}).encode("utf-8")
+        self.send_response(401)
+        self.send_header("Content-Type", "application/json")
+        self.send_header("WWW-Authenticate", 'Bearer realm="coordinationhub"')
+        self.send_header("Content-Length", str(len(body)))
+        self.end_headers()
+        self.wfile.write(body)
+
+    def _reject_bad_origin(self) -> None:
+        body = json.dumps({"error": "origin not allowed"}).encode("utf-8")
+        self.send_response(403)
+        self.send_header("Content-Type", "application/json")
+        self.send_header("Content-Length", str(len(body)))
+        self.end_headers()
+        self.wfile.write(body)
+
     # -- GET endpoints ------------------------------------------------- #
 
+    _OPEN_PATHS = frozenset({"/health", "/"})
+
     def do_GET(self):  # noqa: N802
+        # T2.1: enforce origin + auth before dispatch. /health and / stay
+        # open so readiness probes and browser bootstrap work; /  embeds
+        # the token in the HTML response.
+        if not self._origin_ok():
+            return self._reject_bad_origin()
+        if self.path not in self._OPEN_PATHS and not self._auth_ok():
+            return self._reject_unauthorized()
         if self.path == "/":
             self._serve_dashboard()
         elif self.path == "/tools":
@@ -87,10 +165,34 @@ class MCPRequestHandler(BaseHTTPRequestHandler):
             self._send_error_json(404, f"Unknown endpoint: {self.path}")
 
     def _serve_dashboard(self) -> None:
-        """GET / — serve the HTML dashboard."""
-        body = DASHBOARD_HTML.encode("utf-8")
+        """GET / — serve the HTML dashboard.
+
+        T2.1: inject the bearer token as a ``<meta>`` tag so the browser
+        can read it (``document.querySelector('meta[name=coordhub-token]').content``)
+        and include it in ``Authorization: Bearer`` headers for
+        ``/api/dashboard-data`` and ``/events`` fetches. Also sets a
+        strict Content-Security-Policy so injected `<script>` tags
+        (e.g. via a reflected XSS through prompt text) can't call home.
+        """
+        token = getattr(self.server, "auth_token", "") or ""
+        # escape the token for safe HTML injection (alphanumerics only by
+        # construction, but be defensive).
+        import html as _html
+        meta = f'<meta name="coordhub-token" content="{_html.escape(token)}">'
+        html_text = DASHBOARD_HTML
+        if "<head>" in html_text:
+            html_text = html_text.replace("<head>", f"<head>\n{meta}", 1)
+        else:
+            html_text = meta + html_text
+        body = html_text.encode("utf-8")
         self.send_response(200)
         self.send_header("Content-Type", "text/html; charset=utf-8")
+        self.send_header(
+            "Content-Security-Policy",
+            "default-src 'self'; script-src 'self' 'unsafe-inline'; "
+            "style-src 'self' 'unsafe-inline'; connect-src 'self'",
+        )
+        self.send_header("X-Content-Type-Options", "nosniff")
         self.send_header("Content-Length", str(len(body)))
         self.end_headers()
         self.wfile.write(body)
@@ -106,7 +208,30 @@ class MCPRequestHandler(BaseHTTPRequestHandler):
         self.wfile.write(body)
 
     def _serve_sse_events(self) -> None:
-        """GET /events — Server-Sent Events stream of dashboard data every 5s."""
+        """GET /events — Server-Sent Events stream of dashboard data every 5s.
+
+        T2.6: enforces a per-remote-address cap on concurrent SSE
+        connections. Without this a single misbehaving page could open
+        unlimited streams (each holding a DB connection + thread). Cap
+        is tracked on ``self.server._sse_counts`` guarded by
+        ``self.server._sse_lock``.
+        """
+        # T2.6: per-IP cap on concurrent SSE streams.
+        client_ip = self.client_address[0]
+        max_per_ip = getattr(self.server, "sse_max_per_ip", 4)
+        sse_lock = getattr(self.server, "_sse_lock", None)
+        sse_counts = getattr(self.server, "_sse_counts", None)
+        if sse_lock is not None and sse_counts is not None:
+            with sse_lock:
+                if sse_counts.get(client_ip, 0) >= max_per_ip:
+                    body = json.dumps({"error": "too many SSE connections"}).encode("utf-8")
+                    self.send_response(429)
+                    self.send_header("Content-Type", "application/json")
+                    self.send_header("Content-Length", str(len(body)))
+                    self.end_headers()
+                    self.wfile.write(body)
+                    return
+                sse_counts[client_ip] = sse_counts.get(client_ip, 0) + 1
         self.send_response(200)
         self.send_header("Content-Type", "text/event-stream")
         self.send_header("Cache-Control", "no-cache")
@@ -115,17 +240,28 @@ class MCPRequestHandler(BaseHTTPRequestHandler):
         self.end_headers()
         # Set a socket timeout so dead connections don't hang forever
         self.request.settimeout(10.0)
-        while True:
-            try:
-                data = get_dashboard_data(self.server.engine._connect)
-                payload = json.dumps(data, default=str)
-                self.wfile.write(f"data: {payload}\n\n".encode("utf-8"))
-                self.wfile.flush()
-            except (socket.timeout, BrokenPipeError, ConnectionResetError):
-                break  # client disconnected or timed out
-            except Exception:
-                break  # any other error — terminate the stream
-            _time.sleep(5)
+        try:
+            while True:
+                try:
+                    data = get_dashboard_data(self.server.engine._connect)
+                    payload = json.dumps(data, default=str)
+                    self.wfile.write(f"data: {payload}\n\n".encode("utf-8"))
+                    self.wfile.flush()
+                except (socket.timeout, BrokenPipeError, ConnectionResetError):
+                    break  # client disconnected or timed out
+                except Exception:
+                    break  # any other error — terminate the stream
+                _time.sleep(5)
+        finally:
+            # T2.6: always decrement the per-IP counter so a slow client
+            # disconnect doesn't leak a slot.
+            if sse_lock is not None and sse_counts is not None:
+                with sse_lock:
+                    current = sse_counts.get(client_ip, 0) - 1
+                    if current <= 0:
+                        sse_counts.pop(client_ip, None)
+                    else:
+                        sse_counts[client_ip] = current
 
     def _handle_list_tools(self) -> None:
         """GET /tools — return all tool schemas."""
@@ -139,6 +275,11 @@ class MCPRequestHandler(BaseHTTPRequestHandler):
     # -- POST endpoints ------------------------------------------------ #
 
     def do_POST(self):  # noqa: N802
+        # T2.1: POST endpoints never public.
+        if not self._origin_ok():
+            return self._reject_bad_origin()
+        if not self._auth_ok():
+            return self._reject_unauthorized()
         if self.path == "/call":
             self._handle_call()
         else:
@@ -215,13 +356,36 @@ class MCPRequestHandler(BaseHTTPRequestHandler):
 # ------------------------------------------------------------------ #
 
 class ThreadedHTTPServer(ThreadingMixIn, HTTPServer):
-    """HTTPServer that handles each request in a new thread."""
+    """HTTPServer that handles each request in a new thread.
+
+    T2.1: carries the bearer ``auth_token`` and the ``allowed_origins`` /
+    ``allowed_hosts`` sets used by the handler's auth checks. Both may be
+    set to empty/None to disable the check (legacy / test mode).
+    """
 
     daemon_threads = True
     allow_reuse_address = True
 
-    def __init__(self, server_address: tuple[str, int], handler_class: type, engine: CoordinationEngine) -> None:
+    def __init__(
+        self,
+        server_address: tuple[str, int],
+        handler_class: type,
+        engine: CoordinationEngine,
+        auth_token: str | None = None,
+        allowed_origins: frozenset[str] | None = None,
+        allowed_hosts: frozenset[str] | None = None,
+        sse_max_per_ip: int = 4,
+    ) -> None:
         self.engine = engine
+        self.auth_token = auth_token or ""
+        self.allowed_origins = allowed_origins or frozenset()
+        self.allowed_hosts = allowed_hosts or frozenset()
+        # T2.6: per-IP SSE connection counters (dict[str, int]) guarded
+        # by a lock so the handler can increment/decrement safely from
+        # multiple daemon threads.
+        self.sse_max_per_ip = sse_max_per_ip
+        self._sse_lock = threading.Lock()
+        self._sse_counts: dict[str, int] = {}
         super().__init__(server_address, handler_class)
 
 
@@ -249,6 +413,8 @@ class CoordinationHubMCPServer:
         namespace: str = "hub",
         host: str = "127.0.0.1",
         port: int = 9877,
+        auth_token: str | None = None,
+        disable_auth: bool = False,
     ) -> None:
         self._host = host
         self._port = port
@@ -257,8 +423,21 @@ class CoordinationHubMCPServer:
             project_root=Path(project_root) if project_root else None,
             namespace=namespace,
         )
+        # T2.1: generate a random bearer token at startup unless the
+        # caller explicitly opts out of auth (disable_auth=True) or
+        # supplies their own (auth_token="..."). Token is 32 hex chars
+        # — cryptographically random via secrets.token_hex.
+        if disable_auth:
+            self._auth_token = ""
+        else:
+            self._auth_token = auth_token if auth_token is not None else secrets.token_hex(16)
         self._httpd: ThreadedHTTPServer | None = None
         self._thread: threading.Thread | None = None
+
+    @property
+    def auth_token(self) -> str:
+        """Return the bearer token required by clients, or ''."""
+        return self._auth_token
 
     # -- Public API ---------------------------------------------------- #
 
@@ -277,13 +456,40 @@ class CoordinationHubMCPServer:
         """
         self._engine.start()
 
+        # Compute the allowed Origin/Host pair up-front so the handler
+        # can reject DNS-rebinding attacks before dispatching. We know
+        # the host/port after the HTTPServer is constructed, so compute
+        # them lazily inside build_allowed below.
         self._httpd = ThreadedHTTPServer(
             (self._host, self._port), MCPRequestHandler, self._engine,
+            auth_token=self._auth_token,
+            # Origins/hosts are set below once the port is final.
         )
         # Update port in case 0 was passed (OS-assigned)
         self._port = self._httpd.server_address[1]
 
-        logger.info("CoordinationHub MCP server listening on %s", self.get_url())
+        # T2.1: Origin set. The browser sends Origin "http://127.0.0.1:PORT",
+        # so allow exactly that. Host header value is "{host}:{port}".
+        host_port = f"{self._host}:{self._port}"
+        self._httpd.allowed_origins = frozenset({
+            f"http://{host_port}",
+            f"http://localhost:{self._port}" if self._host == "127.0.0.1" else None,
+        } - {None})
+        self._httpd.allowed_hosts = frozenset({
+            host_port,
+            f"localhost:{self._port}" if self._host == "127.0.0.1" else None,
+        } - {None})
+
+        if self._auth_token:
+            logger.info(
+                "CoordinationHub MCP server listening on %s (auth enabled)",
+                self.get_url(),
+            )
+        else:
+            logger.warning(
+                "CoordinationHub MCP server listening on %s (AUTH DISABLED)",
+                self.get_url(),
+            )
 
         if blocking:
             try:

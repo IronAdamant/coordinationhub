@@ -19,12 +19,19 @@ from coordinationhub.mcp_server import (
 
 @pytest.fixture
 def server(tmp_path):
-    """Yield a started non-blocking server; stop it on teardown."""
+    """Yield a started non-blocking server; stop it on teardown.
+
+    T2.1: auth is DISABLED for this fixture so the bulk of the
+    endpoint tests can continue to use bare _get / _post. Auth itself
+    is covered by dedicated tests in ``TestAuthEnforcement`` below
+    which builds its own auth-enabled server.
+    """
     srv = CoordinationHubMCPServer(
         storage_dir=str(tmp_path),
         project_root=str(tmp_path),
         host="127.0.0.1",
         port=0,  # OS-assigned
+        disable_auth=True,
     )
     srv.start(blocking=False)
     # Wait briefly for the server thread to start listening
@@ -33,16 +40,34 @@ def server(tmp_path):
     srv.stop()
 
 
-def _get(url: str) -> dict:
-    with urllib.request.urlopen(url, timeout=5) as resp:
+@pytest.fixture
+def auth_server(tmp_path):
+    """Auth-enabled server for T2.1 auth tests."""
+    srv = CoordinationHubMCPServer(
+        storage_dir=str(tmp_path),
+        project_root=str(tmp_path),
+        host="127.0.0.1",
+        port=0,
+    )
+    srv.start(blocking=False)
+    time.sleep(0.1)
+    yield srv
+    srv.stop()
+
+
+def _get(url: str, token: str | None = None) -> dict:
+    headers = {"Authorization": f"Bearer {token}"} if token else {}
+    req = urllib.request.Request(url, headers=headers, method="GET")
+    with urllib.request.urlopen(req, timeout=5) as resp:
         return json.loads(resp.read().decode("utf-8"))
 
 
-def _post(url: str, data: dict) -> dict:
+def _post(url: str, data: dict, token: str | None = None) -> dict:
     body = json.dumps(data).encode("utf-8")
-    req = urllib.request.Request(
-        url, data=body, headers={"Content-Type": "application/json"}, method="POST"
-    )
+    headers = {"Content-Type": "application/json"}
+    if token:
+        headers["Authorization"] = f"Bearer {token}"
+    req = urllib.request.Request(url, data=body, headers=headers, method="POST")
     with urllib.request.urlopen(req, timeout=5) as resp:
         return json.loads(resp.read().decode("utf-8"))
 
@@ -203,6 +228,129 @@ class TestSSE:
             # Read a few bytes to confirm data is flowing
             chunk = resp.read(20)
             assert chunk.startswith(b"data: ")
+
+
+class TestAuthEnforcement:
+    """T2.1: auth-enabled server rejects unauthenticated requests.
+
+    Uses the dedicated ``auth_server`` fixture so the bulk of the
+    endpoint tests (which use the ``server`` fixture with auth disabled)
+    don't need to thread tokens through.
+    """
+
+    def test_missing_token_returns_401(self, auth_server):
+        url = f"{auth_server.get_url()}/api/dashboard-data"
+        with pytest.raises(urllib.error.HTTPError) as exc_info:
+            urllib.request.urlopen(url, timeout=5)
+        assert exc_info.value.code == 401
+        assert exc_info.value.headers.get("WWW-Authenticate", "").startswith("Bearer")
+
+    def test_wrong_token_returns_401(self, auth_server):
+        req = urllib.request.Request(
+            f"{auth_server.get_url()}/api/dashboard-data",
+            headers={"Authorization": "Bearer wrong-token"},
+        )
+        with pytest.raises(urllib.error.HTTPError) as exc_info:
+            urllib.request.urlopen(req, timeout=5)
+        assert exc_info.value.code == 401
+
+    def test_correct_token_accepted(self, auth_server):
+        result = _get(
+            f"{auth_server.get_url()}/api/dashboard-data",
+            token=auth_server.auth_token,
+        )
+        assert isinstance(result, dict)
+
+    def test_health_endpoint_stays_open(self, auth_server):
+        """Health is a liveness probe — must work without auth."""
+        result = _get(f"{auth_server.get_url()}/health")
+        assert result == {"status": "ok"}
+
+    def test_dashboard_html_stays_open(self, auth_server):
+        """/ serves the HTML bootstrap; browser reads the token from it."""
+        with urllib.request.urlopen(f"{auth_server.get_url()}/", timeout=5) as resp:
+            html = resp.read().decode("utf-8")
+            assert "coordhub-token" in html
+            assert auth_server.auth_token in html
+            # CSP header set (T2.1 defense against reflected XSS)
+            csp = resp.headers.get("Content-Security-Policy")
+            assert csp and "default-src 'self'" in csp
+
+    def test_post_call_requires_auth(self, auth_server):
+        with pytest.raises(urllib.error.HTTPError) as exc_info:
+            _post(
+                f"{auth_server.get_url()}/call",
+                {"tool": "health", "arguments": {}},
+            )
+        assert exc_info.value.code == 401
+
+    def test_cross_origin_request_rejected(self, auth_server):
+        """DNS-rebinding defense: a request whose Origin header points
+        to a different host is rejected with 403 before auth runs.
+        """
+        url = f"{auth_server.get_url()}/api/dashboard-data"
+        req = urllib.request.Request(
+            url,
+            headers={
+                "Authorization": f"Bearer {auth_server.auth_token}",
+                "Origin": "http://evil.example",
+            },
+        )
+        with pytest.raises(urllib.error.HTTPError) as exc_info:
+            urllib.request.urlopen(req, timeout=5)
+        assert exc_info.value.code == 403
+
+    def test_same_origin_request_accepted(self, auth_server):
+        """A request with Origin matching the bound URL is accepted."""
+        url = f"{auth_server.get_url()}/api/dashboard-data"
+        req = urllib.request.Request(
+            url,
+            headers={
+                "Authorization": f"Bearer {auth_server.auth_token}",
+                "Origin": auth_server.get_url(),
+            },
+        )
+        with urllib.request.urlopen(req, timeout=5) as resp:
+            assert resp.status == 200
+
+
+class TestPromptRedaction:
+    """T2.1: prompts redacted before storage in agents.current_task."""
+
+    def test_api_keys_redacted(self):
+        from coordinationhub.hooks.base import _redact_prompt
+        result = _redact_prompt("my key is sk-ant-api03-1234567890abcdefghij please use it")
+        assert "sk-ant-api03-1234567890" not in result
+        assert "[REDACTED_API_KEY]" in result
+
+    def test_bearer_tokens_redacted(self):
+        from coordinationhub.hooks.base import _redact_prompt
+        result = _redact_prompt("send header Bearer abc123.xyz789 to the API")
+        assert "Bearer [REDACTED]" in result
+
+    def test_github_pat_redacted(self):
+        from coordinationhub.hooks.base import _redact_prompt
+        result = _redact_prompt("my token ghp_1234567890abcdefghij is public")
+        assert "ghp_1234567890abcdefghij" not in result
+        assert "[REDACTED_GH_PAT]" in result
+
+    def test_email_redacted(self):
+        from coordinationhub.hooks.base import _redact_prompt
+        result = _redact_prompt("contact alice@example.com about this")
+        assert "alice@example.com" not in result
+        assert "[REDACTED_EMAIL]" in result
+
+    def test_long_hex_redacted(self):
+        from coordinationhub.hooks.base import _redact_prompt
+        digest = "a" * 32
+        result = _redact_prompt(f"hash is {digest}")
+        assert digest not in result
+        assert "[REDACTED_HEX]" in result
+
+    def test_normal_text_passes_through(self):
+        from coordinationhub.hooks.base import _redact_prompt
+        text = "Please refactor the authentication flow in src/auth.py"
+        assert _redact_prompt(text) == text
 
 
 class TestServerLifecycle:

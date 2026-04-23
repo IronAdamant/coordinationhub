@@ -67,6 +67,7 @@ class _TestServer:
             namespace="hub",
             host="127.0.0.1",
             port=0,  # auto-assign
+            disable_auth=True,  # T2.1: this test uses raw HTTP without tokens
         )
         self.server.start(blocking=False)
         self.port = self.server.get_port()

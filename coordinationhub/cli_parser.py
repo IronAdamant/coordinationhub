@@ -32,6 +32,13 @@ def _add_serve(sub, shared) -> None:
     p = sub.add_parser("serve", parents=[shared], help="Start HTTP MCP server")
     p.add_argument("--port", type=int, default=9877)
     p.add_argument("--host", default="127.0.0.1")
+    # T2.1: auth controls. Default is enabled with a freshly generated
+    # token printed to stdout on start. --auth-token pins a specific
+    # token; --no-auth disables the check entirely (local-trust only).
+    p.add_argument("--auth-token", dest="auth_token", default=None,
+                   help="Bearer token to require. Default: randomly generated.")
+    p.add_argument("--no-auth", action="store_true", dest="no_auth",
+                   help="Disable bearer-token auth (local-trust only).")
 
     sub.add_parser("serve-mcp", parents=[shared], help="Start MCP server (stdio mode)")
 
@@ -40,6 +47,10 @@ def _add_serve(sub, shared) -> None:
     p.add_argument("--host", default="127.0.0.1")
     p.add_argument("--no-browser", action="store_true", dest="no_browser",
                    help="Don't open the browser automatically")
+    p.add_argument("--auth-token", dest="auth_token", default=None,
+                   help="Bearer token to require. Default: randomly generated.")
+    p.add_argument("--no-auth", action="store_true", dest="no_auth",
+                   help="Disable bearer-token auth (local-trust only).")
 
     sub.add_parser("status", parents=[shared], help="Get coordination system status summary")
 

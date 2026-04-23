@@ -78,6 +78,135 @@ class TestMergeHooks:
         assert json.dumps(merged1, sort_keys=True) == json.dumps(merged2, sort_keys=True)
 
 
+class TestMergeHooksAntiAccumulation:
+    """T2.7: repeated init runs must not accumulate stale coordinationhub
+    matcher blocks. Pre-fix a drift in the matcher string (e.g. adding a
+    new event, renaming a matcher) left the old block behind.
+    """
+
+    def test_stale_hub_matcher_block_is_replaced(self):
+        existing = {
+            "PreToolUse": [
+                {
+                    "matcher": "Write",  # old, narrower matcher
+                    "hooks": [{
+                        "type": "command",
+                        "command": "python3 -m coordinationhub.hooks.stdio_adapter",
+                        "timeout": 5,
+                    }],
+                },
+            ],
+        }
+        new = _fill_hook_command(_HOOKS_CONFIG, "/usr/bin/python3")
+        merged = _merge_hooks(existing, new)
+        pre_tool = merged["PreToolUse"]
+        matchers = sorted(m["matcher"] for m in pre_tool)
+        # Old "Write" block (containing a coordinationhub command) is gone;
+        # only the fresh Agent / Write|Edit blocks remain.
+        assert "Write" not in matchers
+        assert "Write|Edit" in matchers
+        assert "Agent" in matchers
+
+    def test_accumulated_duplicate_blocks_are_collapsed(self):
+        """A pre-fix settings file that already had two duplicate
+        CoordinationHub matcher blocks in SessionStart (from two
+        overlapping init runs) must come out with exactly one.
+        """
+        existing = {
+            "SessionStart": [
+                {"matcher": "", "hooks": [{
+                    "type": "command",
+                    "command": "python3 -m coordinationhub.hooks.stdio_adapter",
+                }]},
+                {"matcher": "", "hooks": [{
+                    "type": "command",
+                    "command": "python3 -m coordinationhub.hooks.stdio_adapter",
+                }]},
+            ],
+        }
+        new = _fill_hook_command(_HOOKS_CONFIG, "/usr/bin/python3")
+        merged = _merge_hooks(existing, new)
+        assert len(merged["SessionStart"]) == 1
+
+    def test_preserves_user_matcher_blocks_with_same_matcher_string(self):
+        """A user's own hook on the same matcher as ours must not be
+        removed — we only drop blocks that reference coordinationhub.
+        """
+        existing = {
+            "SessionStart": [
+                {"matcher": "", "hooks": [{
+                    "type": "command",
+                    "command": "my-thing",
+                }]},
+            ],
+        }
+        new = _fill_hook_command(_HOOKS_CONFIG, "/usr/bin/python3")
+        merged = _merge_hooks(existing, new)
+        # User's block survives; our block is appended separately.
+        commands = [
+            h["command"]
+            for block in merged["SessionStart"]
+            for h in block.get("hooks", [])
+        ]
+        assert "my-thing" in commands
+        assert any("coordinationhub" in c for c in commands)
+
+
+class TestInitSettingsSafety:
+    """T2.7: cmd_init backs up settings.json before writing and aborts
+    rather than overwriting a file it can't parse.
+    """
+
+    def test_corrupt_settings_aborts_without_clobber(self, tmp_path, monkeypatch, capsys):
+        from coordinationhub import cli_setup
+
+        settings_path = tmp_path / ".claude" / "settings.json"
+        settings_path.parent.mkdir(parents=True)
+        corrupt = "{this is : NOT json]"
+        settings_path.write_text(corrupt)
+
+        monkeypatch.setattr(cli_setup, "_CLAUDE_SETTINGS_PATH", settings_path)
+        monkeypatch.setattr(cli_setup, "_NEUTRAL_HOOKS_PATH", tmp_path / ".coordinationhub" / "hooks.json")
+        monkeypatch.setattr("pathlib.Path.home", lambda: tmp_path)
+        monkeypatch.setattr(cli_setup, "run_doctor", lambda: [])
+        monkeypatch.setattr(cli_setup, "_install_ide_hooks", lambda *a, **k: None)
+
+        from types import SimpleNamespace
+        args = SimpleNamespace(
+            auto_dashboard=False, monitor_skill=False,
+        )
+        cli_setup.cmd_init(args)
+
+        # File contents unchanged — we refused to overwrite.
+        assert settings_path.read_text() == corrupt
+        # A .bak file exists alongside the original.
+        backups = list(settings_path.parent.glob("settings.json.bak.*"))
+        assert backups, f"expected a backup in {settings_path.parent}"
+
+        captured = capsys.readouterr()
+        assert "not valid JSON" in captured.err or "not valid JSON" in captured.out
+
+    def test_backup_created_on_successful_run(self, tmp_path, monkeypatch):
+        from coordinationhub import cli_setup
+
+        settings_path = tmp_path / ".claude" / "settings.json"
+        settings_path.parent.mkdir(parents=True)
+        settings_path.write_text(json.dumps({"hooks": {}}))
+
+        monkeypatch.setattr(cli_setup, "_CLAUDE_SETTINGS_PATH", settings_path)
+        monkeypatch.setattr(cli_setup, "_NEUTRAL_HOOKS_PATH", tmp_path / ".coordinationhub" / "hooks.json")
+        monkeypatch.setattr("pathlib.Path.home", lambda: tmp_path)
+        monkeypatch.setattr(cli_setup, "run_doctor", lambda: [])
+        monkeypatch.setattr(cli_setup, "_install_ide_hooks", lambda *a, **k: None)
+
+        from types import SimpleNamespace
+        args = SimpleNamespace(auto_dashboard=False, monitor_skill=False)
+        cli_setup.cmd_init(args)
+
+        backups = list(settings_path.parent.glob("settings.json.bak.*"))
+        assert backups, "expected a backup file to be created on init"
+
+
 class TestFillHookCommand:
     def test_fills_all_events(self):
         filled = _fill_hook_command(_HOOKS_CONFIG, "/usr/bin/python3")

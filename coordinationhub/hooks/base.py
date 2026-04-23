@@ -45,6 +45,41 @@ def _sanitize_session_id(session_id: str | None) -> str:
     return digest[:12]
 
 
+# T2.1: prompts are stored into agents.current_task and then surfaced on
+# the dashboard (exposed over HTTP to any local process). Unfiltered
+# prompt text often contains API keys, tokens, PII, or internal URLs.
+# Redact the common credential-shaped strings before storing.
+_REDACT_PATTERNS: tuple[tuple[re.Pattern[str], str], ...] = (
+    # Anthropic API keys (sk-ant-...) and OpenAI keys (sk-...) and
+    # generic hex/base64 tokens passed as Bearer.
+    (re.compile(r"\bsk-[A-Za-z0-9_\-]{16,}\b"), "[REDACTED_API_KEY]"),
+    (re.compile(r"\bBearer\s+[A-Za-z0-9._\-]+\b", re.IGNORECASE), "Bearer [REDACTED]"),
+    # GitHub personal access tokens
+    (re.compile(r"\bghp_[A-Za-z0-9]{20,}\b"), "[REDACTED_GH_PAT]"),
+    (re.compile(r"\bgithub_pat_[A-Za-z0-9_]{20,}\b"), "[REDACTED_GH_PAT]"),
+    # AWS-looking keys
+    (re.compile(r"\bAKIA[0-9A-Z]{16}\b"), "[REDACTED_AWS_KEY_ID]"),
+    # Email addresses
+    (re.compile(r"\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}\b"), "[REDACTED_EMAIL]"),
+    # Long all-lowercase hex strings (likely credentials or hashes)
+    (re.compile(r"\b[a-f0-9]{32,}\b"), "[REDACTED_HEX]"),
+)
+
+
+def _redact_prompt(text: str) -> str:
+    """Return *text* with credential-shaped substrings replaced.
+
+    T2.1: applied to prompts before they land in ``current_task`` so the
+    dashboard can't accidentally expose secrets that happened to appear
+    in a user prompt. Conservative — only matches well-known patterns;
+    unknown shapes pass through unchanged.
+    """
+    redacted = text
+    for pattern, placeholder in _REDACT_PATTERNS:
+        redacted = pattern.sub(placeholder, redacted)
+    return redacted
+
+
 class BaseHook:
     """IDE-agnostic hook protocol for CoordinationHub."""
 
@@ -157,6 +192,10 @@ class BaseHook:
         prompt = prompt.strip()
         if not prompt:
             return
+        # T2.1: redact credential-shaped substrings BEFORE truncating so
+        # a secret living past the 120-char cutoff can't sneak through
+        # at full length.
+        prompt = _redact_prompt(prompt)
         summary = prompt if len(prompt) <= 120 else prompt[:117] + "..."
         summary = " ".join(summary.split())
         agent_id = self.session_agent_id(session_id)

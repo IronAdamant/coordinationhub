@@ -447,3 +447,59 @@ class TestStatusCommand:
         data = json.loads(buf.getvalue())
         assert "active_agents" in data
         assert "active_locks" in data
+
+
+class TestAssessOutputPathValidation:
+    """T2.8: cmd_assess --output must reject symlinks and paths outside
+    the project root so ``--output /etc/passwd`` can't land a file on
+    disk.
+    """
+
+    def _make_engine(self, tmp_path):
+        storage = tmp_path / "_storage"
+        storage.mkdir()
+        return CoordinationEngine(
+            storage_dir=str(storage), project_root=tmp_path,
+        )
+
+    def test_rejects_output_path_outside_project_root(self, tmp_path, capsys):
+        from coordinationhub.cli_vis import _validate_assess_output
+
+        eng = self._make_engine(tmp_path)
+        eng.start()
+        try:
+            outside = tmp_path.parent / "escape.md"
+            path, error = _validate_assess_output(str(outside), eng)
+            assert path is None
+            assert "inside the project root" in error
+        finally:
+            eng.close()
+
+    def test_rejects_symlinked_output_path(self, tmp_path):
+        from coordinationhub.cli_vis import _validate_assess_output
+
+        eng = self._make_engine(tmp_path)
+        eng.start()
+        try:
+            real = tmp_path / "real.md"
+            real.write_text("")
+            link = tmp_path / "link.md"
+            link.symlink_to(real)
+            path, error = _validate_assess_output(str(link), eng)
+            assert path is None
+            assert "symlink" in error.lower()
+        finally:
+            eng.close()
+
+    def test_accepts_normal_path_inside_project(self, tmp_path):
+        from coordinationhub.cli_vis import _validate_assess_output
+
+        eng = self._make_engine(tmp_path)
+        eng.start()
+        try:
+            target = tmp_path / "report.md"
+            path, error = _validate_assess_output(str(target), eng)
+            assert error is None
+            assert path == target.resolve()
+        finally:
+            eng.close()

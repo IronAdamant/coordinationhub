@@ -11,11 +11,21 @@ from .cli_utils import print_json as _print_json, command as _command
 
 def cmd_serve(args):
     from .mcp_server import CoordinationHubMCPServer
+    # T2.1: opt-in --no-auth for local-trust scenarios (e.g.
+    # multiprocess tests). Default is auth enabled with a random token.
+    disable_auth = getattr(args, "no_auth", False)
+    auth_token = getattr(args, "auth_token", None)
     server = CoordinationHubMCPServer(
         storage_dir=args.storage_dir, project_root=args.project_root,
         namespace=getattr(args, "namespace", "hub"), host=args.host, port=args.port,
+        auth_token=auth_token, disable_auth=disable_auth,
     )
     print(f"Starting CoordinationHub HTTP server on {server.get_url()}")
+    if server.auth_token:
+        print(f"  Auth token: {server.auth_token}")
+        print(f"  Use: Authorization: Bearer {server.auth_token}")
+    else:
+        print("  Auth: DISABLED (local-trust mode)")
     try:
         server.start(blocking=True)
     finally:

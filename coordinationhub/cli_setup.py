@@ -65,34 +65,62 @@ def _fill_hook_command(config: dict, python_path: str) -> dict:
     return filled
 
 
+def _backup_settings(path: Path) -> Path:
+    """Copy *path* to ``{path}.bak.YYYYMMDD-HHMMSS`` and return the backup.
+
+    T2.7: called before any overwrite of ``~/.claude/settings.json`` so
+    the user never loses their pre-init state silently.
+    """
+    stamp = time.strftime("%Y%m%d-%H%M%S")
+    backup = path.with_suffix(path.suffix + f".bak.{stamp}")
+    try:
+        backup.write_bytes(path.read_bytes())
+    except OSError:
+        # Best-effort; a failed backup is not fatal, but we can't offer
+        # recovery then. Continue so the init can still fix the config.
+        pass
+    return backup
+
+
 def _merge_hooks(existing: dict, new: dict) -> dict:
     """Merge new CoordinationHub hooks into existing hook config.
 
-    For each event type, checks if a CoordinationHub hook already exists
-    (by checking if the command references coordinationhub). If so, updates
-    the command. If not, appends the new matcher block.
+    T2.7: rewritten to be repeatable-run-safe. The pre-fix merge could
+    (a) leave behind stale CoordinationHub matcher blocks from prior
+    init runs because it only ever updated the first matcher whose
+    ``matcher`` string matched, and (b) accumulate duplicate matcher
+    blocks with the same matcher string when no existing block happened
+    to already contain a ``coordinationhub`` command.
+
+    New semantics, per event:
+      1. Drop every existing matcher block whose hooks list contains ANY
+         command referencing ``coordinationhub``. Non-CoordinationHub
+         matcher blocks (user's own hooks) are preserved untouched.
+      2. Append the fresh matcher blocks from ``new``.
+
+    This means running ``coordinationhub init`` repeatedly always leaves
+    exactly one CoordinationHub matcher block per (event, matcher_string)
+    pair — no accumulation, no drift.
     """
-    merged = dict(existing)
+    merged: dict = {}
+    for event_name, existing_matchers in existing.items():
+        if event_name in new:
+            # Remove any existing block that references coordinationhub;
+            # keep user-owned blocks.
+            preserved = [
+                em for em in existing_matchers
+                if not any(
+                    "coordinationhub" in hook.get("command", "")
+                    for hook in em.get("hooks", [])
+                )
+            ]
+            merged[event_name] = preserved
+        else:
+            merged[event_name] = list(existing_matchers)
     for event_name, new_matchers in new.items():
-        if event_name not in merged:
-            merged[event_name] = new_matchers
-            continue
-
-        existing_matchers = merged[event_name]
-        for new_matcher in new_matchers:
-            found = False
-            for em in existing_matchers:
-                if em.get("matcher") == new_matcher["matcher"]:
-                    for hook in em.get("hooks", []):
-                        if "coordinationhub" in hook.get("command", ""):
-                            hook["command"] = new_matcher["hooks"][0]["command"]
-                            found = True
-                            break
-                if found:
-                    break
-            if not found:
-                existing_matchers.append(new_matcher)
-
+        bucket = merged.setdefault(event_name, [])
+        for matcher_block in new_matchers:
+            bucket.append(matcher_block)
     return merged
 
 
@@ -131,13 +159,36 @@ def cmd_init(args):
 
     # Also write to IDE-specific settings if present
     _CLAUDE_SETTINGS_PATH.parent.mkdir(parents=True, exist_ok=True)
+    # T2.7: on JSONDecodeError abort with a clear error and point the
+    # user at their file rather than silently overwriting a file we
+    # couldn't parse.
     if _CLAUDE_SETTINGS_PATH.exists():
         try:
-            settings = json.loads(_CLAUDE_SETTINGS_PATH.read_text(encoding="utf-8"))
-        except (json.JSONDecodeError, OSError):
-            settings = {}
+            raw = _CLAUDE_SETTINGS_PATH.read_text(encoding="utf-8")
+            settings = json.loads(raw) if raw.strip() else {}
+        except json.JSONDecodeError as exc:
+            backup = _backup_settings(_CLAUDE_SETTINGS_PATH)
+            print(
+                f"ERROR: {_CLAUDE_SETTINGS_PATH} is not valid JSON ({exc}). "
+                f"A backup was saved to {backup}. Refusing to overwrite — "
+                f"fix the file by hand and re-run `coordinationhub init`.",
+                file=sys.stderr,
+            )
+            return
+        except OSError as exc:
+            print(
+                f"ERROR: could not read {_CLAUDE_SETTINGS_PATH}: {exc}",
+                file=sys.stderr,
+            )
+            return
     else:
         settings = {}
+
+    # T2.7: back up the existing settings before we rewrite them so a
+    # user whose file was silently changed can recover.
+    if _CLAUDE_SETTINGS_PATH.exists():
+        backup = _backup_settings(_CLAUDE_SETTINGS_PATH)
+        print(f"Existing settings backed up to {backup}")
 
     existing_hooks = settings.get("hooks", {})
     merged = _merge_hooks(existing_hooks, hooks_config)
@@ -176,11 +227,25 @@ def _install_auto_dashboard_hook(python_path: str) -> None:
 
     Idempotent — if the hook already references ``auto-start-dashboard``,
     the command string is updated in place rather than duplicated.
+
+    T2.7: wraps ``json.loads`` in a try/except. Previously a corrupt
+    ``~/.claude/settings.json`` would propagate as an uncaught
+    ``JSONDecodeError`` out of ``cmd_init`` — now the user sees a clear
+    message and the file is left untouched.
     """
     cmd = _AUTO_DASHBOARD_CMD_TEMPLATE.format(python=python_path)
     if not _CLAUDE_SETTINGS_PATH.exists():
         return
-    settings = json.loads(_CLAUDE_SETTINGS_PATH.read_text(encoding="utf-8"))
+    try:
+        raw = _CLAUDE_SETTINGS_PATH.read_text(encoding="utf-8")
+        settings = json.loads(raw) if raw.strip() else {}
+    except (json.JSONDecodeError, OSError) as exc:
+        print(
+            f"WARNING: could not install auto-dashboard hook "
+            f"({_CLAUDE_SETTINGS_PATH} is unreadable: {exc}). Skipping.",
+            file=sys.stderr,
+        )
+        return
     hooks = settings.setdefault("hooks", {})
     session_start = hooks.setdefault("SessionStart", [])
 

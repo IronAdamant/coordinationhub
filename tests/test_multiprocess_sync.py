@@ -31,7 +31,8 @@ def server_url(tmp_path_factory: pytest.TempPathFactory):
     tmp_path = tmp_path_factory.mktemp("multiprocess_sync")
     port = _find_free_port()
     proc = subprocess.Popen(
-        ["python", "-m", "coordinationhub.cli", "serve", "--port", str(port)],
+        ["python", "-m", "coordinationhub.cli", "serve",
+         "--port", str(port), "--no-auth"],  # T2.1: disable auth for this test
         cwd=str(Path(__file__).resolve().parent.parent),
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
