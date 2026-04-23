@@ -30,11 +30,16 @@ class LockingMixin:
     - ``DEFAULT_TTL``
     """
 
-    DEFAULT_TTL = 300.0
+    # T6.23: renamed from DEFAULT_TTL to disambiguate from
+    # LeaseMixin.DEFAULT_TTL (10s). Both attrs would land on the same
+    # engine via multiple inheritance. DEFAULT_TTL kept as a back-compat
+    # alias.
+    DEFAULT_LOCK_TTL = 300.0
+    DEFAULT_TTL = DEFAULT_LOCK_TTL  # legacy alias
 
     def acquire_lock(
         self, document_path: str, agent_id: str,
-        lock_type: str = "exclusive", ttl: float = DEFAULT_TTL, force: bool = False,
+        lock_type: str = "exclusive", ttl: float = DEFAULT_LOCK_TTL, force: bool = False,
         region_start: int | None = None, region_end: int | None = None,
         retry: bool = False, max_retries: int = 5, backoff_ms: float = 100.0, timeout_ms: float = 5000.0,
     ) -> dict[str, Any]:
@@ -310,7 +315,7 @@ class LockingMixin:
             return {"released": True, "count": len(owned)}
 
     def refresh_lock(
-        self, document_path: str, agent_id: str, ttl: float = DEFAULT_TTL,
+        self, document_path: str, agent_id: str, ttl: float = DEFAULT_LOCK_TTL,
         region_start: int | None = None, region_end: int | None = None,
     ) -> dict[str, Any]:
         norm_path = normalize_path(document_path, self._storage.project_root)

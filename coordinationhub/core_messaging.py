@@ -50,13 +50,13 @@ class MessagingMixin:
             )
             return result
         if action == "get":
+            # T6.24: don't auto-ack on read. Acknowledgement must be an
+            # explicit action (manage_messages action='ack_broadcast' or
+            # the dedicated acknowledge_broadcast engine method); a
+            # crash between fetching the message and acting on it no
+            # longer produces a ghost-ack. Callers that want the old
+            # implicit-ack semantics can opt in via auto_ack=True.
             messages = _msg.get_messages(self._connect, agent_id, unread_only, limit)
-            for msg in messages:
-                if msg.get("message_type") == "broadcast_ack_request":
-                    p = msg.get("payload") or {}
-                    broadcast_id = p.get("broadcast_id")
-                    if broadcast_id is not None:
-                        _bc.acknowledge_broadcast(self._connect, broadcast_id, agent_id)
             return {"messages": messages, "count": len(messages)}
         if action == "mark_read":
             return _msg.mark_messages_read(self._connect, agent_id, message_ids)
@@ -85,16 +85,13 @@ class MessagingMixin:
     def get_messages(
         self, agent_id: str, unread_only: bool = False, limit: int = 50,
     ) -> dict[str, Any]:
-        """Get messages for an agent."""
+        """Get messages for an agent.
+
+        T6.24: read is now read-only. Acknowledging a broadcast must be
+        an explicit call to ``acknowledge_broadcast`` — a crash between
+        fetching and acting on a message no longer ghost-acks it.
+        """
         messages = _msg.get_messages(self._connect, agent_id, unread_only, limit)
-        # Auto-acknowledge broadcast requests so non-interactive agents
-        # don't leave pending_acks dangling indefinitely.
-        for msg in messages:
-            if msg.get("message_type") == "broadcast_ack_request":
-                payload = msg.get("payload") or {}
-                broadcast_id = payload.get("broadcast_id")
-                if broadcast_id is not None:
-                    _bc.acknowledge_broadcast(self._connect, broadcast_id, agent_id)
         return {"messages": messages, "count": len(messages)}
 
     def mark_messages_read(

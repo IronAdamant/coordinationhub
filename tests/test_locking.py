@@ -732,6 +732,40 @@ class TestBroadcastAcknowledgment:
         assert msgs["messages"][0]["payload"]["message"] == "test"
 
 
+class TestGetMessagesNoAutoAck:
+    """T6.24: reading a broadcast_ack_request must NOT implicitly ack.
+    Previously the auto-ack happened as a side effect of get_messages,
+    so a crash after fetch-but-before-process produced ghost acks.
+    """
+
+    def _heartbeat(self, engine, *ids):
+        for aid in ids:
+            engine.heartbeat(aid)
+
+    def test_get_messages_does_not_auto_ack_broadcast(self, engine, two_agents):
+        self._heartbeat(engine, two_agents["parent"], two_agents["child"], two_agents["other"])
+        child = two_agents["child"]
+        other = two_agents["other"]
+
+        broadcast = engine.broadcast(child, require_ack=True, message="hi")
+        bid = broadcast["broadcast_id"]
+
+        # Recipient fetches messages — pre-fix this auto-acked.
+        msgs = engine.get_messages(other, unread_only=True)
+        assert msgs["count"] == 1
+
+        status = engine.get_broadcast_status(bid)
+        # Pending must still list `other` — no implicit ack happened.
+        assert other in status["pending_acks"]
+        assert status["acknowledged_by"] == []
+
+        # Explicit ack works and moves the bookkeeping.
+        engine.acknowledge_broadcast(bid, other)
+        status = engine.get_broadcast_status(bid)
+        assert status["acknowledged_by"] == [other]
+        assert status["pending_acks"] == []
+
+
 class TestScopeBoundaryPrecision:
     """T3.23: scope check must compare path components, not character
     prefixes. Pre-fix ``docs/security`` leaked through a scope of

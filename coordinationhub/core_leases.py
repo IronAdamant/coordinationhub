@@ -17,7 +17,17 @@ class LeaseMixin:
     """HA coordinator lease management via coordinator_leases table."""
 
     COORDINATOR_LEASE = "COORDINATOR_LEADER"
-    DEFAULT_TTL = 10.0  # 10-second lease — must refresh within TTL
+    # T6.23: renamed from DEFAULT_TTL so it doesn't collide with
+    # LockingMixin.DEFAULT_TTL (300s) when both mixins land on the same
+    # engine via multiple inheritance.
+    DEFAULT_LEASE_TTL = 10.0  # 10-second lease — must refresh within TTL
+    # Back-compat alias (kept for callers that read LeaseMixin.DEFAULT_TTL
+    # explicitly). Prefer DEFAULT_LEASE_TTL going forward. NOTE: on a
+    # subclass that also inherits LockingMixin, bare ``self.DEFAULT_TTL``
+    # resolves to whichever mixin appears first in the MRO — always use
+    # the typed attribute (DEFAULT_LEASE_TTL / DEFAULT_LOCK_TTL) from
+    # new code.
+    DEFAULT_TTL = DEFAULT_LEASE_TTL
 
     # ------------------------------------------------------------------ #
     # Lease Management
@@ -59,7 +69,7 @@ class LeaseMixin:
         Returns {"acquired": False, "holder": <current_holder>} if leadership
         is held by another agent.
         """
-        ttl = ttl if ttl is not None else self.DEFAULT_TTL
+        ttl = ttl if ttl is not None else self.DEFAULT_LEASE_TTL
         conn = self._connect()
         ok = _leases.acquire_lease(conn, self.COORDINATOR_LEASE, agent_id, ttl)
 
@@ -152,7 +162,7 @@ class LeaseMixin:
         Returns {"claimed": True} on success.
         Returns {"claimed": False, "error": ...} if leadership is held by a live agent.
         """
-        ttl = ttl if ttl is not None else self.DEFAULT_TTL
+        ttl = ttl if ttl is not None else self.DEFAULT_LEASE_TTL
         conn = self._connect()
         ok = _leases.claim_leadership(conn, self.COORDINATOR_LEASE, agent_id, ttl)
         if not ok:

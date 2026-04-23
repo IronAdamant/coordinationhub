@@ -18,7 +18,17 @@ from .db import ConnectFn
 
 
 # Rows older than this with status='pending' are marked expired.
-_SPAWN_TTL_SECONDS = 600.0  # 10 minutes
+# T6.15: overridable via the ``COORDINATIONHUB_SPAWN_TTL_SECONDS``
+# environment variable so deployments running slow CLIs (Kimi, remote
+# evaluator, etc.) that can exceed the default 10-minute window don't
+# have to patch source code.
+import os as _os
+try:
+    _SPAWN_TTL_SECONDS = float(
+        _os.environ.get("COORDINATIONHUB_SPAWN_TTL_SECONDS", "600.0")
+    )
+except (TypeError, ValueError):
+    _SPAWN_TTL_SECONDS = 600.0
 
 
 class PendingSpawn(NamedTuple):
@@ -402,36 +412,8 @@ def is_stop_requested(
         }
 
 
-def await_agent_stopped(
-    connect: ConnectFn,
-    child_agent_id: str,
-    timeout: float = 30.0,
-    poll_interval: float = 0.5,
-) -> dict[str, Any]:
-    """Poll until a child agent is stopped or the timeout is reached.
-
-    Returns ``stopped: True`` if the child called ``deregister_agent`` within
-    the timeout. Returns ``timed_out: True`` if the child did not stop in time —
-    the caller should then call ``deregister_agent`` directly to force cleanup.
-
-    The child agent is responsible for polling ``is_stop_requested`` and
-    calling ``deregister_agent`` when it sees the stop flag.
-    """
-    deadline = time.time() + timeout
-
-    while time.time() < deadline:
-        with connect() as conn:
-            row = conn.execute(
-                "SELECT status FROM agents WHERE agent_id = ?",
-                (child_agent_id,),
-            ).fetchone()
-            if row is None or row["status"] == "stopped":
-                return {"stopped": True, "child_agent_id": child_agent_id}
-        time.sleep(poll_interval)
-
-    return {
-        "timed_out": True,
-        "child_agent_id": child_agent_id,
-        "timeout": timeout,
-        "escalate": True,  # Caller should call deregister_agent as hard fallback
-    }
+# T6.5: the polling ``await_agent_stopped`` primitive was superseded by
+# :meth:`core_spawner.SpawnerMixin.await_subagent_stopped`, which waits
+# on the in-memory event bus (and falls back to the SQLite journal for
+# cross-process sync via _hybrid_wait). The polling version had no
+# callers. Deleted.

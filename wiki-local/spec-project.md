@@ -323,9 +323,9 @@ coordinationhub/
   core_dependencies.py  — DependencyMixin — cross-agent dependency declarations and checks (~120 LOC)
   core_handoffs.py      — HandoffMixin — one-to-many handoff acknowledgment and lifecycle (~117 LOC)
   core_identity.py      — IdentityMixin — agent lifecycle and lineage management (~125 LOC)
-  core_leases.py        — LeaseMixin — HA coordinator lease management (~151 LOC)
-  core_locking.py       — Locking methods for CoordinationEngine (~359 LOC)
-  core_messaging.py     — MessagingMixin — inter-agent messages and await (~121 LOC)
+  core_leases.py        — LeaseMixin — HA coordinator lease management (~152 LOC)
+  core_locking.py       — Locking methods for CoordinationEngine (~360 LOC)
+  core_messaging.py     — MessagingMixin — inter-agent messages and await (~113 LOC)
   core_spawner.py       — SpawnerMixin — HA coordinator sub-agent spawn management (~196 LOC)
   core_tasks.py         — TaskMixin — shared task registry with hierarchy support (~193 LOC)
   core_visibility.py    — VisibilityMixin — coordination graph, project scan, agent status, assessment (~127 LOC)
@@ -347,9 +347,9 @@ coordinationhub/
   paths.py              — Path normalization and project-root detection utilities (~38 LOC)
   pending_tasks.py      — Pending sub-agent task storage for CoordinationHub (~106 LOC)
   scan.py               — File ownership scan for CoordinationHub (~279 LOC)
-  spawner.py            — Zero-deps spawner primitives for HA coordinator sub-agent registry (~373 LOC)
+  spawner.py            — Zero-deps spawner primitives for HA coordinator sub-agent registry (~350 LOC)
   task_failures.py      — Task failure tracking and dead letter queue for CoordinationHub (~120 LOC)
-  tasks.py              — Task registry primitives for CoordinationHub (work board) (~421 LOC)
+  tasks.py              — Task registry primitives for CoordinationHub (work board) (~398 LOC)
   work_intent.py        — Work intent board primitives for CoordinationHub (~136 LOC)
   hooks/
     __init__.py         — Hooks package — IDE integration via stdin/stdout event protocol (~1 LOC)
@@ -392,7 +392,7 @@ coordinationhub/
 ```
 <!-- /GEN -->
 
-`tests/` contains <!-- GEN:test-count -->602<!-- /GEN --> tests across 28 files plus `fixtures/claude_code_events/` (hook contract fixtures).
+`tests/` contains <!-- GEN:test-count -->603<!-- /GEN --> tests across 28 files plus `fixtures/claude_code_events/` (hook contract fixtures).
 
 Top-level project files: `pyproject.toml`, `coordination_spec.yaml`/`.json` (example specs), `README.md`, `CLAUDE.md`, `COMPLETE_PROJECT_DOCUMENTATION.md`, `LLM_Development.md`, and `wiki-local/` (this spec, glossary, index).
 

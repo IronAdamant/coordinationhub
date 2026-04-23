@@ -327,30 +327,9 @@ def get_task_tree(connect: ConnectFn, root_task_id: str) -> dict[str, Any]:
     return _build_tree(root_task_id, 0) or {}
 
 
-def wait_for_task(
-    connect: ConnectFn,
-    task_id: str,
-    timeout_s: float = 60.0,
-    poll_interval_s: float = 2.0,
-) -> dict[str, Any]:
-    """Poll until a task reaches a terminal state (completed/failed) or timeout expires.
-
-    Returns {"waited": True, "task_id": ..., "status": ..., "timed_out": False}
-    or {"waited": False, "task_id": ..., "timed_out": True} if timeout expired.
-    """
-    import time
-    start = time.time()
-    terminal_states = {"completed", "failed"}
-    while True:
-        task = get_task(connect, task_id)
-        if task is None:
-            return {"waited": False, "task_id": task_id, "timed_out": True, "reason": "task_not_found"}
-        if task.get("status") in terminal_states:
-            return {"waited": True, "task_id": task_id, "status": task["status"], "timed_out": False}
-        elapsed = time.time() - start
-        if elapsed >= timeout_s:
-            return {"waited": False, "task_id": task_id, "timed_out": True, "status": task.get("status")}
-        time.sleep(min(poll_interval_s, timeout_s - elapsed))
+# T6.42: the polling ``wait_for_task`` primitive was replaced by the
+# event-bus-based ``TaskMixin.wait_for_task`` in core_tasks.py. The
+# polling version had no callers inside the package. Deleted.
 
 
 def get_available_tasks(
