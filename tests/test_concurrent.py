@@ -2,14 +2,19 @@
 
 Validates that the SQLite WAL-mode backend handles multi-threaded access
 correctly for locks, registrations, notifications, and heartbeats.
+
+All tests use the ``run_concurrent`` helper from conftest (T5.1), which
+uses ``threading.Barrier`` to guarantee every worker hits the critical
+section in the same scheduler tick. Earlier versions started threads in
+a for-loop; by the time thread N-1 started, thread 0 may already have
+completed — the tests passed but did not actually exercise concurrency.
 """
 
 from __future__ import annotations
 
-import threading
-import time
-
 import pytest
+
+from .conftest import run_concurrent
 
 
 class TestConcurrentLocking:
@@ -24,26 +29,23 @@ class TestConcurrentLocking:
             engine.register_agent(aid)
             agents.append(aid)
 
-        results = [None] * n
-        errors = []
-
         def acquire(idx):
-            try:
-                results[idx] = engine.acquire_lock(f"/file_{idx}.txt", agents[idx])
-            except Exception as exc:
-                errors.append(exc)
+            return engine.acquire_lock(f"/file_{idx}.txt", agents[idx])
 
-        threads = [threading.Thread(target=acquire, args=(i,)) for i in range(n)]
-        for t in threads:
-            t.start()
-        for t in threads:
-            t.join(timeout=10)
+        results, errors = run_concurrent(
+            n, acquire, args_per_worker=[(i,) for i in range(n)]
+        )
 
         assert not errors, f"Errors during concurrent lock: {errors}"
         assert all(r["acquired"] is True for r in results)
 
     def test_concurrent_lock_same_file(self, engine):
-        """N agents racing to lock ONE file — exactly one wins."""
+        """N agents racing to lock ONE file — exactly one wins.
+
+        This is the canonical concurrency invariant: even with all workers
+        hitting the same path in one scheduler tick, the acquire primitive
+        must serialise them correctly via SQLite's BEGIN IMMEDIATE.
+        """
         n = 10
         agents = []
         for _ in range(n):
@@ -51,25 +53,20 @@ class TestConcurrentLocking:
             engine.register_agent(aid)
             agents.append(aid)
 
-        results = [None] * n
-        errors = []
-
         def acquire(idx):
-            try:
-                results[idx] = engine.acquire_lock("/contested.txt", agents[idx])
-            except Exception as exc:
-                errors.append(exc)
+            return engine.acquire_lock("/contested.txt", agents[idx])
 
-        threads = [threading.Thread(target=acquire, args=(i,)) for i in range(n)]
-        for t in threads:
-            t.start()
-        for t in threads:
-            t.join(timeout=10)
+        results, errors = run_concurrent(
+            n, acquire, args_per_worker=[(i,) for i in range(n)]
+        )
 
         assert not errors, f"Errors during contested lock: {errors}"
         winners = [r for r in results if r["acquired"]]
         losers = [r for r in results if not r["acquired"]]
-        assert len(winners) == 1
+        assert len(winners) == 1, (
+            f"Expected exactly 1 winner, got {len(winners)} winners and "
+            f"{len(losers)} losers (total {len(results)})"
+        )
         assert len(losers) == n - 1
 
     def test_concurrent_lock_release_cycle(self, engine):
@@ -82,22 +79,16 @@ class TestConcurrentLocking:
             engine.register_agent(aid)
             agents.append(aid)
 
-        errors = []
-
         def cycle(idx):
-            try:
-                path = f"/cycle_{idx}.txt"
-                for _ in range(cycles):
-                    engine.acquire_lock(path, agents[idx])
-                    engine.release_lock(path, agents[idx])
-            except Exception as exc:
-                errors.append(exc)
+            path = f"/cycle_{idx}.txt"
+            for _ in range(cycles):
+                engine.acquire_lock(path, agents[idx])
+                engine.release_lock(path, agents[idx])
+            return None
 
-        threads = [threading.Thread(target=cycle, args=(i,)) for i in range(n)]
-        for t in threads:
-            t.start()
-        for t in threads:
-            t.join(timeout=30)
+        _, errors = run_concurrent(
+            n, cycle, args_per_worker=[(i,) for i in range(n)], timeout=30.0
+        )
 
         assert not errors, f"Errors during lock cycling: {errors}"
 
@@ -106,50 +97,40 @@ class TestConcurrentRegistration:
     """Multiple threads registering agents simultaneously."""
 
     def test_concurrent_root_registrations(self, engine):
-        """Register N root agents from N threads — all should succeed."""
+        """Register N root agents from N threads — all should succeed with unique IDs."""
         n = 20
-        results = [None] * n
-        errors = []
 
         def register(idx):
-            try:
-                aid = engine.generate_agent_id()
-                results[idx] = engine.register_agent(aid)
-            except Exception as exc:
-                errors.append(exc)
+            aid = engine.generate_agent_id()
+            return engine.register_agent(aid)
 
-        threads = [threading.Thread(target=register, args=(i,)) for i in range(n)]
-        for t in threads:
-            t.start()
-        for t in threads:
-            t.join(timeout=10)
+        results, errors = run_concurrent(
+            n, register, args_per_worker=[(i,) for i in range(n)]
+        )
 
         assert not errors, f"Errors during concurrent registration: {errors}"
         ids = {r["agent_id"] for r in results if r}
-        assert len(ids) == n, f"Expected {n} unique agent IDs, got {len(ids)}"
+        assert len(ids) == n, (
+            f"Expected {n} unique agent IDs, got {len(ids)} — this indicates "
+            f"a race in generate_agent_id/register_agent (see T1.2). "
+            f"Collisions: {n - len(ids)}"
+        )
 
     def test_concurrent_child_registrations(self, engine, registered_agent):
         """Register N children under the same parent concurrently."""
         n = 10
-        results = [None] * n
-        errors = []
 
         def register_child(idx):
-            try:
-                cid = engine.generate_agent_id(registered_agent)
-                results[idx] = engine.register_agent(cid, parent_id=registered_agent)
-            except Exception as exc:
-                errors.append(exc)
+            cid = engine.generate_agent_id(registered_agent)
+            return engine.register_agent(cid, parent_id=registered_agent)
 
-        threads = [threading.Thread(target=register_child, args=(i,)) for i in range(n)]
-        for t in threads:
-            t.start()
-        for t in threads:
-            t.join(timeout=10)
+        results, errors = run_concurrent(
+            n, register_child, args_per_worker=[(i,) for i in range(n)]
+        )
 
         assert not errors, f"Errors during child registration: {errors}"
         ids = {r["agent_id"] for r in results if r}
-        assert len(ids) == n
+        assert len(ids) == n, f"Expected {n} unique child IDs, got {len(ids)}"
 
 
 class TestConcurrentNotifications:
@@ -158,19 +139,14 @@ class TestConcurrentNotifications:
     def test_concurrent_notify(self, engine, registered_agent):
         """N threads each post a change notification — all recorded."""
         n = 20
-        errors = []
 
         def notify(idx):
-            try:
-                engine.notify_change(f"/file_{idx}.txt", "modified", registered_agent)
-            except Exception as exc:
-                errors.append(exc)
+            engine.notify_change(f"/file_{idx}.txt", "modified", registered_agent)
+            return None
 
-        threads = [threading.Thread(target=notify, args=(i,)) for i in range(n)]
-        for t in threads:
-            t.start()
-        for t in threads:
-            t.join(timeout=10)
+        _, errors = run_concurrent(
+            n, notify, args_per_worker=[(i,) for i in range(n)]
+        )
 
         assert not errors
         result = engine.get_notifications(limit=100)
@@ -185,30 +161,18 @@ class TestConcurrentNotifications:
         reader = engine.generate_agent_id(parent)
         engine.register_agent(reader, parent_id=parent)
 
-        errors = []
-        read_counts = []
-
-        def write_loop():
-            try:
+        def work(role):
+            if role == "write":
                 for i in range(30):
                     engine.notify_change(f"/w_{i}.txt", "modified", writer)
-            except Exception as exc:
-                errors.append(exc)
-
-        def read_loop():
-            try:
+            else:
                 for _ in range(30):
-                    result = engine.get_notifications(exclude_agent=reader, limit=50)
-                    read_counts.append(len(result["notifications"]))
-            except Exception as exc:
-                errors.append(exc)
+                    engine.get_notifications(exclude_agent=reader, limit=50)
+            return None
 
-        t_write = threading.Thread(target=write_loop)
-        t_read = threading.Thread(target=read_loop)
-        t_write.start()
-        t_read.start()
-        t_write.join(timeout=10)
-        t_read.join(timeout=10)
+        _, errors = run_concurrent(
+            2, work, args_per_worker=[("write",), ("read",)]
+        )
 
         assert not errors
 
@@ -225,20 +189,12 @@ class TestConcurrentHeartbeats:
             engine.register_agent(aid)
             agents.append(aid)
 
-        results = [None] * n
-        errors = []
-
         def heartbeat(idx):
-            try:
-                results[idx] = engine.heartbeat(agents[idx])
-            except Exception as exc:
-                errors.append(exc)
+            return engine.heartbeat(agents[idx])
 
-        threads = [threading.Thread(target=heartbeat, args=(i,)) for i in range(n)]
-        for t in threads:
-            t.start()
-        for t in threads:
-            t.join(timeout=10)
+        results, errors = run_concurrent(
+            n, heartbeat, args_per_worker=[(i,) for i in range(n)]
+        )
 
         assert not errors
         assert all(r["updated"] is True for r in results)

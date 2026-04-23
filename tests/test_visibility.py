@@ -92,6 +92,69 @@ class TestFileOwnershipScan:
             assert len(hidden) == 0
 
 
+class TestScanSecurityGuards:
+    """T2.2: scan_project_tool rejects traversal/symlink/oversized attempts."""
+
+    def test_rejects_worktree_outside_project_root(self, engine, tmp_path):
+        """An attacker-supplied worktree_root outside the engine's project
+        root (e.g. ``/etc`` or ``/``) must be rejected with an error.
+        """
+        import os, tempfile
+        outside = tempfile.mkdtemp(prefix="coordhub_outside_")
+        try:
+            result = engine.scan_project(worktree_root=outside)
+            assert result.get("error")
+            assert "inside project_root" in result["error"]
+            assert result["scanned"] == 0
+        finally:
+            os.rmdir(outside)
+
+    def test_rejects_nonexistent_worktree(self, engine, tmp_path):
+        result = engine.scan_project(worktree_root=str(tmp_path / "no-such-dir"))
+        assert "does not exist" in result.get("error", "")
+
+    def test_rejects_symlink_worktree(self, engine, tmp_path):
+        target = tmp_path / "real"
+        target.mkdir()
+        link = tmp_path / "link"
+        link.symlink_to(target)
+        result = engine.scan_project(worktree_root=str(link))
+        assert "symlink" in result.get("error", "").lower()
+
+    def test_skips_egg_info_directory(self, engine, tmp_path):
+        """Pre-fix SKIP_PARTS held literal ``"*.egg-info"`` so
+        ``mypkg.egg-info`` was never skipped — fnmatch'd now.
+        """
+        (tmp_path / "mypkg.egg-info").mkdir()
+        (tmp_path / "mypkg.egg-info" / "PKG-INFO").write_text("meta")
+        (tmp_path / "real.py").write_text("# real")
+
+        result = engine.scan_project(worktree_root=str(tmp_path))
+        # Only real.py should have been scanned.
+        with engine._connect() as conn:
+            rows = [
+                r["document_path"] for r in conn.execute(
+                    "SELECT document_path FROM file_ownership"
+                ).fetchall()
+            ]
+        assert "real.py" in rows
+        assert not any("egg-info" in r for r in rows), f"egg-info leaked: {rows}"
+
+    def test_skips_symlinked_files(self, engine, tmp_path):
+        """Symlinked files inside the worktree are skipped."""
+        (tmp_path / "real.py").write_text("x")
+        (tmp_path / "linked.py").symlink_to(tmp_path / "real.py")
+        engine.scan_project(worktree_root=str(tmp_path))
+        with engine._connect() as conn:
+            rows = [
+                r["document_path"] for r in conn.execute(
+                    "SELECT document_path FROM file_ownership"
+                ).fetchall()
+            ]
+        assert "real.py" in rows
+        assert "linked.py" not in rows
+
+
 class TestAgentStatus:
     """Tests for get_agent_status and update_agent_status."""
 

@@ -59,6 +59,28 @@ class TestAgentIdHelpers:
     def test_session_agent_id_empty(self):
         assert _session_agent_id("") == "hub.cc.unknown"
 
+    def test_session_agent_id_rejects_non_ascii(self):
+        """T2.9: non-ASCII session ids are hashed, not passed through raw."""
+        result = _session_agent_id("séssionünsafe")
+        assert result.startswith("hub.cc.")
+        suffix = result.removeprefix("hub.cc.")
+        assert len(suffix) == 12
+        # Hash is deterministic and hex-only
+        assert all(c in "0123456789abcdef" for c in suffix)
+
+    def test_session_agent_id_rejects_slashes(self):
+        """T2.9: path separators are a latent injection vector; hash them."""
+        result = _session_agent_id("../../etc/passwd")
+        suffix = result.removeprefix("hub.cc.")
+        # Not a prefix of the input — proves hashing kicked in.
+        assert suffix != "../../etc/pa"
+
+    def test_session_agent_id_stable_for_same_unsafe_input(self):
+        """Hashing is deterministic — same input always produces same key."""
+        a = _session_agent_id("spaces and dots.")
+        b = _session_agent_id("spaces and dots.")
+        assert a == b
+
     def test_subagent_id_with_tool_use_id(self):
         event = {"tool_input": {"subagent_type": "explorer"}, "tool_use_id": "toolu_abc123xyz"}
         result = _subagent_id("hub.cc.parent", event)
@@ -704,10 +726,18 @@ class TestErrorLogging:
             finally:
                 pass
 
-    def test_log_error_never_raises(self):
-        """_log_error must never raise, even with pathological inputs."""
+    def test_log_error_never_raises(self, tmp_path, monkeypatch):
+        """_log_error must never raise, even with pathological inputs.
+
+        T5.2 fix: earlier version of this test did not monkeypatch Path.home,
+        so it wrote to the developer's real ~/.coordinationhub/hook.log on
+        every test run. Now constrained to the per-test tmp_path.
+        """
+        monkeypatch.setattr("pathlib.Path.home", lambda: tmp_path)
         # This should not raise
         _log_error("Test", RuntimeError("x"))
+        # And it should have written to tmp, not real $HOME
+        assert (tmp_path / ".coordinationhub" / "hook.log").exists()
 
 
 class TestSessionSummary:

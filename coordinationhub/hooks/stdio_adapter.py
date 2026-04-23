@@ -118,7 +118,10 @@ class StdioHook(BaseHook):
 # ---------------------------------------------------------------------------
 
 def _session_agent_id(session_id: str) -> str:
-    return f"hub.{StdioHook.IDE_PREFIX}.{session_id[:12] if session_id else 'unknown'}"
+    # T2.9: routed through the sanitizer so non-ASCII / attacker-controlled
+    # session ids can't land unescaped in a DB key.
+    from coordinationhub.hooks.base import _sanitize_session_id
+    return f"hub.{StdioHook.IDE_PREFIX}.{_sanitize_session_id(session_id)}"
 
 
 def _subagent_type(event: dict) -> str:

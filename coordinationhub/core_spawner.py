@@ -41,19 +41,17 @@ class SpawnerMixin:
 
         Returns the spawn ID and pending spawn record.
         """
-        spawn_id = _spawner.generate_spawn_id(
-            self._connect, parent_agent_id, subagent_type,
-        )
+        # T1.9: generate+stash in one BEGIN IMMEDIATE so two concurrent
+        # spawns from the same (parent, subagent_type) can't produce the
+        # same seq. spawn_id is returned in the result dict.
         result = _spawner.stash_pending_spawn(
             connect=self._connect,
-            spawn_id=spawn_id,
             parent_agent_id=parent_agent_id,
             subagent_type=subagent_type,
             description=description,
             prompt=prompt,
             source=source,
         )
-        result["spawn_id"] = spawn_id
         return result
 
     def get_pending_spawns(

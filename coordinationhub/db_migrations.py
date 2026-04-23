@@ -15,7 +15,7 @@ import time
 from .db_schemas import _SCHEMAS, _INDEXES
 
 
-_CURRENT_SCHEMA_VERSION = 21
+_CURRENT_SCHEMA_VERSION = 23
 
 
 def _get_schema_version(conn: sqlite3.Connection) -> int:
@@ -54,14 +54,80 @@ def _migrate_v1_to_v2(conn: sqlite3.Connection) -> None:
 def _migrate_v2_to_v3(conn: sqlite3.Connection) -> None:
     """Add claude_agent_id column to agents table.
 
-    Maps raw Claude Code agent hex IDs back to hub.cc.* child IDs so that
-    PreToolUse hooks resolve the correct agent after SubagentStart registers.
+    Historical migration: mapped raw Claude Code agent hex IDs back to
+    hub.cc.* child IDs so that PreToolUse hooks could resolve the correct
+    agent after SubagentStart registered.
+
+    Superseded by v21 which renamed claude_agent_id → raw_ide_id for
+    vendor neutrality. On fresh installs the current _SCHEMAS["agents"]
+    shape already includes raw_ide_id, so this migration must skip to
+    avoid re-introducing the vestigial claude_agent_id column that v21
+    would then leave orphaned (v21 returns early when raw_ide_id exists).
     """
     cols = [row[1] for row in conn.execute("PRAGMA table_info(agents)").fetchall()]
-    if "claude_agent_id" in cols:
+    if "claude_agent_id" in cols or "raw_ide_id" in cols:
         return
     conn.execute("ALTER TABLE agents ADD COLUMN claude_agent_id TEXT")
     conn.execute("CREATE INDEX IF NOT EXISTS idx_agents_claude_id ON agents(claude_agent_id)")
+
+
+def _migrate_v22_to_v23(conn: sqlite3.Connection) -> None:
+    """Relax work_intent PK from (agent_id) to (agent_id, document_path).
+
+    T1.16: prior to v23 an agent could only declare intent on one file —
+    declaring on file B silently erased intent on file A. The new PK
+    allows multiple live intents per agent, so cross-file conflict
+    detection can actually work.
+
+    SQLite cannot drop a PK constraint in-place; rebuild the table.
+    """
+    # PRAGMA index_list returns PK constraints too — check if the PK is
+    # already compound by inspecting PRAGMA index_info of the implicit
+    # 'sqlite_autoindex_work_intent_*' index.
+    idx_rows = conn.execute("PRAGMA index_list(work_intent)").fetchall()
+    if idx_rows:
+        for idx in idx_rows:
+            # idx columns: seq, name, unique, origin ('pk'/'c'/'u')
+            if (len(idx) > 3 and idx[3] == "pk") or "autoindex" in idx[1]:
+                info = conn.execute(f"PRAGMA index_info('{idx[1]}')").fetchall()
+                # info rows: seqno, cid, name — count how many PK columns
+                if len(info) >= 2:
+                    return  # already compound PK
+    # Check the table exists at all (handles pristine DBs that already
+    # got the new shape via _SCHEMAS).
+    tables = {
+        r[0] for r in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")
+    }
+    if "work_intent" not in tables:
+        conn.execute(_SCHEMAS["work_intent"])
+        return
+    conn.execute("ALTER TABLE work_intent RENAME TO _work_intent_v22")
+    conn.execute(_SCHEMAS["work_intent"])
+    conn.execute(
+        """
+        INSERT OR IGNORE INTO work_intent
+        (agent_id, document_path, intent, declared_at, ttl)
+        SELECT agent_id, document_path, intent, declared_at, ttl
+        FROM _work_intent_v22
+        """
+    )
+    conn.execute("DROP TABLE _work_intent_v22")
+
+
+def _migrate_v21_to_v22(conn: sqlite3.Connection) -> None:
+    """Add broadcast_targets table (T1.11).
+
+    Pre-fix, ``broadcasts.expected_count`` was a scalar and pending_acks
+    could not be computed — get_broadcast_status always returned an empty
+    list. This table snapshots the exact set of sibling agents a broadcast
+    was delivered to, so pending_acks = targets - acks and late-joiners
+    are explicitly excluded.
+    """
+    tables = {
+        row[0] for row in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")
+    }
+    if "broadcast_targets" not in tables:
+        conn.execute(_SCHEMAS["broadcast_targets"])
 
 
 def _migrate_v20_to_v21(conn: sqlite3.Connection) -> None:
@@ -253,6 +319,8 @@ _MIGRATIONS = {
     19: _migrate_v18_to_v19,  # expected_count column on broadcasts
     20: _migrate_v19_to_v20,  # merge pending_subagent_tasks and pending_spawner_tasks
     21: _migrate_v20_to_v21,  # rename claude_agent_id -> raw_ide_id
+    22: _migrate_v21_to_v22,  # broadcast_targets table (T1.11)
+    23: _migrate_v22_to_v23,  # work_intent PK: (agent_id, document_path) (T1.16)
 }
 
 

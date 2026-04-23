@@ -12,6 +12,7 @@ Zero internal dependencies on other coordinationhub modules.
 
 from __future__ import annotations
 
+import fnmatch
 import json
 import time as _time
 from pathlib import Path
@@ -19,12 +20,79 @@ from typing import Any, Callable
 
 DEFAULT_SCAN_EXTENSIONS = [".py", ".md", ".json", ".yaml", ".yml", ".txt", ".toml"]
 
-# Paths containing these directory/file name components are skipped during scan.
+# Paths whose components exactly match one of these names are skipped.
 SKIP_PARTS = frozenset({
     "__pycache__", ".pytest_cache", "node_modules", ".coordinationhub",
-    ".git", ".venv", "venv", ".env", ".eggs", "*.egg-info",
+    ".git", ".venv", "venv", ".env", ".eggs",
     ".mypy_cache", ".tox", ".ruff_cache",
 })
+
+# T2.2: glob patterns against path components. Previously ``"*.egg-info"``
+# was in SKIP_PARTS and compared with ``part in SKIP_PARTS``, so
+# ``mypkg.egg-info`` was NOT skipped (literal match required). Now we
+# fnmatch each component against this list.
+SKIP_GLOBS: tuple[str, ...] = ("*.egg-info",)
+
+# T2.2: safety ceilings applied during traversal. The pre-fix scan would
+# walk an attacker-supplied ``worktree_root`` indefinitely.
+MAX_SCAN_FILES = 50_000
+MAX_SCAN_DEPTH = 20
+MAX_SCAN_SECONDS = 30.0
+
+
+def _is_skipped_part(name: str) -> bool:
+    """True if *name* (a single path component) matches SKIP_PARTS or SKIP_GLOBS."""
+    if name.startswith("."):
+        return True
+    if name in SKIP_PARTS:
+        return True
+    for pattern in SKIP_GLOBS:
+        if fnmatch.fnmatchcase(name, pattern):
+            return True
+    return False
+
+
+def _validate_scan_root(
+    worktree_root: str | Path | None,
+    project_root: Path | None,
+) -> tuple[Path | None, str | None]:
+    """T2.2: validate the caller-supplied worktree_root before walking.
+
+    Returns ``(resolved_root, error_message)``. When ``error_message`` is
+    not None the scan must abort — the caller should surface it to the
+    client (or log it) and return a no-op result.
+
+    Rules:
+    - ``worktree_root`` must resolve to a real directory.
+    - ``worktree_root`` must be equal to, or a descendant of, ``project_root``.
+      Scanning ``/``, ``/etc``, or ``~`` is therefore rejected.
+    - The resolved path itself must not be a symlink (we don't walk
+      through one even if its target is inside the project root — if the
+      caller wants it scanned they can pass the resolved path).
+    """
+    if worktree_root is None:
+        return (project_root, None)
+    root = Path(worktree_root)
+    if not root.exists():
+        return (None, f"worktree_root does not exist: {worktree_root!r}")
+    if root.is_symlink():
+        return (None, "worktree_root may not be a symlink")
+    if not root.is_dir():
+        return (None, f"worktree_root must be a directory: {worktree_root!r}")
+    if project_root is None:
+        # No project_root configured: accept any directory (caller-configured).
+        return (root.resolve(), None)
+    try:
+        resolved = root.resolve()
+        pr = project_root.resolve()
+    except (OSError, RuntimeError) as exc:
+        return (None, f"failed to resolve scan paths: {exc}")
+    # resolved must be pr or a descendant
+    try:
+        resolved.relative_to(pr)
+    except ValueError:
+        return (None, "worktree_root must be inside project_root")
+    return (resolved, None)
 
 
 def _default_owner_agent(connect: Callable[[], Any]) -> str:
@@ -117,11 +185,16 @@ def scan_project_tool(
     Spawned agents (agents with a parent_id in lineage) are resolved by looking up
     their parent's graph role for role-based assignment.
     """
-    root = Path(worktree_root) if worktree_root else project_root
+    # T2.2: validate worktree_root is a real directory inside project_root.
+    # Reject symlinks and paths outside the configured project root.
+    root, error = _validate_scan_root(worktree_root, project_root)
+    if error is not None:
+        return {"scanned": 0, "owned": 0, "error": error}
     if root is None:
         return {"scanned": 0, "owned": 0, "error": "No project root"}
     exts = set(extensions) if extensions else set(DEFAULT_SCAN_EXTENSIONS)
     now = _time.time()
+    scan_deadline = now + MAX_SCAN_SECONDS
 
     with connect() as conn:
         ownership_rows = conn.execute(
@@ -148,13 +221,45 @@ def scan_project_tool(
     owned = 0
     to_upsert: list[tuple[str, str, float]] = []
 
-    for ext in exts:
-        for path in root.rglob(f"*{ext}"):
-            if any(part.startswith(".") or part in SKIP_PARTS for part in path.parts):
+    # T2.2: manual walk instead of rglob so we can (a) skip symlinks,
+    # (b) honour MAX_SCAN_DEPTH, and (c) bail out on count/time budgets.
+    truncated = False
+
+    def _iter_files():
+        nonlocal truncated
+        import os
+        root_parts_len = len(root.parts)
+        for dirpath, dirnames, filenames in os.walk(root, followlinks=False):
+            # Enforce depth budget.
+            depth = len(Path(dirpath).parts) - root_parts_len
+            if depth > MAX_SCAN_DEPTH:
+                dirnames[:] = []  # stop descending
                 continue
-            scanned += 1
-            rel = path.relative_to(root).as_posix()
-            assigned = path_to_agent.get(rel)
+            # Filter out skipped subdirectories in-place so os.walk never
+            # descends into them.
+            dirnames[:] = [d for d in dirnames if not _is_skipped_part(d)]
+            for name in filenames:
+                if _is_skipped_part(name):
+                    continue
+                if not any(name.endswith(ext) for ext in exts):
+                    continue
+                yield Path(dirpath) / name
+
+    for path in _iter_files():
+        if scanned >= MAX_SCAN_FILES:
+            truncated = True
+            break
+        if _time.time() >= scan_deadline:
+            truncated = True
+            break
+        # Don't follow symlinked files either — if it's a symlink we skip.
+        if path.is_symlink():
+            continue
+        scanned += 1
+        rel = path.relative_to(root).as_posix()
+        assigned = path_to_agent.get(rel)
+        # Re-entering the original per-file logic below.
+        if True:  # preserve original control flow without another level of indent change
             if assigned is None:
                 d = str(path.parent)
                 assigned = None
@@ -205,7 +310,10 @@ def scan_project_tool(
                 to_upsert,
             )
 
-    return {"scanned": scanned, "owned": owned}
+    result: dict[str, Any] = {"scanned": scanned, "owned": owned}
+    if truncated:
+        result["truncated"] = True
+    return result
 
 
 def store_responsibilities(

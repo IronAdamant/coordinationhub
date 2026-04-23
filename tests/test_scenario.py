@@ -349,6 +349,12 @@ class TestHookLevelMultiAgentScenario:
         This is the test Review Thirteen flagged as missing: actual
         concurrent contention on a shared file, verified via the hook
         handlers (not the engine API directly).
+
+        T5.1 refactor: uses threading.Barrier so both workers hit the lock
+        acquire path in the same scheduler tick. Previously threads were
+        started sequentially with t_a.start(); t_b.start() — t_a often
+        finished its SQLite transaction before t_b's start() even returned,
+        so the "concurrent" invariant was not actually exercised.
         """
         from coordinationhub.hooks.stdio_adapter import (
             handle_session_start, handle_subagent_start, handle_pre_write,
@@ -367,9 +373,11 @@ class TestHookLevelMultiAgentScenario:
         shared_file = str(tmp_path / "shared_state.py")
         results = {}
         errors = []
+        barrier = threading.Barrier(2)
 
         def attempt_lock(raw_id, key):
             try:
+                barrier.wait(timeout=5)
                 result = handle_pre_write(self._write_event(
                     cwd, session_id, raw_id, shared_file))
                 results[key] = result

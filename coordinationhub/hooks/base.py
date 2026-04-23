@@ -13,9 +13,36 @@ and map their native event shapes to these methods.
 
 from __future__ import annotations
 
+import hashlib
+import re
 import time
 from pathlib import Path
 from typing import Any
+
+
+# T2.9: session_id is supplied by the IDE and embedded into a derived
+# agent_id that becomes a DB primary key. Accepting arbitrary content
+# (non-ASCII, shell specials, path separators) produced hard-to-debug
+# collisions and was a latent injection vector. Restrict the 12-char
+# prefix to the IDE-safe alphabet; hash anything else to a stable short
+# digest so the agent_id remains deterministic across hook invocations.
+_SESSION_ID_SAFE = re.compile(r"^[A-Za-z0-9_-]+$")
+
+
+def _sanitize_session_id(session_id: str | None) -> str:
+    """Return a DB-safe 12-char tag derived from ``session_id``.
+
+    Safe session ids pass through truncated to 12 chars. Unsafe inputs
+    (empty, None, or containing anything outside ``[A-Za-z0-9_-]``) are
+    hashed with SHA-256 and the first 12 hex chars are returned — still
+    deterministic per input but guaranteed to be safe.
+    """
+    if not session_id:
+        return "unknown"
+    if _SESSION_ID_SAFE.match(session_id):
+        return session_id[:12]
+    digest = hashlib.sha256(session_id.encode("utf-8", errors="replace")).hexdigest()
+    return digest[:12]
 
 
 class BaseHook:
@@ -47,7 +74,7 @@ class BaseHook:
     # ------------------------------------------------------------------ #
 
     def session_agent_id(self, session_id: str) -> str:
-        short = session_id[:12] if session_id else "unknown"
+        short = _sanitize_session_id(session_id)
         return f"hub.{self.IDE_PREFIX}.{short}"
 
     def resolve_agent_id(self, session_id: str, raw_ide_id: str | None = None) -> str:

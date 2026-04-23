@@ -64,6 +64,14 @@ def assign_task(
     return {"assigned": True, "task_id": task_id}
 
 
+# T1.13: canonical task status vocabulary. Any value outside this set
+# is rejected at the primitive boundary (the DB CHECK constraint is
+# deferred to the v22 schema migration bundle).
+_VALID_TASK_STATUSES = {
+    "pending", "in_progress", "completed", "blocked", "failed", "dead_letter",
+}
+
+
 def update_task_status(
     connect: ConnectFn,
     task_id: str,
@@ -71,9 +79,34 @@ def update_task_status(
     summary: str | None = None,
     blocked_by: str | None = None,
 ) -> dict[str, Any]:
-    """Update task status, optionally with a completion summary or blocker."""
+    """Update task status, optionally with a completion summary or blocker.
+
+    T1.13: validates ``status`` against a canonical vocabulary and checks
+    that the task exists. Returns ``{"updated": False, "reason": ...}`` on
+    invalid status or missing task — previously accepted arbitrary strings
+    silently (a misspelled status like "done" would be stored and leave
+    dependents hanging forever because no status-change event fires on
+    unknown values).
+    """
+    if status not in _VALID_TASK_STATUSES:
+        return {
+            "updated": False,
+            "reason": "invalid_status",
+            "task_id": task_id,
+            "status": status,
+            "valid_statuses": sorted(_VALID_TASK_STATUSES),
+        }
     now = time.time()
     with connect() as conn:
+        existing = conn.execute(
+            "SELECT id FROM tasks WHERE id = ?", (task_id,),
+        ).fetchone()
+        if existing is None:
+            return {
+                "updated": False,
+                "reason": "task_not_found",
+                "task_id": task_id,
+            }
         if summary is not None:
             conn.execute(
                 "UPDATE tasks SET status=?, summary=?, updated_at=? WHERE id=?",
@@ -157,6 +190,45 @@ def get_all_tasks(connect: ConnectFn) -> list[dict[str, Any]]:
     return tasks
 
 
+MAX_TASK_DEPTH = 100
+
+
+def _would_create_cycle(
+    conn,
+    task_id: str,
+    parent_task_id: str,
+) -> bool:
+    """Walk up from ``parent_task_id`` via parent_task_id links. If we
+    ever reach ``task_id`` (or exceed MAX_TASK_DEPTH), creating the
+    subtask would introduce a cycle.
+
+    T1.14: prevents `create_subtask` from wiring a task as a descendant
+    of itself, which would send `get_task_tree` into infinite recursion
+    and crash the process.
+    """
+    cursor_id = parent_task_id
+    visited = set()
+    depth = 0
+    while cursor_id is not None:
+        if cursor_id == task_id:
+            return True
+        if cursor_id in visited:
+            # Existing cycle in parent chain — reject to avoid propagating.
+            return True
+        if depth >= MAX_TASK_DEPTH:
+            return True
+        visited.add(cursor_id)
+        row = conn.execute(
+            "SELECT parent_task_id FROM tasks WHERE id = ?",
+            (cursor_id,),
+        ).fetchone()
+        if row is None:
+            return False
+        cursor_id = row["parent_task_id"]
+        depth += 1
+    return False
+
+
 def create_subtask(
     connect: ConnectFn,
     task_id: str,
@@ -166,9 +238,32 @@ def create_subtask(
     depends_on: list[str] | None = None,
     priority: int = 0,
 ) -> dict[str, Any]:
-    """Create a new subtask under an existing parent task."""
+    """Create a new subtask under an existing parent task.
+
+    T1.14: rejects creation if it would introduce a cycle in the
+    parent_task_id chain, or if the parent chain is already deeper than
+    MAX_TASK_DEPTH. Returns ``{"created": False, "reason": "cycle"}`` or
+    ``{"created": False, "reason": "parent_not_found"}`` in those cases.
+    """
     now = time.time()
     with connect() as conn:
+        parent_row = conn.execute(
+            "SELECT id FROM tasks WHERE id = ?", (parent_task_id,),
+        ).fetchone()
+        if parent_row is None:
+            return {
+                "created": False,
+                "reason": "parent_not_found",
+                "task_id": task_id,
+                "parent_task_id": parent_task_id,
+            }
+        if _would_create_cycle(conn, task_id, parent_task_id):
+            return {
+                "created": False,
+                "reason": "cycle",
+                "task_id": task_id,
+                "parent_task_id": parent_task_id,
+            }
         conn.execute(
             """INSERT INTO tasks
             (id, parent_task_id, parent_agent_id, description, created_at, updated_at, depends_on, priority)
@@ -199,8 +294,17 @@ def get_task_tree(connect: ConnectFn, root_task_id: str) -> dict[str, Any]:
     """Get a task with all its subtasks recursively.
 
     Returns a dict with task data + 'subtasks' key containing list of child task trees.
+
+    T1.14: caps recursion at ``MAX_TASK_DEPTH`` and tracks a visited set
+    so a cycle in ``parent_task_id`` (which create_subtask now rejects,
+    but legacy DBs might contain) can't blow the Python stack.
     """
-    def _build_tree(task_id: str) -> dict[str, Any] | None:
+    visited: set[str] = set()
+
+    def _build_tree(task_id: str, depth: int) -> dict[str, Any] | None:
+        if depth >= MAX_TASK_DEPTH or task_id in visited:
+            return None
+        visited.add(task_id)
         with connect() as conn:
             row = conn.execute("SELECT * FROM tasks WHERE id=?", (task_id,)).fetchone()
             if not row:
@@ -215,12 +319,12 @@ def get_task_tree(connect: ConnectFn, root_task_id: str) -> dict[str, Any]:
             child_ids = [child_row["id"] for child_row in children_rows]
         d["subtasks"] = []
         for child_id in child_ids:
-            child_tree = _build_tree(child_id)
+            child_tree = _build_tree(child_id, depth + 1)
             if child_tree:
                 d["subtasks"].append(child_tree)
         return d
 
-    return _build_tree(root_task_id) or {}
+    return _build_tree(root_task_id, 0) or {}
 
 
 def wait_for_task(
@@ -253,38 +357,93 @@ def get_available_tasks(
     connect: ConnectFn,
     agent_id: str | None = None,
 ) -> list[dict[str, Any]]:
-    """Return tasks whose depends_on are all satisfied (completed) and not currently claimed.
+    """Return tasks whose dependencies are all satisfied.
 
     A task is "available" if:
     - Its status is "pending" (not yet claimed)
-    - All tasks in its depends_on list have status "completed"
+    - All tasks in its ``depends_on`` list have status "completed"
+    - The assigned agent (if any) has no unsatisfied rows in
+      ``agent_dependencies`` (T1.12)
     - Optionally filtered to a specific agent_id
     """
     import json
     all_tasks = get_all_tasks(connect)
     available = []
-    for task in all_tasks:
-        if task.get("status") not in (None, "pending"):
-            continue
-        if agent_id and task.get("assigned_agent_id") != agent_id:
-            continue
-        depends_on = task.get("depends_on") or []
-        if isinstance(depends_on, str):
-            try:
-                depends_on = json.loads(depends_on)
-            except json.JSONDecodeError:
-                depends_on = []
-        if not depends_on:
-            available.append(task)
-            continue
-        # Check all dependencies are satisfied (completed)
-        deps_satisfied = True
-        for dep_id in depends_on:
-            dep_task = get_task(connect, dep_id)
-            if dep_task is None or dep_task.get("status") != "completed":
-                deps_satisfied = False
-                break
-        if deps_satisfied:
+
+    # T1.12: cache per-agent blocker state so we don't re-query the
+    # agent_dependencies table for every task in the list.
+    agent_blocker_cache: dict[str, bool] = {}
+    with connect() as conn:
+        def _agent_has_unsatisfied_deps(aid: str) -> bool:
+            cached = agent_blocker_cache.get(aid)
+            if cached is not None:
+                return cached
+            # Inline the check_dependencies logic without auto-satisfying
+            # side effects — get_available_tasks is a read-heavy query and
+            # should not mutate state.
+            rows = conn.execute(
+                "SELECT depends_on_task_id, condition, depends_on_agent_id "
+                "FROM agent_dependencies WHERE dependent_agent_id = ? AND satisfied = 0",
+                (aid,),
+            ).fetchall()
+            blocked = False
+            for r in rows:
+                cond = r["condition"]
+                if cond == "task_completed" and r["depends_on_task_id"]:
+                    blocker = conn.execute(
+                        "SELECT status FROM tasks WHERE id = ?",
+                        (r["depends_on_task_id"],),
+                    ).fetchone()
+                    if not blocker or blocker["status"] != "completed":
+                        blocked = True
+                        break
+                elif cond in ("agent_stopped", "agent_registered"):
+                    blocker = conn.execute(
+                        "SELECT status FROM agents WHERE agent_id = ?",
+                        (r["depends_on_agent_id"],),
+                    ).fetchone()
+                    if cond == "agent_stopped":
+                        if not blocker or blocker["status"] != "stopped":
+                            blocked = True
+                            break
+                    elif cond == "agent_registered":
+                        if not blocker or blocker["status"] != "active":
+                            blocked = True
+                            break
+                else:
+                    # Unknown condition: be conservative, treat as blocked.
+                    blocked = True
+                    break
+            agent_blocker_cache[aid] = blocked
+            return blocked
+
+        for task in all_tasks:
+            if task.get("status") not in (None, "pending"):
+                continue
+            if agent_id and task.get("assigned_agent_id") != agent_id:
+                continue
+
+            # Task-level depends_on (JSON array of task IDs)
+            depends_on = task.get("depends_on") or []
+            if isinstance(depends_on, str):
+                try:
+                    depends_on = json.loads(depends_on)
+                except json.JSONDecodeError:
+                    depends_on = []
+            deps_satisfied = True
+            for dep_id in depends_on:
+                dep_task = get_task(connect, dep_id)
+                if dep_task is None or dep_task.get("status") != "completed":
+                    deps_satisfied = False
+                    break
+            if not deps_satisfied:
+                continue
+
+            # Agent-level declared dependencies (T1.12)
+            assigned = task.get("assigned_agent_id")
+            if assigned and _agent_has_unsatisfied_deps(assigned):
+                continue
+
             available.append(task)
     return available
 

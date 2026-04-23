@@ -163,8 +163,17 @@ def get_agent_tree_tool(
             "children": [],
         }
 
-    def _build_tree(conn, aid, now):
+    # T1.14: cap recursion depth and track visited set so a cycle in
+    # the parent_id chain (reparenting bugs under reap) can't blow the
+    # Python stack.
+    MAX_AGENT_TREE_DEPTH = 100
+    visited: set[str] = set()
+
+    def _build_tree(conn, aid, now, depth: int = 0):
         """Recursively build tree rooted at aid, filling in children."""
+        if depth >= MAX_AGENT_TREE_DEPTH or aid in visited:
+            return None
+        visited.add(aid)
         node = _build_node(conn, aid, now)
         if node is None:
             return None
@@ -173,7 +182,7 @@ def get_agent_tree_tool(
             (aid,)
         ).fetchall()
         for child_row in child_rows:
-            child_node = _build_tree(conn, child_row["agent_id"], now)
+            child_node = _build_tree(conn, child_row["agent_id"], now, depth + 1)
             if child_node is not None:
                 node["children"].append(child_node)
         return node

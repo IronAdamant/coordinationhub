@@ -70,7 +70,7 @@ def cmd_update_task_status(engine, args):
 @_command(replica=True)
 def cmd_query_tasks(engine, args):
     result = engine.query_tasks(
-        query_type=args.action,
+        query_type=args.query_type,
         task_id=getattr(args, "task_id", None),
         parent_agent_id=getattr(args, "parent_agent_id", None),
         assigned_agent_id=getattr(args, "assigned_agent_id", None),

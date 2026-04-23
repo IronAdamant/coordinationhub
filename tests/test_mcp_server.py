@@ -157,6 +157,33 @@ class TestCall:
             urllib.request.urlopen(req, timeout=5)
         assert exc_info.value.code == 413
 
+    def test_internal_error_does_not_leak_exception_text(self, server, monkeypatch):
+        """T2.3: unexpected exceptions are wrapped in a generic 500 with a
+        correlation id. Pre-fix the raw ``str(exc)`` leaked SQLite error
+        strings, file paths, and stack fragments to the HTTP client.
+        """
+        from coordinationhub import mcp_server as _mcp
+
+        sentinel = "SECRET_SQLITE_PATH_/var/private/db"
+
+        def _boom(engine, tool_name, arguments):
+            raise RuntimeError(sentinel)
+
+        monkeypatch.setattr(_mcp, "dispatch_tool", _boom)
+
+        with pytest.raises(urllib.error.HTTPError) as exc_info:
+            _post(
+                f"{server.get_url()}/call",
+                {"tool": "register_agent", "arguments": {"agent_id": "a"}},
+            )
+        assert exc_info.value.code == 500
+        body = exc_info.value.read().decode("utf-8")
+        assert sentinel not in body, (
+            f"raw exception text leaked to client: {body}"
+        )
+        assert "correlation_id" in body
+        assert "Internal tool execution error" in body
+
 
 class TestDashboard:
     def test_dashboard_html_served_at_root(self, server):

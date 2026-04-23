@@ -10,6 +10,7 @@ same pattern as ``notifications.py`` and ``conflict_log.py``.
 
 from __future__ import annotations
 
+import sqlite3
 import time
 from typing import Any, NamedTuple
 
@@ -37,23 +38,59 @@ def generate_spawn_id(
     parent_agent_id: str,
     subagent_type: str,
 ) -> str:
-    """Generate a unique spawn ID: ``{parent_agent_id}.{subagent_type}.{seq}``."""
+    """Generate a unique spawn ID: ``{parent_agent_id}.{subagent_type}.{seq}``.
+
+    DEPRECATED (T1.9): this function is NOT atomic with the subsequent
+    INSERT. Two concurrent callers can observe the same seq and produce
+    identical spawn IDs, causing PK collisions in ``pending_tasks``. Use
+    :func:`stash_pending_spawn` without passing ``spawn_id`` — it generates
+    the seq inside the same ``BEGIN IMMEDIATE`` that inserts the row, so
+    the race is closed.
+
+    Retained only for back-compat; callers should migrate.
+    """
+    prefix = f"{parent_agent_id}.{subagent_type}."
     with conn() as cx:
         cursor = cx.execute(
             """
-            SELECT COUNT(*) FROM pending_tasks
-            WHERE scope_id = ? AND subagent_type = ?
+            SELECT MAX(CAST(substr(task_id, ?) AS INTEGER)) AS max_seq
+            FROM pending_tasks
+            WHERE scope_id = ?
+              AND subagent_type = ?
+              AND substr(task_id, ?) GLOB '[0-9]*'
             """,
-            (parent_agent_id, subagent_type),
+            (len(prefix) + 1, parent_agent_id, subagent_type, len(prefix) + 1),
         )
-        seq = cursor.fetchone()[0]
-    return f"{parent_agent_id}.{subagent_type}.{seq}"
+        row = cursor.fetchone()
+        max_seq = row[0] if row and row[0] is not None else -1
+    return f"{prefix}{max_seq + 1}"
+
+
+def _next_spawn_seq(conn: Any, parent_agent_id: str, subagent_type: str) -> int:
+    """Return the next integer seq for (parent_agent_id, subagent_type).
+
+    Must be called inside a BEGIN IMMEDIATE transaction so the MAX read
+    and the subsequent INSERT cannot be interleaved with another writer.
+    """
+    prefix = f"{parent_agent_id}.{subagent_type}."
+    row = conn.execute(
+        """
+        SELECT MAX(CAST(substr(task_id, ?) AS INTEGER)) AS max_seq
+        FROM pending_tasks
+        WHERE scope_id = ?
+          AND subagent_type = ?
+          AND substr(task_id, ?) GLOB '[0-9]*'
+        """,
+        (len(prefix) + 1, parent_agent_id, subagent_type, len(prefix) + 1),
+    ).fetchone()
+    max_seq = row[0] if row and row[0] is not None else -1
+    return int(max_seq) + 1
 
 
 def stash_pending_spawn(
     connect: ConnectFn,
-    spawn_id: str,
-    parent_agent_id: str,
+    spawn_id: str | None = None,
+    parent_agent_id: str | None = None,
     subagent_type: str | None = None,
     description: str | None = None,
     prompt: str | None = None,
@@ -66,19 +103,50 @@ def stash_pending_spawn(
     it correlates the spawn with this pending record via
     ``report_subagent_spawned``.
 
+    T1.9: if ``spawn_id`` is ``None`` (preferred), the spawn id is generated
+    atomically inside the same ``BEGIN IMMEDIATE`` that inserts the row by
+    taking ``MAX(seq) + 1`` over existing ``(parent, subagent_type, *)``
+    rows. This closes the race where two concurrent callers observed the
+    same ``COUNT(*)`` and produced colliding spawn ids.
+
+    If ``spawn_id`` is supplied the caller is responsible for its uniqueness
+    (back-compat path only).
+
     Also prunes rows older than ``_SPAWN_TTL_SECONDS`` so the table
     cannot grow without bound if spawn requests fail before the agent
     is actually spawned.
     """
+    if parent_agent_id is None:
+        raise TypeError("parent_agent_id is required")
+
     now = time.time()
     cutoff = now - _SPAWN_TTL_SECONDS
     with connect() as conn:
-        # Expire stale pending rows
+        # T1.9: the MAX-seq read and the INSERT must be atomic. Opening
+        # BEGIN IMMEDIATE here serializes concurrent callers. Uses the
+        # dual-shape pattern — if the outer `with connect()` already
+        # began a tx (test_db_safety's custom shim), skip our own
+        # BEGIN/COMMIT and let the wrapper handle it.
+        try:
+            conn.execute("BEGIN IMMEDIATE")
+            began = True
+        except sqlite3.OperationalError:
+            began = False
+
+        # Expire stale pending rows inside the same tx so the seq
+        # computation sees a stable snapshot.
         conn.execute(
             "UPDATE pending_tasks SET status = 'expired' "
             "WHERE status = 'pending' AND created_at < ?",
             (cutoff,),
         )
+        if spawn_id is None:
+            if subagent_type is None:
+                raise TypeError(
+                    "subagent_type is required when spawn_id is not supplied"
+                )
+            seq = _next_spawn_seq(conn, parent_agent_id, subagent_type)
+            spawn_id = f"{parent_agent_id}.{subagent_type}.{seq}"
         conn.execute(
             """
             INSERT INTO pending_tasks
@@ -87,6 +155,8 @@ def stash_pending_spawn(
             """,
             (spawn_id, parent_agent_id, subagent_type, description, prompt, now, source),
         )
+        if began:
+            conn.execute("COMMIT")
     return {"stashed": True, "spawn_id": spawn_id, "parent_agent_id": parent_agent_id}
 
 

@@ -191,11 +191,12 @@ CREATE TABLE task_failures (
 );
 
 CREATE TABLE work_intent (
-    agent_id TEXT PRIMARY KEY,
+    agent_id TEXT,
     document_path TEXT,
     intent TEXT,
     declared_at REAL,
-    ttl REAL
+    ttl REAL,
+    PRIMARY KEY (agent_id, document_path)
 );
 
 CREATE TABLE file_ownership (
@@ -207,7 +208,8 @@ CREATE TABLE file_ownership (
 
 CREATE TABLE lineage (
     parent_id TEXT,
-    child_id TEXT PRIMARY KEY
+    child_id TEXT PRIMARY KEY,
+    spawned_at REAL
 );
 
 CREATE TABLE descendant_registry (
@@ -244,6 +246,12 @@ CREATE TABLE broadcast_acks (
     broadcast_id INTEGER,
     agent_id TEXT,
     acknowledged_at REAL,
+    PRIMARY KEY (broadcast_id, agent_id)
+);
+
+CREATE TABLE broadcast_targets (
+    broadcast_id INTEGER,
+    agent_id TEXT,
     PRIMARY KEY (broadcast_id, agent_id)
 );
 

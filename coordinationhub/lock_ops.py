@@ -73,11 +73,17 @@ def find_own_lock(
     region_start: int | None,
     region_end: int | None,
 ) -> dict | None:
-    """Find an existing lock held by the same agent on the same region."""
-    now = time.time()
+    """Find an existing lock held by the same agent on the same region.
+
+    T1.4: includes expired-but-unreaped rows so callers (acquire_lock)
+    UPDATE the existing row instead of INSERTing a duplicate. Previously
+    this filtered `locked_at + lock_ttl > now`, which made expired own
+    locks invisible and caused duplicate rows to accumulate whenever
+    the reaper hadn't run between expiry and re-acquire.
+    """
     rows = conn.execute(
-        f"SELECT * FROM {table} WHERE document_path = ? AND locked_by = ? AND locked_at + lock_ttl > ?",
-        (document_path, agent_id, now),
+        f"SELECT * FROM {table} WHERE document_path = ? AND locked_by = ?",
+        (document_path, agent_id),
     ).fetchall()
     for row in rows:
         if row["region_start"] == region_start and row["region_end"] == region_end:
@@ -95,7 +101,13 @@ def refresh_lock(
     region_start: int | None = None,
     region_end: int | None = None,
 ) -> dict[str, bool | str | float]:
-    """Extend TTL on a lock. Used by both local and shared lock tables."""
+    """Extend TTL on a lock. Used by both local and shared lock tables.
+
+    T1.4: rejects refresh on an expired lock. Previously there was no
+    expiry filter, so a lock whose TTL had passed (and which any other
+    agent could now acquire) could be silently resurrected via refresh,
+    bypassing proper reap semantics.
+    """
     now = time.time()
     if region_start is not None:
         row = conn.execute(
@@ -112,6 +124,8 @@ def refresh_lock(
         return {"refreshed": False, "reason": not_found_reason}
     if row["locked_by"] != agent_id:
         return {"refreshed": False, "reason": "not_owner"}
+    if row["locked_at"] + row["lock_ttl"] <= now:
+        return {"refreshed": False, "reason": "expired"}
 
     new_ttl = ttl if ttl is not None else row["lock_ttl"]
     new_expires = now + new_ttl

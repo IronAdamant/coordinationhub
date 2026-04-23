@@ -127,12 +127,14 @@ def cmd_leader_status(engine, args):
 @_command(replica=True)
 def cmd_ha_dashboard(engine, args):
     result = engine.manage_leases(action="get")
-    leases = result.get("leases", [])
+    leader = result.get("leader")
     if args.json_output:
         _print_json(result)
-    elif not leases:
-        print("No active leases")
+    elif leader is None:
+        print("No active coordinator lease")
     else:
-        print(f"Active leases ({len(leases)}):")
-        for ls in leases:
-            print(f"  {ls['lease_name']}: {ls['holder_id']} (expires {ls['expires_at']})")
+        print("Coordinator lease:")
+        print(f"  Lease: {leader.get('lease_name', '?')}")
+        print(f"  Holder: {leader.get('holder_id', '?')}")
+        print(f"  Acquired at: {leader.get('acquired_at', '?')}")
+        print(f"  Expires at: {leader.get('expires_at', '?')}")

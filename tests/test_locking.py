@@ -33,6 +33,221 @@ class TestLockAcquisition:
         assert result["acquired"] is True
         assert result["locked_by"] == two_agents["other"]
 
+    def test_force_steal_leaves_exactly_one_lock_row(self, engine, two_agents):
+        """Regression test for T1.1: force-steal must be atomic.
+
+        Before the fix, record_conflict used conflict_log's `with connect()`
+        wrapper which committed the outer BEGIN IMMEDIATE transaction
+        mid-flight. After record_conflict but before DELETE+INSERT, the
+        outer tx was closed, which broke atomicity of the force-steal.
+        The happy path still 'worked' but DB invariants weren't guaranteed
+        under concurrency.
+
+        This test asserts the end-state invariant: exactly one lock row
+        on the contested path after a force-steal.
+        """
+        engine.acquire_lock("/contested.txt", two_agents["child"])
+        engine.acquire_lock("/contested.txt", two_agents["other"], force=True)
+        with engine._connect() as conn:
+            rows = conn.execute(
+                "SELECT locked_by FROM document_locks WHERE document_path = ?",
+                ("/contested.txt",),
+            ).fetchall()
+        assert len(rows) == 1
+        assert rows[0]["locked_by"] == two_agents["other"]
+
+    def test_force_steal_holds_outer_transaction(self, engine, two_agents):
+        """Regression test for T1.1: during force-steal, the outer BEGIN
+        IMMEDIATE transaction must remain active between the conflict-log
+        write and the DELETE of the stolen lock. Otherwise a concurrent
+        force-stealer can squeeze in during that window and produce
+        duplicate lock rows.
+
+        Technique: wrap conn.execute to record every statement issued,
+        so we can see whether a COMMIT fires between the INSERT into
+        lock_conflicts and the DELETE from document_locks.
+        """
+        engine.acquire_lock("/concurrency.txt", two_agents["child"])
+
+        # Use sqlite3's set_trace_callback to record every statement issued
+        # on the thread-local conn during the force-steal.
+        conn = engine._connect()
+        statements: list[str] = []
+
+        def trace(sql: str) -> None:
+            first = sql.strip().split()[0].upper() if sql.strip() else ""
+            statements.append(first)
+
+        conn.set_trace_callback(trace)
+        try:
+            engine.acquire_lock("/concurrency.txt", two_agents["other"], force=True)
+        finally:
+            conn.set_trace_callback(None)
+
+        # Locate the outer BEGIN IMMEDIATE and the DELETE that removes the
+        # stolen lock row. Between them there must be no COMMIT, which
+        # would indicate the outer transaction was closed prematurely.
+        begin_idx = next(
+            (i for i, s in enumerate(statements) if s in ("BEGIN",)),
+            -1,
+        )
+        last_delete_idx = max(
+            (i for i, s in enumerate(statements) if s == "DELETE"), default=-1
+        )
+        assert begin_idx >= 0, f"Expected a BEGIN statement; got: {statements}"
+        assert last_delete_idx > begin_idx, (
+            f"Expected DELETE after BEGIN; got: {statements}"
+        )
+        commits_during_tx = [
+            i for i, s in enumerate(statements)
+            if s == "COMMIT" and begin_idx < i < last_delete_idx
+        ]
+        assert commits_during_tx == [], (
+            f"No COMMIT may fire between BEGIN and DELETE during force-steal; "
+            f"statements: {statements}"
+        )
+
+    def test_force_steal_scope_violation_rolls_back_conflict_log(self, engine):
+        """T1.1: force-steal rejected by scope violation must NOT leave a
+        phantom 'lock_stolen' row in lock_conflicts. Before the fix,
+        record_conflict committed the outer tx, so when scope check
+        rejected the acquire at ROLLBACK time, only the force-steal's
+        DELETE+INSERT rolled back — the conflict log entry was already
+        committed and stayed behind as a ghost 'force_overwritten' record.
+        """
+        import json
+        import time as _time
+
+        victim = engine.generate_agent_id()
+        engine.register_agent(victim)
+        scoped = engine.generate_agent_id()
+        engine.register_agent(scoped)
+        with engine._connect() as conn:
+            conn.execute(
+                "INSERT INTO agent_responsibilities (agent_id, scope, updated_at) "
+                "VALUES (?, ?, ?)",
+                (scoped, json.dumps(["src/"]), _time.time()),
+            )
+
+        engine.acquire_lock("/tests/test.py", victim)
+        result = engine.acquire_lock("/tests/test.py", scoped, force=True)
+
+        assert result["acquired"] is False
+        assert result.get("error") == "scope_violation"
+
+        with engine._connect() as conn:
+            lock_rows = conn.execute(
+                "SELECT locked_by FROM document_locks WHERE document_path = ?",
+                ("/tests/test.py",),
+            ).fetchall()
+            conflict_rows = conn.execute(
+                "SELECT * FROM lock_conflicts"
+            ).fetchall()
+        assert len(lock_rows) == 1
+        assert lock_rows[0]["locked_by"] == victim
+        assert len(conflict_rows) == 0, (
+            f"Scope-violation rollback must also roll back the conflict log "
+            f"entry; found phantom rows: {[dict(r) for r in conflict_rows]}"
+        )
+
+    def test_concurrent_force_steal_with_delay_produces_one_lock(self, engine):
+        """T1.1 strengthened concurrent test: inject a delay inside
+        record_conflict so the race window between `record_conflict` and
+        `DELETE` is wide enough to manifest reliably.
+
+        Without the fix, thread A's record_conflict commits the outer tx,
+        then sleeps — thread B grabs BEGIN IMMEDIATE, sees the victim's
+        lock still present, records its own conflict (also commits its
+        outer tx), etc. When both threads finish, two lock rows exist on
+        the same path.
+        """
+        import time as _time
+        from coordinationhub import lock_ops as _lo
+        from coordinationhub import core_locking as _cl
+        from .conftest import run_concurrent
+
+        victim = engine.generate_agent_id()
+        engine.register_agent(victim)
+        stealer_a = engine.generate_agent_id()
+        engine.register_agent(stealer_a)
+        stealer_b = engine.generate_agent_id()
+        engine.register_agent(stealer_b)
+        engine.acquire_lock("/race.txt", victim)
+
+        orig = _lo.record_conflict
+
+        def slow_record_conflict(*args, **kwargs):
+            result = orig(*args, **kwargs)
+            _time.sleep(0.05)  # wide race window
+            return result
+
+        _lo.record_conflict = slow_record_conflict
+        _cl._lo = _lo
+        try:
+            results, errors = run_concurrent(
+                2, lambda aid: engine.acquire_lock("/race.txt", aid, force=True),
+                args_per_worker=[(stealer_a,), (stealer_b,)], timeout=15.0,
+            )
+        finally:
+            _lo.record_conflict = orig
+            _cl._lo = _lo
+
+        assert not errors, f"Errors during concurrent force-steal: {errors}"
+
+        with engine._connect() as conn:
+            rows = conn.execute(
+                "SELECT locked_by FROM document_locks WHERE document_path = ?",
+                ("/race.txt",),
+            ).fetchall()
+        assert len(rows) == 1, (
+            f"Expected exactly 1 lock row after concurrent force-steal with "
+            f"injected delay, got {len(rows)}: {[dict(r) for r in rows]}. "
+            f"This indicates T1.1's outer-transaction-commit bug has returned."
+        )
+
+    def test_concurrent_force_steal_produces_one_lock(self, engine):
+        """T1.1 concurrent regression: two threads force-steal from a shared
+        prior holder at the same time. Invariant: after both complete, there
+        is exactly one lock row and the conflict log records both steals.
+
+        Before the fix, record_conflict's `with connect()` closed the outer
+        BEGIN IMMEDIATE early. A second force-stealer starting BEGIN IMMEDIATE
+        between the first's record_conflict and DELETE could produce two
+        lock rows on the same path.
+        """
+        from .conftest import run_concurrent
+
+        victim = engine.generate_agent_id()
+        engine.register_agent(victim)
+        stealer_a = engine.generate_agent_id()
+        engine.register_agent(stealer_a)
+        stealer_b = engine.generate_agent_id()
+        engine.register_agent(stealer_b)
+
+        engine.acquire_lock("/shared.txt", victim)
+
+        def steal(aid):
+            return engine.acquire_lock("/shared.txt", aid, force=True)
+
+        results, errors = run_concurrent(
+            2, steal, args_per_worker=[(stealer_a,), (stealer_b,)]
+        )
+        assert not errors, f"Unexpected errors: {errors}"
+
+        with engine._connect() as conn:
+            rows = conn.execute(
+                "SELECT locked_by FROM document_locks WHERE document_path = ?",
+                ("/shared.txt",),
+            ).fetchall()
+        # Invariant: at most one lock row. (With broken transaction boundaries,
+        # a race could produce two rows — both stealers "winning".)
+        assert len(rows) == 1, (
+            f"Expected exactly 1 lock row after concurrent force-steal, got "
+            f"{len(rows)}: {[dict(r) for r in rows]}"
+        )
+        # The winner is whichever ran first; both claim to have acquired.
+        assert all(r["acquired"] for r in results)
+
     def test_acquire_expired_lock(self, engine, registered_agent):
         """An expired lock can be taken over without force."""
         engine.acquire_lock("/test.txt", registered_agent, ttl=0.01)
@@ -41,6 +256,86 @@ class TestLockAcquisition:
         engine.register_agent(other)
         result = engine.acquire_lock("/test.txt", other)
         assert result["acquired"] is True
+
+
+class TestReapCacheCoherence:
+    """T1.3 regression: reap_expired must not wipe cache entries added by
+    concurrent acquire_lock calls. The fix wraps reap DELETE + SELECT +
+    warm() in one BEGIN IMMEDIATE so a concurrent acquirer is serialised."""
+
+    def test_reap_wraps_delete_and_warm_in_one_transaction(self, engine):
+        """T1.3 regression: the DELETE and the subsequent SELECT that drives
+        warm() must live inside one BEGIN IMMEDIATE so a concurrent
+        acquire_lock cannot interleave between them (which would let the
+        cache warm with a snapshot that misses the concurrent add_lock).
+
+        Technique: sqlite3 trace_callback records every statement. The
+        invariant is that no COMMIT appears between the DELETE and the
+        SELECT that feeds warm.
+        """
+        # Seed an expired lock so reap has work to do
+        expired_holder = engine.generate_agent_id()
+        engine.register_agent(expired_holder)
+        engine.acquire_lock("/expired.txt", expired_holder, ttl=0.01)
+        time.sleep(0.03)
+
+        conn = engine._connect()
+        statements: list[str] = []
+
+        def trace(sql: str) -> None:
+            first = sql.strip().split()[0].upper() if sql.strip() else ""
+            statements.append(first)
+
+        conn.set_trace_callback(trace)
+        try:
+            engine.admin_locks("reap_expired")
+        finally:
+            conn.set_trace_callback(None)
+
+        # Find the DELETE from document_locks and the SELECT that feeds warm.
+        delete_idx = next(
+            (i for i, s in enumerate(statements) if s == "DELETE"), -1
+        )
+        # The SELECT driving warm is the last SELECT after DELETE.
+        select_after_delete_idx = max(
+            (i for i, s in enumerate(statements)
+             if s == "SELECT" and i > delete_idx),
+            default=-1,
+        )
+        assert delete_idx >= 0 and select_after_delete_idx > delete_idx, (
+            f"Expected DELETE followed by SELECT in reap_expired; statements: {statements}"
+        )
+        commits_between = [
+            i for i, s in enumerate(statements)
+            if s == "COMMIT" and delete_idx < i < select_after_delete_idx
+        ]
+        assert commits_between == [], (
+            f"No COMMIT may fire between reap's DELETE and the SELECT that "
+            f"feeds lock_cache.warm — a concurrent acquire_lock could "
+            f"interleave and have its cache entry wiped. Statements: {statements}"
+        )
+
+    def test_reap_releases_and_reacquires_locks_preserves_cache(self, engine):
+        """Sanity test: after reap_expired runs, the cache still matches DB
+        for all non-expired locks.
+        """
+        active_holder = engine.generate_agent_id()
+        engine.register_agent(active_holder)
+        engine.acquire_lock("/still_active.txt", active_holder, ttl=60.0)
+
+        expired_holder = engine.generate_agent_id()
+        engine.register_agent(expired_holder)
+        engine.acquire_lock("/expired.txt", expired_holder, ttl=0.01)
+        time.sleep(0.03)
+
+        engine.admin_locks("reap_expired")
+
+        # The active lock must still be in the cache
+        status = engine.get_lock_status("/still_active.txt")
+        assert status["locked"] is True
+        # The expired lock must be gone from both DB and cache
+        status2 = engine.get_lock_status("/expired.txt")
+        assert status2["locked"] is False
 
 
 class TestLockRelease:
@@ -78,6 +373,59 @@ class TestLockRefresh:
         result = engine.refresh_lock("/nonexistent.txt", registered_agent)
         assert result["refreshed"] is False
         assert result["reason"] == "not_locked"
+
+    def test_refresh_expired_lock_rejected(self, engine, registered_agent):
+        """T1.4 regression: refresh_lock must reject a lock whose TTL has
+        expired. Previously there was no expiry check — an expired lock
+        (which another agent could have legitimately acquired in the
+        meantime) could be silently resurrected via refresh.
+        """
+        engine.acquire_lock("/expiring.txt", registered_agent, ttl=0.01)
+        time.sleep(0.03)
+        result = engine.refresh_lock("/expiring.txt", registered_agent, ttl=60.0)
+        assert result["refreshed"] is False
+        assert result.get("reason") == "expired"
+
+
+class TestDuplicateLockPrevention:
+    """T1.4 regression: re-acquiring an expired own-lock must UPDATE the
+    existing row, not INSERT a duplicate. Previously find_own_lock filtered
+    by expiry so expired rows were invisible to the acquire path, which
+    then INSERTed a new row — duplicate rows accumulated until reap ran.
+    """
+
+    def test_reacquire_expired_own_lock_updates_not_duplicates(self, engine, registered_agent):
+        engine.acquire_lock("/reacquire.txt", registered_agent, ttl=0.01)
+        time.sleep(0.03)
+        # Re-acquire without running reap — the old expired row is still in
+        # the table but invisible to find_own_lock pre-fix.
+        engine.acquire_lock("/reacquire.txt", registered_agent, ttl=60.0)
+
+        with engine._connect() as conn:
+            rows = conn.execute(
+                "SELECT id FROM document_locks WHERE document_path = ? AND locked_by = ?",
+                ("/reacquire.txt", registered_agent),
+            ).fetchall()
+        assert len(rows) == 1, (
+            f"Re-acquiring an expired own lock must UPDATE the existing row, "
+            f"not INSERT a new one. Got {len(rows)} rows: {[dict(r) for r in rows]}. "
+            f"This indicates T1.4's duplicate-row accumulation has returned."
+        )
+
+    def test_multiple_reacquires_still_single_row(self, engine, registered_agent):
+        """Repeated acquire/expire cycles must still produce at most one row."""
+        for _ in range(5):
+            engine.acquire_lock("/cyclic.txt", registered_agent, ttl=0.01)
+            time.sleep(0.02)
+
+        with engine._connect() as conn:
+            rows = conn.execute(
+                "SELECT id FROM document_locks WHERE document_path = ? AND locked_by = ?",
+                ("/cyclic.txt", registered_agent),
+            ).fetchall()
+        assert len(rows) == 1, (
+            f"After 5 acquire/expire cycles there should be 1 lock row, got {len(rows)}"
+        )
 
 
 class TestLockStatus:
@@ -382,3 +730,82 @@ class TestBroadcastAcknowledgment:
         assert msgs["count"] == 1
         assert msgs["messages"][0]["message_type"] == "broadcast_ack_request"
         assert msgs["messages"][0]["payload"]["message"] == "test"
+
+
+class TestBroadcastTargetSnapshot:
+    """T1.11: broadcast snapshots target list so pending_acks is computable
+    and late-joiners are excluded.
+    """
+
+    def _heartbeat(self, engine, *agent_ids):
+        for aid in agent_ids:
+            engine.heartbeat(aid)
+
+    def test_status_shows_real_pending_acks(self, engine, two_agents):
+        """Pre-fix get_broadcast_status always returned pending_acks=[].
+        Post-fix it returns the snapshot minus the acks."""
+        self._heartbeat(engine, two_agents["parent"], two_agents["child"], two_agents["other"])
+        child = two_agents["child"]
+        other = two_agents["other"]
+
+        broadcast = engine.broadcast(child, require_ack=True, message="hi")
+        bid = broadcast["broadcast_id"]
+
+        status = engine.get_broadcast_status(bid)
+        assert status["pending_acks"] == [other]
+        assert status["acknowledged_by"] == []
+
+        engine.acknowledge_broadcast(bid, other)
+        status = engine.get_broadcast_status(bid)
+        assert status["pending_acks"] == []
+        assert status["acknowledged_by"] == [other]
+
+    def test_late_joiner_excluded_from_targets(self, engine, two_agents):
+        """An agent that registers after the broadcast fires isn't a target
+        and doesn't appear in pending_acks.
+        """
+        self._heartbeat(engine, two_agents["parent"], two_agents["child"], two_agents["other"])
+        parent = two_agents["parent"]
+        child = two_agents["child"]
+        other = two_agents["other"]
+
+        broadcast = engine.broadcast(child, require_ack=True, message="early")
+        bid = broadcast["broadcast_id"]
+
+        # Register a new sibling after the broadcast.
+        late = engine.generate_agent_id(parent)
+        engine.register_agent(late, parent)
+        engine.heartbeat(late)
+
+        status = engine.get_broadcast_status(bid)
+        assert late not in status["pending_acks"]
+        assert status["pending_acks"] == [other]
+
+    def test_targets_persist_in_broadcast_targets_table(self, engine, two_agents):
+        """The snapshot is stored in the broadcast_targets table."""
+        self._heartbeat(engine, two_agents["parent"], two_agents["child"], two_agents["other"])
+        child = two_agents["child"]
+        other = two_agents["other"]
+
+        broadcast = engine.broadcast(child, require_ack=True)
+        bid = broadcast["broadcast_id"]
+
+        with engine._connect() as conn:
+            rows = conn.execute(
+                "SELECT agent_id FROM broadcast_targets WHERE broadcast_id = ?",
+                (bid,),
+            ).fetchall()
+            target_ids = {r["agent_id"] for r in rows}
+
+        assert target_ids == {other}
+
+    def test_expected_count_matches_target_count(self, engine, two_agents):
+        """When targets are supplied, expected_count is derived from len(targets),
+        so callers can't pass a mismatched count.
+        """
+        self._heartbeat(engine, two_agents["parent"], two_agents["child"], two_agents["other"])
+        child = two_agents["child"]
+
+        broadcast = engine.broadcast(child, require_ack=True)
+        status = engine.get_broadcast_status(broadcast["broadcast_id"])
+        assert status["expected_count"] == len(status["pending_acks"]) + len(status["acknowledged_by"])

@@ -148,11 +148,12 @@ _SCHEMAS = {
     """,
     "work_intent": """
         CREATE TABLE IF NOT EXISTS work_intent (
-            agent_id      TEXT PRIMARY KEY,
+            agent_id      TEXT NOT NULL,
             document_path TEXT NOT NULL,
             intent        TEXT NOT NULL,
             declared_at   REAL NOT NULL,
-            ttl           REAL DEFAULT 60.0
+            ttl           REAL DEFAULT 60.0,
+            PRIMARY KEY (agent_id, document_path)
         )
     """,
     "handoffs": """
@@ -240,6 +241,13 @@ _SCHEMAS = {
             broadcast_id    INTEGER NOT NULL,
             agent_id        TEXT NOT NULL,
             acknowledged_at REAL NOT NULL,
+            PRIMARY KEY (broadcast_id, agent_id)
+        )
+    """,
+    "broadcast_targets": """
+        CREATE TABLE IF NOT EXISTS broadcast_targets (
+            broadcast_id    INTEGER NOT NULL,
+            agent_id        TEXT NOT NULL,
             PRIMARY KEY (broadcast_id, agent_id)
         )
     """,

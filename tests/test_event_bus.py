@@ -53,3 +53,92 @@ class TestEventBus:
         bus.publish("message.received", {"from": "a"})
         with pytest.raises(queue.Empty):
             sub.get(timeout=0.01)
+
+
+class TestPublishEventDurability:
+    """T1.10: _publish_event journals BEFORE firing the in-mem bus; journal
+    failures are logged, not silently swallowed; in-mem publish still fires
+    so same-process waiters don't deadlock.
+    """
+
+    def test_event_journaled_before_inmem_publish(self, engine):
+        """The SQLite journal row must exist BEFORE the in-memory bus fires.
+
+        Deterministic observation: intercept ``EventBus.publish`` and
+        record whether the coordination_events row is visible at that
+        moment. Pre-fix the bus fires first so the journal row isn't yet
+        committed; post-fix the journal commit precedes the bus call.
+        """
+        journal_visible_at_inmem_publish = {"value": None}
+        orig_publish = engine._event_bus.publish
+
+        def wrapped_publish(topic, payload):
+            if topic == "t1.10.ordering":
+                with engine._connect() as conn:
+                    row = conn.execute(
+                        "SELECT COUNT(*) as c FROM coordination_events WHERE topic=?",
+                        ("t1.10.ordering",),
+                    ).fetchone()
+                journal_visible_at_inmem_publish["value"] = row["c"] > 0
+            return orig_publish(topic, payload)
+
+        engine._event_bus.publish = wrapped_publish  # type: ignore[assignment]
+        try:
+            engine._publish_event("t1.10.ordering", {"payload": "x"})
+        finally:
+            engine._event_bus.publish = orig_publish  # type: ignore[assignment]
+
+        assert journal_visible_at_inmem_publish["value"] is True, (
+            "in-memory bus fired before journal row committed — "
+            "cross-process waiters could miss this event on crash"
+        )
+
+    def test_journal_failure_is_logged_not_swallowed(self, engine, caplog):
+        """Pre-fix: bare ``except: pass`` silently swallowed all DB errors.
+        Post-fix: WARNING is logged and _last_event_journaled=False.
+        """
+        import logging
+
+        class _Boom:
+            def __enter__(self_inner):
+                raise RuntimeError("db on fire")
+
+            def __exit__(self_inner, *a):
+                return False
+
+        original_connect = engine._connect
+        engine._connect = lambda: _Boom()  # type: ignore[method-assign]
+        try:
+            with caplog.at_level(logging.WARNING, logger="coordinationhub.core"):
+                engine._publish_event("t1.10.failtest", {"x": 1})
+        finally:
+            engine._connect = original_connect  # type: ignore[method-assign]
+
+        assert engine._last_event_journaled is False
+        assert any(
+            "journal write failed" in r.getMessage()
+            and "t1.10.failtest" in r.getMessage()
+            for r in caplog.records
+        ), f"no journal-failure warning in: {[r.getMessage() for r in caplog.records]}"
+
+    def test_journal_failure_still_fires_inmem_bus(self, engine):
+        """Same-process waiters shouldn't hang when the journal write fails."""
+        sub_id, sub = engine._event_bus.subscribe(["t1.10.inmem"])
+
+        class _Boom:
+            def __enter__(self_inner):
+                raise RuntimeError("db on fire")
+
+            def __exit__(self_inner, *a):
+                return False
+
+        original_connect = engine._connect
+        engine._connect = lambda: _Boom()  # type: ignore[method-assign]
+        try:
+            engine._publish_event("t1.10.inmem", {"n": 42})
+        finally:
+            engine._connect = original_connect  # type: ignore[method-assign]
+
+        event = sub.get(timeout=0.5)
+        assert event["n"] == 42
+        engine._event_bus.unsubscribe(sub_id)

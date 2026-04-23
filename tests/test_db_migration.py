@@ -250,6 +250,63 @@ class TestFreshInstall:
         assert "region_start" in _cols(conn, "document_locks")
         assert "region_end" in _cols(conn, "document_locks")
 
+    def test_fresh_db_has_no_vestigial_claude_agent_id(self, tmp_path: Path) -> None:
+        """Regression test for T0.4: before the fix, init_schema on a fresh DB
+        created `agents` with `raw_ide_id` (from _SCHEMAS), then replayed v3
+        migration which unconditionally added `claude_agent_id`, then v21
+        early-returned because `raw_ide_id` already existed — leaving a
+        vestigial `claude_agent_id NULL` column. The fix: v3 skips when
+        either `claude_agent_id` or `raw_ide_id` already exists.
+        """
+        db = tmp_path / "fresh.db"
+        conn = _create_connection(db)
+        init_schema(conn)
+        conn.commit()
+
+        agent_cols = _cols(conn, "agents")
+        assert "raw_ide_id" in agent_cols
+        assert "claude_agent_id" not in agent_cols, (
+            f"v3 migration re-introduced vestigial claude_agent_id column. "
+            f"agents columns: {agent_cols}"
+        )
+
+    def test_legacy_db_still_migrates_through_v3_and_v21(self, tmp_path: Path) -> None:
+        """A DB that genuinely predates v3 (no raw_ide_id, no claude_agent_id)
+        must still pick up claude_agent_id via v3, then have it renamed to
+        raw_ide_id by v21. Ensures the v3 guard didn't break legacy DBs."""
+        db = tmp_path / "legacy.db"
+        conn = sqlite3.connect(db)
+        # Pre-v3 agents table (no raw_ide_id, no claude_agent_id)
+        conn.execute(
+            "CREATE TABLE agents ("
+            "  agent_id TEXT PRIMARY KEY, parent_id TEXT,"
+            "  worktree_root TEXT NOT NULL, pid INTEGER,"
+            "  started_at REAL NOT NULL, last_heartbeat REAL NOT NULL,"
+            "  status TEXT DEFAULT 'active'"
+            ")"
+        )
+        conn.execute(
+            "INSERT INTO agents (agent_id, worktree_root, started_at, last_heartbeat) "
+            "VALUES (?, ?, ?, ?)",
+            ("hub.legacy.1", "/tmp", 1.0, 1.0),
+        )
+        conn.commit()
+        conn.close()
+
+        conn = _create_connection(db)
+        init_schema(conn)
+        conn.commit()
+
+        agent_cols = _cols(conn, "agents")
+        assert "raw_ide_id" in agent_cols
+        assert "claude_agent_id" not in agent_cols
+        # Existing row preserved
+        rows = conn.execute(
+            "SELECT agent_id FROM agents WHERE agent_id = ?",
+            ("hub.legacy.1",),
+        ).fetchall()
+        assert len(rows) == 1
+
     def test_fresh_db_passes_agent_tree_query(self, tmp_path: Path) -> None:
         """Review Fourteen: ``agent-tree`` errored with 'no such column: region_start'.
 

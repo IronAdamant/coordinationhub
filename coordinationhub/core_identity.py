@@ -64,18 +64,27 @@ class IdentityMixin:
         worktree_root: str | None = None,
         raw_ide_id: str | None = None,
     ) -> dict[str, Any]:
-        """Register a new agent and return its context bundle."""
+        """Register a new agent and return its context bundle.
+
+        Returns an error bundle (``{"registered": False, "reason": "collision", ...}``)
+        if an active agent already exists at ``agent_id`` under a different PID
+        (T1.2 cross-process collision guard).
+        """
         worktree = worktree_root or (
             str(self._storage.project_root) if self._storage.project_root else os.getcwd()
         )
-        _ar.register_agent(self._connect, agent_id, worktree, parent_id, raw_ide_id=raw_ide_id)
+        ar_result = _ar.register_agent(
+            self._connect, agent_id, worktree, parent_id, raw_ide_id=raw_ide_id
+        )
+        if not ar_result.get("registered", True):
+            # Collision with a live agent in another process — do NOT publish
+            # an agent.registered event or write lineage.
+            return ar_result
+
+        # T1.20: lineage insert moved into the primitive so it joins the
+        # agent-row INSERT in a single transaction. The engine now only
+        # publishes the event and handles optional graph/responsibilities.
         self._publish_event("agent.registered", {"agent_id": agent_id, "parent_id": parent_id})
-        if parent_id is not None:
-            with self._connect() as conn:
-                conn.execute(
-                    "INSERT OR IGNORE INTO lineage (parent_id, child_id, spawned_at) VALUES (?, ?, ?)",
-                    (parent_id, agent_id, time.time()),
-                )
         if graph_agent_id:
             graph = _g.get_graph()
             if graph:
@@ -92,9 +101,20 @@ class IdentityMixin:
         return self._build_context_bundle(agent_id, parent_id)
 
     def heartbeat(self, agent_id: str) -> dict[str, Any]:
-        """Send an agent heartbeat. Updates last_heartbeat timestamp."""
-        updated = _ar.heartbeat(self._connect, agent_id)
-        return {"updated": updated.get("updated", False), "next_heartbeat_in": self.HEARTBEAT_INTERVAL}
+        """Send an agent heartbeat. Updates last_heartbeat timestamp.
+
+        T1.18: propagates the primitive's ``reason`` field on failure
+        (e.g. ``not_registered``, ``agent_stopped``) so the caller can
+        distinguish "need to re-register" from "lost race".
+        """
+        result = _ar.heartbeat(self._connect, agent_id)
+        out = {
+            "updated": result.get("updated", False),
+            "next_heartbeat_in": self.HEARTBEAT_INTERVAL,
+        }
+        if not out["updated"] and "reason" in result:
+            out["reason"] = result["reason"]
+        return out
 
     def deregister_agent(self, agent_id: str) -> dict[str, Any]:
         """Deregister an agent, release its locks, and orphan its children."""
@@ -107,9 +127,19 @@ class IdentityMixin:
 
     def list_agents(
         self, active_only: bool = True, stale_timeout: float = 600.0,
+        include_stale: bool = False,
     ) -> dict[str, Any]:
-        """List registered agents, optionally filtered to active only."""
-        agents = _ar.list_agents(self._connect, active_only, stale_timeout)
+        """List registered agents, optionally filtered to active only.
+
+        T1.17: when ``active_only`` is True the result excludes rows whose
+        heartbeat is older than ``stale_timeout``. Pass
+        ``include_stale=True`` to recover every row with status='active'
+        regardless of heartbeat age (useful for dashboards surfacing
+        stuck agents).
+        """
+        agents = _ar.list_agents(
+            self._connect, active_only, stale_timeout, include_stale=include_stale,
+        )
         return {"agents": agents}
 
     def get_agent_relations(self, agent_id: str, mode: str = "lineage") -> dict[str, Any]:

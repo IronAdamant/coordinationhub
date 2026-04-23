@@ -187,12 +187,27 @@ class MCPRequestHandler(BaseHTTPRequestHandler):
             result = dispatch_tool(self.server.engine, tool_name, arguments)
             self._send_json({"result": result})
         except ValueError as exc:
+            # ValueError for "Unknown tool: X. Available: [...]" is intentional
+            # information (caller needs to know what's available).
             self._send_error_json(404, str(exc))
         except TypeError as exc:
+            # Argument-shape problem — tell the caller what's wrong with their
+            # inputs but stay within the tool-name + TypeError text (no SQL
+            # internals leak via this path).
             self._send_error_json(400, f"Invalid arguments for tool {tool_name!r}: {exc}")
         except Exception as exc:
-            logger.exception("Error executing tool %s", tool_name)
-            self._send_error_json(500, f"Tool execution error: {exc}")
+            # T2.3: log the full exception with a correlation id; send only a
+            # generic message + the id to the client so SQLite error text,
+            # file paths, or stack fragments don't leak.
+            import uuid as _uuid
+            correlation_id = _uuid.uuid4().hex[:12]
+            logger.exception(
+                "tool %s failed [correlation_id=%s]", tool_name, correlation_id,
+            )
+            self._send_error_json(
+                500,
+                f"Internal tool execution error (correlation_id={correlation_id})",
+            )
 
 
 # ------------------------------------------------------------------ #

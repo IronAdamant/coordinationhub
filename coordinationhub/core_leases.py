@@ -26,18 +26,24 @@ class LeaseMixin:
     def manage_leases(
         self,
         action: str,
-        agent_id: str,
+        agent_id: str | None = None,
         ttl: float | None = None,
     ) -> dict[str, Any]:
-        """Unified lease management: acquire | refresh | release | get | claim."""
+        """Unified lease management: acquire | refresh | release | get | claim.
+
+        agent_id is required for acquire/refresh/release/claim. For `get` it is
+        ignored (the coordinator lease is a singleton).
+        """
+        if action == "get":
+            return {"leader": self.get_leader()}
+        if agent_id is None:
+            return {"error": f"action={action!r} requires agent_id"}
         if action == "acquire":
             return self.acquire_coordinator_lease(agent_id, ttl)
         if action == "refresh":
             return self.refresh_coordinator_lease(agent_id)
         if action == "release":
             return self.release_coordinator_lease(agent_id)
-        if action == "get":
-            return {"leader": self.get_leader()}
         if action == "claim":
             return self.claim_leadership(agent_id, ttl)
         return {"error": f"Unknown action: {action!r}"}

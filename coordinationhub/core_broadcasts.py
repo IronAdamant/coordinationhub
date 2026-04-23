@@ -50,13 +50,17 @@ class BroadcastMixin:
         live_siblings = [s for s in siblings if now - s.get("last_heartbeat", 0) <= ttl]
 
         if require_ack and live_siblings:
+            sibling_ids = [s["agent_id"] for s in live_siblings]
+            # T1.11: snapshot the target list at broadcast time so
+            # pending_acks is computable and late-joiners are excluded.
             result = _bc.record_broadcast(
-                self._connect, agent_id, document_path, message, ttl, len(live_siblings),
+                self._connect, agent_id, document_path, message, ttl,
+                len(live_siblings), targets=sibling_ids,
             )
             broadcast_id = result["broadcast_id"]
-            for sib in live_siblings:
+            for sib_id in sibling_ids:
                 _msg.send_message(
-                    self._connect, agent_id, sib["agent_id"], "broadcast_ack_request",
+                    self._connect, agent_id, sib_id, "broadcast_ack_request",
                     {"broadcast_id": broadcast_id, "document_path": document_path, "message": message},
                 )
             self._publish_event(
@@ -65,13 +69,13 @@ class BroadcastMixin:
                     "broadcast_id": broadcast_id,
                     "agent_id": agent_id,
                     "document_path": document_path,
-                    "pending_acks": [s["agent_id"] for s in live_siblings],
+                    "pending_acks": sibling_ids,
                 },
             )
             return {
                 "broadcast_id": broadcast_id,
                 "acknowledged_by": [],
-                "pending_acks": [s["agent_id"] for s in live_siblings],
+                "pending_acks": sibling_ids,
                 "conflicts": [],
             }
 
@@ -149,9 +153,12 @@ class BroadcastMixin:
                 break
             acked.add(event.get("agent_id"))
 
+        # T1.11: re-read status so pending_acks reflects the snapshot.
+        final = self.get_broadcast_status(broadcast_id)
         return {
             "timed_out": len(acked) < expected,
             "acknowledged_by": list(acked),
+            "pending_acks": final.get("pending_acks", []),
         }
 
     def _handoff(

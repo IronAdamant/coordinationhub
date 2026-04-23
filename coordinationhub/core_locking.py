@@ -97,8 +97,19 @@ class LockingMixin:
                     return result
                 if conflicts and force:
                     for c in conflicts:
-                        _cl.record_conflict(self._connect, norm_path, c["locked_by"], agent_id,
-                                            "lock_stolen", resolution="force_overwritten")
+                        # T1.1: use the lock_ops primitive directly so the conflict
+                        # log write joins the outer BEGIN IMMEDIATE transaction
+                        # instead of `conflict_log.record_conflict` opening a
+                        # nested `with connect()` that would commit the outer
+                        # transaction mid-flight (creating a race window where
+                        # another force-stealer could start BEGIN IMMEDIATE
+                        # between our SELECT and our DELETE, producing duplicate
+                        # lock rows on the same path).
+                        _lo.record_conflict(
+                            conn, "lock_conflicts", norm_path,
+                            c["locked_by"], agent_id,
+                            "lock_stolen", resolution="force_overwritten",
+                        )
                         conn.execute("DELETE FROM document_locks WHERE id = ?", (c["id"],))
 
                 conn.execute(
@@ -221,13 +232,22 @@ class LockingMixin:
 
     def _check_work_intent_conflict(
         self, conn, norm_path: str, agent_id: str,
+        requesting_intent: str | None = None,
     ) -> dict[str, Any] | None:
         """Check if another agent has a live intent for this file.
 
         Returns a proximity_warning dict (cooperative signal, not a denial).
         Only populated when lock acquisition would otherwise succeed.
+
+        T1.16: passing ``requesting_intent`` lets read-only acquires filter
+        out peer readers from the warning. Lock acquisition (the default
+        call path) is always a write-class access so leaving it None
+        preserves the strictest semantics.
         """
-        conflicts = _wi.check_intent_conflict(self._connect, norm_path, agent_id)
+        conflicts = _wi.check_intent_conflict(
+            self._connect, norm_path, agent_id,
+            requesting_intent=requesting_intent,
+        )
         if not conflicts:
             return None
         return {
@@ -326,18 +346,38 @@ class LockingMixin:
             return result
 
         if action == "reap_expired":
-            with self._connect() as conn:
+            # T1.3: reap + warm must be atomic vs. concurrent acquire_lock.
+            # If DELETE commits and the SELECT+warm happens in a separate
+            # transaction, a concurrent acquire_lock can insert a new row
+            # and call add_lock on the cache BEFORE warm(); then warm()
+            # rebuilds from a snapshot that excludes the new row, wiping
+            # it from the cache even though the DB holds it.
+            #
+            # Fix: wrap DELETE + SELECT + warm in one BEGIN IMMEDIATE so a
+            # concurrent acquirer is serialised behind us. Because warm
+            # runs while we still hold the writer lock, no add_lock can
+            # interleave between our post-delete SELECT and warm().
+            conn = self._connect()
+            conn.execute("BEGIN IMMEDIATE")
+            try:
                 result = _lo.reap_expired_locks(
                     conn, "document_locks",
                     agent_grace_seconds=grace_seconds,
                 )
-            now = time.time()
-            with self._connect() as conn:
+                now = time.time()
                 rows = conn.execute(
                     "SELECT * FROM document_locks WHERE locked_at + lock_ttl >= ?",
                     (now,),
                 ).fetchall()
                 self._lock_cache.warm([dict(r) for r in rows])
+                conn.execute("COMMIT")
+            except Exception:
+                try:
+                    conn.execute("ROLLBACK")
+                except sqlite3.OperationalError as e:
+                    if "no transaction is active" not in str(e):
+                        raise
+                raise
             return result
 
         if action == "reap_stale":

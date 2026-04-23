@@ -59,15 +59,30 @@ def _configure_server(engine: CoordinationEngine):
 
     @server.call_tool()
     async def call_tool(name: str, arguments: dict[str, Any]):
-        """Dispatch an MCP tool call to the appropriate engine method."""
+        """Dispatch an MCP tool call to the appropriate engine method.
+
+        T2.3: exceptions are logged with a correlation id and the client
+        sees only a generic message. Previously the raw `str(exc)` leaked
+        SQLite error text, paths, and stack fragments. Still returns as
+        ``TextContent`` because the MCP SDK's ``call_tool`` decorator
+        doesn't expose an error envelope yet; the payload starts with
+        ``"Error:"`` so clients can detect the failure textually.
+        """
         try:
             loop = asyncio.get_running_loop()
             result = await loop.run_in_executor(
                 None, lambda: dispatch_tool(engine, name, arguments),
             )
         except Exception as exc:
-            logger.exception("Error executing tool %s", name)
-            return [TextContent(type="text", text=f"Error: {exc}")]
+            import uuid as _uuid
+            correlation_id = _uuid.uuid4().hex[:12]
+            logger.exception(
+                "tool %s failed [correlation_id=%s]", name, correlation_id,
+            )
+            return [TextContent(
+                type="text",
+                text=f"Error: Internal tool execution error (correlation_id={correlation_id})",
+            )]
 
         return [TextContent(type="text", text=json.dumps(result, indent=2, default=str))]
 

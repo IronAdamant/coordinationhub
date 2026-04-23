@@ -22,9 +22,24 @@ def record_broadcast(
     message: str | None,
     ttl: float,
     expected_count: int,
+    targets: list[str] | None = None,
 ) -> dict[str, Any]:
-    """Record a broadcast that requires acknowledgments."""
+    """Record a broadcast that requires acknowledgments.
+
+    T1.11: when ``targets`` is provided, the exact set of expected
+    recipients is snapshotted into ``broadcast_targets``. This makes
+    ``pending_acks`` computable in :func:`get_broadcast_status` as
+    ``targets - acks``. Late-joining siblings (registered after the
+    broadcast) are not added — they never received the ack_request
+    message anyway, so excluding them from ``pending_acks`` is correct.
+
+    ``expected_count`` still parameterises the scalar for back-compat,
+    but when ``targets`` is supplied the stored count is derived from
+    ``len(targets)`` to guarantee consistency.
+    """
     now = time.time()
+    if targets is not None:
+        expected_count = len(targets)
     with connect() as conn:
         cursor = conn.execute(
             """
@@ -35,6 +50,11 @@ def record_broadcast(
             (from_agent_id, document_path, message, now, ttl, now + ttl, expected_count),
         )
         broadcast_id = cursor.lastrowid
+        if targets:
+            conn.executemany(
+                "INSERT OR IGNORE INTO broadcast_targets (broadcast_id, agent_id) VALUES (?, ?)",
+                [(broadcast_id, aid) for aid in targets],
+            )
     return {
         "broadcast_id": broadcast_id,
         "from_agent_id": from_agent_id,
@@ -73,7 +93,13 @@ def get_broadcast_status(
     connect: ConnectFn,
     broadcast_id: int,
 ) -> dict[str, Any]:
-    """Get the current acknowledgment status for a broadcast."""
+    """Get the current acknowledgment status for a broadcast.
+
+    T1.11: ``pending_acks`` is now computed from the snapshot in
+    ``broadcast_targets`` minus the rows in ``broadcast_acks``. For
+    broadcasts recorded before the snapshot table existed (legacy), the
+    list is empty and callers fall back to the scalar ``expected_count``.
+    """
     with connect() as conn:
         row = conn.execute("SELECT * FROM broadcasts WHERE id = ?", (broadcast_id,)).fetchone()
         if not row:
@@ -83,12 +109,15 @@ def get_broadcast_status(
             "SELECT agent_id FROM broadcast_acks WHERE broadcast_id = ?",
             (broadcast_id,),
         ).fetchall()
+        targets = conn.execute(
+            "SELECT agent_id FROM broadcast_targets WHERE broadcast_id = ?",
+            (broadcast_id,),
+        ).fetchall()
 
         expected_count = row["expected_count"] or 0
         acked = [a["agent_id"] for a in acks]
-        pending_acks: list[str] = []
-        # pending_acks can only be computed when we know the original targets.
-        # For now, report the counts so callers can see progress.
+        acked_set = set(acked)
+        pending_acks = [t["agent_id"] for t in targets if t["agent_id"] not in acked_set]
         return {
             "found": True,
             "broadcast_id": broadcast_id,

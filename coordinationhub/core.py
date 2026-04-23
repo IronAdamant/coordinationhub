@@ -19,9 +19,12 @@ Zero third-party dependencies.
 
 from __future__ import annotations
 
+import logging
 import time
 from pathlib import Path
 from typing import Any
+
+_log = logging.getLogger(__name__)
 
 from ._storage import CoordinationStorage
 from .event_bus import EventBus
@@ -104,19 +107,46 @@ class CoordinationEngine(
         return self._storage._connect()
 
     def _publish_event(self, topic: str, payload: dict[str, Any]) -> None:
-        """Publish to in-memory bus and write to SQLite journal for cross-process sync."""
-        self._event_bus.publish(topic, payload)
+        """Publish to the SQLite journal first, then the in-memory bus.
+
+        T1.10: order reversed. Previously the in-memory bus fired before the
+        journal write, so a crash between the two left in-process waiters
+        with an event that cross-process waiters (via ``_hybrid_wait``)
+        could never observe. Now the DB insert commits before in-memory
+        subscribers see the event, so a crash after the bus publish still
+        leaves the durable journal consistent, and a failure on the
+        journal write is visible (logged at WARNING) instead of silently
+        swallowed.
+        """
+        import json as _json
+        journal_ok = False
         try:
             with self._connect() as conn:
-                import json as _json
                 conn.execute(
                     "INSERT INTO coordination_events (topic, payload_json, created_at) VALUES (?, ?, ?)",
                     (topic, _json.dumps(payload, default=str), time.time()),
                 )
                 conn.commit()
-        except Exception:
-            # Best-effort journal write; don't let event bus fail on DB issues
-            pass
+            journal_ok = True
+        except Exception as exc:
+            # Journal write failed — log, but still fire the in-memory bus
+            # so same-process waiters don't hang indefinitely. Cross-process
+            # waiters will miss this event (they poll the journal); caller
+            # can check the return-value-free contract and re-publish if
+            # durability matters.
+            _log.warning(
+                "coordination event journal write failed for topic=%r: %s",
+                topic, exc,
+            )
+        # In-memory publish happens after the durable write so there is no
+        # window where a same-process waiter sees an event that isn't yet
+        # in the journal. On journal failure we still publish so the
+        # in-process bus remains usable.
+        self._event_bus.publish(topic, payload)
+        # Expose the outcome to callers that care (most don't). This
+        # attribute is intentionally per-engine, not per-call, because the
+        # API is fire-and-forget for backwards compat.
+        self._last_event_journaled = journal_ok
 
     def _hybrid_wait(
         self,

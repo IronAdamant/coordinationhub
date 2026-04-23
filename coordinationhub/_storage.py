@@ -100,14 +100,26 @@ class CoordinationStorage:
     # ------------------------------------------------------------------ #
 
     def _next_seq(self, prefix: str, conn: sqlite3.Connection) -> int:
+        """Return the next available sequence number for prefix by
+        examining existing agent rows whose id is ``{prefix}.{n}``.
+
+        The suffix is extracted numerically (CAST) rather than sorted
+        lexicographically. A lex sort orders `...9` > `...10`, so the
+        old implementation wrapped back to seq 10 after creating 10
+        agents, causing colliding agent_ids on the 11th registration.
+        """
         base = prefix.rstrip(".")
+        # Extract the portion after the last dot and cast to int.
+        # substr(agent_id, length(base) + 2) strips "{base}." leaving the tail.
         row = conn.execute(
-            f"SELECT agent_id FROM agents WHERE agent_id LIKE ? || '.%' ORDER BY agent_id DESC LIMIT 1",
-            (base,),
+            "SELECT MAX(CAST(substr(agent_id, ? + 2) AS INTEGER)) AS max_seq "
+            "FROM agents WHERE agent_id LIKE ? || '.%' "
+            "AND substr(agent_id, ? + 2) GLOB '[0-9]*'",
+            (len(base), base, len(base)),
         ).fetchone()
-        if row:
-            return int(row["agent_id"].rsplit(".", 1)[-1]) + 1
-        return 0
+        if row is None or row["max_seq"] is None:
+            return 0
+        return int(row["max_seq"]) + 1
 
     def _next_seq_atomic(self, prefix: str, conn: sqlite3.Connection) -> int:
         """Return the next sequence number for *prefix*, using an in-memory

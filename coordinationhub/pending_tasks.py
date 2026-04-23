@@ -55,7 +55,14 @@ def stash_pending_task(
             "DELETE FROM pending_tasks WHERE status = 'pending' AND created_at < ?",
             (cutoff,),
         )
-        conn.execute(
+        # T1.9: the ON CONFLICT path is intentionally restricted to rows
+        # still in 'pending' status. An IDE replaying the same tool_use_id
+        # (Claude Code double-fire, or crash/retry) used to reset
+        # consumed_at=NULL + status='pending' here, which re-queued a task
+        # that had already been consumed by a SubagentStart. With the
+        # WHERE clause, a duplicate hook on an already-consumed row is a
+        # silent no-op — the consumed row stays consumed.
+        cursor = conn.execute(
             """
             INSERT INTO pending_tasks
             (task_id, scope_id, subagent_type, description, prompt, created_at, status, source)
@@ -63,13 +70,13 @@ def stash_pending_task(
             ON CONFLICT(task_id) DO UPDATE SET
                 description = excluded.description,
                 prompt      = excluded.prompt,
-                created_at  = excluded.created_at,
-                consumed_at = NULL,
-                status      = 'pending'
+                created_at  = excluded.created_at
+            WHERE pending_tasks.status = 'pending'
             """,
             (tool_use_id, session_id, subagent_type, description, prompt, now),
         )
-    return {"stashed": True, "tool_use_id": tool_use_id}
+        updated = cursor.rowcount > 0
+    return {"stashed": updated, "tool_use_id": tool_use_id}
 
 
 def consume_pending_task(

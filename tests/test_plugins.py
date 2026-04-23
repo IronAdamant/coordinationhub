@@ -40,3 +40,27 @@ class TestPluginRegistry:
         registry = PluginRegistry(plugin_names=())
         registry.register_cli(None)
         assert registry.list_plugins() == []
+
+
+class TestPluginAllowList:
+    """T2.5: plugin loading must only honour names in ALLOWED_PLUGINS,
+    so ``plugin_names=("evil_module",)`` can't be abused to run arbitrary
+    code that happens to be importable on sys.path.
+    """
+
+    def test_unknown_name_rejected_silently(self, caplog):
+        import logging
+
+        with caplog.at_level(logging.WARNING, logger="coordinationhub.plugins.registry"):
+            plugin = _load_plugin("evil_module")
+        assert plugin is None
+        assert any("not in ALLOWED_PLUGINS" in r.getMessage() for r in caplog.records)
+
+    def test_registry_ignores_unknown_plugin_names(self):
+        registry = PluginRegistry(plugin_names=("evil", "dashboard", "also_evil"))
+        assert registry.list_plugins() == ["dashboard"]
+
+    def test_allowed_list_matches_default(self):
+        """Catch accidental drift between ALLOWED_PLUGINS and DEFAULT_PLUGINS."""
+        from coordinationhub.plugins.registry import ALLOWED_PLUGINS, PluginRegistry as R
+        assert set(R.DEFAULT_PLUGINS).issubset(ALLOWED_PLUGINS)
