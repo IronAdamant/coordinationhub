@@ -34,8 +34,11 @@ def server(tmp_path):
         disable_auth=True,
     )
     srv.start(blocking=False)
-    # Wait briefly for the server thread to start listening
-    time.sleep(0.1)
+    # T5.4: poll /health until ready instead of relying on a fixed sleep.
+    from tests.conftest import wait_for_health
+    assert wait_for_health(srv.get_url(), timeout=5.0), (
+        "server did not become ready on /health within 5s"
+    )
     yield srv
     srv.stop()
 
@@ -427,7 +430,8 @@ class TestServerLifecycle:
             disable_auth=True,
         )
         srv.start(blocking=False)
-        time.sleep(0.1)
+        from tests.conftest import wait_for_health
+        assert wait_for_health(srv.get_url(), timeout=5.0)
 
         slow_handler_done = threading.Event()
         handler_started = threading.Event()
@@ -476,7 +480,8 @@ class TestServerLifecycle:
             port=0,
         )
         srv.start(blocking=False)
-        time.sleep(0.1)
+        from tests.conftest import wait_for_health
+        assert wait_for_health(srv.get_url(), timeout=5.0)
         port = srv.get_port()
         srv.stop()
         # After stop, a new server should be able to bind the same port
@@ -486,6 +491,6 @@ class TestServerLifecycle:
             port=port,
         )
         srv2.start(blocking=False)
-        time.sleep(0.1)
+        assert wait_for_health(srv2.get_url(), timeout=5.0)
         assert srv2.get_port() == port
         srv2.stop()

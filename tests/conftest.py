@@ -9,6 +9,27 @@ from typing import Any, Callable, Sequence
 from coordinationhub.core import CoordinationEngine
 
 
+def wait_for_health(url: str, timeout: float = 10.0) -> bool:
+    """Poll ``{url}/health`` until it returns 200 or *timeout* elapses.
+
+    T5.4: replaces the pre-fix ``time.sleep(0.1)`` assumption that the
+    MCP server binds within 100ms. Returns True on ready, False on
+    timeout so callers can raise or skip as appropriate.
+    """
+    import time as _time
+    import urllib.request
+    deadline = _time.time() + timeout
+    while _time.time() < deadline:
+        try:
+            with urllib.request.urlopen(f"{url}/health", timeout=1.0) as resp:
+                if resp.status == 200:
+                    return True
+        except Exception:
+            pass
+        _time.sleep(0.05)
+    return False
+
+
 def run_concurrent(
     n: int,
     target: Callable[..., Any],

@@ -1630,8 +1630,8 @@ Block markers for multi-line content:
 | `coordinationhub/core_visibility.py` | 127 | VisibilityMixin — coordination graph, project scan, agent status, assessment |
 | `coordinationhub/core_work_intent.py` | 75 | WorkIntentMixin — cooperative work intent board |
 | `coordinationhub/db.py` | 93 | SQLite connection pool and public re-exports for CoordinationHub |
-| `coordinationhub/db_migrations.py` | 309 | Schema-version tracking, migration functions, and the ``init_schema`` driver |
-| `coordinationhub/db_schemas.py` | 296 | Canonical SQLite schema definitions for CoordinationHub |
+| `coordinationhub/db_migrations.py` | 324 | Schema-version tracking, migration functions, and the ``init_schema`` driver |
+| `coordinationhub/db_schemas.py` | 298 | Canonical SQLite schema definitions for CoordinationHub |
 | `coordinationhub/dependencies.py` | 140 | Cross-agent dependency declaration and satisfaction tracking |
 | `coordinationhub/dispatch.py` | 57 | Tool dispatch table for CoordinationHub |
 | `coordinationhub/event_bus.py` | 102 | Lightweight thread-safe in-memory pub-sub event bus for CoordinationHub |

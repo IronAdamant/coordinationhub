@@ -1090,8 +1090,8 @@ keep it in sync; CI checks for drift on every push.
 | `coordinationhub/core_visibility.py` | 127 | VisibilityMixin — coordination graph, project scan, agent status, assessment |
 | `coordinationhub/core_work_intent.py` | 75 | WorkIntentMixin — cooperative work intent board |
 | `coordinationhub/db.py` | 93 | SQLite connection pool and public re-exports for CoordinationHub |
-| `coordinationhub/db_migrations.py` | 309 | Schema-version tracking, migration functions, and the ``init_schema`` driver |
-| `coordinationhub/db_schemas.py` | 296 | Canonical SQLite schema definitions for CoordinationHub |
+| `coordinationhub/db_migrations.py` | 324 | Schema-version tracking, migration functions, and the ``init_schema`` driver |
+| `coordinationhub/db_schemas.py` | 298 | Canonical SQLite schema definitions for CoordinationHub |
 | `coordinationhub/dependencies.py` | 140 | Cross-agent dependency declaration and satisfaction tracking |
 | `coordinationhub/dispatch.py` | 57 | Tool dispatch table for CoordinationHub |
 | `coordinationhub/event_bus.py` | 102 | Lightweight thread-safe in-memory pub-sub event bus for CoordinationHub |
@@ -1190,8 +1190,8 @@ coordinationhub/
   core_visibility.py    — VisibilityMixin — coordination graph, project scan, agent status, assessment (~127 LOC)
   core_work_intent.py   — WorkIntentMixin — cooperative work intent board (~75 LOC)
   db.py                 — SQLite connection pool and public re-exports for CoordinationHub (~93 LOC)
-  db_migrations.py      — Schema-version tracking, migration functions, and the ``init_schema`` driver (~309 LOC)
-  db_schemas.py         — Canonical SQLite schema definitions for CoordinationHub (~296 LOC)
+  db_migrations.py      — Schema-version tracking, migration functions, and the ``init_schema`` driver (~324 LOC)
+  db_schemas.py         — Canonical SQLite schema definitions for CoordinationHub (~298 LOC)
   dependencies.py       — Cross-agent dependency declaration and satisfaction tracking (~140 LOC)
   dispatch.py           — Tool dispatch table for CoordinationHub (~57 LOC)
   event_bus.py          — Lightweight thread-safe in-memory pub-sub event bus for CoordinationHub (~102 LOC)

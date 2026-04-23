@@ -372,8 +372,28 @@ def init_schema(conn: sqlite3.Connection) -> None:
     for sql in _SCHEMAS.values():
         conn.execute(sql)
 
+    # T4.9: wrap each migration in an explicit BEGIN/COMMIT with
+    # rollback-on-exception so a failed CREATE/INSERT/DROP sequence
+    # (e.g. partial v1->v2) doesn't leave a ``_document_locks_v1``
+    # half-rebuilt table stranded. Every migration is idempotent, so
+    # re-running a rolled-back migration after a fix is safe.
+    import logging as _logging
+    _log = _logging.getLogger(__name__)
     for ver in sorted(_MIGRATIONS.keys()):
-        _MIGRATIONS[ver](conn)
+        migrate = _MIGRATIONS[ver]
+        try:
+            conn.execute("BEGIN")
+            migrate(conn)
+            conn.execute("COMMIT")
+        except Exception as exc:
+            try:
+                conn.execute("ROLLBACK")
+            except Exception:
+                pass
+            _log.error(
+                "migration v%d failed: %s; rolling back and re-raising", ver, exc,
+            )
+            raise
 
     for idx_sql in _INDEXES:
         conn.execute(idx_sql)

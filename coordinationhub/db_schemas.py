@@ -300,4 +300,9 @@ _INDEXES = [
     "CREATE INDEX IF NOT EXISTS idx_broadcasts_expires ON broadcasts(expires_at)",
     "CREATE INDEX IF NOT EXISTS idx_broadcast_acks_id ON broadcast_acks(broadcast_id)",
     "CREATE INDEX IF NOT EXISTS idx_coordination_events_topic ON coordination_events(topic, created_at)",
+    # T4.6: read-accelerating indexes.
+    # - messages(to_agent_id, read_at) covers unread_only=True scans.
+    # - coordination_events(created_at) alone powers prune by age.
+    "CREATE INDEX IF NOT EXISTS idx_messages_to_read ON messages(to_agent_id, read_at)",
+    "CREATE INDEX IF NOT EXISTS idx_coordination_events_created ON coordination_events(created_at)",
 ]
