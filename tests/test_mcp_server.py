@@ -411,6 +411,64 @@ class TestServerLifecycle:
         assert server.get_port() > 0
         assert server.get_url() == f"http://127.0.0.1:{server.get_port()}"
 
+    def test_stop_drains_inflight_handlers(self, tmp_path):
+        """T3.7: stop() waits for in-flight handlers before closing the
+        engine. Previously ``self._engine = None`` ran while a handler
+        was mid-``dispatch_tool`` and the next operation dereferenced
+        None.
+        """
+        import threading
+
+        srv = CoordinationHubMCPServer(
+            storage_dir=str(tmp_path),
+            project_root=str(tmp_path),
+            host="127.0.0.1",
+            port=0,
+            disable_auth=True,
+        )
+        srv.start(blocking=False)
+        time.sleep(0.1)
+
+        slow_handler_done = threading.Event()
+        handler_started = threading.Event()
+
+        import coordinationhub.mcp_server as _mcp
+        original_dispatch = _mcp.dispatch_tool
+
+        def _slow_dispatch(engine, tool_name, arguments):
+            handler_started.set()
+            # Sleep long enough that stop() has to actually wait.
+            time.sleep(0.3)
+            slow_handler_done.set()
+            return {"done": True}
+
+        _mcp.dispatch_tool = _slow_dispatch
+        try:
+            def _fire():
+                try:
+                    _post(f"{srv.get_url()}/call",
+                          {"tool": "register_agent", "arguments": {"agent_id": "a"}})
+                except Exception:
+                    pass  # we only care that dispatch ran
+
+            req_thread = threading.Thread(target=_fire, daemon=True)
+            req_thread.start()
+
+            assert handler_started.wait(timeout=2.0), "dispatch_tool was never called"
+
+            # Now stop() — should wait for the slow handler.
+            stop_start = time.time()
+            srv.stop()
+            elapsed = time.time() - stop_start
+
+            assert slow_handler_done.is_set(), "stop() returned before handler finished"
+            # At least some drain wait happened (not a snap-immediate close).
+            assert elapsed >= 0.05, (
+                f"stop() returned in {elapsed:.3f}s — did not actually wait"
+            )
+        finally:
+            _mcp.dispatch_tool = original_dispatch
+
     def test_server_stop_releases_port(self, tmp_path):
         srv = CoordinationHubMCPServer(
             storage_dir=str(tmp_path),

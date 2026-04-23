@@ -98,6 +98,7 @@ def register_agent(
     parent_id: str | None = None,
     pid: int | None = None,
     raw_ide_id: str | None = None,
+    ide_vendor: str | None = None,
 ) -> dict[str, Any]:
     """Register a new agent or update heartbeat if already registered.
 
@@ -151,20 +152,24 @@ def register_agent(
                 "reason": "collision",
                 "existing_pid": existing["pid"],
             }
+        # T3.12: persist ide_vendor alongside raw_ide_id so the unique
+        # index on (raw_ide_id, ide_vendor) can separate Claude Code vs
+        # Kimi CLI agents that happen to produce the same raw id.
         conn.execute(
             """
             INSERT INTO agents
-            (agent_id, parent_id, worktree_root, pid, started_at, last_heartbeat, status, raw_ide_id)
-            VALUES (?, ?, ?, ?, ?, ?, 'active', ?)
+            (agent_id, parent_id, worktree_root, pid, started_at, last_heartbeat, status, raw_ide_id, ide_vendor)
+            VALUES (?, ?, ?, ?, ?, ?, 'active', ?, ?)
             ON CONFLICT(agent_id) DO UPDATE SET
                 parent_id    = excluded.parent_id,
                 worktree_root= excluded.worktree_root,
                 pid          = excluded.pid,
                 last_heartbeat = excluded.last_heartbeat,
                 status       = 'active',
-                raw_ide_id   = COALESCE(excluded.raw_ide_id, agents.raw_ide_id)
+                raw_ide_id   = COALESCE(excluded.raw_ide_id, agents.raw_ide_id),
+                ide_vendor   = COALESCE(excluded.ide_vendor, agents.ide_vendor)
             """,
-            (agent_id, parent_id, worktree_root, pid, now, now, raw_ide_id),
+            (agent_id, parent_id, worktree_root, pid, now, now, raw_ide_id, ide_vendor),
         )
         if parent_id is not None:
             _record_descendant_relationship(conn, agent_id, parent_id)
@@ -183,35 +188,35 @@ def find_agent_by_raw_ide_id(
     connect: ConnectFn,
     raw_ide_id: str,
     stale_timeout: float | None = 600.0,
+    ide_vendor: str | None = None,
 ) -> str | None:
     """Look up a hub agent_id by the raw IDE-specific agent ID.
 
-    Returns the agent_id if found, active, and (when ``stale_timeout`` is
-    not None) not stale. Pass ``stale_timeout=None`` to skip the freshness
-    check for callers that explicitly want to match an agent regardless
-    of heartbeat age (e.g. debugging or reconciliation flows).
+    T3.12: ``ide_vendor`` narrows the search to the calling IDE, so a
+    raw_ide_id that happens to be used by two different vendors doesn't
+    cross-match. Callers that don't care about vendor (reconciliation,
+    debugging) can omit it.
 
-    T1.17: pre-fix this matched any active row, so a silent-crash agent
-    that never reaped remained resolvable, causing hooks to re-use a
-    dead hub child id.
+    T1.17: agents with an old heartbeat don't satisfy the lookup so
+    hook flows can't re-use a dead hub child id. Pass
+    ``stale_timeout=None`` to skip the freshness check entirely.
     """
     import time as _time
     with connect() as conn:
-        if stale_timeout is None:
-            row = conn.execute(
-                "SELECT agent_id FROM agents "
-                "WHERE raw_ide_id = ? AND status = 'active' "
-                "ORDER BY last_heartbeat DESC LIMIT 1",
-                (raw_ide_id,),
-            ).fetchone()
-        else:
+        params: list[Any] = [raw_ide_id]
+        where = "raw_ide_id = ? AND status = 'active'"
+        if ide_vendor is not None:
+            where += " AND ide_vendor = ?"
+            params.append(ide_vendor)
+        if stale_timeout is not None:
             cutoff = _time.time() - stale_timeout
-            row = conn.execute(
-                "SELECT agent_id FROM agents "
-                "WHERE raw_ide_id = ? AND status = 'active' AND last_heartbeat >= ? "
-                "ORDER BY last_heartbeat DESC LIMIT 1",
-                (raw_ide_id, cutoff),
-            ).fetchone()
+            where += " AND last_heartbeat >= ?"
+            params.append(cutoff)
+        row = conn.execute(
+            f"SELECT agent_id FROM agents WHERE {where} "
+            f"ORDER BY last_heartbeat DESC LIMIT 1",
+            tuple(params),
+        ).fetchone()
         return row["agent_id"] if row else None
 
 

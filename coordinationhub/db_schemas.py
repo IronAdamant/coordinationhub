@@ -19,7 +19,8 @@ _SCHEMAS = {
             started_at      REAL NOT NULL,
             last_heartbeat  REAL NOT NULL,
             status          TEXT DEFAULT 'active',
-            raw_ide_id TEXT
+            raw_ide_id      TEXT,
+            ide_vendor      TEXT
         )
     """,
     "lineage": """

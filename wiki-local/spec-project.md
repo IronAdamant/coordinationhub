@@ -297,7 +297,7 @@ coordinationhub/
   __init__.py           — CoordinationHub — multi-agent swarm coordination MCP server (~14 LOC)
   __main__.py           — ``python -m coordinationhub`` entry point — delegates to :mod:`cli` (~10 LOC)
   _storage.py           — Storage backend for CoordinationHub — SQLite pool, path resolution, lifecycle (~122 LOC)
-  agent_registry.py     — Agent lifecycle: register, heartbeat, deregister, lineage management (~422 LOC)
+  agent_registry.py     — Agent lifecycle: register, heartbeat, deregister, lineage management (~424 LOC)
   agent_status.py       — Agent status and file-map query helpers for CoordinationHub (~282 LOC)
   broadcasts.py         — Broadcast acknowledgment primitives for CoordinationHub (~134 LOC)
   cli.py                — CoordinationHub CLI — command-line interface for all coordination tool methods (~102 LOC)
@@ -322,7 +322,7 @@ coordinationhub/
   core_change.py        — ChangeMixin — change notifications, file ownership, conflict audit, status (~182 LOC)
   core_dependencies.py  — DependencyMixin — cross-agent dependency declarations and checks (~120 LOC)
   core_handoffs.py      — HandoffMixin — one-to-many handoff acknowledgment and lifecycle (~117 LOC)
-  core_identity.py      — IdentityMixin — agent lifecycle and lineage management (~116 LOC)
+  core_identity.py      — IdentityMixin — agent lifecycle and lineage management (~125 LOC)
   core_leases.py        — LeaseMixin — HA coordinator lease management (~151 LOC)
   core_locking.py       — Locking methods for CoordinationEngine (~359 LOC)
   core_messaging.py     — MessagingMixin — inter-agent messages and await (~121 LOC)
@@ -331,8 +331,8 @@ coordinationhub/
   core_visibility.py    — VisibilityMixin — coordination graph, project scan, agent status, assessment (~127 LOC)
   core_work_intent.py   — WorkIntentMixin — cooperative work intent board (~75 LOC)
   db.py                 — SQLite connection pool and public re-exports for CoordinationHub (~93 LOC)
-  db_migrations.py      — Schema-version tracking, migration functions, and the ``init_schema`` driver (~291 LOC)
-  db_schemas.py         — Canonical SQLite schema definitions for CoordinationHub (~295 LOC)
+  db_migrations.py      — Schema-version tracking, migration functions, and the ``init_schema`` driver (~309 LOC)
+  db_schemas.py         — Canonical SQLite schema definitions for CoordinationHub (~296 LOC)
   dependencies.py       — Cross-agent dependency declaration and satisfaction tracking (~140 LOC)
   dispatch.py           — Tool dispatch table for CoordinationHub (~57 LOC)
   event_bus.py          — Lightweight thread-safe in-memory pub-sub event bus for CoordinationHub (~102 LOC)
@@ -340,7 +340,7 @@ coordinationhub/
   leases.py             — Zero-deps lease primitives for HA coordinator leadership (~197 LOC)
   lock_cache.py         — In-memory lock cache for CoordinationHub (~180 LOC)
   lock_ops.py           — Shared lock primitives used by both local locks and coordination locks (~204 LOC)
-  mcp_server.py         — HTTP-based MCP server for CoordinationHub — zero external dependencies (~428 LOC)
+  mcp_server.py         — HTTP-based MCP server for CoordinationHub — zero external dependencies (~469 LOC)
   mcp_stdio.py          — Stdio-based MCP server for CoordinationHub using the ``mcp`` Python package (~147 LOC)
   messages.py           — Inter-agent messaging primitives for CoordinationHub (~90 LOC)
   notifications.py      — Change notification storage and retrieval for CoordinationHub (~136 LOC)
@@ -353,7 +353,7 @@ coordinationhub/
   work_intent.py        — Work intent board primitives for CoordinationHub (~136 LOC)
   hooks/
     __init__.py         — Hooks package — IDE integration via stdin/stdout event protocol (~1 LOC)
-    base.py             — Base hook abstraction for CoordinationHub (~312 LOC)
+    base.py             — Base hook abstraction for CoordinationHub (~328 LOC)
     cursor.py           — CoordinationHub hook adapter for Cursor (~110 LOC)
     kimi_cli.py         — CoordinationHub hook adapter for Kimi CLI (~111 LOC)
     stdio_adapter.py    — CoordinationHub stdio event adapter (~298 LOC)
@@ -392,7 +392,7 @@ coordinationhub/
 ```
 <!-- /GEN -->
 
-`tests/` contains <!-- GEN:test-count -->598<!-- /GEN --> tests across 28 files plus `fixtures/claude_code_events/` (hook contract fixtures).
+`tests/` contains <!-- GEN:test-count -->602<!-- /GEN --> tests across 28 files plus `fixtures/claude_code_events/` (hook contract fixtures).
 
 Top-level project files: `pyproject.toml`, `coordination_spec.yaml`/`.json` (example specs), `README.md`, `CLAUDE.md`, `COMPLETE_PROJECT_DOCUMENTATION.md`, `LLM_Development.md`, and `wiki-local/` (this spec, glossary, index).
 

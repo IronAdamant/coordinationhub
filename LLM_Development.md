@@ -1596,7 +1596,7 @@ Block markers for multi-line content:
 | `coordinationhub/__init__.py` | 14 | CoordinationHub — multi-agent swarm coordination MCP server |
 | `coordinationhub/__main__.py` | 10 | ``python -m coordinationhub`` entry point — delegates to :mod:`cli` |
 | `coordinationhub/_storage.py` | 122 | Storage backend for CoordinationHub — SQLite pool, path resolution, lifecycle |
-| `coordinationhub/agent_registry.py` | 422 | Agent lifecycle: register, heartbeat, deregister, lineage management |
+| `coordinationhub/agent_registry.py` | 424 | Agent lifecycle: register, heartbeat, deregister, lineage management |
 | `coordinationhub/agent_status.py` | 282 | Agent status and file-map query helpers for CoordinationHub |
 | `coordinationhub/broadcasts.py` | 134 | Broadcast acknowledgment primitives for CoordinationHub |
 | `coordinationhub/cli.py` | 102 | CoordinationHub CLI — command-line interface for all coordination tool methods |
@@ -1621,7 +1621,7 @@ Block markers for multi-line content:
 | `coordinationhub/core_change.py` | 182 | ChangeMixin — change notifications, file ownership, conflict audit, status |
 | `coordinationhub/core_dependencies.py` | 120 | DependencyMixin — cross-agent dependency declarations and checks |
 | `coordinationhub/core_handoffs.py` | 117 | HandoffMixin — one-to-many handoff acknowledgment and lifecycle |
-| `coordinationhub/core_identity.py` | 116 | IdentityMixin — agent lifecycle and lineage management |
+| `coordinationhub/core_identity.py` | 125 | IdentityMixin — agent lifecycle and lineage management |
 | `coordinationhub/core_leases.py` | 151 | LeaseMixin — HA coordinator lease management |
 | `coordinationhub/core_locking.py` | 359 | Locking methods for CoordinationEngine |
 | `coordinationhub/core_messaging.py` | 121 | MessagingMixin — inter-agent messages and await |
@@ -1630,21 +1630,21 @@ Block markers for multi-line content:
 | `coordinationhub/core_visibility.py` | 127 | VisibilityMixin — coordination graph, project scan, agent status, assessment |
 | `coordinationhub/core_work_intent.py` | 75 | WorkIntentMixin — cooperative work intent board |
 | `coordinationhub/db.py` | 93 | SQLite connection pool and public re-exports for CoordinationHub |
-| `coordinationhub/db_migrations.py` | 291 | Schema-version tracking, migration functions, and the ``init_schema`` driver |
-| `coordinationhub/db_schemas.py` | 295 | Canonical SQLite schema definitions for CoordinationHub |
+| `coordinationhub/db_migrations.py` | 309 | Schema-version tracking, migration functions, and the ``init_schema`` driver |
+| `coordinationhub/db_schemas.py` | 296 | Canonical SQLite schema definitions for CoordinationHub |
 | `coordinationhub/dependencies.py` | 140 | Cross-agent dependency declaration and satisfaction tracking |
 | `coordinationhub/dispatch.py` | 57 | Tool dispatch table for CoordinationHub |
 | `coordinationhub/event_bus.py` | 102 | Lightweight thread-safe in-memory pub-sub event bus for CoordinationHub |
 | `coordinationhub/handoffs.py` | 200 | Handoff recording and acknowledgement primitives for CoordinationHub |
 | `coordinationhub/hooks/__init__.py` | 1 | Hooks package — IDE integration via stdin/stdout event protocol |
-| `coordinationhub/hooks/base.py` | 312 | Base hook abstraction for CoordinationHub |
+| `coordinationhub/hooks/base.py` | 328 | Base hook abstraction for CoordinationHub |
 | `coordinationhub/hooks/cursor.py` | 110 | CoordinationHub hook adapter for Cursor |
 | `coordinationhub/hooks/kimi_cli.py` | 111 | CoordinationHub hook adapter for Kimi CLI |
 | `coordinationhub/hooks/stdio_adapter.py` | 298 | CoordinationHub stdio event adapter |
 | `coordinationhub/leases.py` | 197 | Zero-deps lease primitives for HA coordinator leadership |
 | `coordinationhub/lock_cache.py` | 180 | In-memory lock cache for CoordinationHub |
 | `coordinationhub/lock_ops.py` | 204 | Shared lock primitives used by both local locks and coordination locks |
-| `coordinationhub/mcp_server.py` | 428 | HTTP-based MCP server for CoordinationHub — zero external dependencies |
+| `coordinationhub/mcp_server.py` | 469 | HTTP-based MCP server for CoordinationHub — zero external dependencies |
 | `coordinationhub/mcp_stdio.py` | 147 | Stdio-based MCP server for CoordinationHub using the ``mcp`` Python package |
 | `coordinationhub/messages.py` | 90 | Inter-agent messaging primitives for CoordinationHub |
 | `coordinationhub/notifications.py` | 136 | Change notification storage and retrieval for CoordinationHub |
@@ -1687,7 +1687,7 @@ Block markers for multi-line content:
 
 Inline markers for single values (render invisibly in Markdown):
 ```markdown
-This project has <!-- GEN:test-count -->598<!-- /GEN --> tests.
+This project has <!-- GEN:test-count -->602<!-- /GEN --> tests.
 ```
 
 Unknown marker names raise an error during rewrite (catches typos).

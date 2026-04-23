@@ -169,18 +169,26 @@ class MCPRequestHandler(BaseHTTPRequestHandler):
             return self._reject_bad_origin()
         if self.path not in self._OPEN_PATHS and not self._auth_ok():
             return self._reject_unauthorized()
-        if self.path == "/":
-            self._serve_dashboard()
-        elif self.path == "/tools":
-            self._handle_list_tools()
-        elif self.path == "/health":
-            self._handle_health()
-        elif self.path == "/api/dashboard-data":
-            self._serve_api_dashboard()
-        elif self.path == "/events":
-            self._serve_sse_events()
-        else:
-            self._send_error_json(404, f"Unknown endpoint: {self.path}")
+        # T3.7: track in-flight handlers so stop() can drain them before
+        # the engine is closed. /events is long-lived (SSE) and manages
+        # its own lifecycle; we still count it so stop() waits for the
+        # stream to exit via the socket timeout + finally block.
+        self.server.inflight_enter()
+        try:
+            if self.path == "/":
+                self._serve_dashboard()
+            elif self.path == "/tools":
+                self._handle_list_tools()
+            elif self.path == "/health":
+                self._handle_health()
+            elif self.path == "/api/dashboard-data":
+                self._serve_api_dashboard()
+            elif self.path == "/events":
+                self._serve_sse_events()
+            else:
+                self._send_error_json(404, f"Unknown endpoint: {self.path}")
+        finally:
+            self.server.inflight_exit()
 
     def _serve_dashboard(self) -> None:
         """GET / — serve the HTML dashboard.
@@ -298,10 +306,16 @@ class MCPRequestHandler(BaseHTTPRequestHandler):
             return self._reject_bad_origin()
         if not self._auth_ok():
             return self._reject_unauthorized()
-        if self.path == "/call":
-            self._handle_call()
-        else:
-            self._send_error_json(404, f"Unknown endpoint: {self.path}")
+        # T3.7: inflight counter so stop() drains tool-execution handlers
+        # before closing the engine.
+        self.server.inflight_enter()
+        try:
+            if self.path == "/call":
+                self._handle_call()
+            else:
+                self._send_error_json(404, f"Unknown endpoint: {self.path}")
+        finally:
+            self.server.inflight_exit()
 
     def _read_json_body(self) -> dict[str, Any] | None:
         """Read and parse the JSON request body. Returns None on failure."""
@@ -404,7 +418,35 @@ class ThreadedHTTPServer(ThreadingMixIn, HTTPServer):
         self.sse_max_per_ip = sse_max_per_ip
         self._sse_lock = threading.Lock()
         self._sse_counts: dict[str, int] = {}
+        # T3.7: track in-flight handlers so stop() can drain them before
+        # closing the engine. Without this, a daemon handler thread
+        # executing ``dispatch_tool(self.server.engine, ...)`` could
+        # dereference engine=None after stop() nulled it.
+        self._inflight_lock = threading.Lock()
+        self._inflight_count = 0
+        self._inflight_done = threading.Event()
+        self._inflight_done.set()  # initially idle
         super().__init__(server_address, handler_class)
+
+    def inflight_enter(self) -> None:
+        with self._inflight_lock:
+            self._inflight_count += 1
+            self._inflight_done.clear()
+
+    def inflight_exit(self) -> None:
+        with self._inflight_lock:
+            self._inflight_count -= 1
+            if self._inflight_count <= 0:
+                self._inflight_count = 0
+                self._inflight_done.set()
+
+    def wait_inflight_drain(self, timeout: float = 5.0) -> bool:
+        """Block until ``_inflight_count`` reaches 0 or *timeout* elapses.
+
+        Returns True if drain completed, False if timeout fired with
+        handlers still in flight.
+        """
+        return self._inflight_done.wait(timeout=timeout)
 
 
 # ------------------------------------------------------------------ #
@@ -523,16 +565,33 @@ class CoordinationHubMCPServer:
             self._thread.start()
 
     def stop(self) -> None:
-        """Shut down the server gracefully and close the engine."""
+        """Shut down the server gracefully and close the engine.
+
+        T3.7: wait for in-flight handler threads to drain before
+        closing the engine. Previously ``self._engine = None`` could
+        run while a daemon thread was mid-``dispatch_tool`` and the
+        next handler operation dereferenced None.
+        """
         if self._httpd is not None:
             self._httpd.shutdown()
+            # Wait for handlers currently executing to finish. 5s is
+            # plenty for POST /call (tool dispatch); SSE streams exit
+            # on the next 5s tick via their own socket timeout.
+            drained = self._httpd.wait_inflight_drain(timeout=5.0)
+            if not drained:
+                logger.warning(
+                    "stop(): inflight handlers did not drain within 5s "
+                    "(count=%d); closing engine anyway",
+                    getattr(self._httpd, "_inflight_count", -1),
+                )
             self._httpd.server_close()
             self._httpd = None
         if self._thread is not None:
             self._thread.join(timeout=5)
             self._thread = None
-        self._engine.close()
-        self._engine = None
+        if self._engine is not None:
+            self._engine.close()
+            self._engine = None
 
     def get_url(self) -> str:
         """Return the base URL the server is listening on."""

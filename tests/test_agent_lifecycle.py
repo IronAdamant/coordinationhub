@@ -122,6 +122,41 @@ class TestAgentRegistration:
         assert result["agents"][0]["stale"] is False
 
 
+class TestIdeVendorNamespace:
+    """T3.12: raw_ide_id is namespaced by ide_vendor so different IDEs
+    can reuse id shapes without cross-matching.
+    """
+
+    def test_same_raw_id_different_vendors_both_findable(self, engine):
+        a = engine.generate_agent_id()
+        engine.register_agent(a, raw_ide_id="shared", ide_vendor="cc")
+        b = engine.generate_agent_id()
+        engine.register_agent(b, raw_ide_id="shared", ide_vendor="cursor")
+        engine.heartbeat(a)
+        engine.heartbeat(b)
+
+        assert engine.find_agent_by_raw_ide_id("shared", ide_vendor="cc") == a
+        assert engine.find_agent_by_raw_ide_id("shared", ide_vendor="cursor") == b
+
+    def test_vendor_mismatch_returns_none(self, engine):
+        a = engine.generate_agent_id()
+        engine.register_agent(a, raw_ide_id="ide-1", ide_vendor="cc")
+        engine.heartbeat(a)
+
+        # Looking up with the wrong vendor → no match
+        assert engine.find_agent_by_raw_ide_id("ide-1", ide_vendor="kimi") is None
+
+    def test_legacy_null_vendor_lookup_still_works(self, engine):
+        """Omitting ide_vendor in the lookup matches any vendor — useful
+        for debug/reconciliation paths.
+        """
+        a = engine.generate_agent_id()
+        engine.register_agent(a, raw_ide_id="ide-2", ide_vendor="cc")
+        engine.heartbeat(a)
+
+        assert engine.find_agent_by_raw_ide_id("ide-2") == a
+
+
 class TestMaxAgentsCap:
     """T3.9: register_agent rejects new rows when MAX_AGENTS is reached."""
 

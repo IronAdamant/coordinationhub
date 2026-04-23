@@ -108,7 +108,8 @@ CREATE TABLE agents (
     started_at REAL,
     last_heartbeat REAL,
     stop_requested_at REAL,
-    raw_ide_id TEXT
+    raw_ide_id TEXT,
+    ide_vendor TEXT
 );
 
 CREATE TABLE agent_responsibilities (

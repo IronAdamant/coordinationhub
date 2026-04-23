@@ -152,13 +152,23 @@ class BaseHook:
 
     def resolve_agent_id(self, session_id: str, raw_ide_id: str | None = None) -> str:
         if raw_ide_id:
-            mapped = self._engine.find_agent_by_raw_ide_id(raw_ide_id)
+            # T3.12: pass our IDE vendor so raw ids from different IDEs
+            # don't cross-match. IDE_PREFIX is the vendor tag ("cc",
+            # "cursor", "kimi", etc.).
+            mapped = self._engine.find_agent_by_raw_ide_id(
+                raw_ide_id, ide_vendor=self.IDE_PREFIX,
+            )
             if mapped:
                 return mapped
             return raw_ide_id
         return self.session_agent_id(session_id)
 
-    def _ensure_registered(self, agent_id: str, parent_id: str | None = None) -> None:
+    def _ensure_registered(
+        self,
+        agent_id: str,
+        parent_id: str | None = None,
+        raw_ide_id: str | None = None,
+    ) -> None:
         # T3.3: wrap engine calls in try/except so DB errors stay
         # inside the hook layer (fail-open). Callers don't check a
         # return value; the signal is "you tried, we logged if it
@@ -170,7 +180,13 @@ class BaseHook:
             if any(a["agent_id"] == agent_id for a in agents.get("agents", [])):
                 self._engine.heartbeat(agent_id)
                 return
-            self._engine.register_agent(agent_id, parent_id=parent_id)
+            # T3.12: persist ide_vendor so subsequent lookups can
+            # namespace by IDE.
+            self._engine.register_agent(
+                agent_id, parent_id=parent_id,
+                raw_ide_id=raw_ide_id,
+                ide_vendor=self.IDE_PREFIX,
+            )
         except Exception as exc:
             _log_hook_error("ensure_registered", exc)
 
@@ -351,9 +367,12 @@ class BaseHook:
         )
         pending_desc = (pending or {}).get("description") or description or ""
 
-        # Dedup by raw IDE ID
+        # T3.12: dedup by (raw_ide_id, ide_vendor) so an id from a
+        # different IDE doesn't cross-match.
         if raw_ide_id:
-            existing = self._engine.find_agent_by_raw_ide_id(raw_ide_id)
+            existing = self._engine.find_agent_by_raw_ide_id(
+                raw_ide_id, ide_vendor=self.IDE_PREFIX,
+            )
             if existing:
                 self._engine.heartbeat(existing)
                 if pending_desc:
@@ -369,7 +388,10 @@ class BaseHook:
         if any(a["agent_id"] == child_id for a in agents.get("agents", [])):
             self._engine.heartbeat(child_id)
         else:
-            kwargs: dict[str, Any] = {"parent_id": parent_id}
+            kwargs: dict[str, Any] = {
+                "parent_id": parent_id,
+                "ide_vendor": self.IDE_PREFIX,  # T3.12: tag vendor
+            }
             if raw_ide_id:
                 kwargs["raw_ide_id"] = raw_ide_id
             self._engine.register_agent(child_id, **kwargs)

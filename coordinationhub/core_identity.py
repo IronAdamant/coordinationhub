@@ -63,6 +63,7 @@ class IdentityMixin:
         graph_agent_id: str | None = None,
         worktree_root: str | None = None,
         raw_ide_id: str | None = None,
+        ide_vendor: str | None = None,
     ) -> dict[str, Any]:
         """Register a new agent and return its context bundle.
 
@@ -74,7 +75,8 @@ class IdentityMixin:
             str(self._storage.project_root) if self._storage.project_root else os.getcwd()
         )
         ar_result = _ar.register_agent(
-            self._connect, agent_id, worktree, parent_id, raw_ide_id=raw_ide_id
+            self._connect, agent_id, worktree, parent_id,
+            raw_ide_id=raw_ide_id, ide_vendor=ide_vendor,
         )
         if not ar_result.get("registered", True):
             # Collision with a live agent in another process — do NOT publish
@@ -149,6 +151,14 @@ class IdentityMixin:
             return {"mode": "siblings", "agent_id": agent_id, "siblings": siblings}
         return _ar.get_lineage(self._connect, agent_id)
 
-    def find_agent_by_raw_ide_id(self, raw_ide_id: str) -> str | None:
-        """Look up a hub agent_id by the raw IDE-specific agent ID."""
-        return _ar.find_agent_by_raw_ide_id(self._connect, raw_ide_id)
+    def find_agent_by_raw_ide_id(
+        self, raw_ide_id: str, ide_vendor: str | None = None,
+    ) -> str | None:
+        """Look up a hub agent_id by the raw IDE-specific agent ID.
+
+        T3.12: pass ``ide_vendor`` to namespace the lookup so
+        colliding raw ids from different IDEs don't cross-match.
+        """
+        return _ar.find_agent_by_raw_ide_id(
+            self._connect, raw_ide_id, ide_vendor=ide_vendor,
+        )

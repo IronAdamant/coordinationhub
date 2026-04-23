@@ -15,7 +15,7 @@ import time
 from .db_schemas import _SCHEMAS, _INDEXES
 
 
-_CURRENT_SCHEMA_VERSION = 23
+_CURRENT_SCHEMA_VERSION = 24
 
 
 def _get_schema_version(conn: sqlite3.Connection) -> int:
@@ -69,6 +69,29 @@ def _migrate_v2_to_v3(conn: sqlite3.Connection) -> None:
         return
     conn.execute("ALTER TABLE agents ADD COLUMN claude_agent_id TEXT")
     conn.execute("CREATE INDEX IF NOT EXISTS idx_agents_claude_id ON agents(claude_agent_id)")
+
+
+def _migrate_v23_to_v24(conn: sqlite3.Connection) -> None:
+    """Add ``ide_vendor`` column to ``agents`` and a uniqueness index on
+    (raw_ide_id, ide_vendor).
+
+    T3.12: raw IDE agent IDs aren't vendor-globally unique; two
+    different IDEs happening to share an id shape would collide on a
+    naked UNIQUE(raw_ide_id). Adding a vendor namespace lets us
+    enforce "one active hub-agent per raw-id per vendor" without
+    cross-vendor false positives.
+    """
+    cols = [row[1] for row in conn.execute("PRAGMA table_info(agents)").fetchall()]
+    if "ide_vendor" not in cols:
+        conn.execute("ALTER TABLE agents ADD COLUMN ide_vendor TEXT")
+    # Unique index on the (raw_ide_id, ide_vendor) pair. Partial so
+    # rows without raw_ide_id (local-only agents) aren't forced to
+    # share a single slot.
+    conn.execute(
+        "CREATE UNIQUE INDEX IF NOT EXISTS idx_agents_raw_ide_pair "
+        "ON agents(raw_ide_id, ide_vendor) "
+        "WHERE raw_ide_id IS NOT NULL"
+    )
 
 
 def _migrate_v22_to_v23(conn: sqlite3.Connection) -> None:
@@ -321,6 +344,7 @@ _MIGRATIONS = {
     21: _migrate_v20_to_v21,  # rename claude_agent_id -> raw_ide_id
     22: _migrate_v21_to_v22,  # broadcast_targets table (T1.11)
     23: _migrate_v22_to_v23,  # work_intent PK: (agent_id, document_path) (T1.16)
+    24: _migrate_v23_to_v24,  # agents.ide_vendor + unique(raw_ide_id, ide_vendor) (T3.12)
 }
 
 
