@@ -52,7 +52,12 @@ DASHBOARD_JS = r"""
       useSSE = false;
       es.close();
       es = null;
-      setTimeout(startSSE, 30000);  // retry SSE every 30s
+      // T7.36: the 5 s polling fallback already kicked in when useSSE
+      // flipped to false, so we're not in a dead zone — but 30 s is
+      // too conservative for the SSE retry. 5 s keeps parity with the
+      // fallback poll interval so a transient server restart doesn't
+      // leave the user on slow-poll for half a minute.
+      setTimeout(startSSE, 5000);
     };
   }
 

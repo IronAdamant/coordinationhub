@@ -85,6 +85,9 @@ def cmd_get_all_dependencies(engine, args):
         print("No dependencies declared")
     else:
         print(f"{len(deps)} declared dependency/dependencies:")
+        # T7.5: ASCII tags instead of check/cross glyphs; cp1252 stdout
+        # (default on Windows before PowerShell 7.2) dies on ✓/✗ and
+        # the arrow ``→``.
         for d in deps:
-            sat = "✓" if d.get("satisfied") else "✗"
-            print(f"  [{sat}] {d['dependent_agent_id']} → {d['depends_on_agent_id']} ({d['condition']})")
+            sat = "OK" if d.get("satisfied") else "PENDING"
+            print(f"  [{sat}] {d['dependent_agent_id']} -> {d['depends_on_agent_id']} ({d['condition']})")

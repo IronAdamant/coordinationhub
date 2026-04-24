@@ -1060,7 +1060,7 @@ keep it in sync; CI checks for drift on every push.
 | `coordinationhub/agent_status.py` | 288 | Agent status and file-map query helpers for CoordinationHub |
 | `coordinationhub/broadcasts.py` | 147 | Broadcast acknowledgment primitives for CoordinationHub |
 | `coordinationhub/cli.py` | 102 | CoordinationHub CLI — command-line interface for all coordination tool methods |
-| `coordinationhub/cli_agents.py` | 110 | Agent identity and lifecycle CLI commands |
+| `coordinationhub/cli_agents.py` | 111 | Agent identity and lifecycle CLI commands |
 | `coordinationhub/cli_commands.py` | 98 | CoordinationHub CLI command handlers |
 | `coordinationhub/cli_deps.py` | 64 | CLI commands for cross-agent dependency declarations |
 | `coordinationhub/cli_intent.py` | 35 | CLI commands for the work intent board |
@@ -1069,11 +1069,11 @@ keep it in sync; CI checks for drift on every push.
 | `coordinationhub/cli_parser.py` | 369 | Argument parser for the CoordinationHub CLI |
 | `coordinationhub/cli_setup.py` | 313 | CLI commands for setup and diagnostics: ``init``, ``doctor``, ``watch`` |
 | `coordinationhub/cli_setup_doctor.py` | 148 | Diagnostic checks for ``coordinationhub doctor`` |
-| `coordinationhub/cli_spawner.py` | 101 | CLI commands for HA coordinator spawner — sub-agent registry management |
-| `coordinationhub/cli_sse.py` | 44 | CLI commands for SSE dashboard server |
-| `coordinationhub/cli_tasks.py` | 152 | CLI commands for the task registry |
+| `coordinationhub/cli_spawner.py` | 105 | CLI commands for HA coordinator spawner — sub-agent registry management |
+| `coordinationhub/cli_sse.py` | 56 | CLI commands for SSE dashboard server |
+| `coordinationhub/cli_tasks.py` | 163 | CLI commands for the task registry |
 | `coordinationhub/cli_utils.py` | 51 | Shared CLI helper functions used by all cli_* sub-modules |
-| `coordinationhub/cli_vis.py` | 232 | Change awareness, audit, graph, and assessment CLI commands |
+| `coordinationhub/cli_vis.py` | 241 | Change awareness, audit, graph, and assessment CLI commands |
 | `coordinationhub/conflict_log.py` | 43 | Conflict recording and querying for CoordinationHub |
 | `coordinationhub/context.py` | 93 | Context bundle builder for CoordinationHub agent registration responses |
 | `coordinationhub/core.py` | 182 | CoordinationEngine — thin host class that inherits all mixins |
@@ -1101,15 +1101,15 @@ keep it in sync; CI checks for drift on every push.
 | `coordinationhub/hooks/cursor.py` | 110 | CoordinationHub hook adapter for Cursor |
 | `coordinationhub/hooks/kimi_cli.py` | 110 | CoordinationHub hook adapter for Kimi CLI |
 | `coordinationhub/hooks/stdio_adapter.py` | 298 | CoordinationHub stdio event adapter |
-| `coordinationhub/leases.py` | 203 | Zero-deps lease primitives for HA coordinator leadership |
+| `coordinationhub/leases.py` | 220 | Zero-deps lease primitives for HA coordinator leadership |
 | `coordinationhub/limits.py` | 40 | String-length caps for user-supplied fields (T6.14) |
 | `coordinationhub/lock_cache.py` | 180 | In-memory lock cache for CoordinationHub |
-| `coordinationhub/lock_ops.py` | 204 | Shared lock primitives used by both local locks and coordination locks |
+| `coordinationhub/lock_ops.py` | 209 | Shared lock primitives used by both local locks and coordination locks |
 | `coordinationhub/mcp_server.py` | 461 | HTTP-based MCP server for CoordinationHub — zero external dependencies |
 | `coordinationhub/mcp_stdio.py` | 183 | Stdio-based MCP server for CoordinationHub using the ``mcp`` Python package |
 | `coordinationhub/messages.py` | 105 | Inter-agent messaging primitives for CoordinationHub |
 | `coordinationhub/notifications.py` | 154 | Change notification storage and retrieval for CoordinationHub |
-| `coordinationhub/paths.py` | 38 | Path normalization and project-root detection utilities |
+| `coordinationhub/paths.py` | 39 | Path normalization and project-root detection utilities |
 | `coordinationhub/pending_tasks.py` | 109 | Pending sub-agent task storage for CoordinationHub |
 | `coordinationhub/plugins/__init__.py` | 8 | CoordinationHub plugin system |
 | `coordinationhub/plugins/assessment/__init__.py` | 27 | Assessment plugin for CoordinationHub |
@@ -1119,7 +1119,7 @@ keep it in sync; CI checks for drift on every push.
 | `coordinationhub/plugins/dashboard/dashboard.py` | 141 | Web dashboard for CoordinationHub — zero external dependencies |
 | `coordinationhub/plugins/dashboard/dashboard_css.py` | 91 | CSS for the CoordinationHub dashboard |
 | `coordinationhub/plugins/dashboard/dashboard_html.py` | 98 | Self-contained HTML for the CoordinationHub dashboard |
-| `coordinationhub/plugins/dashboard/dashboard_js.py` | 447 | Client-side JavaScript for the CoordinationHub dashboard |
+| `coordinationhub/plugins/dashboard/dashboard_js.py` | 452 | Client-side JavaScript for the CoordinationHub dashboard |
 | `coordinationhub/plugins/graph/__init__.py` | 31 | Graph plugin for CoordinationHub |
 | `coordinationhub/plugins/graph/graphs.py` | 327 | Declarative coordination graph: loader, validator, in-memory representation |
 | `coordinationhub/plugins/registry.py` | 59 | Plugin registry for CoordinationHub |
@@ -1161,7 +1161,7 @@ coordinationhub/
   agent_status.py       — Agent status and file-map query helpers for CoordinationHub (~288 LOC)
   broadcasts.py         — Broadcast acknowledgment primitives for CoordinationHub (~147 LOC)
   cli.py                — CoordinationHub CLI — command-line interface for all coordination tool methods (~102 LOC)
-  cli_agents.py         — Agent identity and lifecycle CLI commands (~110 LOC)
+  cli_agents.py         — Agent identity and lifecycle CLI commands (~111 LOC)
   cli_commands.py       — CoordinationHub CLI command handlers (~98 LOC)
   cli_deps.py           — CLI commands for cross-agent dependency declarations (~64 LOC)
   cli_intent.py         — CLI commands for the work intent board (~35 LOC)
@@ -1170,11 +1170,11 @@ coordinationhub/
   cli_parser.py         — Argument parser for the CoordinationHub CLI (~369 LOC)
   cli_setup.py          — CLI commands for setup and diagnostics: ``init``, ``doctor``, ``watch`` (~313 LOC)
   cli_setup_doctor.py   — Diagnostic checks for ``coordinationhub doctor`` (~148 LOC)
-  cli_spawner.py        — CLI commands for HA coordinator spawner — sub-agent registry management (~101 LOC)
-  cli_sse.py            — CLI commands for SSE dashboard server (~44 LOC)
-  cli_tasks.py          — CLI commands for the task registry (~152 LOC)
+  cli_spawner.py        — CLI commands for HA coordinator spawner — sub-agent registry management (~105 LOC)
+  cli_sse.py            — CLI commands for SSE dashboard server (~56 LOC)
+  cli_tasks.py          — CLI commands for the task registry (~163 LOC)
   cli_utils.py          — Shared CLI helper functions used by all cli_* sub-modules (~51 LOC)
-  cli_vis.py            — Change awareness, audit, graph, and assessment CLI commands (~232 LOC)
+  cli_vis.py            — Change awareness, audit, graph, and assessment CLI commands (~241 LOC)
   conflict_log.py       — Conflict recording and querying for CoordinationHub (~43 LOC)
   context.py            — Context bundle builder for CoordinationHub agent registration responses (~93 LOC)
   core.py               — CoordinationEngine — thin host class that inherits all mixins (~182 LOC)
@@ -1197,15 +1197,15 @@ coordinationhub/
   dispatch.py           — Tool dispatch for CoordinationHub (~91 LOC)
   event_bus.py          — Lightweight thread-safe in-memory pub-sub event bus for CoordinationHub (~102 LOC)
   handoffs.py           — Handoff recording and acknowledgement primitives for CoordinationHub (~200 LOC)
-  leases.py             — Zero-deps lease primitives for HA coordinator leadership (~203 LOC)
+  leases.py             — Zero-deps lease primitives for HA coordinator leadership (~220 LOC)
   limits.py             — String-length caps for user-supplied fields (T6.14) (~40 LOC)
   lock_cache.py         — In-memory lock cache for CoordinationHub (~180 LOC)
-  lock_ops.py           — Shared lock primitives used by both local locks and coordination locks (~204 LOC)
+  lock_ops.py           — Shared lock primitives used by both local locks and coordination locks (~209 LOC)
   mcp_server.py         — HTTP-based MCP server for CoordinationHub — zero external dependencies (~461 LOC)
   mcp_stdio.py          — Stdio-based MCP server for CoordinationHub using the ``mcp`` Python package (~183 LOC)
   messages.py           — Inter-agent messaging primitives for CoordinationHub (~105 LOC)
   notifications.py      — Change notification storage and retrieval for CoordinationHub (~154 LOC)
-  paths.py              — Path normalization and project-root detection utilities (~38 LOC)
+  paths.py              — Path normalization and project-root detection utilities (~39 LOC)
   pending_tasks.py      — Pending sub-agent task storage for CoordinationHub (~109 LOC)
   scan.py               — File ownership scan for CoordinationHub (~279 LOC)
   spawner.py            — Zero-deps spawner primitives for HA coordinator sub-agent registry (~380 LOC)
@@ -1230,7 +1230,7 @@ coordinationhub/
     dashboard.py        — Web dashboard for CoordinationHub — zero external dependencies (~141 LOC)
     dashboard_css.py    — CSS for the CoordinationHub dashboard (~91 LOC)
     dashboard_html.py   — Self-contained HTML for the CoordinationHub dashboard (~98 LOC)
-    dashboard_js.py     — Client-side JavaScript for the CoordinationHub dashboard (~447 LOC)
+    dashboard_js.py     — Client-side JavaScript for the CoordinationHub dashboard (~452 LOC)
   plugins/graph/
     __init__.py         — Graph plugin for CoordinationHub (~31 LOC)
     graphs.py           — Declarative coordination graph: loader, validator, in-memory representation (~327 LOC)

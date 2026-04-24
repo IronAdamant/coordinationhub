@@ -45,7 +45,8 @@ def _add_serve(sub, shared) -> None:
     p = sub.add_parser("serve-sse", parents=[shared], help="Start HTTP server with SSE dashboard")
     p.add_argument("--port", type=int, default=9898)
     p.add_argument("--host", default="127.0.0.1")
-    p.add_argument("--no-browser", action="store_true", dest="no_browser",
+    # T7.8: argparse auto-derives dest="no_browser" from the flag.
+    p.add_argument("--no-browser", action="store_true",
                    help="Don't open the browser automatically")
     p.add_argument("--auth-token", dest="auth_token", default=None,
                    help="Bearer token to require. Default: randomly generated.")

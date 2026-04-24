@@ -45,6 +45,19 @@ def cmd_get_notifications(engine, args):
 
 @_command()
 def cmd_prune_notifications(engine, args):
+    # T7.13: require at least one bound. Pre-fix both args defaulting
+    # to None resulted in a call that pruned nothing — operators
+    # expected "no args = prune everything" and got the opposite with
+    # no error.
+    if args.max_age_seconds is None and args.max_entries is None:
+        import sys
+        print(
+            "Error: specify at least one of --max-age or --max-entries.\n"
+            "       --max-age SECONDS   keep rows newer than N seconds\n"
+            "       --max-entries N     keep at most N rows (newest wins)",
+            file=sys.stderr,
+        )
+        return 2
     result = engine.prune_notifications(max_age_seconds=args.max_age_seconds, max_entries=args.max_entries)
     if args.json_output:
         _print_json(result)
@@ -185,9 +198,12 @@ def cmd_dashboard(engine, args):
     if args.json_output:
         _print_json(result)
         return
-    print("═" * 60)
+    # T7.5: ``═`` (U+2550) breaks on Windows cp1252 stdout. ASCII
+    # ``=`` renders identically in a dashboard framing role and works
+    # everywhere.
+    print("=" * 60)
     print("CoordinationHub Dashboard")
-    print("═" * 60)
+    print("=" * 60)
     print(f"\nAgents ({len(agents)}):")
     for a in agents:
         stale = " (STALE)" if a.get("stale") else ""

@@ -20,7 +20,13 @@ def detect_project_root(cwd: str | Path | None = None) -> Path | None:
         cwd = Path(cwd).resolve()
     path = cwd
     for _ in range(256):
-        if (path / ".git").exists():
+        # T7.26: ``.git`` is a directory in a normal repo and a file in
+        # a worktree or submodule (a pointer file containing
+        # ``gitdir: ...``). Either counts as a valid root. ``.exists()``
+        # also accepts broken symlinks that resolve to nothing, so be
+        # explicit about the valid shapes.
+        git_marker = path / ".git"
+        if git_marker.is_dir() or git_marker.is_file():
             return path
         parent = path.parent
         if parent == path:

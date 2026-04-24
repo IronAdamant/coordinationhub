@@ -5,6 +5,20 @@ from __future__ import annotations
 from .cli_utils import print_json as _print_json, command as _command
 
 
+def _truncate(text: str, max_len: int) -> str:
+    """Truncate *text* with a trailing ``...`` when it exceeds *max_len*.
+
+    T7.10: single helper so the 60-char / 80-char truncations in this
+    module render consistently (the pre-fix inline truncation at some
+    sites dropped the ``...``).
+    """
+    if text is None:
+        return ""
+    if len(text) <= max_len:
+        return text
+    return text[: max_len - 3] + "..."
+
+
 # ------------------------------------------------------------------ #
 # create-task
 # ------------------------------------------------------------------ #
@@ -63,7 +77,7 @@ def cmd_update_task_status(engine, args):
         # attr to None when the flag is unpassed; ``len(None)`` raised).
         summary = getattr(args, "summary", None) or ""
         if summary:
-            print(f"  Summary: {summary[:80]}{'...' if len(summary) > 80 else ''}")
+            print(f"  Summary: {_truncate(summary, 80)}")
 
 
 # ------------------------------------------------------------------ #
@@ -93,7 +107,7 @@ def cmd_query_tasks(engine, args):
             assigned = t.get("assigned_agent_id") or "(unassigned)"
             print(f"  [{status}] {t['task_id']} — {assigned}")
             if t.get("description"):
-                print(f"    {t['description'][:60]}")
+                print(f"    {_truncate(t['description'], 60)}")
 
 
 # ------------------------------------------------------------------ #
@@ -151,7 +165,7 @@ def cmd_dead_letter_queue(engine, args):
         for t in tasks:
             print(f"  {t['task_id']} — failed at {t.get('failed_at', '?')}")
             if t.get("error"):
-                print(f"    Error: {t['error'][:80]}")
+                print(f"    Error: {_truncate(t['error'], 80)}")
 
 
 # ------------------------------------------------------------------ #
@@ -170,7 +184,7 @@ def cmd_task_failure_history(engine, args):
             return
         print(f"Failure history for {args.task_id} ({len(history)} entries):")
         for h in history:
-            print(f"  {h.get('timestamp', '?')}: {h.get('error', 'unknown')[:80]}")
+            print(f"  {h.get('timestamp', '?')}: {_truncate(h.get('error', 'unknown'), 80)}")
 
 
 # ------------------------------------------------------------------ #
@@ -213,4 +227,4 @@ def cmd_get_available_tasks(engine, args):
             return
         print(f"Available tasks ({len(tasks)}):")
         for t in tasks:
-            print(f"  {t['task_id']} — {t.get('description', '')[:60]}")
+            print(f"  {t['task_id']} — {_truncate(t.get('description', ''), 60)}")

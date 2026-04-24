@@ -51,12 +51,15 @@ class CoordinationStorage:
     # ------------------------------------------------------------------ #
 
     def _resolve_storage_dir(self, storage_dir: Path | str | None) -> Path:
+        # T7.25: resolve the path only; no mkdir here. Pre-fix
+        # ``__init__`` created the ``.coordinationhub`` directory as
+        # a side effect of construction, which was surprising (an
+        # engine that's never ``start()``'d still left a breadcrumb
+        # on disk). ``start()`` now owns the mkdir.
         if storage_dir is not None:
             return Path(storage_dir).resolve()
         if self._project_root is not None:
-            base = self._project_root / ".coordinationhub"
-            base.mkdir(parents=True, exist_ok=True)
-            return base
+            return self._project_root / ".coordinationhub"
         return Path.home() / ".coordinationhub"
 
     @property
@@ -122,7 +125,12 @@ class CoordinationStorage:
         """
         if self._db_path is None:
             raise RuntimeError("Storage not started. Call start() first.")
-        conn = sqlite3.connect(f"file:{self._db_path}?mode=ro", uri=True)
+        # T7.28: URL-encode the path so a storage directory containing
+        # ``?``/``#`` or spaces doesn't confuse the URI parser. Prefix
+        # with ``/`` because ``file:`` URIs want an absolute path.
+        from urllib.parse import quote as _url_quote
+        encoded = _url_quote(str(self._db_path), safe="/:")
+        conn = sqlite3.connect(f"file:{encoded}?mode=ro", uri=True)
         conn.row_factory = sqlite3.Row
         return conn
 

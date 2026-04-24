@@ -74,11 +74,19 @@ def cmd_list_pending_spawns(engine, args):
 
     print(f"Pending spawns for {args.parent_agent_id}:")
     for s in result:
-        age = _time.time() - s.get("created_at", 0)
+        # T7.9: explicit None check. ``s.get('created_at', 0)`` returned
+        # 0 on a missing/corrupt column and then ``_time.time() - 0``
+        # printed an age of ~1.8e9 seconds, which was noise. A missing
+        # timestamp now renders as ``age=unknown``.
+        created_at = s.get("created_at")
+        if created_at is None:
+            age_str = "unknown"
+        else:
+            age_str = f"{_time.time() - created_at:.1f}s"
         status = s.get("status", "?")
         marker = " [EXPIRED]" if status == "expired" else (" [REGISTERED]" if status == "registered" else "")
         print(f"  {s['id']}{marker}")
-        print(f"    type={s.get('subagent_type', '?')} | age={age:.1f}s | desc={s.get('description', '')[:40]}")
+        print(f"    type={s.get('subagent_type', '?')} | age={age_str} | desc={s.get('description', '')[:40]}")
 
 
 # ------------------------------------------------------------------ #

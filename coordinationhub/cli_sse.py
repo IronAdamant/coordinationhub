@@ -30,16 +30,31 @@ def cmd_serve_sse(args):
     else:
         print("Auth: DISABLED (local-trust mode)")
 
-    # Open browser in background thread so it doesn't block server start
+    # Open browser in background thread so it doesn't block server start.
+    # T7.12: poll /health before opening so the browser doesn't hit a
+    # "connection refused" race if server startup runs slow. Give up
+    # after ~5 seconds — the user can always refresh.
     if not no_browser:
         def _open_browser():
+            import time as _time
+            import urllib.error as _url_error
+            import urllib.request as _url_request
             dashboard_url = f"http://{host}:{port}/"
+            health_url = f"http://{host}:{port}/health"
+            deadline = _time.time() + 5.0
+            while _time.time() < deadline:
+                try:
+                    with _url_request.urlopen(health_url, timeout=0.3) as resp:
+                        if resp.status == 200:
+                            break
+                except (_url_error.URLError, ConnectionError, OSError):
+                    _time.sleep(0.1)
             try:
                 webbrowser.open(dashboard_url)
             except Exception:
                 pass  # fail silently if no browser available
 
-        threading.Timer(1.0, _open_browser).start()
+        threading.Thread(target=_open_browser, daemon=True).start()
 
     print(f"Starting SSE dashboard server on {host}:{port}")
     print(f"Dashboard: http://{host}:{port}/")

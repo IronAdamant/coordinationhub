@@ -81,6 +81,7 @@ def acquire_lease(
         )
         row = cursor.fetchone()
         if row is None:
+            conn.rollback()
             return None
 
         existing_holder = row["holder_id"]
@@ -88,6 +89,7 @@ def acquire_lease(
 
         # Reject if another valid holder has the lease
         if existing_holder != holder_id and existing_expires > acquired_at:
+            conn.rollback()
             return None
 
         # Overwrite: either unheld (expired) or ours
@@ -96,9 +98,12 @@ def acquire_lease(
             "WHERE lease_name = ?",
             (holder_id, acquired_at, ttl, expires_at, lease_name),
         )
-        return expires_at
-    finally:
         conn.commit()
+        return expires_at
+    except BaseException:
+        conn.rollback()
+        raise
+
 
 def refresh_lease(
     conn: sqlite3.Connection,
@@ -110,6 +115,10 @@ def refresh_lease(
     Only the current holder can refresh. Returns the new expires_at on
     success, or None if the caller isn't the current holder (T6.30: the
     timestamp is returned inline so wrappers skip a follow-up read).
+
+    T7.31: explicit COMMIT on success / ROLLBACK on bail-out, so an
+    empty-check-and-return doesn't waste a COMMIT round trip on a
+    transaction that wrote nothing.
     """
     now = time.time()
 
@@ -126,6 +135,7 @@ def refresh_lease(
         )
         row = cursor.fetchone()
         if row is None or row["holder_id"] != holder_id:
+            conn.rollback()
             return None
 
         ttl = row["ttl"]
@@ -135,9 +145,11 @@ def refresh_lease(
             "UPDATE coordinator_leases SET acquired_at = ?, expires_at = ? WHERE lease_name = ?",
             (now, expires_at, lease_name),
         )
-        return expires_at
-    finally:
         conn.commit()
+        return expires_at
+    except BaseException:
+        conn.rollback()
+        raise
 
 
 def release_lease(
@@ -148,6 +160,8 @@ def release_lease(
     """Release a lease held by the given holder.
 
     Returns True if the lease was released, False if it wasn't held by this holder.
+
+    T7.31: explicit COMMIT/ROLLBACK, same rationale as refresh_lease.
     """
     try:
         conn.execute("BEGIN IMMEDIATE")
@@ -161,15 +175,18 @@ def release_lease(
         )
         row = cursor.fetchone()
         if row is None or row["holder_id"] != holder_id:
+            conn.rollback()
             return False
 
         conn.execute(
             "DELETE FROM coordinator_leases WHERE lease_name = ? AND holder_id = ?",
             (lease_name, holder_id),
         )
-        return True
-    finally:
         conn.commit()
+        return True
+    except BaseException:
+        conn.rollback()
+        raise
 
 
 def get_lease_holder(
@@ -253,6 +270,7 @@ def claim_leadership(
 
             # Reject if a live holder has the lease
             if existing_holder != agent_id and existing_expires > acquired_at:
+                conn.rollback()
                 return None
 
         # Claim: insert if absent, or update if expired/unheld
@@ -262,6 +280,8 @@ def claim_leadership(
             "VALUES (?, ?, ?, ?, ?)",
             (lease_name, agent_id, acquired_at, ttl, expires_at),
         )
-        return expires_at
-    finally:
         conn.commit()
+        return expires_at
+    except BaseException:
+        conn.rollback()
+        raise

@@ -21,6 +21,12 @@ def _regions_overlap(
     """Check if two lock regions overlap.
 
     None means whole-file — overlaps with everything.
+
+    T7.17: ``region_end`` is treated as **exclusive** — ``[1, 50]``
+    and ``[50, 100]`` therefore do NOT overlap (the strict ``<``
+    below). Callers using inclusive line-number semantics need to
+    pass ``region_end`` as the line *after* the last line they own.
+    This is locked in by ``tests/test_locking.py::test_region_overlap``.
     """
     if a_start is None or b_start is None:
         return True

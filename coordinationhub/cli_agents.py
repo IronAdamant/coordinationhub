@@ -137,8 +137,12 @@ def cmd_list_agents(engine, args):
     else:
         print(f"{len(agents)} agent(s):")
         for a in agents:
-            stale = " (STALE)" if a.get("stale") else ""
-            print(f"  {a['agent_id']}: {a['status']}{stale}")
+            # T7.11: prefix with ``!`` when stale so line-based
+            # scripts (`grep "^ *!"`) can pick out stuck agents
+            # without parsing the trailing ``(STALE)`` literal.
+            stale_flag = "!" if a.get("stale") else " "
+            stale_tag = " (STALE)" if a.get("stale") else ""
+            print(f" {stale_flag} {a['agent_id']}: {a['status']}{stale_tag}")
 
 
 # ------------------------------------------------------------------ #
