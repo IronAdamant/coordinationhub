@@ -1,25 +1,64 @@
-"""HandoffMixin — one-to-many handoff acknowledgment and lifecycle.
+"""Handoff subsystem — one-to-many handoff acknowledgment and lifecycle.
 
-Expects the host class to provide:
-    self._connect() — callable returning a sqlite3 connection
-    self._event_bus  — EventBus instance for pub-sub notifications
+T6.22 sixth step: extracted out of ``core_handoffs.HandoffMixin`` into
+a standalone class. Coupling audit confirmed HandoffMixin had zero
+cross-mixin method calls and only relied on three pieces of engine
+infrastructure — ``_connect``, ``_publish_event``, ``_hybrid_wait`` —
+which are now injected as constructor dependencies. Same three-dep
+shape as :class:`Spawner` (commit ``1ee46c6``) and :class:`Messaging`
+(commit ``d9f84d3``). See commits ``3d1bd48`` (WorkIntent),
+``b4a3e6b`` (Lease), and ``d6c8796`` (Dependency) for the other
+extractions in this series. This continues breaking the god-object
+inheritance chain on ``CoordinationEngine`` without changing
+observable behaviour.
 
-Delegates to: handoffs (handoffs.py)
+Preserves T1.15's caller-vs-row authz check on handoff acknowledgment
+— the primitive ``acknowledge_handoff`` in :mod:`handoffs` validates
+that the supplied ``agent_id`` appears in the row's ``to_agents``
+list, rejecting non-recipients with ``reason='not_recipient'``.
+Preserves T1.19's no-phantom-event guarantee: events only fire when
+the primitive reports success.
+
+Delegates to: handoffs (handoffs.py) for handoff DB primitives.
 """
 
 from __future__ import annotations
 
 import time
-from typing import Any
+from typing import Any, Callable
 
 from . import handoffs as _handoffs
 
 
-class HandoffMixin:
-    """Formal handoff recording with multi-recipient acknowledgment tracking."""
+class Handoff:
+    """Formal handoff recording with multi-recipient acknowledgment tracking.
+
+    Constructed by :class:`CoordinationEngine` and exposed as
+    ``engine._handoff``. The engine keeps facade methods for each
+    public operation so the existing tool API is preserved.
+    """
+
+    def __init__(
+        self,
+        connect_fn: Callable[[], Any],
+        publish_event_fn: Callable[[str, dict[str, Any]], None],
+        hybrid_wait_fn: Callable[..., dict[str, Any] | None],
+    ) -> None:
+        self._connect = connect_fn
+        self._publish_event = publish_event_fn
+        self._hybrid_wait = hybrid_wait_fn
+
+    # ------------------------------------------------------------------ #
+    # Public API
+    # ------------------------------------------------------------------ #
 
     def acknowledge_handoff(self, handoff_id: int, agent_id: str) -> dict[str, Any]:
-        """Acknowledge receipt of a handoff."""
+        """Acknowledge receipt of a handoff.
+
+        T1.15: the primitive rejects acks from agents not present in the
+        handoff row's ``to_agents`` list. The event only fires on a real
+        ack (T1.19).
+        """
         result = _handoffs.acknowledge_handoff(self._connect, handoff_id, agent_id)
         if result.get("acknowledged"):
             self._publish_event(

@@ -7,7 +7,6 @@ LockingMixin:     core_locking.py     — lock acquire/release/refresh/list/admi
 BroadcastMixin:   core_broadcasts.py  — broadcast, handoff dispatch, wait_for_locks
 IdentityMixin:    core_identity.py    — agent registration, heartbeat, lineage
 TaskMixin:        core_tasks.py       — task registry with hierarchy
-HandoffMixin:     core_handoffs.py    — handoff acknowledgment tracking
 ChangeMixin:      core_change.py      — change notifications, audit, status
 VisibilityMixin:  core_visibility.py  — coordination graph, scan, assessment
 
@@ -17,6 +16,7 @@ WorkIntent:       work_intent_subsystem.py — cooperative work intent board
 Lease:            lease_subsystem.py       — HA coordinator leadership leases
 Dependency:       dependency_subsystem.py  — cross-agent dependency declarations
 Messaging:        messaging_subsystem.py   — inter-agent messages, agent await
+Handoff:          handoff_subsystem.py     — handoff acknowledgment tracking
 
 Zero third-party dependencies.
 """
@@ -42,7 +42,6 @@ from .core_locking import LockingMixin
 from .core_broadcasts import BroadcastMixin
 from .core_identity import IdentityMixin
 from .core_tasks import TaskMixin
-from .core_handoffs import HandoffMixin
 from .core_change import ChangeMixin
 from .core_visibility import VisibilityMixin
 from .spawner_subsystem import Spawner
@@ -50,6 +49,7 @@ from .work_intent_subsystem import WorkIntent
 from .lease_subsystem import Lease
 from .dependency_subsystem import Dependency
 from .messaging_subsystem import Messaging
+from .handoff_subsystem import Handoff
 from .paths import detect_project_root
 from .plugins.graph import graphs as _g
 
@@ -59,7 +59,6 @@ class CoordinationEngine(
     BroadcastMixin,
     IdentityMixin,
     TaskMixin,
-    HandoffMixin,
     ChangeMixin,
     VisibilityMixin,
 ):
@@ -69,8 +68,9 @@ class CoordinationEngine(
     Most domain methods are provided by the mixins. Subsystems
     extracted from the mixin tree (T6.22) hang off the engine as
     composed attributes — ``self._spawner``, ``self._work_intent``,
-    ``self._lease``, ``self._dependency``, and ``self._messaging`` —
-    with facade methods on the engine preserving the public API.
+    ``self._lease``, ``self._dependency``, ``self._messaging``, and
+    ``self._handoff`` — with facade methods on the engine preserving
+    the public API.
     """
 
     DEFAULT_PORT = 9877
@@ -155,6 +155,23 @@ class CoordinationEngine(
         # design (``send_message`` and ``manage_messages(action='send')``
         # both remain on the MCP surface by design).
         self._messaging = Messaging(
+            connect_fn=self._connect,
+            publish_event_fn=self._publish_event,
+            hybrid_wait_fn=self._hybrid_wait,
+        )
+        # T6.22: composed subsystem replaces HandoffMixin. Per the
+        # coupling audit HandoffMixin had zero cross-mixin calls and
+        # needed all three infra callables — ``_connect`` for the
+        # primitive module, ``_publish_event`` for ``handoff.ack`` /
+        # ``handoff.completed`` / ``handoff.cancelled`` notifications,
+        # and ``_hybrid_wait`` for ``wait_for_handoff(mode='completion')``.
+        # Same three-dep shape as :class:`Spawner` (commit ``1ee46c6``)
+        # and :class:`Messaging` (commit ``d9f84d3``). Preserves the
+        # T1.15 caller-vs-row authz check on ``acknowledge_handoff`` —
+        # the primitive rejects acks from agents not listed in the
+        # handoff row's ``to_agents`` — and the T1.19 no-phantom-event
+        # guarantee on no-op ``complete_handoff`` / ``cancel_handoff``.
+        self._handoff = Handoff(
             connect_fn=self._connect,
             publish_event_fn=self._publish_event,
             hybrid_wait_fn=self._hybrid_wait,
@@ -634,6 +651,53 @@ class CoordinationEngine(
             agent_id=agent_id, timeout_s=timeout_s,
         )
 
+    # ------------------------------------------------------------------ #
+    # Handoff facade (T6.22)
+    # ------------------------------------------------------------------ #
+    # These one-liners delegate to ``self._handoff`` (a :class:`Handoff`
+    # composed in ``__init__``). They preserve the pre-extraction public
+    # API — MCP dispatch (``acknowledge_handoff``, ``complete_handoff``,
+    # ``cancel_handoff``, ``get_handoffs``, ``wait_for_handoff``), CLI
+    # (``cli_locks.py``), and tests all continue to call
+    # ``engine.acknowledge_handoff(...)`` etc. verbatim. Preserves the
+    # T1.15 caller-vs-row authz check (the primitive rejects acks from
+    # agents not listed in the handoff row's ``to_agents``).
+
+    def acknowledge_handoff(self, handoff_id: int, agent_id: str) -> dict[str, Any]:
+        return self._handoff.acknowledge_handoff(
+            handoff_id=handoff_id, agent_id=agent_id,
+        )
+
+    def complete_handoff(self, handoff_id: int) -> dict[str, Any]:
+        return self._handoff.complete_handoff(handoff_id=handoff_id)
+
+    def cancel_handoff(self, handoff_id: int) -> dict[str, Any]:
+        return self._handoff.cancel_handoff(handoff_id=handoff_id)
+
+    def get_handoffs(
+        self,
+        status: str | None = None,
+        from_agent_id: str | None = None,
+        limit: int = 50,
+    ) -> dict[str, Any]:
+        return self._handoff.get_handoffs(
+            status=status, from_agent_id=from_agent_id, limit=limit,
+        )
+
+    def wait_for_handoff(
+        self,
+        handoff_id: int,
+        timeout_s: float = 30.0,
+        agent_id: str | None = None,
+        mode: str = "completion",
+    ) -> dict[str, Any]:
+        return self._handoff.wait_for_handoff(
+            handoff_id=handoff_id,
+            timeout_s=timeout_s,
+            agent_id=agent_id,
+            mode=mode,
+        )
+
     def read_only_engine(self) -> "CoordinationEngine":
         """Return a read-only view of this engine using direct WAL reads.
 
@@ -677,5 +741,13 @@ class CoordinationEngine(
         # a supported flow and ``await_agent`` is read-only, so only the
         # ``_connect`` rebind is needed.
         replica._messaging._connect = replica._connect
+        # T6.22: and the Handoff subsystem — same three-dep pattern as
+        # Spawner and Messaging. ``_publish_event`` and ``_hybrid_wait``
+        # were captured in ``_handoff.__init__`` against the replica's
+        # own callables; handoff mutations (ack/complete/cancel) through
+        # a read-only replica are not a supported flow and
+        # ``wait_for_handoff(mode='completion')`` / ``mode='status'``
+        # are read-only, so only the ``_connect`` rebind is needed.
+        replica._handoff._connect = replica._connect
         return replica
 
