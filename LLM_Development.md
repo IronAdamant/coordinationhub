@@ -1626,7 +1626,7 @@ Block markers for multi-line content:
 | `coordinationhub/core_locking.py` | 394 | Locking methods for CoordinationEngine |
 | `coordinationhub/core_messaging.py` | 121 | MessagingMixin — inter-agent messages and await |
 | `coordinationhub/core_spawner.py` | 196 | SpawnerMixin — HA coordinator sub-agent spawn management |
-| `coordinationhub/core_tasks.py` | 200 | TaskMixin — shared task registry with hierarchy support |
+| `coordinationhub/core_tasks.py` | 202 | TaskMixin — shared task registry with hierarchy support |
 | `coordinationhub/core_visibility.py` | 127 | VisibilityMixin — coordination graph, project scan, agent status, assessment |
 | `coordinationhub/core_work_intent.py` | 75 | WorkIntentMixin — cooperative work intent board |
 | `coordinationhub/db.py` | 93 | SQLite connection pool and public re-exports for CoordinationHub |
@@ -1662,7 +1662,7 @@ Block markers for multi-line content:
 | `coordinationhub/plugins/graph/__init__.py` | 31 | Graph plugin for CoordinationHub |
 | `coordinationhub/plugins/graph/graphs.py` | 309 | Declarative coordination graph: loader, validator, in-memory representation |
 | `coordinationhub/plugins/registry.py` | 59 | Plugin registry for CoordinationHub |
-| `coordinationhub/scan.py` | 279 | File ownership scan for CoordinationHub |
+| `coordinationhub/scan.py` | 275 | File ownership scan for CoordinationHub |
 | `coordinationhub/schemas/__init__.py` | 56 | Tool schemas for CoordinationHub — all MCP tools |
 | `coordinationhub/schemas/audit.py` | 61 | Audit & Status tool schemas for CoordinationHub |
 | `coordinationhub/schemas/change.py` | 41 | Change Awareness tool schemas for CoordinationHub |
@@ -1680,14 +1680,14 @@ Block markers for multi-line content:
 | `coordinationhub/schemas/visibility.py` | 159 | Graph & Visibility tool schemas for CoordinationHub |
 | `coordinationhub/spawner.py` | 350 | Zero-deps spawner primitives for HA coordinator sub-agent registry |
 | `coordinationhub/task_failures.py` | 149 | Task failure tracking and dead letter queue for CoordinationHub |
-| `coordinationhub/tasks.py` | 410 | Task registry primitives for CoordinationHub (work board) |
+| `coordinationhub/tasks.py` | 502 | Task registry primitives for CoordinationHub (work board) |
 | `coordinationhub/work_intent.py` | 136 | Work intent board primitives for CoordinationHub |
 <!-- /GEN -->
 ```
 
 Inline markers for single values (render invisibly in Markdown):
 ```markdown
-This project has <!-- GEN:test-count -->619<!-- /GEN --> tests.
+This project has <!-- GEN:test-count -->628<!-- /GEN --> tests.
 ```
 
 Unknown marker names raise an error during rewrite (catches typos).

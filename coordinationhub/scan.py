@@ -196,6 +196,11 @@ def scan_project_tool(
     now = _time.time()
     scan_deadline = now + MAX_SCAN_SECONDS
 
+    # T6.1: prefetch everything the per-file loop needs in ONE connection
+    # so the loop body is connection-free. Pre-fix, a role-based resolution
+    # path opened a new connection per file and then called
+    # _get_spawned_agent_responsibilities which opened yet another — a
+    # 10K-file scan would burn 10K+ connections on the thread-local pool.
     with connect() as conn:
         ownership_rows = conn.execute(
             "SELECT document_path, assigned_agent_id FROM file_ownership"
@@ -203,6 +208,26 @@ def scan_project_tool(
         path_to_agent: dict[str, str] = {
             row["document_path"]: row["assigned_agent_id"] for row in ownership_rows
         }
+        # Map every graph_agent_id → the active registered agent that
+        # implements it. One scan of agent_responsibilities joined to
+        # agents replaces a per-file lookup.
+        role_rows = conn.execute("""
+            SELECT ar.graph_agent_id, ar.agent_id
+            FROM agent_responsibilities ar
+            JOIN agents a ON a.agent_id = ar.agent_id AND a.status = 'active'
+            WHERE ar.graph_agent_id IS NOT NULL
+        """).fetchall()
+        # If multiple agents implement the same role we pick the first
+        # encountered — matches the pre-fix ``LIMIT 1`` semantics.
+        graph_to_agent: dict[str, str] = {}
+        for r in role_rows:
+            graph_to_agent.setdefault(r["graph_agent_id"], r["agent_id"])
+        # First-registered active agent for the fallback path.
+        fallback_row = conn.execute(
+            "SELECT agent_id FROM agents WHERE status = 'active' "
+            "ORDER BY started_at ASC LIMIT 1"
+        ).fetchone()
+        fallback_agent = fallback_row["agent_id"] if fallback_row else "unassigned"
 
     # Build dir -> agent for nearest-ancestor lookup
     dir_to_agent: dict[str, str] = {}
@@ -216,7 +241,6 @@ def scan_project_tool(
                 break
             d = str(parent)
 
-    fallback_agent = _default_owner_agent(connect)
     scanned = 0
     owned = 0
     to_upsert: list[tuple[str, str, float]] = []
@@ -272,30 +296,18 @@ def scan_project_tool(
                         break
                     d = str(parent)
                 if assigned is None:
-                    # Try role-based assignment from coordination graph
+                    # T6.1: role-based assignment uses the prefetched
+                    # graph_to_agent map instead of a per-file SELECT.
                     role_agent = _role_based_agent(graph, path)
                     if role_agent is not None:
-                        # Resolve graph_agent_id to the registered agent that implements this role
-                        with connect() as conn:
-                            row = conn.execute("""
-                                SELECT agent_id FROM agent_responsibilities
-                                WHERE graph_agent_id = ? AND agent_id IN (
-                                    SELECT agent_id FROM agents WHERE status = 'active'
-                                )
-                                LIMIT 1
-                            """, (role_agent,)).fetchone()
-                            if row:
-                                assigned = row["agent_id"]
-                    # Fallback: spawned agent inherits parent's responsibility slice
-                    if assigned is None and fallback_agent != "unassigned":
-                        parent_graph_id, parent_resp = _get_spawned_agent_responsibilities(
-                            connect, fallback_agent
-                        )
-                        if parent_graph_id:
-                            role_agent = _role_based_agent(graph, path)
-                            if role_agent == parent_graph_id:
-                                # fallback_agent is a spawned agent inheriting parent role — keep it
-                                pass
+                        assigned = graph_to_agent.get(role_agent)
+                    # Fallback: spawned agent inherits parent's responsibility
+                    # slice. Pre-fix this also called the DB per-file; the
+                    # spawn-agent lookup is a constant w.r.t. the loop so it
+                    # would have been safe to cache there too. We now skip
+                    # the call entirely because fallback_agent either has a
+                    # matching role (already resolved above) or the fallback
+                    # branch below handles it.
                 assigned = assigned or fallback_agent
             to_upsert.append((rel, assigned, now))
             owned += 1

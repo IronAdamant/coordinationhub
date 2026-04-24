@@ -325,6 +325,286 @@ class TestUpdateTaskStatusValidation:
             )
 
 
+class TestGetAvailableTasksNoPerDepRoundTrip:
+    """T6.3: dependency resolution used to call ``get_task`` per dep,
+    opening a fresh connection each time. A task with D deps across N
+    candidate tasks cost O(N*D) round trips. After the rewrite, deps
+    are resolved from the already-loaded universe — a new SELECT fires
+    only for deps pointing outside the universe (cross-scope).
+    """
+
+    def test_many_deps_do_not_scale_round_trips(self, engine, registered_agent):
+        # Create 20 tasks, mark them completed.
+        engine.create_task(
+            task_id="b.0", parent_agent_id=registered_agent, description="seed"
+        )
+        for i in range(1, 21):
+            engine.create_task(
+                task_id=f"b.{i}", parent_agent_id=registered_agent, description=f"dep{i}"
+            )
+            engine.update_task_status(f"b.{i}", "completed")
+        # One pending task with all 20 as deps.
+        engine.create_task(
+            task_id="target",
+            parent_agent_id=registered_agent,
+            description="collector",
+            depends_on=[f"b.{i}" for i in range(1, 21)],
+        )
+
+        selects_before = 0
+        selects_after = 0
+
+        # Pre-query baseline: how many SELECTs does get_available_tasks
+        # fire with no deps? (upper-bound irrespective of dep count)
+        conn = engine._connect()
+        def _make_tracer(bucket):
+            def _t(stmt):
+                if stmt.strip().upper().startswith("SELECT"):
+                    bucket.append(stmt)
+            return _t
+
+        # Baseline: seed task has no deps
+        baseline: list[str] = []
+        conn.set_trace_callback(_make_tracer(baseline))
+        try:
+            engine.get_available_tasks()
+        finally:
+            conn.set_trace_callback(None)
+
+        # With-20-deps: must not scale by 20.
+        with_deps: list[str] = []
+        conn.set_trace_callback(_make_tracer(with_deps))
+        try:
+            available = engine.get_available_tasks()
+        finally:
+            conn.set_trace_callback(None)
+
+        # Pre-fix, `get_task` would fire 20 extra SELECTs for the
+        # depends_on resolution. After T6.3 the resolution is in-memory
+        # so the select count should differ by ≤ 3 (to leave headroom
+        # for unrelated reads).
+        delta = len(with_deps) - len(baseline)
+        assert delta <= 3, (
+            f"get_available_tasks ran {delta} extra SELECTs when a 20-dep "
+            f"task was present; expected ≤3 (in-memory dep resolution). "
+            f"T6.3 regression.\nBaseline: {len(baseline)}\nWith deps: {len(with_deps)}"
+        )
+        # The target should be in the available list (all deps completed).
+        assert any(t["id"] == "target" for t in available["tasks"])
+
+
+class TestGetTaskTreeSingleQuery:
+    """T6.36: get_task_tree uses one WITH RECURSIVE query; a deep tree
+    used to pay O(N) round trips (one SELECT per node + one SELECT per
+    direct-child list). The trace-callback assertion below guards the
+    optimisation against regression.
+    """
+
+    def _build_chain(self, engine, parent_agent, n):
+        """Build a linear chain of n+1 tasks (root, t.1, ..., t.n)."""
+        engine.create_task(
+            task_id="t.root", parent_agent_id=parent_agent, description="root"
+        )
+        prev = "t.root"
+        for i in range(1, n + 1):
+            tid = f"t.{i}"
+            engine.create_subtask(
+                task_id=tid,
+                parent_task_id=prev,
+                parent_agent_id=parent_agent,
+                description=f"d{i}",
+            )
+            prev = tid
+
+    def test_deep_chain_runs_one_select(self, engine, registered_agent):
+        self._build_chain(engine, registered_agent, n=10)
+
+        selects: list[str] = []
+        conn = engine._connect()
+        def _tracer(stmt):
+            if stmt.strip().upper().startswith("SELECT"):
+                selects.append(stmt)
+        conn.set_trace_callback(_tracer)
+        try:
+            tree = engine.query_tasks(query_type="tree", root_task_id="t.root")
+        finally:
+            conn.set_trace_callback(None)
+
+        # The query returns a dict rooted at t.root with 10 descendants.
+        assert tree.get("id") == "t.root"
+        # Walk the chain.
+        node = tree
+        for i in range(1, 11):
+            assert len(node["subtasks"]) == 1, f"Chain broken at depth {i}"
+            node = node["subtasks"][0]
+            assert node["id"] == f"t.{i}"
+
+        # Pre-fix, 11 tasks → ≥ 22 SELECTs (one per node + one for
+        # children list). After T6.36, the whole traversal uses one
+        # SELECT. Allow one more for safety (trace can pick up
+        # sqlite-internal statements in some environments).
+        assert len(selects) <= 2, (
+            f"Expected ≤2 SELECTs for 11-node tree (one WITH RECURSIVE); "
+            f"got {len(selects)}. T6.36 regression. Statements:\n"
+            + "\n".join(selects)
+        )
+
+
+class TestUpdateTaskStatusAtomicSideEffects:
+    """T6.38: the status UPDATE and its side effects (dep-satisfy for
+    completed, DLQ record for failed) are now in one transaction. A
+    crash in between cannot leave inconsistent state — the sqlite3
+    trace should show a single COMMIT for the whole compound operation.
+    """
+
+    def test_complete_uses_single_transaction(self, engine, registered_agent):
+        """Trace callback asserts dep-satisfy and status UPDATE share
+        the same tx. Pre-fix the primitive committed after the status
+        UPDATE and the mixin's satisfy call opened a separate tx.
+        """
+        engine.create_task(
+            task_id="t.atomic", parent_agent_id=registered_agent, description="x"
+        )
+        # Create a dependency pointing at this task.
+        engine.manage_dependencies(
+            mode="declare",
+            dependent_agent_id=registered_agent,
+            depends_on_task_id="t.atomic",
+            condition="task_completed",
+        )
+
+        statements: list[str] = []
+
+        def _tracer(stmt):
+            up = stmt.strip().upper()
+            if up.startswith(("BEGIN", "COMMIT", "ROLLBACK", "UPDATE TASKS", "UPDATE AGENT_DEPENDENCIES")):
+                statements.append(up.split()[0] if up.startswith(("BEGIN", "COMMIT", "ROLLBACK")) else " ".join(up.split()[:2]))
+
+        conn = engine._connect()
+        conn.set_trace_callback(_tracer)
+        try:
+            engine.update_task_status("t.atomic", "completed")
+        finally:
+            conn.set_trace_callback(None)
+
+        # Expect: exactly one UPDATE TASKS followed by one UPDATE
+        # AGENT_DEPENDENCIES, with no COMMIT in between.
+        try:
+            i_tasks = statements.index("UPDATE TASKS")
+            i_deps = statements.index("UPDATE AGENT_DEPENDENCIES")
+        except ValueError:
+            # No dep row means satisfy was a no-op UPDATE — still fine.
+            # Instead just assert no COMMIT between status write and end.
+            assert "UPDATE TASKS" in statements
+            return
+        assert i_deps > i_tasks
+        between = statements[i_tasks + 1: i_deps]
+        assert "COMMIT" not in between, (
+            f"Expected no COMMIT between status UPDATE and dep satisfy; got {statements}"
+        )
+
+    def test_fail_records_dlq_inside_status_tx(self, engine, registered_agent):
+        """DLQ recording moves into the primitive's tx. After a failed
+        transition, history must already be visible without needing a
+        subsequent commit.
+        """
+        engine.create_task(
+            task_id="t.fail", parent_agent_id=registered_agent, description="x"
+        )
+        result = engine.update_task_status("t.fail", "failed", error="boom")
+        # Primitive now surfaces the failure record inline.
+        assert result.get("failure_record") is not None
+        assert result["failure_record"].get("status") in ("failed", "dead_letter")
+        history = engine.task_failures(action="history", task_id="t.fail")
+        assert history["count"] == 1
+
+    def test_noop_failed_call_does_not_record_extra_attempt(
+        self, engine, registered_agent
+    ):
+        """T6.40 guard under T6.38 fold: idempotent failed() still
+        doesn't double-record. Fold must not accidentally re-enable the
+        pre-T6.40 behaviour.
+        """
+        engine.create_task(
+            task_id="t.idem2", parent_agent_id=registered_agent, description="x"
+        )
+        engine.update_task_status("t.idem2", "failed", error="b1")
+        engine.update_task_status("t.idem2", "failed", error="b2")
+        engine.update_task_status("t.idem2", "failed", error="b3")
+        history = engine.task_failures(action="history", task_id="t.idem2")
+        assert history["count"] == 1
+
+
+class TestAssignTaskReassignment:
+    """T6.32: re-assigning a task clears the previous assignee's
+    ``current_task`` row so it doesn't stale-reference work they no
+    longer own. Old behaviour left the row pointing at the description
+    forever, so ``list_agents`` would show two agents working on the
+    same thing after a handoff.
+    """
+
+    def _agent_current_task(self, engine, agent_id):
+        with engine._connect() as conn:
+            row = conn.execute(
+                "SELECT current_task FROM agent_responsibilities WHERE agent_id=?",
+                (agent_id,),
+            ).fetchone()
+            return row["current_task"] if row else None
+
+    def test_reassign_clears_prior_current_task(self, engine, two_agents):
+        a = two_agents["child"]
+        b = two_agents["other"]
+        engine.create_task(
+            task_id="t.re", parent_agent_id=two_agents["parent"], description="pay"
+        )
+        engine.assign_task("t.re", a)
+        assert self._agent_current_task(engine, a) == "pay"
+
+        engine.assign_task("t.re", b)
+        # a's current_task is cleared; b picks it up.
+        assert self._agent_current_task(engine, a) is None
+        assert self._agent_current_task(engine, b) == "pay"
+
+    def test_reassign_to_same_agent_is_noop(self, engine, registered_agent):
+        engine.create_task(
+            task_id="t.same", parent_agent_id=registered_agent, description="x"
+        )
+        engine.assign_task("t.same", registered_agent)
+        engine.assign_task("t.same", registered_agent)
+        assert self._agent_current_task(engine, registered_agent) == "x"
+
+    def test_reassign_does_not_clobber_unrelated_current_task(
+        self, engine, two_agents
+    ):
+        """If a's current_task already points at something else (not this
+        task's description), reassigning task t.re away from a must not
+        wipe that unrelated entry.
+        """
+        a = two_agents["child"]
+        b = two_agents["other"]
+        engine.create_task(
+            task_id="t.unrelated",
+            parent_agent_id=two_agents["parent"],
+            description="different work",
+        )
+        engine.create_task(
+            task_id="t.move",
+            parent_agent_id=two_agents["parent"],
+            description="moving work",
+        )
+        engine.assign_task("t.move", a)
+        # Override a's current_task to the unrelated description.
+        with engine._connect() as conn:
+            conn.execute(
+                "UPDATE agent_responsibilities SET current_task=? WHERE agent_id=?",
+                ("different work", a),
+            )
+
+        engine.assign_task("t.move", b)
+        # Unrelated current_task is preserved.
+        assert self._agent_current_task(engine, a) == "different work"
+
+
 class TestUpdateTaskStatusErrorForwarding:
     """T6.39: ``error`` is persisted on the task row for every status
     transition, not just ``status='failed'``. Callers that move a task

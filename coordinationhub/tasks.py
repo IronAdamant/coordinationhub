@@ -42,25 +42,47 @@ def assign_task(
     task_id: str,
     assigned_agent_id: str,
 ) -> dict[str, Any]:
-    """Assign a task to an agent."""
+    """Assign a task to an agent.
+
+    T6.32: when an already-assigned task is reassigned, the previous
+    assignee's ``current_task`` is cleared so it no longer points at
+    work they no longer own. The new assignee's row is upserted in the
+    same transaction so no window exists where both agents claim the
+    task as current.
+    """
     now = time.time()
     with connect() as conn:
+        prior = conn.execute(
+            "SELECT assigned_agent_id, description FROM tasks WHERE id=?",
+            (task_id,),
+        ).fetchone()
+        if prior is None:
+            return {"assigned": False, "reason": "task_not_found", "task_id": task_id}
+        prior_assignee = prior["assigned_agent_id"]
+        description = prior["description"]
+
         conn.execute(
             "UPDATE tasks SET assigned_agent_id=?, updated_at=? WHERE id=?",
             (assigned_agent_id, now, task_id),
         )
+        # T6.32: clear the prior assignee's current_task if it still points
+        # at this task. We match on current_task = description rather than
+        # task_id because agent_responsibilities stores descriptions — a
+        # stricter schema (task_id FK) is deferred to the migration bundle.
+        if prior_assignee and prior_assignee != assigned_agent_id:
+            conn.execute(
+                "UPDATE agent_responsibilities SET current_task = NULL, updated_at = ? "
+                "WHERE agent_id = ? AND current_task = ?",
+                (now, prior_assignee, description),
+            )
         # Sync agent state: update current_task in agent_responsibilities
-        row = conn.execute(
-            "SELECT description FROM tasks WHERE id=?", (task_id,)
-        ).fetchone()
-        if row:
-            conn.execute("""
-                INSERT INTO agent_responsibilities (agent_id, current_task, updated_at)
-                VALUES (?, ?, ?)
-                ON CONFLICT(agent_id) DO UPDATE SET
-                    current_task = excluded.current_task,
-                    updated_at = excluded.updated_at
-            """, (assigned_agent_id, row["description"], now))
+        conn.execute("""
+            INSERT INTO agent_responsibilities (agent_id, current_task, updated_at)
+            VALUES (?, ?, ?)
+            ON CONFLICT(agent_id) DO UPDATE SET
+                current_task = excluded.current_task,
+                updated_at = excluded.updated_at
+        """, (assigned_agent_id, description, now))
     return {"assigned": True, "task_id": task_id}
 
 
@@ -93,6 +115,14 @@ def update_task_status(
     non-None. Callers moving a task to ``blocked`` or ``in_progress`` can
     now preserve diagnostic context on the task row itself (prior to the
     fix, the string was only surfaced via the DLQ on ``failed``).
+
+    T6.38: when the transition is to ``completed`` or ``failed``, the
+    dependency-satisfy / DLQ-record side effects fold into the same
+    transaction as the status write. Prior code committed the status
+    update first and invoked the side-effect primitives in their own
+    connections — a crash between left dependents hanging (completed
+    without satisfy) or the DLQ empty (failed without record). The fold
+    uses local imports to avoid circular deps between the three modules.
     """
     if status not in _VALID_TASK_STATUSES:
         return {
@@ -103,6 +133,8 @@ def update_task_status(
             "valid_statuses": sorted(_VALID_TASK_STATUSES),
         }
     now = time.time()
+    failure_record: dict[str, Any] | None = None
+    satisfied_count = 0
     with connect() as conn:
         existing = conn.execute(
             "SELECT status FROM tasks WHERE id = ?", (task_id,),
@@ -130,12 +162,54 @@ def update_task_status(
             f"UPDATE tasks SET {', '.join(fields)} WHERE id=?",
             tuple(params),
         )
+
+        # T6.38: perform side effects inside the same connection context
+        # so a crash after the status UPDATE but before dep-satisfy /
+        # DLQ-record can't leave inconsistent state. Only fire on real
+        # state transitions (T6.40).
+        is_transition = prior_status != status
+        if status == "completed" and is_transition:
+            cursor = conn.execute(
+                """UPDATE agent_dependencies
+                   SET satisfied=1, satisfied_at=?
+                   WHERE depends_on_task_id=? AND satisfied=0""",
+                (now, task_id),
+            )
+            satisfied_count = cursor.rowcount
+        elif status == "failed" and is_transition:
+            # Local import: task_failures imports nothing from tasks.py so
+            # there's no cycle risk, but keeping it local avoids widening
+            # the module header for a conditional code path.
+            from . import task_failures as _tf
+            failure_record = _tf.record_task_failure(
+                lambda: _LiveConn(conn), task_id, error,
+            )
     return {
         "updated": True,
         "task_id": task_id,
         "status": status,
         "prior_status": prior_status,
+        "dependencies_satisfied": satisfied_count,
+        "failure_record": failure_record,
     }
+
+
+class _LiveConn:
+    """Context manager that yields an existing connection without opening
+    or committing a transaction. Used by :func:`update_task_status` so
+    primitives that accept a ``connect`` callable can piggy-back on an
+    already-active transaction (T6.38).
+    """
+    __slots__ = ("_conn",)
+
+    def __init__(self, conn):
+        self._conn = conn
+
+    def __enter__(self):
+        return self._conn
+
+    def __exit__(self, exc_type, exc, tb):
+        return False
 
 
 def get_task(connect: ConnectFn, task_id: str) -> dict[str, Any] | None:
@@ -311,33 +385,67 @@ def get_task_tree(connect: ConnectFn, root_task_id: str) -> dict[str, Any]:
     T1.14: caps recursion at ``MAX_TASK_DEPTH`` and tracks a visited set
     so a cycle in ``parent_task_id`` (which create_subtask now rejects,
     but legacy DBs might contain) can't blow the Python stack.
+
+    T6.36: the whole tree is fetched in a single ``WITH RECURSIVE`` CTE
+    query. Previously each node cost one round trip (one SELECT for the
+    row, one SELECT for its direct children); deep trees paid O(N)
+    connections on the thread-local pool. The CTE walks the tree
+    server-side and caps at ``MAX_TASK_DEPTH`` via a depth column in
+    the recursive term.
     """
+    with connect() as conn:
+        rows = conn.execute(
+            """
+            WITH RECURSIVE tree(id, depth) AS (
+                SELECT id, 0 FROM tasks WHERE id = ?
+                UNION ALL
+                SELECT t.id, tree.depth + 1
+                FROM tasks t
+                JOIN tree ON t.parent_task_id = tree.id
+                WHERE tree.depth < ?
+            )
+            SELECT t.*, tree.depth AS _depth
+            FROM tree
+            JOIN tasks t ON t.id = tree.id
+            ORDER BY tree.depth ASC, t.created_at ASC
+            """,
+            (root_task_id, MAX_TASK_DEPTH),
+        ).fetchall()
+
+    if not rows:
+        return {}
+
+    # Build parent → children map from the flat row set.
+    by_id: dict[str, dict[str, Any]] = {}
+    children_of: dict[str | None, list[str]] = {}
+    for row in rows:
+        d = dict(row)
+        d.pop("_depth", None)
+        if d.get("depends_on"):
+            d["depends_on"] = json.loads(d["depends_on"])
+        d["subtasks"] = []
+        by_id[d["id"]] = d
+        parent = d.get("parent_task_id")
+        children_of.setdefault(parent, []).append(d["id"])
+
+    # T1.14 cycle-guard carries over — a DB cycle would make the CTE
+    # infinite, but SQLite caps recursion at its own limit; we also
+    # track a visited set at the Python-side assembly to guarantee a
+    # finite tree even if the CTE leaked a duplicate node.
     visited: set[str] = set()
 
-    def _build_tree(task_id: str, depth: int) -> dict[str, Any] | None:
-        if depth >= MAX_TASK_DEPTH or task_id in visited:
-            return None
-        visited.add(task_id)
-        with connect() as conn:
-            row = conn.execute("SELECT * FROM tasks WHERE id=?", (task_id,)).fetchone()
-            if not row:
-                return None
-            d = dict(row)
-            if d.get("depends_on"):
-                d["depends_on"] = json.loads(d["depends_on"])
-            children_rows = conn.execute(
-                "SELECT id FROM tasks WHERE parent_task_id=? ORDER BY created_at",
-                (task_id,),
-            ).fetchall()
-            child_ids = [child_row["id"] for child_row in children_rows]
-        d["subtasks"] = []
-        for child_id in child_ids:
-            child_tree = _build_tree(child_id, depth + 1)
-            if child_tree:
-                d["subtasks"].append(child_tree)
-        return d
+    def _attach(node_id: str) -> dict[str, Any]:
+        visited.add(node_id)
+        node = by_id[node_id]
+        for child_id in children_of.get(node_id, []):
+            if child_id in visited or child_id not in by_id:
+                continue
+            node["subtasks"].append(_attach(child_id))
+        return node
 
-    return _build_tree(root_task_id, 0) or {}
+    if root_task_id not in by_id:
+        return {}
+    return _attach(root_task_id)
 
 
 # T6.42: the polling ``wait_for_task`` primitive was replaced by the
@@ -357,13 +465,24 @@ def get_available_tasks(
     - The assigned agent (if any) has no unsatisfied rows in
       ``agent_dependencies`` (T1.12)
     - Optionally filtered to a specific agent_id
+
+    T6.3: dependency resolution now uses the already-loaded ``all_tasks``
+    rather than calling ``get_task`` per dep (one connection per dep).
+    For N tasks with average D deps each, the pre-fix cost was O(N*D)
+    round trips plus O(N) agent-blocker queries. The rewrite performs
+    one SELECT for the task universe and one SELECT per distinct
+    candidate agent.
     """
     import json
     all_tasks = get_all_tasks(connect)
     available = []
 
-    # T1.12: cache per-agent blocker state so we don't re-query the
-    # agent_dependencies table for every task in the list.
+    # T6.3: index all tasks by id once so per-dep lookup is O(1) in-memory.
+    status_by_id = {t["id"]: t.get("status") for t in all_tasks}
+
+    # T1.12 + T6.3: cache per-agent blocker state; share one connection
+    # for every agent_dependencies query (the prior implementation also
+    # reused a conn but issued per-dep get_task calls on a separate one).
     agent_blocker_cache: dict[str, bool] = {}
     with connect() as conn:
         def _agent_has_unsatisfied_deps(aid: str) -> bool:
@@ -382,13 +501,24 @@ def get_available_tasks(
             for r in rows:
                 cond = r["condition"]
                 if cond == "task_completed" and r["depends_on_task_id"]:
-                    blocker = conn.execute(
-                        "SELECT status FROM tasks WHERE id = ?",
-                        (r["depends_on_task_id"],),
-                    ).fetchone()
-                    if not blocker or blocker["status"] != "completed":
-                        blocked = True
-                        break
+                    # Dep is a task — satisfied iff its status is 'completed'.
+                    # Use the in-memory status map to skip a round trip.
+                    dep_status = status_by_id.get(r["depends_on_task_id"])
+                    if dep_status != "completed":
+                        # If the task isn't in the universe (deleted or
+                        # cross-scope), fall back to a direct read so we
+                        # can tell "not found" from "pending".
+                        if dep_status is None:
+                            blocker = conn.execute(
+                                "SELECT status FROM tasks WHERE id = ?",
+                                (r["depends_on_task_id"],),
+                            ).fetchone()
+                            if not blocker or blocker["status"] != "completed":
+                                blocked = True
+                                break
+                        else:
+                            blocked = True
+                            break
                 elif cond in ("agent_stopped", "agent_registered"):
                     blocker = conn.execute(
                         "SELECT status FROM agents WHERE agent_id = ?",
@@ -424,8 +554,10 @@ def get_available_tasks(
                     depends_on = []
             deps_satisfied = True
             for dep_id in depends_on:
-                dep_task = get_task(connect, dep_id)
-                if dep_task is None or dep_task.get("status") != "completed":
+                # T6.3: O(1) in-memory lookup instead of a fresh
+                # ``get_task(connect, dep_id)`` round trip.
+                dep_status = status_by_id.get(dep_id)
+                if dep_status != "completed":
                     deps_satisfied = False
                     break
             if not deps_satisfied:

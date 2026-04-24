@@ -332,6 +332,47 @@ class TestGraphLoading:
             eng.close()
 
 
+class TestScanPerFileConnection:
+    """T6.1: scan no longer opens a connection per file. Pre-fix, any
+    file that needed role-based resolution opened a fresh connection
+    (plus another via ``_get_spawned_agent_responsibilities``) inside
+    the walk loop, so a 10K-file tree paid 10K+ connect cycles on the
+    thread-local pool. The rewrite prefetches everything once.
+    """
+
+    def test_100_files_fire_constant_connects(self, engine, registered_agent, tmp_path):
+        # Lay down 100 .py files — enough that a per-file connect would
+        # show up clearly in the trace.
+        for i in range(100):
+            (tmp_path / f"f{i:03d}.py").write_text(f"# file {i}")
+
+        # Use the same thread-local conn for tracing. All scan work
+        # happens on the main thread (and thus on this conn).
+        import re
+        conn = engine._connect()
+        begins: list[str] = []
+        def _tracer(stmt):
+            if re.match(r"\s*(BEGIN|COMMIT)\b", stmt, re.IGNORECASE):
+                begins.append(stmt)
+        conn.set_trace_callback(_tracer)
+        try:
+            result = engine.scan_project(worktree_root=str(tmp_path))
+        finally:
+            conn.set_trace_callback(None)
+
+        assert result["scanned"] == 100
+
+        # Pre-fix, a scan that hit role-based resolution would open one
+        # implicit transaction per file → ≥ 100 COMMITs. After T6.1 we
+        # expect at most a handful: one prefetch tx + the final
+        # ON-CONFLICT upsert batch.
+        commits = [s for s in begins if re.match(r"\s*COMMIT\b", s, re.IGNORECASE)]
+        assert len(commits) <= 6, (
+            f"Scan fired {len(commits)} COMMITs for 100 files; expected ≤6. "
+            f"T6.1 regression — a per-file connection path re-appeared."
+        )
+
+
 class TestSpawnedAgentScan:
     """Tests for spawned-agent file ownership during scan."""
 
