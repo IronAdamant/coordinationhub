@@ -7,7 +7,6 @@ LockingMixin:     core_locking.py     — lock acquire/release/refresh/list/admi
 BroadcastMixin:   core_broadcasts.py  — broadcast, handoff dispatch, wait_for_locks
 IdentityMixin:    core_identity.py    — agent registration, heartbeat, lineage
 TaskMixin:        core_tasks.py       — task registry with hierarchy
-ChangeMixin:      core_change.py      — change notifications, audit, status
 VisibilityMixin:  core_visibility.py  — coordination graph, scan, assessment
 
 Composed subsystems (T6.22 — extracted from the mixin tree):
@@ -17,6 +16,7 @@ Lease:            lease_subsystem.py       — HA coordinator leadership leases
 Dependency:       dependency_subsystem.py  — cross-agent dependency declarations
 Messaging:        messaging_subsystem.py   — inter-agent messages, agent await
 Handoff:          handoff_subsystem.py     — handoff acknowledgment tracking
+Change:           change_subsystem.py      — change notifications, audit, status
 
 Zero third-party dependencies.
 """
@@ -42,7 +42,6 @@ from .core_locking import LockingMixin
 from .core_broadcasts import BroadcastMixin
 from .core_identity import IdentityMixin
 from .core_tasks import TaskMixin
-from .core_change import ChangeMixin
 from .core_visibility import VisibilityMixin
 from .spawner_subsystem import Spawner
 from .work_intent_subsystem import WorkIntent
@@ -50,6 +49,7 @@ from .lease_subsystem import Lease
 from .dependency_subsystem import Dependency
 from .messaging_subsystem import Messaging
 from .handoff_subsystem import Handoff
+from .change_subsystem import Change
 from .paths import detect_project_root
 from .plugins.graph import graphs as _g
 
@@ -59,7 +59,6 @@ class CoordinationEngine(
     BroadcastMixin,
     IdentityMixin,
     TaskMixin,
-    ChangeMixin,
     VisibilityMixin,
 ):
     """Host class that inherits capability mixins and holds subsystems.
@@ -68,9 +67,9 @@ class CoordinationEngine(
     Most domain methods are provided by the mixins. Subsystems
     extracted from the mixin tree (T6.22) hang off the engine as
     composed attributes — ``self._spawner``, ``self._work_intent``,
-    ``self._lease``, ``self._dependency``, ``self._messaging``, and
-    ``self._handoff`` — with facade methods on the engine preserving
-    the public API.
+    ``self._lease``, ``self._dependency``, ``self._messaging``,
+    ``self._handoff``, and ``self._change`` — with facade methods on
+    the engine preserving the public API.
     """
 
     DEFAULT_PORT = 9877
@@ -175,6 +174,27 @@ class CoordinationEngine(
             connect_fn=self._connect,
             publish_event_fn=self._publish_event,
             hybrid_wait_fn=self._hybrid_wait,
+        )
+        # T6.22: composed subsystem replaces ChangeMixin. Per the
+        # coupling audit ChangeMixin had zero cross-mixin calls and
+        # needed all three infra callables — ``_connect`` for the
+        # primitive module and direct SQL (status,
+        # get_contention_hotspots), ``_publish_event`` for the
+        # ``notification.created`` event fired on ``notify_change``,
+        # and ``_hybrid_wait`` for ``get_notifications(timeout_s>0)``
+        # plus ``wait_for_notifications``. Also needs the project root
+        # for ``normalize_path`` on ``notify_change`` /
+        # ``claim_file_ownership`` / ``get_conflicts``; injected as a
+        # closure like :class:`WorkIntent` (commit ``3d1bd48``) so a
+        # replica produced by ``read_only_engine`` picks up its own
+        # storage's root without a rebind. Four-dep shape: three-dep
+        # Spawner/Messaging/Handoff (commits ``1ee46c6``, ``d9f84d3``,
+        # ``ded641d``) plus ``project_root_getter``.
+        self._change = Change(
+            connect_fn=self._connect,
+            publish_event_fn=self._publish_event,
+            hybrid_wait_fn=self._hybrid_wait,
+            project_root_getter=lambda: self._storage.project_root,
         )
 
     def start(self) -> None:
@@ -698,6 +718,97 @@ class CoordinationEngine(
             mode=mode,
         )
 
+    # ------------------------------------------------------------------ #
+    # Change facade (T6.22)
+    # ------------------------------------------------------------------ #
+    # These one-liners delegate to ``self._change`` (a :class:`Change`
+    # composed in ``__init__``). They preserve the pre-extraction public
+    # API — MCP dispatch (``notify_change``, ``get_notifications``,
+    # ``get_conflicts``, ``get_contention_hotspots``), CLI
+    # (``cli_vis.py``), hooks (``hooks/base.py`` calls
+    # ``notify_change`` / ``claim_file_ownership``), housekeeping
+    # (``build_default_scheduler`` calls ``engine.prune_notifications``),
+    # and tests all continue to call ``engine.notify_change(...)`` etc.
+    # verbatim.
+
+    def notify_change(
+        self,
+        document_path: str,
+        change_type: str,
+        agent_id: str,
+    ) -> dict[str, Any]:
+        return self._change.notify_change(
+            document_path=document_path,
+            change_type=change_type,
+            agent_id=agent_id,
+        )
+
+    def claim_file_ownership(self, document_path: str, agent_id: str) -> None:
+        return self._change.claim_file_ownership(
+            document_path=document_path, agent_id=agent_id,
+        )
+
+    def get_notifications(
+        self,
+        since: float | None = None,
+        exclude_agent: str | None = None,
+        limit: int = 100,
+        agent_id: str | None = None,
+        timeout_s: float = 0.0,
+        poll_interval_s: float = 2.0,
+        prune_max_age_seconds: float | None = None,
+        prune_max_entries: int | None = None,
+    ) -> dict[str, Any]:
+        return self._change.get_notifications(
+            since=since,
+            exclude_agent=exclude_agent,
+            limit=limit,
+            agent_id=agent_id,
+            timeout_s=timeout_s,
+            poll_interval_s=poll_interval_s,
+            prune_max_age_seconds=prune_max_age_seconds,
+            prune_max_entries=prune_max_entries,
+        )
+
+    def prune_notifications(
+        self,
+        max_age_seconds: float | None = None,
+        max_entries: int | None = None,
+    ) -> dict[str, Any]:
+        return self._change.prune_notifications(
+            max_age_seconds=max_age_seconds, max_entries=max_entries,
+        )
+
+    def wait_for_notifications(
+        self,
+        agent_id: str,
+        timeout_s: float = 30.0,
+        poll_interval_s: float = 2.0,
+        exclude_agent: str | None = None,
+    ) -> dict[str, Any]:
+        return self._change.wait_for_notifications(
+            agent_id=agent_id,
+            timeout_s=timeout_s,
+            poll_interval_s=poll_interval_s,
+            exclude_agent=exclude_agent,
+        )
+
+    def get_conflicts(
+        self,
+        document_path: str | None = None,
+        agent_id: str | None = None,
+        limit: int = 20,
+    ) -> dict[str, Any]:
+        return self._change.get_conflicts(
+            document_path=document_path, agent_id=agent_id, limit=limit,
+        )
+
+    def get_contention_hotspots(self, limit: int = 10) -> dict[str, Any]:
+        return self._change.get_contention_hotspots(limit=limit)
+
+    def status(self) -> dict[str, Any]:
+        return self._change.status()
+
     def read_only_engine(self) -> "CoordinationEngine":
         """Return a read-only view of this engine using direct WAL reads.
 
@@ -749,5 +860,16 @@ class CoordinationEngine(
         # ``wait_for_handoff(mode='completion')`` / ``mode='status'``
         # are read-only, so only the ``_connect`` rebind is needed.
         replica._handoff._connect = replica._connect
+        # T6.22: and the Change subsystem — four-dep shape, but the
+        # ``project_root_getter`` is a closure over ``self._storage``
+        # so it already picks up the replica's storage without a
+        # rebind (same pattern as WorkIntent). ``_publish_event`` and
+        # ``_hybrid_wait`` were captured in ``_change.__init__`` against
+        # the replica's own callables; change mutations
+        # (notify_change / claim_file_ownership) through a read-only
+        # replica are not a supported flow. Read-only reads
+        # (get_notifications, get_conflicts, get_contention_hotspots,
+        # status) only need ``_connect`` rebound.
+        replica._change._connect = replica._connect
         return replica
 

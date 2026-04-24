@@ -1059,6 +1059,7 @@ keep it in sync; CI checks for drift on every push.
 | `coordinationhub/agent_registry.py` | 495 | Agent lifecycle: register, heartbeat, deregister, lineage management |
 | `coordinationhub/agent_status.py` | 288 | Agent status and file-map query helpers for CoordinationHub |
 | `coordinationhub/broadcasts.py` | 147 | Broadcast acknowledgment primitives for CoordinationHub |
+| `coordinationhub/change_subsystem.py` | 219 | Change subsystem — change notifications, file ownership, conflict audit, status |
 | `coordinationhub/cli.py` | 102 | CoordinationHub CLI — command-line interface for all coordination tool methods |
 | `coordinationhub/cli_agents.py` | 111 | Agent identity and lifecycle CLI commands |
 | `coordinationhub/cli_commands.py` | 98 | CoordinationHub CLI command handlers |
@@ -1076,9 +1077,8 @@ keep it in sync; CI checks for drift on every push.
 | `coordinationhub/cli_vis.py` | 241 | Change awareness, audit, graph, and assessment CLI commands |
 | `coordinationhub/conflict_log.py` | 43 | Conflict recording and querying for CoordinationHub |
 | `coordinationhub/context.py` | 104 | Context bundle builder for CoordinationHub agent registration responses |
-| `coordinationhub/core.py` | 526 | CoordinationEngine — host class that composes mixins and subsystems |
+| `coordinationhub/core.py` | 602 | CoordinationEngine — host class that composes mixins and subsystems |
 | `coordinationhub/core_broadcasts.py` | 188 | BroadcastMixin — broadcast, handoff dispatch, and cross-agent waits |
-| `coordinationhub/core_change.py` | 191 | ChangeMixin — change notifications, file ownership, conflict audit, status |
 | `coordinationhub/core_identity.py` | 139 | IdentityMixin — agent lifecycle and lineage management |
 | `coordinationhub/core_locking.py` | 394 | Locking methods for CoordinationEngine |
 | `coordinationhub/core_tasks.py` | 202 | TaskMixin — shared task registry with hierarchy support |
@@ -1162,6 +1162,7 @@ coordinationhub/
   agent_registry.py     — Agent lifecycle: register, heartbeat, deregister, lineage management (~495 LOC)
   agent_status.py       — Agent status and file-map query helpers for CoordinationHub (~288 LOC)
   broadcasts.py         — Broadcast acknowledgment primitives for CoordinationHub (~147 LOC)
+  change_subsystem.py   — Change subsystem — change notifications, file ownership, conflict audit, status (~219 LOC)
   cli.py                — CoordinationHub CLI — command-line interface for all coordination tool methods (~102 LOC)
   cli_agents.py         — Agent identity and lifecycle CLI commands (~111 LOC)
   cli_commands.py       — CoordinationHub CLI command handlers (~98 LOC)
@@ -1179,9 +1180,8 @@ coordinationhub/
   cli_vis.py            — Change awareness, audit, graph, and assessment CLI commands (~241 LOC)
   conflict_log.py       — Conflict recording and querying for CoordinationHub (~43 LOC)
   context.py            — Context bundle builder for CoordinationHub agent registration responses (~104 LOC)
-  core.py               — CoordinationEngine — host class that composes mixins and subsystems (~526 LOC)
+  core.py               — CoordinationEngine — host class that composes mixins and subsystems (~602 LOC)
   core_broadcasts.py    — BroadcastMixin — broadcast, handoff dispatch, and cross-agent waits (~188 LOC)
-  core_change.py        — ChangeMixin — change notifications, file ownership, conflict audit, status (~191 LOC)
   core_identity.py      — IdentityMixin — agent lifecycle and lineage management (~139 LOC)
   core_locking.py       — Locking methods for CoordinationEngine (~394 LOC)
   core_tasks.py         — TaskMixin — shared task registry with hierarchy support (~202 LOC)

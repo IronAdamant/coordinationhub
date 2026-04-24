@@ -1,20 +1,31 @@
-"""ChangeMixin — change notifications, file ownership, conflict audit, status.
+"""Change subsystem — change notifications, file ownership, conflict audit, status.
 
-Expects the host class to provide:
-    self._connect()     — callable returning a sqlite3 connection
-    self._storage        — CoordinationStorage instance (provides project_root)
+T6.22 seventh step: extracted out of ``core_change.ChangeMixin`` into
+a standalone class. Coupling audit confirmed ChangeMixin had zero
+cross-mixin method calls; it relied on four pieces of engine state —
+``_connect``, ``_publish_event``, ``_hybrid_wait``, and
+``_storage.project_root`` (for ``normalize_path`` in ``notify_change``,
+``claim_file_ownership``, and ``get_conflicts``) — which are now
+injected as constructor dependencies. Same path-normalization shape as
+:class:`WorkIntent` (commit ``3d1bd48``): ``project_root_getter`` is a
+callable so a replica produced by ``read_only_engine`` picks up its
+own storage root without a rebind. The three infra callables follow
+the :class:`Spawner` / :class:`Messaging` / :class:`Handoff` pattern
+(commits ``1ee46c6``, ``d9f84d3``, ``ded641d``). See commits
+``b4a3e6b`` (Lease) and ``d6c8796`` (Dependency) for the other
+extractions in this series. This continues breaking the god-object
+inheritance chain on ``CoordinationEngine`` without changing
+observable behaviour.
 
-Delegates to: notifications (notifications.py), conflict_log (conflict_log.py)
+Delegates to: notifications (notifications.py), conflict_log (conflict_log.py).
 Direct SQL for status() and get_contention_hotspots().
-
-Also provides claim_file_ownership and notify_change which use normalize_path
-from paths.py.
 """
 
 from __future__ import annotations
 
 import time
-from typing import Any
+from pathlib import Path
+from typing import Any, Callable
 
 from . import notifications as _cn
 from . import conflict_log as _cl
@@ -22,10 +33,27 @@ from .dispatch import TOOL_DISPATCH
 from .paths import normalize_path
 
 
-class ChangeMixin:
-    """Change awareness, file ownership, notifications, conflict audit, and status."""
+class Change:
+    """Change awareness, file ownership, notifications, conflict audit, and status.
+
+    Constructed by :class:`CoordinationEngine` and exposed as
+    ``engine._change``. The engine keeps facade methods for each
+    public operation so the existing tool API is preserved.
+    """
 
     DEFAULT_TTL = 300.0
+
+    def __init__(
+        self,
+        connect_fn: Callable[[], Any],
+        publish_event_fn: Callable[[str, dict[str, Any]], None],
+        hybrid_wait_fn: Callable[..., dict[str, Any] | None],
+        project_root_getter: Callable[[], Path | None],
+    ) -> None:
+        self._connect = connect_fn
+        self._publish_event = publish_event_fn
+        self._hybrid_wait = hybrid_wait_fn
+        self._project_root_getter = project_root_getter
 
     # ------------------------------------------------------------------ #
     # Change Awareness
@@ -38,10 +66,11 @@ class ChangeMixin:
         agent_id: str,
     ) -> dict[str, Any]:
         """Record a change event for downstream agents to poll."""
-        norm_path = normalize_path(document_path, self._storage.project_root)
+        project_root = self._project_root_getter()
+        norm_path = normalize_path(document_path, project_root)
         result = _cn.notify_change(
             self._connect, norm_path, change_type, agent_id,
-            str(self._storage.project_root),
+            str(project_root),
         )
         # T6.6: include notification_id in the event payload so long-poll
         # waiters can resume from a monotonic cursor instead of a
@@ -66,7 +95,7 @@ class ChangeMixin:
         Subsequent writes by other agents do not overwrite.
         scan_project can reassign based on graph roles later.
         """
-        norm_path = normalize_path(document_path, self._storage.project_root)
+        norm_path = normalize_path(document_path, self._project_root_getter())
         with self._connect() as conn:
             conn.execute(
                 "INSERT OR IGNORE INTO file_ownership "
@@ -176,7 +205,7 @@ class ChangeMixin:
     ) -> dict[str, Any]:
         """Query the conflict log."""
         norm_path = (
-            normalize_path(document_path, self._storage.project_root)
+            normalize_path(document_path, self._project_root_getter())
             if document_path else None
         )
         conflicts = _cl.query_conflicts(self._connect, norm_path, agent_id, limit)
