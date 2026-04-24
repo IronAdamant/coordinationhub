@@ -1,22 +1,51 @@
-"""MessagingMixin — inter-agent messages and await.
+"""Messaging subsystem — inter-agent message passing and agent await.
 
-Expects the host class to provide:
-    self._connect() — callable returning a sqlite3 connection
+T6.22 fifth step: extracted out of ``core_messaging.MessagingMixin``
+into a standalone class. Coupling audit confirmed MessagingMixin had
+zero cross-mixin method calls and only relied on three pieces of engine
+infrastructure — ``_connect``, ``_publish_event``, ``_hybrid_wait`` —
+which are now injected as constructor dependencies. Same three-dep
+shape as :class:`Spawner` (see commit ``1ee46c6``). See commits
+``3d1bd48`` (WorkIntent), ``b4a3e6b`` (Lease), and ``d6c8796``
+(Dependency) for the other extractions in this series. This continues
+breaking the god-object inheritance chain on ``CoordinationEngine``
+without changing observable behaviour.
 
-Delegates to: messages (messages.py)
+Preserves the T2.4 ``caller_agent_id`` security check on both
+``send_message`` and ``manage_messages`` — a compromised caller can no
+longer forge messages "from" another agent or read another agent's
+inbox when the optional caller id is supplied. Preserves the T7.23
+dual-path design: ``send_message`` and ``manage_messages(action='send')``
+remain functionally equivalent by design.
+
+Delegates to: messages (messages.py) for message DB primitives.
 """
 
 from __future__ import annotations
 
 import time as _time
-from typing import Any
+from typing import Any, Callable
 
 from . import messages as _msg
-from . import broadcasts as _bc
 
 
-class MessagingMixin:
-    """Inter-agent message passing and agent await."""
+class Messaging:
+    """Inter-agent message passing and agent await.
+
+    Constructed by :class:`CoordinationEngine` and exposed as
+    ``engine._messaging``. The engine keeps facade methods for each
+    public operation so the existing tool API is preserved.
+    """
+
+    def __init__(
+        self,
+        connect_fn: Callable[[], Any],
+        publish_event_fn: Callable[[str, dict[str, Any]], None],
+        hybrid_wait_fn: Callable[..., dict[str, Any] | None],
+    ) -> None:
+        self._connect = connect_fn
+        self._publish_event = publish_event_fn
+        self._hybrid_wait = hybrid_wait_fn
 
     # ------------------------------------------------------------------ #
     # Messaging

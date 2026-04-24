@@ -1616,13 +1616,12 @@ Block markers for multi-line content:
 | `coordinationhub/cli_vis.py` | 241 | Change awareness, audit, graph, and assessment CLI commands |
 | `coordinationhub/conflict_log.py` | 43 | Conflict recording and querying for CoordinationHub |
 | `coordinationhub/context.py` | 104 | Context bundle builder for CoordinationHub agent registration responses |
-| `coordinationhub/core.py` | 423 | CoordinationEngine — host class that composes mixins and subsystems |
+| `coordinationhub/core.py` | 490 | CoordinationEngine — host class that composes mixins and subsystems |
 | `coordinationhub/core_broadcasts.py` | 188 | BroadcastMixin — broadcast, handoff dispatch, and cross-agent waits |
 | `coordinationhub/core_change.py` | 191 | ChangeMixin — change notifications, file ownership, conflict audit, status |
 | `coordinationhub/core_handoffs.py` | 117 | HandoffMixin — one-to-many handoff acknowledgment and lifecycle |
 | `coordinationhub/core_identity.py` | 139 | IdentityMixin — agent lifecycle and lineage management |
 | `coordinationhub/core_locking.py` | 394 | Locking methods for CoordinationEngine |
-| `coordinationhub/core_messaging.py` | 160 | MessagingMixin — inter-agent messages and await |
 | `coordinationhub/core_tasks.py` | 202 | TaskMixin — shared task registry with hierarchy support |
 | `coordinationhub/core_visibility.py` | 138 | VisibilityMixin — coordination graph, project scan, agent status, assessment |
 | `coordinationhub/db.py` | 93 | SQLite connection pool and public re-exports for CoordinationHub |
@@ -1647,6 +1646,7 @@ Block markers for multi-line content:
 | `coordinationhub/mcp_server.py` | 578 | HTTP REST admin / dashboard endpoint for CoordinationHub |
 | `coordinationhub/mcp_stdio.py` | 197 | Stdio-based MCP server for CoordinationHub using the ``mcp`` Python package |
 | `coordinationhub/messages.py` | 105 | Inter-agent messaging primitives for CoordinationHub |
+| `coordinationhub/messaging_subsystem.py` | 186 | Messaging subsystem — inter-agent message passing and agent await |
 | `coordinationhub/notifications.py` | 154 | Change notification storage and retrieval for CoordinationHub |
 | `coordinationhub/paths.py` | 39 | Path normalization and project-root detection utilities |
 | `coordinationhub/pending_tasks.py` | 109 | Pending sub-agent task storage for CoordinationHub |

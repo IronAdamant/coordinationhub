@@ -6,7 +6,6 @@ subsystems. Each mixin is in its own file under coordinationhub/.
 LockingMixin:     core_locking.py     — lock acquire/release/refresh/list/admin
 BroadcastMixin:   core_broadcasts.py  — broadcast, handoff dispatch, wait_for_locks
 IdentityMixin:    core_identity.py    — agent registration, heartbeat, lineage
-MessagingMixin:   core_messaging.py  — inter-agent messages, await
 TaskMixin:        core_tasks.py       — task registry with hierarchy
 HandoffMixin:     core_handoffs.py    — handoff acknowledgment tracking
 ChangeMixin:      core_change.py      — change notifications, audit, status
@@ -17,6 +16,7 @@ Spawner:          spawner_subsystem.py     — sub-agent spawn management
 WorkIntent:       work_intent_subsystem.py — cooperative work intent board
 Lease:            lease_subsystem.py       — HA coordinator leadership leases
 Dependency:       dependency_subsystem.py  — cross-agent dependency declarations
+Messaging:        messaging_subsystem.py   — inter-agent messages, agent await
 
 Zero third-party dependencies.
 """
@@ -41,7 +41,6 @@ from .lock_cache import LockCache
 from .core_locking import LockingMixin
 from .core_broadcasts import BroadcastMixin
 from .core_identity import IdentityMixin
-from .core_messaging import MessagingMixin
 from .core_tasks import TaskMixin
 from .core_handoffs import HandoffMixin
 from .core_change import ChangeMixin
@@ -50,6 +49,7 @@ from .spawner_subsystem import Spawner
 from .work_intent_subsystem import WorkIntent
 from .lease_subsystem import Lease
 from .dependency_subsystem import Dependency
+from .messaging_subsystem import Messaging
 from .paths import detect_project_root
 from .plugins.graph import graphs as _g
 
@@ -58,7 +58,6 @@ class CoordinationEngine(
     LockingMixin,
     BroadcastMixin,
     IdentityMixin,
-    MessagingMixin,
     TaskMixin,
     HandoffMixin,
     ChangeMixin,
@@ -70,8 +69,8 @@ class CoordinationEngine(
     Most domain methods are provided by the mixins. Subsystems
     extracted from the mixin tree (T6.22) hang off the engine as
     composed attributes — ``self._spawner``, ``self._work_intent``,
-    ``self._lease``, and ``self._dependency`` — with facade methods on
-    the engine preserving the public API.
+    ``self._lease``, ``self._dependency``, and ``self._messaging`` —
+    with facade methods on the engine preserving the public API.
     """
 
     DEFAULT_PORT = 9877
@@ -144,6 +143,21 @@ class CoordinationEngine(
         self._dependency = Dependency(
             connect_fn=self._connect,
             publish_event_fn=self._publish_event,
+        )
+        # T6.22: composed subsystem replaces MessagingMixin. Per the
+        # coupling audit MessagingMixin had zero cross-mixin calls and
+        # needed all three infra callables — ``_connect`` for the
+        # primitive module, ``_publish_event`` for ``message.received``
+        # notifications on send, and ``_hybrid_wait`` for ``await_agent``.
+        # Same three-dep shape as :class:`Spawner` (commit ``1ee46c6``).
+        # Preserves the T2.4 caller_agent_id security check on
+        # ``send_message`` + ``manage_messages`` and the T7.23 dual-path
+        # design (``send_message`` and ``manage_messages(action='send')``
+        # both remain on the MCP surface by design).
+        self._messaging = Messaging(
+            connect_fn=self._connect,
+            publish_event_fn=self._publish_event,
+            hybrid_wait_fn=self._hybrid_wait,
         )
 
     def start(self) -> None:
@@ -541,6 +555,85 @@ class CoordinationEngine(
             poll_interval_s=poll_interval_s,
         )
 
+    # ------------------------------------------------------------------ #
+    # Messaging facade (T6.22)
+    # ------------------------------------------------------------------ #
+    # These one-liners delegate to ``self._messaging`` (a
+    # :class:`Messaging` composed in ``__init__``). They preserve the
+    # pre-extraction public API — MCP dispatch (``send_message``,
+    # ``manage_messages``, ``await_agent``), CLI (``cli_locks.py``), and
+    # tests all continue to call ``engine.send_message(...)`` etc.
+    # verbatim, including the T2.4 ``caller_agent_id`` kwarg used by
+    # ``tests/test_authz.py`` and the T7.23 dual-path ``send_message``
+    # and ``manage_messages(action='send')`` coexistence.
+
+    def manage_messages(
+        self,
+        action: str,
+        agent_id: str,
+        from_agent_id: str | None = None,
+        to_agent_id: str | None = None,
+        message_type: str | None = None,
+        payload: dict[str, Any] | None = None,
+        unread_only: bool = False,
+        limit: int = 50,
+        message_ids: list[int] | None = None,
+        since_id: int | None = None,
+        caller_agent_id: str | None = None,
+    ) -> dict[str, Any]:
+        return self._messaging.manage_messages(
+            action=action,
+            agent_id=agent_id,
+            from_agent_id=from_agent_id,
+            to_agent_id=to_agent_id,
+            message_type=message_type,
+            payload=payload,
+            unread_only=unread_only,
+            limit=limit,
+            message_ids=message_ids,
+            since_id=since_id,
+            caller_agent_id=caller_agent_id,
+        )
+
+    def send_message(
+        self,
+        from_agent_id: str,
+        to_agent_id: str,
+        message_type: str,
+        payload: dict[str, Any] | None = None,
+        caller_agent_id: str | None = None,
+    ) -> dict[str, Any]:
+        return self._messaging.send_message(
+            from_agent_id=from_agent_id,
+            to_agent_id=to_agent_id,
+            message_type=message_type,
+            payload=payload,
+            caller_agent_id=caller_agent_id,
+        )
+
+    def get_messages(
+        self, agent_id: str, unread_only: bool = False, limit: int = 50,
+        since_id: int | None = None,
+    ) -> dict[str, Any]:
+        return self._messaging.get_messages(
+            agent_id=agent_id,
+            unread_only=unread_only,
+            limit=limit,
+            since_id=since_id,
+        )
+
+    def mark_messages_read(
+        self, agent_id: str, message_ids: list[int] | None = None,
+    ) -> dict[str, Any]:
+        return self._messaging.mark_messages_read(
+            agent_id=agent_id, message_ids=message_ids,
+        )
+
+    def await_agent(self, agent_id: str, timeout_s: float = 60.0) -> dict[str, Any]:
+        return self._messaging.await_agent(
+            agent_id=agent_id, timeout_s=timeout_s,
+        )
+
     def read_only_engine(self) -> "CoordinationEngine":
         """Return a read-only view of this engine using direct WAL reads.
 
@@ -577,5 +670,12 @@ class CoordinationEngine(
         # dependency mutations through a read-only replica are not a
         # supported flow.
         replica._dependency._connect = replica._connect
+        # T6.22: and the Messaging subsystem — same three-dep pattern as
+        # Spawner. ``_publish_event`` and ``_hybrid_wait`` were captured
+        # in ``_messaging.__init__`` against the replica's own callables;
+        # messaging mutations (send) through a read-only replica are not
+        # a supported flow and ``await_agent`` is read-only, so only the
+        # ``_connect`` rebind is needed.
+        replica._messaging._connect = replica._connect
         return replica
 
