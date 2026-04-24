@@ -1,11 +1,12 @@
-"""CoordinationEngine — host class that composes mixins and subsystems.
+"""CoordinationEngine — host class that composes twelve subsystems.
 
-Wires together storage, lifecycle, capability mixins, and extracted
-subsystems. Each mixin is in its own file under coordinationhub/.
+T6.22 is complete: :class:`CoordinationEngine` now has **zero mixins**
+in its MRO. Every domain capability lives in a dedicated subsystem
+attribute, and the engine exposes one-liner facade methods that
+preserve the pre-decomposition public API verbatim (MCP dispatch, CLI,
+hooks, housekeeping, and ~737 tests are unchanged).
 
-IdentityMixin:    core_identity.py    — agent registration, heartbeat, lineage
-
-Composed subsystems (T6.22 — extracted from the mixin tree):
+Composed subsystems (twelve):
 Spawner:          spawner_subsystem.py     — sub-agent spawn management
 WorkIntent:       work_intent_subsystem.py — cooperative work intent board
 Lease:            lease_subsystem.py       — HA coordinator leadership leases
@@ -17,6 +18,13 @@ Task:             task_subsystem.py        — task registry, hierarchy, DLQ
 Visibility:       visibility_subsystem.py  — coordination graph, scan, assessment
 Locking:          locking_subsystem.py     — document lock acquire/release/admin
 Broadcast:        broadcast_subsystem.py   — broadcast, handoff dispatch, wait_for_locks
+Identity:         identity_subsystem.py    — agent registration, heartbeat, lineage
+
+Extraction series commits: ``1ee46c6`` (Spawner), ``3d1bd48`` (WorkIntent),
+``b4a3e6b`` (Lease), ``d6c8796`` (Dependency), ``d9f84d3`` (Messaging),
+``ded641d`` (Handoff), ``e0c21a8`` (Change), ``8182c7a`` (Task),
+``64c3ff4`` (Visibility), ``0660785`` (Locking), ``fb9e200`` (Broadcast),
+and this commit (Identity — final step).
 
 Zero third-party dependencies.
 """
@@ -38,7 +46,7 @@ from .housekeeping import (
     is_enabled_by_env,
 )
 from .lock_cache import LockCache
-from .core_identity import IdentityMixin
+from .identity_subsystem import Identity
 from .spawner_subsystem import Spawner
 from .work_intent_subsystem import WorkIntent
 from .lease_subsystem import Lease
@@ -54,19 +62,16 @@ from .paths import detect_project_root
 from .plugins.graph import graphs as _g
 
 
-class CoordinationEngine(
-    IdentityMixin,
-):
-    """Host class that inherits capability mixins and holds subsystems.
+class CoordinationEngine:
+    """Host class that composes twelve subsystems — zero mixins in MRO.
 
-    Provides storage lifecycle and wiring for cross-mixin calls.
-    Most domain methods are provided by the mixins. Subsystems
-    extracted from the mixin tree (T6.22) hang off the engine as
-    composed attributes — ``self._spawner``, ``self._work_intent``,
+    T6.22 complete. Subsystems hang off the engine as composed
+    attributes — ``self._spawner``, ``self._work_intent``,
     ``self._lease``, ``self._dependency``, ``self._messaging``,
     ``self._handoff``, ``self._change``, ``self._task``,
-    ``self._visibility``, ``self._locking``, and ``self._broadcast`` —
-    with facade methods on the engine preserving the public API.
+    ``self._visibility``, ``self._locking``, ``self._broadcast``, and
+    ``self._identity`` — with facade methods on the engine preserving
+    the pre-decomposition public API.
     """
 
     DEFAULT_PORT = 9877
@@ -302,6 +307,51 @@ class CoordinationEngine(
             hybrid_wait_fn=self._hybrid_wait,
             locking=self._locking,
             project_root_getter=lambda: self._storage.project_root,
+        )
+        # T6.22: composed subsystem replaces :class:`IdentityMixin` —
+        # twelfth and FINAL extraction in the series. With this
+        # extraction the engine MRO contains zero mixins; every domain
+        # capability lives in a dedicated subsystem attribute. Per the
+        # coupling audit :class:`IdentityMixin` had two ``_publish_event``
+        # calls (``agent.registered`` / ``agent.deregistered``), zero
+        # ``_hybrid_wait`` calls, and **one** cross-mixin call —
+        # ``self.release_agent_locks(...)`` from ``deregister_agent``.
+        # Wiring follows the :class:`Broadcast` pattern (commit
+        # ``fb9e200``): take ``locking=self._locking`` as an explicit
+        # constructor dep and call ``self._locking.release_agent_locks``
+        # directly, bypassing the engine MRO. Constructed AFTER
+        # ``self._locking`` so the reference exists.
+        # ``effective_worktree_root`` (used by ``register_agent``'s
+        # worktree fallback and the private ``_build_context_bundle``
+        # helper) is threaded via a closure over ``self._storage`` so a
+        # replica produced by ``read_only_engine`` picks up its own
+        # storage without a rebind — same pattern as :class:`WorkIntent`
+        # / :class:`Change` / :class:`Visibility` / :class:`Locking` /
+        # :class:`Broadcast` (commits ``3d1bd48``, ``e0c21a8``,
+        # ``64c3ff4``, ``0660785``, ``fb9e200``). Similarly
+        # ``read_only_connect_fn`` and ``generate_agent_id_fn`` are
+        # bound against the engine's storage so replica rebinds are
+        # unnecessary — the replica has its own storage. ``DEFAULT_PORT``
+        # and ``HEARTBEAT_INTERVAL`` — the canonical declarations are
+        # the class attrs on this engine class so ``engine.DEFAULT_PORT``
+        # access keeps working; we thread them in as plain ints. See
+        # commits ``1ee46c6`` (Spawner), ``3d1bd48`` (WorkIntent),
+        # ``b4a3e6b`` (Lease), ``d6c8796`` (Dependency), ``d9f84d3``
+        # (Messaging), ``ded641d`` (Handoff), ``e0c21a8`` (Change),
+        # ``8182c7a`` (Task), ``64c3ff4`` (Visibility), ``0660785``
+        # (Locking), and ``fb9e200`` (Broadcast) for the eleven prior
+        # extractions in this series.
+        self._identity = Identity(
+            connect_fn=self._connect,
+            publish_event_fn=self._publish_event,
+            locking=self._locking,
+            effective_worktree_root_getter=(
+                lambda: str(self._storage.effective_worktree_root)
+            ),
+            read_only_connect_fn=self._storage.read_only_connection,
+            generate_agent_id_fn=self._storage.generate_agent_id,
+            default_port=self.DEFAULT_PORT,
+            heartbeat_interval=self.HEARTBEAT_INTERVAL,
         )
 
     def start(self) -> None:
@@ -1270,6 +1320,80 @@ class CoordinationEngine(
             timeout_s=timeout_s,
         )
 
+    # ------------------------------------------------------------------ #
+    # Identity facade (T6.22 — final step, completes decomposition)
+    # ------------------------------------------------------------------ #
+    # These one-liners delegate to ``self._identity`` (an :class:`Identity`
+    # composed in ``__init__``). They preserve the pre-extraction public
+    # API — MCP dispatch (``register_agent``, ``heartbeat``,
+    # ``deregister_agent``, ``list_agents``, ``get_agent_relations``,
+    # ``find_agent_by_raw_ide_id``, ``generate_agent_id``), CLI
+    # (``cli_agents.py``), housekeeping (``build_default_scheduler``
+    # calls ``engine.prune_stopped_agents``), hooks, and tests all
+    # continue to call ``engine.register_agent(...)`` etc. verbatim. The
+    # T1.2 cross-process PID collision guard on ``register_agent``, the
+    # T1.18 ``reason`` propagation on ``heartbeat``, the T1.20 atomic
+    # lineage insert (primitive-owned), and the T7.29 read-replica
+    # context-bundle behaviour are preserved by :class:`Identity`.
+
+    def register_agent(
+        self,
+        agent_id: str,
+        parent_id: str | None = None,
+        graph_agent_id: str | None = None,
+        worktree_root: str | None = None,
+        raw_ide_id: str | None = None,
+        ide_vendor: str | None = None,
+    ) -> dict[str, Any]:
+        return self._identity.register_agent(
+            agent_id=agent_id,
+            parent_id=parent_id,
+            graph_agent_id=graph_agent_id,
+            worktree_root=worktree_root,
+            raw_ide_id=raw_ide_id,
+            ide_vendor=ide_vendor,
+        )
+
+    def heartbeat(self, agent_id: str) -> dict[str, Any]:
+        return self._identity.heartbeat(agent_id=agent_id)
+
+    def deregister_agent(self, agent_id: str) -> dict[str, Any]:
+        return self._identity.deregister_agent(agent_id=agent_id)
+
+    def prune_stopped_agents(
+        self, retention_seconds: float = 7 * 24 * 3600.0,
+    ) -> dict[str, Any]:
+        return self._identity.prune_stopped_agents(
+            retention_seconds=retention_seconds,
+        )
+
+    def list_agents(
+        self, active_only: bool = True, stale_timeout: float = 600.0,
+        include_stale: bool = False,
+    ) -> dict[str, Any]:
+        return self._identity.list_agents(
+            active_only=active_only,
+            stale_timeout=stale_timeout,
+            include_stale=include_stale,
+        )
+
+    def get_agent_relations(
+        self, agent_id: str, mode: str = "lineage",
+    ) -> dict[str, Any]:
+        return self._identity.get_agent_relations(
+            agent_id=agent_id, mode=mode,
+        )
+
+    def find_agent_by_raw_ide_id(
+        self, raw_ide_id: str, ide_vendor: str | None = None,
+    ) -> str | None:
+        return self._identity.find_agent_by_raw_ide_id(
+            raw_ide_id=raw_ide_id, ide_vendor=ide_vendor,
+        )
+
+    def generate_agent_id(self, parent_id: str | None = None) -> str:
+        return self._identity.generate_agent_id(parent_id=parent_id)
+
     def read_only_engine(self) -> "CoordinationEngine":
         """Return a read-only view of this engine using direct WAL reads.
 
@@ -1386,5 +1510,21 @@ class CoordinationEngine(
         # replica itself), whose ``_connect`` we just rebound — so no
         # explicit locking rebind is needed here.
         replica._broadcast._connect = replica._connect
+        # T6.22: and the Identity subsystem — twelfth and final
+        # extraction in the series. ``_publish_event`` was captured in
+        # ``_identity.__init__`` against the replica's own callable;
+        # identity mutations (``register_agent`` / ``deregister_agent`` /
+        # ``heartbeat``) through a read-only replica are not a supported
+        # flow, and the read-only operations (``list_agents``,
+        # ``get_agent_relations``, ``find_agent_by_raw_ide_id``) only
+        # need ``_connect`` rebound. The ``effective_worktree_root_getter``
+        # and ``read_only_connect_fn`` closures are bound over the
+        # replica's own ``self._storage`` so they already resolve
+        # against the replica — no rebind needed. The ``locking``
+        # reference is the replica's own ``self._locking`` (since
+        # construction above ran against the replica itself), whose
+        # ``_connect`` we already rebound — so no explicit locking
+        # rebind here either.
+        replica._identity._connect = replica._connect
         return replica
 

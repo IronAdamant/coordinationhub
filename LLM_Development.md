@@ -1618,8 +1618,7 @@ Block markers for multi-line content:
 | `coordinationhub/cli_vis.py` | 241 | Change awareness, audit, graph, and assessment CLI commands |
 | `coordinationhub/conflict_log.py` | 43 | Conflict recording and querying for CoordinationHub |
 | `coordinationhub/context.py` | 104 | Context bundle builder for CoordinationHub agent registration responses |
-| `coordinationhub/core.py` | 880 | CoordinationEngine — host class that composes mixins and subsystems |
-| `coordinationhub/core_identity.py` | 139 | IdentityMixin — agent lifecycle and lineage management |
+| `coordinationhub/core.py` | 948 | CoordinationEngine — host class that composes twelve subsystems |
 | `coordinationhub/db.py` | 93 | SQLite connection pool and public re-exports for CoordinationHub |
 | `coordinationhub/db_migrations.py` | 399 | Schema-version tracking, migration functions, and the ``init_schema`` driver |
 | `coordinationhub/db_schemas.py` | 301 | Canonical SQLite schema definitions for CoordinationHub |
@@ -1635,6 +1634,7 @@ Block markers for multi-line content:
 | `coordinationhub/hooks/kimi_cli.py` | 121 | CoordinationHub hook adapter for Kimi CLI |
 | `coordinationhub/hooks/stdio_adapter.py` | 353 | CoordinationHub stdio event adapter |
 | `coordinationhub/housekeeping.py` | 188 | HousekeepingScheduler — background periodic pruners for long-running hubs |
+| `coordinationhub/identity_subsystem.py` | 203 | Identity subsystem — agent registration, heartbeat, lineage, and ID generation |
 | `coordinationhub/lease_subsystem.py` | 167 | Lease subsystem — HA coordinator lease management |
 | `coordinationhub/leases.py` | 220 | Zero-deps lease primitives for HA coordinator leadership |
 | `coordinationhub/limits.py` | 40 | String-length caps for user-supplied fields (T6.14) |

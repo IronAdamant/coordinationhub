@@ -1078,8 +1078,7 @@ keep it in sync; CI checks for drift on every push.
 | `coordinationhub/cli_vis.py` | 241 | Change awareness, audit, graph, and assessment CLI commands |
 | `coordinationhub/conflict_log.py` | 43 | Conflict recording and querying for CoordinationHub |
 | `coordinationhub/context.py` | 104 | Context bundle builder for CoordinationHub agent registration responses |
-| `coordinationhub/core.py` | 880 | CoordinationEngine — host class that composes mixins and subsystems |
-| `coordinationhub/core_identity.py` | 139 | IdentityMixin — agent lifecycle and lineage management |
+| `coordinationhub/core.py` | 948 | CoordinationEngine — host class that composes twelve subsystems |
 | `coordinationhub/db.py` | 93 | SQLite connection pool and public re-exports for CoordinationHub |
 | `coordinationhub/db_migrations.py` | 399 | Schema-version tracking, migration functions, and the ``init_schema`` driver |
 | `coordinationhub/db_schemas.py` | 301 | Canonical SQLite schema definitions for CoordinationHub |
@@ -1095,6 +1094,7 @@ keep it in sync; CI checks for drift on every push.
 | `coordinationhub/hooks/kimi_cli.py` | 121 | CoordinationHub hook adapter for Kimi CLI |
 | `coordinationhub/hooks/stdio_adapter.py` | 353 | CoordinationHub stdio event adapter |
 | `coordinationhub/housekeeping.py` | 188 | HousekeepingScheduler — background periodic pruners for long-running hubs |
+| `coordinationhub/identity_subsystem.py` | 203 | Identity subsystem — agent registration, heartbeat, lineage, and ID generation |
 | `coordinationhub/lease_subsystem.py` | 167 | Lease subsystem — HA coordinator lease management |
 | `coordinationhub/leases.py` | 220 | Zero-deps lease primitives for HA coordinator leadership |
 | `coordinationhub/limits.py` | 40 | String-length caps for user-supplied fields (T6.14) |
@@ -1181,8 +1181,7 @@ coordinationhub/
   cli_vis.py            — Change awareness, audit, graph, and assessment CLI commands (~241 LOC)
   conflict_log.py       — Conflict recording and querying for CoordinationHub (~43 LOC)
   context.py            — Context bundle builder for CoordinationHub agent registration responses (~104 LOC)
-  core.py               — CoordinationEngine — host class that composes mixins and subsystems (~880 LOC)
-  core_identity.py      — IdentityMixin — agent lifecycle and lineage management (~139 LOC)
+  core.py               — CoordinationEngine — host class that composes twelve subsystems (~948 LOC)
   db.py                 — SQLite connection pool and public re-exports for CoordinationHub (~93 LOC)
   db_migrations.py      — Schema-version tracking, migration functions, and the ``init_schema`` driver (~399 LOC)
   db_schemas.py         — Canonical SQLite schema definitions for CoordinationHub (~301 LOC)
@@ -1193,6 +1192,7 @@ coordinationhub/
   handoff_subsystem.py  — Handoff subsystem — one-to-many handoff acknowledgment and lifecycle (~148 LOC)
   handoffs.py           — Handoff recording and acknowledgement primitives for CoordinationHub (~200 LOC)
   housekeeping.py       — HousekeepingScheduler — background periodic pruners for long-running hubs (~188 LOC)
+  identity_subsystem.py — Identity subsystem — agent registration, heartbeat, lineage, and ID generation (~203 LOC)
   lease_subsystem.py    — Lease subsystem — HA coordinator lease management (~167 LOC)
   leases.py             — Zero-deps lease primitives for HA coordinator leadership (~220 LOC)
   limits.py             — String-length caps for user-supplied fields (T6.14) (~40 LOC)
