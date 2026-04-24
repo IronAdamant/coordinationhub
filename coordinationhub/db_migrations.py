@@ -15,7 +15,7 @@ import time
 from .db_schemas import _SCHEMAS, _INDEXES
 
 
-_CURRENT_SCHEMA_VERSION = 24
+_CURRENT_SCHEMA_VERSION = 25
 
 
 def _get_schema_version(conn: sqlite3.Connection) -> int:
@@ -69,6 +69,21 @@ def _migrate_v2_to_v3(conn: sqlite3.Connection) -> None:
         return
     conn.execute("ALTER TABLE agents ADD COLUMN claude_agent_id TEXT")
     conn.execute("CREATE INDEX IF NOT EXISTS idx_agents_claude_id ON agents(claude_agent_id)")
+
+
+def _migrate_v24_to_v25(conn: sqlite3.Connection) -> None:
+    """Add ``error`` column to ``tasks`` (T6.39).
+
+    Pre-fix, ``update_task_status`` accepted an ``error`` arg but only
+    forwarded it to the task-failure record when ``status=='failed'``.
+    Callers transitioning to ``blocked`` or ``in_progress`` had no place
+    to record diagnostic context, so the error string was silently
+    dropped. This column lets every status transition carry its own
+    diagnostic message.
+    """
+    cols = [row[1] for row in conn.execute("PRAGMA table_info(tasks)").fetchall()]
+    if "error" not in cols:
+        conn.execute("ALTER TABLE tasks ADD COLUMN error TEXT")
 
 
 def _migrate_v23_to_v24(conn: sqlite3.Connection) -> None:
@@ -345,6 +360,7 @@ _MIGRATIONS = {
     22: _migrate_v21_to_v22,  # broadcast_targets table (T1.11)
     23: _migrate_v22_to_v23,  # work_intent PK: (agent_id, document_path) (T1.16)
     24: _migrate_v23_to_v24,  # agents.ide_vendor + unique(raw_ide_id, ide_vendor) (T3.12)
+    25: _migrate_v24_to_v25,  # tasks.error column (T6.39)
 }
 
 

@@ -337,9 +337,38 @@ class LockingMixin:
         now = time.time()
         return self._lock_cache.get_status(norm_path, now)
 
-    def list_locks(self, agent_id: str | None = None) -> dict[str, Any]:
-        """List all active (non-expired) locks, optionally filtered by agent."""
+    def list_locks(
+        self,
+        agent_id: str | None = None,
+        force_refresh: bool = False,
+    ) -> dict[str, Any]:
+        """List all active (non-expired) locks, optionally filtered by agent.
+
+        T6.33: ``force_refresh=True`` re-warms the in-memory lock cache
+        from SQLite under BEGIN IMMEDIATE before reading. Use when a
+        caller suspects the cache has desynced from the DB — the regular
+        acquire/release/reap paths keep the cache in sync, but any future
+        regression or out-of-band DB write is recoverable without a
+        process restart.
+        """
         now = time.time()
+        if force_refresh:
+            conn = self._connect()
+            conn.execute("BEGIN IMMEDIATE")
+            try:
+                rows = conn.execute(
+                    "SELECT * FROM document_locks WHERE locked_at + lock_ttl >= ?",
+                    (now,),
+                ).fetchall()
+                self._lock_cache.warm([dict(r) for r in rows])
+                conn.execute("COMMIT")
+            except Exception:
+                try:
+                    conn.execute("ROLLBACK")
+                except sqlite3.OperationalError as e:
+                    if "no transaction is active" not in str(e):
+                        raise
+                raise
         locks = self._lock_cache.list_active(now, agent_id)
         return {"locks": locks, "count": len(locks)}
 

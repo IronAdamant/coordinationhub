@@ -115,7 +115,10 @@ def cmd_lock_status(engine, args):
 
 @_command(replica=True)
 def cmd_list_locks(engine, args):
-    result = engine.list_locks(agent_id=getattr(args, "agent_id", None))
+    result = engine.list_locks(
+        agent_id=getattr(args, "agent_id", None),
+        force_refresh=getattr(args, "force_refresh", False),
+    )
     if args.json_output:
         _print_json(result)
     else:

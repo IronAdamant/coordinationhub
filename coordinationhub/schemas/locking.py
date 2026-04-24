@@ -150,7 +150,9 @@ TOOL_SCHEMAS_LOCKING: dict[str, dict] = {
         "description": (
             "List all active (non-expired) locks. Optionally filter by agent_id. "
             "Returns lock details including document path, holder, expiry time, "
-            "lock type, and region (if region lock)."
+            "lock type, and region (if region lock). Pass force_refresh=True "
+            "to re-warm the in-memory cache from SQLite before reading — "
+            "useful for recovering from a suspected cache desync."
         ),
         "parameters": {
             "type": "object",
@@ -158,6 +160,13 @@ TOOL_SCHEMAS_LOCKING: dict[str, dict] = {
                 "agent_id": {
                     "type": "string",
                     "description": "Optional agent ID to filter locks by holder",
+                },
+                "force_refresh": {
+                    "type": "boolean",
+                    "description": (
+                        "If true, re-warm the in-memory cache from SQLite "
+                        "before reading. Default false."
+                    ),
                 },
             },
         },

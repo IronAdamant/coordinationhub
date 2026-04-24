@@ -1065,8 +1065,8 @@ keep it in sync; CI checks for drift on every push.
 | `coordinationhub/cli_deps.py` | 64 | CLI commands for cross-agent dependency declarations |
 | `coordinationhub/cli_intent.py` | 35 | CLI commands for the work intent board |
 | `coordinationhub/cli_leases.py` | 96 | CLI commands for HA coordinator lease management |
-| `coordinationhub/cli_locks.py` | 269 | Document locking and coordination CLI commands |
-| `coordinationhub/cli_parser.py` | 364 | Argument parser for the CoordinationHub CLI |
+| `coordinationhub/cli_locks.py` | 272 | Document locking and coordination CLI commands |
+| `coordinationhub/cli_parser.py` | 369 | Argument parser for the CoordinationHub CLI |
 | `coordinationhub/cli_setup.py` | 313 | CLI commands for setup and diagnostics: ``init``, ``doctor``, ``watch`` |
 | `coordinationhub/cli_setup_doctor.py` | 148 | Diagnostic checks for ``coordinationhub doctor`` |
 | `coordinationhub/cli_spawner.py` | 101 | CLI commands for HA coordinator spawner — sub-agent registry management |
@@ -1082,16 +1082,16 @@ keep it in sync; CI checks for drift on every push.
 | `coordinationhub/core_dependencies.py` | 120 | DependencyMixin — cross-agent dependency declarations and checks |
 | `coordinationhub/core_handoffs.py` | 117 | HandoffMixin — one-to-many handoff acknowledgment and lifecycle |
 | `coordinationhub/core_identity.py` | 125 | IdentityMixin — agent lifecycle and lineage management |
-| `coordinationhub/core_leases.py` | 152 | LeaseMixin — HA coordinator lease management |
-| `coordinationhub/core_locking.py` | 360 | Locking methods for CoordinationEngine |
+| `coordinationhub/core_leases.py` | 149 | LeaseMixin — HA coordinator lease management |
+| `coordinationhub/core_locking.py` | 388 | Locking methods for CoordinationEngine |
 | `coordinationhub/core_messaging.py` | 113 | MessagingMixin — inter-agent messages and await |
 | `coordinationhub/core_spawner.py` | 196 | SpawnerMixin — HA coordinator sub-agent spawn management |
-| `coordinationhub/core_tasks.py` | 193 | TaskMixin — shared task registry with hierarchy support |
+| `coordinationhub/core_tasks.py` | 200 | TaskMixin — shared task registry with hierarchy support |
 | `coordinationhub/core_visibility.py` | 127 | VisibilityMixin — coordination graph, project scan, agent status, assessment |
 | `coordinationhub/core_work_intent.py` | 75 | WorkIntentMixin — cooperative work intent board |
 | `coordinationhub/db.py` | 93 | SQLite connection pool and public re-exports for CoordinationHub |
-| `coordinationhub/db_migrations.py` | 324 | Schema-version tracking, migration functions, and the ``init_schema`` driver |
-| `coordinationhub/db_schemas.py` | 298 | Canonical SQLite schema definitions for CoordinationHub |
+| `coordinationhub/db_migrations.py` | 337 | Schema-version tracking, migration functions, and the ``init_schema`` driver |
+| `coordinationhub/db_schemas.py` | 299 | Canonical SQLite schema definitions for CoordinationHub |
 | `coordinationhub/dependencies.py` | 140 | Cross-agent dependency declaration and satisfaction tracking |
 | `coordinationhub/dispatch.py` | 57 | Tool dispatch table for CoordinationHub |
 | `coordinationhub/event_bus.py` | 102 | Lightweight thread-safe in-memory pub-sub event bus for CoordinationHub |
@@ -1101,7 +1101,7 @@ keep it in sync; CI checks for drift on every push.
 | `coordinationhub/hooks/cursor.py` | 110 | CoordinationHub hook adapter for Cursor |
 | `coordinationhub/hooks/kimi_cli.py` | 111 | CoordinationHub hook adapter for Kimi CLI |
 | `coordinationhub/hooks/stdio_adapter.py` | 298 | CoordinationHub stdio event adapter |
-| `coordinationhub/leases.py` | 197 | Zero-deps lease primitives for HA coordinator leadership |
+| `coordinationhub/leases.py` | 203 | Zero-deps lease primitives for HA coordinator leadership |
 | `coordinationhub/lock_cache.py` | 180 | In-memory lock cache for CoordinationHub |
 | `coordinationhub/lock_ops.py` | 204 | Shared lock primitives used by both local locks and coordination locks |
 | `coordinationhub/mcp_server.py` | 469 | HTTP-based MCP server for CoordinationHub — zero external dependencies |
@@ -1133,18 +1133,18 @@ keep it in sync; CI checks for drift on every push.
 | `coordinationhub/schemas/identity.py` | 112 | Identity & Registration tool schemas for CoordinationHub |
 | `coordinationhub/schemas/intent.py` | 20 | Work Intent Board tool schemas for CoordinationHub |
 | `coordinationhub/schemas/leases.py` | 35 | HA Coordinator Leases tool schemas for CoordinationHub |
-| `coordinationhub/schemas/locking.py` | 193 | Document Locking tool schemas for CoordinationHub |
+| `coordinationhub/schemas/locking.py` | 202 | Document Locking tool schemas for CoordinationHub |
 | `coordinationhub/schemas/messaging.py` | 41 | Messaging tool schemas for CoordinationHub |
 | `coordinationhub/schemas/spawner.py` | 193 | Spawner tool schemas for CoordinationHub |
 | `coordinationhub/schemas/tasks.py` | 220 | Task Registry tool schemas for CoordinationHub |
 | `coordinationhub/schemas/visibility.py` | 159 | Graph & Visibility tool schemas for CoordinationHub |
 | `coordinationhub/spawner.py` | 350 | Zero-deps spawner primitives for HA coordinator sub-agent registry |
-| `coordinationhub/task_failures.py` | 120 | Task failure tracking and dead letter queue for CoordinationHub |
-| `coordinationhub/tasks.py` | 398 | Task registry primitives for CoordinationHub (work board) |
+| `coordinationhub/task_failures.py` | 149 | Task failure tracking and dead letter queue for CoordinationHub |
+| `coordinationhub/tasks.py` | 410 | Task registry primitives for CoordinationHub (work board) |
 | `coordinationhub/work_intent.py` | 136 | Work intent board primitives for CoordinationHub |
 <!-- /GEN -->
 
-**Total: <!-- GEN:test-count -->603<!-- /GEN --> tests across 28 test files.**
+**Total: <!-- GEN:test-count -->611<!-- /GEN --> tests across 28 test files.**
 
 ---
 
@@ -1165,8 +1165,8 @@ coordinationhub/
   cli_deps.py           — CLI commands for cross-agent dependency declarations (~64 LOC)
   cli_intent.py         — CLI commands for the work intent board (~35 LOC)
   cli_leases.py         — CLI commands for HA coordinator lease management (~96 LOC)
-  cli_locks.py          — Document locking and coordination CLI commands (~269 LOC)
-  cli_parser.py         — Argument parser for the CoordinationHub CLI (~364 LOC)
+  cli_locks.py          — Document locking and coordination CLI commands (~272 LOC)
+  cli_parser.py         — Argument parser for the CoordinationHub CLI (~369 LOC)
   cli_setup.py          — CLI commands for setup and diagnostics: ``init``, ``doctor``, ``watch`` (~313 LOC)
   cli_setup_doctor.py   — Diagnostic checks for ``coordinationhub doctor`` (~148 LOC)
   cli_spawner.py        — CLI commands for HA coordinator spawner — sub-agent registry management (~101 LOC)
@@ -1182,21 +1182,21 @@ coordinationhub/
   core_dependencies.py  — DependencyMixin — cross-agent dependency declarations and checks (~120 LOC)
   core_handoffs.py      — HandoffMixin — one-to-many handoff acknowledgment and lifecycle (~117 LOC)
   core_identity.py      — IdentityMixin — agent lifecycle and lineage management (~125 LOC)
-  core_leases.py        — LeaseMixin — HA coordinator lease management (~152 LOC)
-  core_locking.py       — Locking methods for CoordinationEngine (~360 LOC)
+  core_leases.py        — LeaseMixin — HA coordinator lease management (~149 LOC)
+  core_locking.py       — Locking methods for CoordinationEngine (~388 LOC)
   core_messaging.py     — MessagingMixin — inter-agent messages and await (~113 LOC)
   core_spawner.py       — SpawnerMixin — HA coordinator sub-agent spawn management (~196 LOC)
-  core_tasks.py         — TaskMixin — shared task registry with hierarchy support (~193 LOC)
+  core_tasks.py         — TaskMixin — shared task registry with hierarchy support (~200 LOC)
   core_visibility.py    — VisibilityMixin — coordination graph, project scan, agent status, assessment (~127 LOC)
   core_work_intent.py   — WorkIntentMixin — cooperative work intent board (~75 LOC)
   db.py                 — SQLite connection pool and public re-exports for CoordinationHub (~93 LOC)
-  db_migrations.py      — Schema-version tracking, migration functions, and the ``init_schema`` driver (~324 LOC)
-  db_schemas.py         — Canonical SQLite schema definitions for CoordinationHub (~298 LOC)
+  db_migrations.py      — Schema-version tracking, migration functions, and the ``init_schema`` driver (~337 LOC)
+  db_schemas.py         — Canonical SQLite schema definitions for CoordinationHub (~299 LOC)
   dependencies.py       — Cross-agent dependency declaration and satisfaction tracking (~140 LOC)
   dispatch.py           — Tool dispatch table for CoordinationHub (~57 LOC)
   event_bus.py          — Lightweight thread-safe in-memory pub-sub event bus for CoordinationHub (~102 LOC)
   handoffs.py           — Handoff recording and acknowledgement primitives for CoordinationHub (~200 LOC)
-  leases.py             — Zero-deps lease primitives for HA coordinator leadership (~197 LOC)
+  leases.py             — Zero-deps lease primitives for HA coordinator leadership (~203 LOC)
   lock_cache.py         — In-memory lock cache for CoordinationHub (~180 LOC)
   lock_ops.py           — Shared lock primitives used by both local locks and coordination locks (~204 LOC)
   mcp_server.py         — HTTP-based MCP server for CoordinationHub — zero external dependencies (~469 LOC)
@@ -1207,8 +1207,8 @@ coordinationhub/
   pending_tasks.py      — Pending sub-agent task storage for CoordinationHub (~106 LOC)
   scan.py               — File ownership scan for CoordinationHub (~279 LOC)
   spawner.py            — Zero-deps spawner primitives for HA coordinator sub-agent registry (~350 LOC)
-  task_failures.py      — Task failure tracking and dead letter queue for CoordinationHub (~120 LOC)
-  tasks.py              — Task registry primitives for CoordinationHub (work board) (~398 LOC)
+  task_failures.py      — Task failure tracking and dead letter queue for CoordinationHub (~149 LOC)
+  tasks.py              — Task registry primitives for CoordinationHub (work board) (~410 LOC)
   work_intent.py        — Work intent board primitives for CoordinationHub (~136 LOC)
   hooks/
     __init__.py         — Hooks package — IDE integration via stdin/stdout event protocol (~1 LOC)
@@ -1243,7 +1243,7 @@ coordinationhub/
     identity.py         — Identity & Registration tool schemas for CoordinationHub (~112 LOC)
     intent.py           — Work Intent Board tool schemas for CoordinationHub (~20 LOC)
     leases.py           — HA Coordinator Leases tool schemas for CoordinationHub (~35 LOC)
-    locking.py          — Document Locking tool schemas for CoordinationHub (~193 LOC)
+    locking.py          — Document Locking tool schemas for CoordinationHub (~202 LOC)
     messaging.py        — Messaging tool schemas for CoordinationHub (~41 LOC)
     spawner.py          — Spawner tool schemas for CoordinationHub (~193 LOC)
     tasks.py            — Task Registry tool schemas for CoordinationHub (~220 LOC)
@@ -1251,7 +1251,7 @@ coordinationhub/
 ```
 <!-- /GEN -->
 
-The `tests/` directory holds <!-- GEN:test-count -->603<!-- /GEN --> tests across 28 files,
+The `tests/` directory holds <!-- GEN:test-count -->611<!-- /GEN --> tests across 28 files,
 plus `tests/fixtures/claude_code_events/` for hook contract fixtures.
 
 **Module design principles:**
@@ -1718,7 +1718,7 @@ Air-gapped install: `pip install coordinationhub --no-deps`.
 
 ```bash
 python -m pytest tests/ -v
-# <!-- GEN:test-count -->603<!-- /GEN --> tests across 28 test files
+# <!-- GEN:test-count -->611<!-- /GEN --> tests across 28 test files
 ```
 
 ---

@@ -325,6 +325,45 @@ class TestUpdateTaskStatusValidation:
             )
 
 
+class TestUpdateTaskStatusErrorForwarding:
+    """T6.39: ``error`` is persisted on the task row for every status
+    transition, not just ``status='failed'``. Callers that move a task
+    to ``blocked`` or ``in_progress`` can surface diagnostic context.
+    """
+
+    def test_error_stored_on_blocked_transition(self, engine, registered_agent):
+        engine.create_task(task_id="t.blk", parent_agent_id=registered_agent, description="x")
+        result = engine.update_task_status(
+            "t.blk", "blocked", error="upstream API returned 502"
+        )
+        assert result.get("updated") is True
+        task = engine.query_tasks(query_type="task", task_id="t.blk").get("task")
+        assert task is not None
+        assert task.get("error") == "upstream API returned 502"
+        assert task.get("status") == "blocked"
+
+    def test_error_stored_on_in_progress_transition(self, engine, registered_agent):
+        engine.create_task(task_id="t.ip", parent_agent_id=registered_agent, description="x")
+        engine.update_task_status(
+            "t.ip", "in_progress", error="retry after partial failure of subtask X"
+        )
+        task = engine.query_tasks(query_type="task", task_id="t.ip").get("task")
+        assert task.get("error") == "retry after partial failure of subtask X"
+
+    def test_none_error_does_not_clobber_existing(self, engine, registered_agent):
+        """A later transition without an error arg must not erase a
+        previously-stored error message. Pre-fix the SET clause was
+        positional and would have overwritten with None; the dynamic
+        SQL build only updates the column when the arg is non-None.
+        """
+        engine.create_task(task_id="t.k", parent_agent_id=registered_agent, description="x")
+        engine.update_task_status("t.k", "blocked", error="disk full")
+        engine.update_task_status("t.k", "in_progress")  # no error arg
+        task = engine.query_tasks(query_type="task", task_id="t.k").get("task")
+        assert task.get("error") == "disk full"
+        assert task.get("status") == "in_progress"
+
+
 class TestSubtaskCycleDetection:
     """T1.14 regression tests."""
 
@@ -411,8 +450,12 @@ class TestDeadLetterQueue:
 
     def test_task_reaches_dead_letter_after_max_retries(self, engine, registered_agent):
         engine.create_task(task_id="task.1", parent_agent_id=registered_agent, description="x")
-        # Need 3 failures to reach dead_letter (default max_retries=3)
+        # Need 3 failures to reach dead_letter (default max_retries=3).
+        # T6.40: each failure is an actual transition — cycle through
+        # in_progress between attempts so each "failed" call is a true
+        # status change, not a no-op re-report.
         for _ in range(3):
+            engine.update_task_status("task.1", "in_progress")
             engine.update_task_status("task.1", "failed", error="boom")
         dlq = engine.task_failures(action="list_dead_letter")
         assert dlq["count"] == 1
@@ -442,13 +485,17 @@ class TestDeadLetterQueue:
         engine.create_task(
             task_id="task.dlq.1", parent_agent_id=registered_agent, description="x"
         )
-        # Push to dead_letter
+        # Push to dead_letter. T6.40: cycle through in_progress so each
+        # failure is a real transition.
         for _ in range(3):
+            engine.update_task_status("task.dlq.1", "in_progress")
             engine.update_task_status("task.dlq.1", "failed", error="boom")
         assert engine.task_failures(action="list_dead_letter")["count"] == 1
         engine.task_failures(action="retry", task_id="task.dlq.1")
 
         # One more failure after retry — should NOT immediately DLQ.
+        # retry puts the task back in 'pending', so this is a real
+        # pending → failed transition.
         engine.update_task_status("task.dlq.1", "failed", error="boom-again")
         history = engine.task_failures(action="history", task_id="task.dlq.1")
         # The retried row is still in history, plus a new attempt=1 row.
@@ -504,3 +551,76 @@ class TestDeadLetterQueue:
         )
         assert r["status"] == "dead_letter"
         assert r["attempt"] == 5
+
+    def test_orphan_dlq_row_flagged_and_retry_rejected(
+        self, engine, registered_agent
+    ):
+        """T6.41: a DLQ row whose underlying task no longer exists is
+        flagged ``orphan=True`` in list_dead_letter, and
+        ``retry_from_dead_letter`` refuses to pretend a retry happened.
+        Pre-fix the UPDATE on the ``tasks`` table matched zero rows and
+        we still returned ``{"retried": True}``.
+        """
+        engine.create_task(
+            task_id="task.ghost", parent_agent_id=registered_agent, description="x"
+        )
+        for _ in range(3):
+            engine.update_task_status("task.ghost", "in_progress")
+            engine.update_task_status("task.ghost", "failed", error="boom")
+        assert engine.task_failures(action="list_dead_letter")["count"] == 1
+
+        # Delete the underlying task row out-of-band (the DLQ row remains).
+        with engine._connect() as conn:
+            conn.execute("DELETE FROM tasks WHERE id = ?", ("task.ghost",))
+
+        dlq = engine.task_failures(action="list_dead_letter")
+        assert dlq["count"] == 1
+        assert dlq["dead_letter_tasks"][0]["orphan"] is True
+
+        # Retrying must refuse and explain why.
+        result = engine.task_failures(action="retry", task_id="task.ghost")
+        assert result.get("retried") is False
+        assert result.get("reason") == "task_row_missing"
+
+        # After rejection, the DLQ row should no longer advertise itself
+        # as dead_letter (status flipped to 'orphan'), so the next
+        # list_dead_letter won't show it.
+        dlq_after = engine.task_failures(action="list_dead_letter")
+        assert dlq_after["count"] == 0
+
+    def test_non_orphan_dlq_row_retries_cleanly(self, engine, registered_agent):
+        engine.create_task(
+            task_id="task.live", parent_agent_id=registered_agent, description="x"
+        )
+        for _ in range(3):
+            engine.update_task_status("task.live", "in_progress")
+            engine.update_task_status("task.live", "failed", error="boom")
+        dlq = engine.task_failures(action="list_dead_letter")
+        assert dlq["dead_letter_tasks"][0]["orphan"] is False
+        result = engine.task_failures(action="retry", task_id="task.live")
+        assert result.get("retried") is True
+
+    def test_double_failed_call_is_idempotent(self, engine, registered_agent):
+        """T6.40: calling ``update_task_status(task_id, 'failed')`` twice
+        in a row must NOT record two separate attempts. The second call
+        sees the task already in ``failed`` (no state transition), so no
+        DLQ side-effect fires. Pre-fix, two calls accelerated the DLQ
+        threshold — three back-to-back failed() calls would hit
+        dead_letter at max_retries=3 even though only one actual
+        execution had failed.
+        """
+        engine.create_task(
+            task_id="task.idem", parent_agent_id=registered_agent, description="x"
+        )
+        engine.update_task_status("task.idem", "failed", error="boom")
+        engine.update_task_status("task.idem", "failed", error="boom-again")
+        engine.update_task_status("task.idem", "failed", error="boom-third")
+        history = engine.task_failures(action="history", task_id="task.idem")
+        assert history["count"] == 1, (
+            f"Three no-op 'failed' calls should record exactly one attempt, "
+            f"got {history['count']}"
+        )
+        assert history["history"][0]["attempt"] == 1
+        # Task stays in 'failed', not escalated to dead_letter prematurely.
+        dlq = engine.task_failures(action="list_dead_letter")
+        assert dlq["count"] == 0

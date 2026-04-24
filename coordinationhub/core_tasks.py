@@ -65,18 +65,32 @@ class TaskMixin:
         blocked_by: str | None = None,
         error: str | None = None,
     ) -> dict[str, Any]:
-        """Update task status. Auto-satisfies dependencies when a task completes."""
+        """Update task status. Auto-satisfies dependencies when a task completes.
+
+        T6.39: ``error`` is forwarded to the primitive on every transition,
+        not only when ``status=='failed'``. A ``blocked`` / ``in_progress``
+        transition carrying a diagnostic message is now preserved on the
+        task row.
+        """
         result = _tasks.update_task_status(
-            self._connect, task_id, status, summary, blocked_by,
+            self._connect, task_id, status, summary, blocked_by, error,
         )
+        # T6.40: only fire the DLQ + completion side effects on an actual
+        # status transition. Pre-fix, a caller that idempotently re-sent
+        # ``update_task_status(t, "failed")`` would record two failure
+        # attempts and prematurely trip the dead-letter threshold. The
+        # primitive now returns ``prior_status``; we only trigger when it
+        # differs from the target status (or when the call was rejected).
+        prior_status = result.get("prior_status")
+        changed = result.get("updated") and prior_status != status
         # Auto-trigger: when task completes, satisfy any deps that reference it
-        if status == "completed":
+        if status == "completed" and changed:
             _deps.satisfy_dependencies_for_task(self._connect, task_id)
             self._publish_event(
                 "task.completed", {"task_id": task_id, "status": "completed"}
             )
         # Auto-record failure: when task fails, record in DLQ
-        if status == "failed":
+        if status == "failed" and changed:
             _tf.record_task_failure(self._connect, task_id, error)
             self._publish_event(
                 "task.failed", {"task_id": task_id, "status": "failed"}

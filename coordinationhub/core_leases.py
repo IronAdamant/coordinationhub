@@ -71,16 +71,17 @@ class LeaseMixin:
         """
         ttl = ttl if ttl is not None else self.DEFAULT_LEASE_TTL
         conn = self._connect()
-        ok = _leases.acquire_lease(conn, self.COORDINATOR_LEASE, agent_id, ttl)
+        # T6.30: primitive returns expires_at on success, None on failure;
+        # eliminates the follow-up get_lease_holder round trip on the hot path.
+        expires_at = _leases.acquire_lease(conn, self.COORDINATOR_LEASE, agent_id, ttl)
 
-        if ok:
-            holder = _leases.get_lease_holder(conn, self.COORDINATOR_LEASE)
+        if expires_at is not None:
             result = {
                 "acquired": True,
                 "lease_name": self.COORDINATOR_LEASE,
                 "holder_id": agent_id,
                 "ttl": ttl,
-                "expires_at": holder.expires_at if holder else None,
+                "expires_at": expires_at,
             }
             self._publish_event(
                 "lease.acquired",
@@ -88,6 +89,7 @@ class LeaseMixin:
             )
             return result
         else:
+            # Failure path still needs the holder row for the error message.
             holder = _leases.get_lease_holder(conn, self.COORDINATOR_LEASE)
             return {
                 "acquired": False,
@@ -102,14 +104,14 @@ class LeaseMixin:
         Returns {"refreshed": False, "error": ...} if not the current holder.
         """
         conn = self._connect()
-        ok = _leases.refresh_lease(conn, self.COORDINATOR_LEASE, agent_id)
-        if not ok:
+        # T6.30: primitive returns expires_at inline on success.
+        expires_at = _leases.refresh_lease(conn, self.COORDINATOR_LEASE, agent_id)
+        if expires_at is None:
             return {"refreshed": False, "error": "Not the current lease holder"}
-        holder = _leases.get_lease_holder(conn, self.COORDINATOR_LEASE)
         result = {
             "refreshed": True,
             "lease_name": self.COORDINATOR_LEASE,
-            "expires_at": holder.expires_at if holder else None,
+            "expires_at": expires_at,
         }
         self._publish_event(
             "lease.refreshed",
@@ -164,8 +166,9 @@ class LeaseMixin:
         """
         ttl = ttl if ttl is not None else self.DEFAULT_LEASE_TTL
         conn = self._connect()
-        ok = _leases.claim_leadership(conn, self.COORDINATOR_LEASE, agent_id, ttl)
-        if not ok:
+        # T6.30: primitive returns expires_at inline on success.
+        expires_at = _leases.claim_leadership(conn, self.COORDINATOR_LEASE, agent_id, ttl)
+        if expires_at is None:
             holder = _leases.get_lease_holder(conn, self.COORDINATOR_LEASE)
             return {
                 "claimed": False,
@@ -173,13 +176,12 @@ class LeaseMixin:
                 "lease_name": self.COORDINATOR_LEASE,
                 "holder": holder._asdict() if holder else None,
             }
-        holder = _leases.get_lease_holder(conn, self.COORDINATOR_LEASE)
         result = {
             "claimed": True,
             "lease_name": self.COORDINATOR_LEASE,
             "holder_id": agent_id,
             "ttl": ttl,
-            "expires_at": holder.expires_at if holder else None,
+            "expires_at": expires_at,
         }
         self._publish_event(
             "lease.claimed",

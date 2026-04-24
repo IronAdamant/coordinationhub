@@ -485,6 +485,54 @@ class TestListLocks:
         assert lock["locked_by"] == registered_agent
 
 
+class TestListLocksForceRefresh:
+    """T6.33: ``force_refresh=True`` re-warms the in-memory lock cache
+    from SQLite. Covers the recovery path if the cache ever desyncs.
+    """
+
+    def test_force_refresh_picks_up_db_row_missing_from_cache(
+        self, engine, registered_agent
+    ):
+        # Simulate a desync: insert a row straight into SQLite, bypassing
+        # the cache-maintaining acquire path.
+        now = time.time()
+        with engine._connect() as conn:
+            conn.execute(
+                "INSERT INTO document_locks (document_path, locked_by, locked_at, "
+                "lock_ttl, lock_type, region_start, region_end, worktree_root) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                ("/orphan.txt", registered_agent, now, 300.0, "exclusive", None, None,
+                 str(engine._storage.project_root)),
+            )
+
+        # Default read misses it (cache wasn't told).
+        assert engine.list_locks()["count"] == 0
+
+        # force_refresh picks it up.
+        refreshed = engine.list_locks(force_refresh=True)
+        assert refreshed["count"] == 1
+        assert refreshed["locks"][0]["document_path"] == "/orphan.txt"
+
+        # Cache is now in sync; subsequent non-forced read also sees it.
+        assert engine.list_locks()["count"] == 1
+
+    def test_force_refresh_drops_stale_cache_entry(self, engine, registered_agent):
+        # Acquire populates both cache and DB.
+        engine.acquire_lock("/ghost.txt", registered_agent, ttl=300.0)
+        assert engine.list_locks()["count"] == 1
+
+        # Out-of-band DELETE from DB — cache still thinks the lock is live.
+        with engine._connect() as conn:
+            conn.execute("DELETE FROM document_locks WHERE document_path = ?",
+                         ("/ghost.txt",))
+
+        # Cache read still shows the ghost.
+        assert engine.list_locks()["count"] == 1
+
+        # force_refresh clears it.
+        assert engine.list_locks(force_refresh=True)["count"] == 0
+
+
 class TestSharedLocks:
     """Tests for shared lock semantics — multiple shared locks allowed."""
 

@@ -111,6 +111,11 @@ def _add_locking(sub, shared) -> None:
 
     p = sub.add_parser("list-locks", parents=[shared], help="List all active locks")
     p.add_argument("--agent-id", default=None, help="Filter to locks held by this agent")
+    p.add_argument(
+        "--force-refresh",
+        action="store_true",
+        help="Re-warm the in-memory lock cache from SQLite before reading (T6.33)",
+    )
 
     p = sub.add_parser("admin-locks", parents=[shared], help="Administrative lock operations")
     p.add_argument("action", choices=["release_by_agent", "reap_expired", "reap_stale"],

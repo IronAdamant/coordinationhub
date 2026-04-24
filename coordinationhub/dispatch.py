@@ -22,7 +22,7 @@ TOOL_DISPATCH: dict[str, tuple[str, list[str]]] = {
     "release_lock": ("release_lock", ["document_path", "agent_id", "region_start", "region_end"]),
     "refresh_lock": ("refresh_lock", ["document_path", "agent_id", "ttl", "region_start", "region_end"]),
     "get_lock_status": ("get_lock_status", ["document_path"]),
-    "list_locks": ("list_locks", ["agent_id"]),
+    "list_locks": ("list_locks", ["agent_id", "force_refresh"]),
     "admin_locks": ("admin_locks", ["action", "agent_id", "grace_seconds", "timeout"]),
     # Coordination
     "broadcast": ("broadcast", ["agent_id", "document_path", "ttl", "handoff_targets", "require_ack", "message"]),

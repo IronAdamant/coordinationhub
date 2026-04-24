@@ -144,7 +144,8 @@ _SCHEMAS = {
             depends_on       TEXT DEFAULT '[]',
             blocked_by       TEXT,
             summary          TEXT,
-            priority         INTEGER DEFAULT 0
+            priority         INTEGER DEFAULT 0,
+            error            TEXT
         )
     """,
     "work_intent": """

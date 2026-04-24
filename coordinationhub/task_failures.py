@@ -93,13 +93,29 @@ def get_dead_letter_tasks(
     connect: ConnectFn,
     limit: int = 50,
 ) -> list[dict[str, Any]]:
-    """Return tasks currently in dead_letter status."""
+    """Return tasks currently in dead_letter status.
+
+    T6.41: each row carries an ``orphan`` boolean. A DLQ row whose
+    ``task_id`` no longer has a matching row in ``tasks`` is flagged so
+    callers don't naively invoke ``retry_from_dead_letter`` on a
+    record that has nothing to retry. Orphan rows still appear in the
+    list so admins can clean them up.
+    """
     with connect() as conn:
         rows = conn.execute(
-            "SELECT * FROM task_failures WHERE status = 'dead_letter' ORDER BY dead_letter_at DESC LIMIT ?",
+            "SELECT f.*, t.id AS _task_exists "
+            "FROM task_failures f "
+            "LEFT JOIN tasks t ON t.id = f.task_id "
+            "WHERE f.status = 'dead_letter' "
+            "ORDER BY f.dead_letter_at DESC LIMIT ?",
             (limit,),
         ).fetchall()
-        return [dict(row) for row in rows]
+        result: list[dict[str, Any]] = []
+        for row in rows:
+            d = dict(row)
+            d["orphan"] = d.pop("_task_exists", None) is None
+            result.append(d)
+        return result
 
 
 def retry_from_dead_letter(
@@ -127,6 +143,26 @@ def retry_from_dead_letter(
         ).fetchone()
         if not row:
             return {"retried": False, "reason": "not_in_dead_letter"}
+
+        # T6.41: verify the underlying task row still exists. Pre-fix the
+        # UPDATE matched zero rows for orphan DLQ entries and we still
+        # returned ``{"retried": True}`` — caller thought the retry was
+        # queued, but nothing would ever run. Mark the DLQ entry as
+        # 'orphan' so it stops showing up as retry-eligible.
+        task_exists = conn.execute(
+            "SELECT 1 FROM tasks WHERE id = ?", (task_id,),
+        ).fetchone()
+        if task_exists is None:
+            conn.execute(
+                "UPDATE task_failures SET status = 'orphan' WHERE task_id = ? "
+                "AND status = 'dead_letter'",
+                (task_id,),
+            )
+            return {
+                "retried": False,
+                "reason": "task_row_missing",
+                "task_id": task_id,
+            }
 
         # Update task_failures status
         conn.execute(

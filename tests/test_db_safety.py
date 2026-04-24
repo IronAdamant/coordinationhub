@@ -163,6 +163,7 @@ CREATE TABLE tasks (
     priority INTEGER DEFAULT 0,
     summary TEXT,
     blocked_by TEXT,
+    error TEXT,
     created_at REAL,
     updated_at REAL
 );
@@ -381,13 +382,15 @@ def test_leases(db_path: str) -> None:
     from coordinationhub import leases
 
     with _safe_connect(db_path) as conn:
-        assert leases.acquire_lease(conn, "COORDINATOR_LEADER", "a1", 10.0) is True
+        # T6.30: acquire/refresh/claim now return expires_at (truthy) on
+        # success and None on failure; release_lease still returns bool.
+        assert leases.acquire_lease(conn, "COORDINATOR_LEADER", "a1", 10.0) is not None
         holder = leases.get_lease_holder(conn, "COORDINATOR_LEADER")
         assert holder is not None
-        assert leases.refresh_lease(conn, "COORDINATOR_LEADER", "a1") is True
+        assert leases.refresh_lease(conn, "COORDINATOR_LEADER", "a1") is not None
         assert leases.is_lease_expired(conn, "COORDINATOR_LEADER") is False
         assert leases.release_lease(conn, "COORDINATOR_LEADER", "a1") is True
-        assert leases.claim_leadership(conn, "COORDINATOR_LEADER", "a1", 10.0) is True
+        assert leases.claim_leadership(conn, "COORDINATOR_LEADER", "a1", 10.0) is not None
 
 
 def test_messages(db_path: str) -> None:

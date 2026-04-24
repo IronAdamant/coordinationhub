@@ -78,6 +78,7 @@ def update_task_status(
     status: str,
     summary: str | None = None,
     blocked_by: str | None = None,
+    error: str | None = None,
 ) -> dict[str, Any]:
     """Update task status, optionally with a completion summary or blocker.
 
@@ -87,6 +88,11 @@ def update_task_status(
     silently (a misspelled status like "done" would be stored and leave
     dependents hanging forever because no status-change event fires on
     unknown values).
+
+    T6.39: ``error`` is persisted alongside every status transition when
+    non-None. Callers moving a task to ``blocked`` or ``in_progress`` can
+    now preserve diagnostic context on the task row itself (prior to the
+    fix, the string was only surfaced via the DLQ on ``failed``).
     """
     if status not in _VALID_TASK_STATUSES:
         return {
@@ -99,7 +105,7 @@ def update_task_status(
     now = time.time()
     with connect() as conn:
         existing = conn.execute(
-            "SELECT id FROM tasks WHERE id = ?", (task_id,),
+            "SELECT status FROM tasks WHERE id = ?", (task_id,),
         ).fetchone()
         if existing is None:
             return {
@@ -107,22 +113,29 @@ def update_task_status(
                 "reason": "task_not_found",
                 "task_id": task_id,
             }
+        prior_status = existing["status"]
+        fields = ["status=?", "updated_at=?"]
+        params: list[Any] = [status, now]
         if summary is not None:
-            conn.execute(
-                "UPDATE tasks SET status=?, summary=?, updated_at=? WHERE id=?",
-                (status, summary, now, task_id),
-            )
-        elif blocked_by is not None:
-            conn.execute(
-                "UPDATE tasks SET status=?, blocked_by=?, updated_at=? WHERE id=?",
-                (status, blocked_by, now, task_id),
-            )
-        else:
-            conn.execute(
-                "UPDATE tasks SET status=?, updated_at=? WHERE id=?",
-                (status, now, task_id),
-            )
-    return {"updated": True, "task_id": task_id, "status": status}
+            fields.append("summary=?")
+            params.append(summary)
+        if blocked_by is not None:
+            fields.append("blocked_by=?")
+            params.append(blocked_by)
+        if error is not None:
+            fields.append("error=?")
+            params.append(error)
+        params.append(task_id)
+        conn.execute(
+            f"UPDATE tasks SET {', '.join(fields)} WHERE id=?",
+            tuple(params),
+        )
+    return {
+        "updated": True,
+        "task_id": task_id,
+        "status": status,
+        "prior_status": prior_status,
+    }
 
 
 def get_task(connect: ConnectFn, task_id: str) -> dict[str, Any] | None:

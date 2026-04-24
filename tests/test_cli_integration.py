@@ -372,11 +372,13 @@ class TestLeaseCommands:
         try:
             conn = engine._connect()
             # First acquire populates the row.
-            assert _leases.acquire_lease(conn, "TEST_LEASE", "holder.1", 60.0) is True
+            # T6.30: acquire_lease now returns expires_at on success, None
+            # on failure. Truthy-on-success preserves the boolean semantics.
+            assert _leases.acquire_lease(conn, "TEST_LEASE", "holder.1", 60.0) is not None
             # Second acquire by same holder goes through the row-exists branch.
             # Before the fix, this hit BEGIN-inside-tx and returned False
-            # incorrectly. After the fix, returns True (same holder = refresh).
-            assert _leases.acquire_lease(conn, "TEST_LEASE", "holder.1", 60.0) is True
+            # incorrectly. After the fix, returns expires_at (same holder = refresh).
+            assert _leases.acquire_lease(conn, "TEST_LEASE", "holder.1", 60.0) is not None
             # Connection state is clean.
             assert conn.in_transaction is False
         finally:
@@ -401,7 +403,8 @@ class TestLeaseCommands:
         try:
             conn = engine._connect()
             # Seed the row so acquire goes through the BEGIN IMMEDIATE branch.
-            assert _leases.acquire_lease(conn, "T", "holder.1", 10.0) is True
+            # T6.30: acquire_lease returns expires_at on success.
+            assert _leases.acquire_lease(conn, "T", "holder.1", 10.0) is not None
 
             # Record successive time.time() samples; monkey-patch the module.
             samples: list[float] = []
@@ -416,7 +419,8 @@ class TestLeaseCommands:
             try:
                 # Same holder re-acquires — goes through the BEGIN-IMMEDIATE
                 # path with fresh sampling.
-                assert _leases.acquire_lease(conn, "T", "holder.1", 10.0) is True
+                # T6.30: acquire_lease returns expires_at on success.
+                assert _leases.acquire_lease(conn, "T", "holder.1", 10.0) is not None
             finally:
                 _leases.time.time = real_time
 

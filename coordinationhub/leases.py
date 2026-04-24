@@ -24,7 +24,7 @@ def acquire_lease(
     lease_name: str,
     holder_id: str,
     ttl: float,
-) -> bool:
+) -> float | None:
     """Attempt to acquire a named lease.
 
     Uses a two-phase approach:
@@ -33,7 +33,10 @@ def acquire_lease(
     2. If INSERT fails (row exists), use BEGIN IMMEDIATE to serialize
        the check-and-update, preventing races from implicit transactions.
 
-    Returns True if this holder now holds the lease, False otherwise.
+    Returns the new expires_at on success, or None if another live holder
+    currently owns the lease. Truthy-on-success for callers that only
+    care about the boolean outcome; carries the timestamp so wrappers
+    (T6.30) don't need a follow-up get_lease_holder round trip.
     """
     # T1.5: sample acquired_at *after* any potential BEGIN IMMEDIATE wait.
     # If BEGIN IMMEDIATE has to wait on another writer (up to busy_timeout =
@@ -49,7 +52,7 @@ def acquire_lease(
             (lease_name, holder_id, acquired_at, ttl, expires_at),
         )
         conn.commit()
-        return True
+        return expires_at
     except sqlite3.IntegrityError:
         # Python's sqlite3 implicit-transaction machinery auto-begins on DML,
         # and IntegrityError leaves the connection with in_transaction=True.
@@ -63,7 +66,7 @@ def acquire_lease(
         conn.execute("BEGIN IMMEDIATE")
     except sqlite3.OperationalError:
         # Another writer is active; bail out
-        return False
+        return None
 
     # T1.5: re-sample after BEGIN IMMEDIATE so expires_at reflects the time
     # we actually entered the critical section, not the time we started
@@ -78,14 +81,14 @@ def acquire_lease(
         )
         row = cursor.fetchone()
         if row is None:
-            return False
+            return None
 
         existing_holder = row["holder_id"]
         existing_expires = row["expires_at"]
 
         # Reject if another valid holder has the lease
         if existing_holder != holder_id and existing_expires > acquired_at:
-            return False
+            return None
 
         # Overwrite: either unheld (expired) or ours
         conn.execute(
@@ -93,7 +96,7 @@ def acquire_lease(
             "WHERE lease_name = ?",
             (holder_id, acquired_at, ttl, expires_at, lease_name),
         )
-        return True
+        return expires_at
     finally:
         conn.commit()
 
@@ -101,10 +104,12 @@ def refresh_lease(
     conn: sqlite3.Connection,
     lease_name: str,
     holder_id: str,
-) -> bool:
+) -> float | None:
     """Refresh a lease's TTL, extending its expiry time.
 
-    Only the current holder can refresh. Returns True if refresh succeeded.
+    Only the current holder can refresh. Returns the new expires_at on
+    success, or None if the caller isn't the current holder (T6.30: the
+    timestamp is returned inline so wrappers skip a follow-up read).
     """
     now = time.time()
 
@@ -112,7 +117,7 @@ def refresh_lease(
     try:
         conn.execute("BEGIN IMMEDIATE")
     except sqlite3.OperationalError:
-        return False
+        return None
 
     try:
         cursor = conn.execute(
@@ -121,7 +126,7 @@ def refresh_lease(
         )
         row = cursor.fetchone()
         if row is None or row["holder_id"] != holder_id:
-            return False
+            return None
 
         ttl = row["ttl"]
         expires_at = now + ttl
@@ -130,7 +135,7 @@ def refresh_lease(
             "UPDATE coordinator_leases SET acquired_at = ?, expires_at = ? WHERE lease_name = ?",
             (now, expires_at, lease_name),
         )
-        return True
+        return expires_at
     finally:
         conn.commit()
 
@@ -209,7 +214,7 @@ def claim_leadership(
     lease_name: str,
     agent_id: str,
     ttl: float,
-) -> bool:
+) -> float | None:
     """Claim leadership of a lease whose current holder has failed.
 
     Uses BEGIN IMMEDIATE to serialize races. If the current lease is
@@ -221,7 +226,8 @@ def claim_leadership(
     via TTL; the new leader's acquired_at > old leader's expires_at makes
     the old lease stale.
 
-    Returns True if this agent now holds the lease, False otherwise.
+    Returns the new expires_at on success, or None if leadership is held
+    by a live agent (T6.30).
     """
     # T1.5: BEGIN IMMEDIATE may wait up to busy_timeout for another writer
     # to release. Sample acquired_at *after* the wait so expires_at
@@ -229,7 +235,7 @@ def claim_leadership(
     try:
         conn.execute("BEGIN IMMEDIATE")
     except sqlite3.OperationalError:
-        return False
+        return None
 
     acquired_at = time.time()
     expires_at = acquired_at + ttl
@@ -247,7 +253,7 @@ def claim_leadership(
 
             # Reject if a live holder has the lease
             if existing_holder != agent_id and existing_expires > acquired_at:
-                return False
+                return None
 
         # Claim: insert if absent, or update if expired/unheld
         conn.execute(
@@ -256,6 +262,6 @@ def claim_leadership(
             "VALUES (?, ?, ?, ?, ?)",
             (lease_name, agent_id, acquired_at, ttl, expires_at),
         )
-        return True
+        return expires_at
     finally:
         conn.commit()
