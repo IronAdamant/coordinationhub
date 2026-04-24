@@ -35,7 +35,7 @@ MAX_BODY_BYTES = 1_000_000  # 1 MB — reject oversized requests
 
 from .core import CoordinationEngine
 from .dispatch import TOOL_DISPATCH
-from .schemas import TOOL_SCHEMAS
+from .schemas import TOOL_SCHEMAS, TOOLS_VERSION
 from .plugins.dashboard.dashboard import get_dashboard_data, DASHBOARD_HTML
 
 logger = logging.getLogger(__name__)
@@ -301,13 +301,18 @@ class MCPRequestHandler(BaseHTTPRequestHandler):
                         sse_counts[client_ip] = current
 
     def _handle_list_tools(self) -> None:
-        """GET /tools — return all tool schemas."""
+        """GET /tools — return all tool schemas.
+
+        T6.13: the response now carries ``tools_version`` so clients
+        pinning to a specific schema shape can detect breaking changes
+        at handshake rather than diffing the full list.
+        """
         tools = list(TOOL_SCHEMAS.values())
-        self._send_json({"tools": tools})
+        self._send_json({"tools": tools, "tools_version": TOOLS_VERSION})
 
     def _handle_health(self) -> None:
         """GET /health — simple health check."""
-        self._send_json({"status": "ok"})
+        self._send_json({"status": "ok", "tools_version": TOOLS_VERSION})
 
     # -- POST endpoints ------------------------------------------------ #
 

@@ -45,8 +45,21 @@ TOOL_SCHEMAS: dict[str, dict] = (
 )
 
 
+# T6.13: semantic-version string identifying the shape of TOOL_SCHEMAS.
+# Bump the major when a tool is renamed or removed; bump the minor when
+# a tool or parameter is added in a backwards-compatible way; bump the
+# patch for description/documentation-only edits. Clients pinning to an
+# older major can detect a breaking change at handshake without having
+# to diff schema dicts.
+#
+# Exposed via ``mcp_server`` on ``/tools`` and ``/health`` responses and
+# on the stdio MCP ``tools/list`` handshake.
+TOOLS_VERSION = "1.0.0"
+
+
 __all__ = [
     "TOOL_SCHEMAS",
+    "TOOLS_VERSION",
     "TOOL_SCHEMAS_IDENTITY",
     "TOOL_SCHEMAS_LOCKING",
     "TOOL_SCHEMAS_COORDINATION",

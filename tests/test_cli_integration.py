@@ -442,6 +442,47 @@ class TestLeaseCommands:
             engine.close()
 
 
+class TestCliRegistryCoverage:
+    """T6.19: every subcommand declared by the argparse parser must
+    have a matching handler in ``cli._COMMANDS``. Pre-fix the two
+    lists could drift silently — a new parser entry would print a
+    generic help text at runtime because the dispatch map didn't
+    know about it.
+    """
+
+    def test_every_parser_subcommand_has_a_handler(self):
+        from coordinationhub.cli import _COMMANDS, _get_handler
+        from coordinationhub.cli_parser import create_parser
+
+        parser = create_parser()
+        # argparse stashes the subparsers on the _subparsers attribute
+        # of the main parser. Walk them out.
+        subparsers_action = None
+        for action in parser._actions:
+            if hasattr(action, "choices") and hasattr(action, "dest") and action.dest == "command":
+                subparsers_action = action
+                break
+        assert subparsers_action is not None, "No subparsers action found in parser"
+
+        declared_commands = set(subparsers_action.choices.keys())
+        mapped_commands = set(_COMMANDS.keys())
+
+        missing_handler = declared_commands - mapped_commands
+        assert not missing_handler, (
+            f"Parser declares subcommands with no handler in _COMMANDS: {missing_handler}"
+        )
+
+        stale_handler = mapped_commands - declared_commands
+        assert not stale_handler, (
+            f"_COMMANDS maps subcommands that no longer exist in the parser: {stale_handler}"
+        )
+
+        # Also verify every mapped handler resolves to a callable.
+        for name, handler_name in _COMMANDS.items():
+            handler = _get_handler(handler_name)
+            assert callable(handler), f"Handler {handler_name!r} for {name!r} is not callable"
+
+
 class TestCliExitCodes:
     """T3.16 / T3.17: distinct exit codes for not-found vs error vs
     denied locks. Pre-fix a blanket ``except Exception`` returned 1 for

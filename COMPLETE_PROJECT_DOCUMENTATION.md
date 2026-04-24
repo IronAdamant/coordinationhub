@@ -1105,7 +1105,7 @@ keep it in sync; CI checks for drift on every push.
 | `coordinationhub/limits.py` | 40 | String-length caps for user-supplied fields (T6.14) |
 | `coordinationhub/lock_cache.py` | 180 | In-memory lock cache for CoordinationHub |
 | `coordinationhub/lock_ops.py` | 204 | Shared lock primitives used by both local locks and coordination locks |
-| `coordinationhub/mcp_server.py` | 475 | HTTP-based MCP server for CoordinationHub — zero external dependencies |
+| `coordinationhub/mcp_server.py` | 479 | HTTP-based MCP server for CoordinationHub — zero external dependencies |
 | `coordinationhub/mcp_stdio.py` | 147 | Stdio-based MCP server for CoordinationHub using the ``mcp`` Python package |
 | `coordinationhub/messages.py` | 105 | Inter-agent messaging primitives for CoordinationHub |
 | `coordinationhub/notifications.py` | 155 | Change notification storage and retrieval for CoordinationHub |
@@ -1124,7 +1124,7 @@ keep it in sync; CI checks for drift on every push.
 | `coordinationhub/plugins/graph/graphs.py` | 327 | Declarative coordination graph: loader, validator, in-memory representation |
 | `coordinationhub/plugins/registry.py` | 59 | Plugin registry for CoordinationHub |
 | `coordinationhub/scan.py` | 275 | File ownership scan for CoordinationHub |
-| `coordinationhub/schemas/__init__.py` | 56 | Tool schemas for CoordinationHub — all MCP tools |
+| `coordinationhub/schemas/__init__.py` | 58 | Tool schemas for CoordinationHub — all MCP tools |
 | `coordinationhub/schemas/audit.py` | 61 | Audit & Status tool schemas for CoordinationHub |
 | `coordinationhub/schemas/change.py` | 41 | Change Awareness tool schemas for CoordinationHub |
 | `coordinationhub/schemas/coordination.py` | 145 | Coordination Actions tool schemas for CoordinationHub |
@@ -1145,7 +1145,7 @@ keep it in sync; CI checks for drift on every push.
 | `coordinationhub/work_intent.py` | 139 | Work intent board primitives for CoordinationHub |
 <!-- /GEN -->
 
-**Total: <!-- GEN:test-count -->634<!-- /GEN --> tests across 28 test files.**
+**Total: <!-- GEN:test-count -->635<!-- /GEN --> tests across 28 test files.**
 
 ---
 
@@ -1201,7 +1201,7 @@ coordinationhub/
   limits.py             — String-length caps for user-supplied fields (T6.14) (~40 LOC)
   lock_cache.py         — In-memory lock cache for CoordinationHub (~180 LOC)
   lock_ops.py           — Shared lock primitives used by both local locks and coordination locks (~204 LOC)
-  mcp_server.py         — HTTP-based MCP server for CoordinationHub — zero external dependencies (~475 LOC)
+  mcp_server.py         — HTTP-based MCP server for CoordinationHub — zero external dependencies (~479 LOC)
   mcp_stdio.py          — Stdio-based MCP server for CoordinationHub using the ``mcp`` Python package (~147 LOC)
   messages.py           — Inter-agent messaging primitives for CoordinationHub (~105 LOC)
   notifications.py      — Change notification storage and retrieval for CoordinationHub (~155 LOC)
@@ -1235,7 +1235,7 @@ coordinationhub/
     __init__.py         — Graph plugin for CoordinationHub (~31 LOC)
     graphs.py           — Declarative coordination graph: loader, validator, in-memory representation (~327 LOC)
   schemas/
-    __init__.py         — Tool schemas for CoordinationHub — all MCP tools (~56 LOC)
+    __init__.py         — Tool schemas for CoordinationHub — all MCP tools (~58 LOC)
     audit.py            — Audit & Status tool schemas for CoordinationHub (~61 LOC)
     change.py           — Change Awareness tool schemas for CoordinationHub (~41 LOC)
     coordination.py     — Coordination Actions tool schemas for CoordinationHub (~145 LOC)
@@ -1253,7 +1253,7 @@ coordinationhub/
 ```
 <!-- /GEN -->
 
-The `tests/` directory holds <!-- GEN:test-count -->634<!-- /GEN --> tests across 28 files,
+The `tests/` directory holds <!-- GEN:test-count -->635<!-- /GEN --> tests across 28 files,
 plus `tests/fixtures/claude_code_events/` for hook contract fixtures.
 
 **Module design principles:**
@@ -1720,7 +1720,7 @@ Air-gapped install: `pip install coordinationhub --no-deps`.
 
 ```bash
 python -m pytest tests/ -v
-# <!-- GEN:test-count -->634<!-- /GEN --> tests across 28 test files
+# <!-- GEN:test-count -->635<!-- /GEN --> tests across 28 test files
 ```
 
 ---

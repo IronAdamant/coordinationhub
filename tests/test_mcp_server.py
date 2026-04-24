@@ -78,7 +78,9 @@ def _post(url: str, data: dict, token: str | None = None) -> dict:
 class TestHealth:
     def test_health_returns_ok(self, server):
         result = _get(f"{server.get_url()}/health")
-        assert result == {"status": "ok"}
+        assert result.get("status") == "ok"
+        # T6.13: health response advertises the tools-schema version.
+        assert "tools_version" in result
 
 
 class TestListTools:
@@ -87,6 +89,8 @@ class TestListTools:
         assert "tools" in result
         assert isinstance(result["tools"], list)
         assert len(result["tools"]) > 0
+        # T6.13: /tools response carries the schema version.
+        assert result.get("tools_version")
 
 
 class TestCall:
@@ -267,7 +271,9 @@ class TestAuthEnforcement:
     def test_health_endpoint_stays_open(self, auth_server):
         """Health is a liveness probe — must work without auth."""
         result = _get(f"{auth_server.get_url()}/health")
-        assert result == {"status": "ok"}
+        # T6.13: health response includes tools_version alongside status.
+        assert result.get("status") == "ok"
+        assert "tools_version" in result
 
     def test_dashboard_html_stays_open(self, auth_server):
         """/ serves the HTML bootstrap; browser reads the token from it."""
