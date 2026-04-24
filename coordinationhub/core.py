@@ -3,7 +3,6 @@
 Wires together storage, lifecycle, capability mixins, and extracted
 subsystems. Each mixin is in its own file under coordinationhub/.
 
-LockingMixin:     core_locking.py     — lock acquire/release/refresh/list/admin
 BroadcastMixin:   core_broadcasts.py  — broadcast, handoff dispatch, wait_for_locks
 IdentityMixin:    core_identity.py    — agent registration, heartbeat, lineage
 
@@ -17,6 +16,7 @@ Handoff:          handoff_subsystem.py     — handoff acknowledgment tracking
 Change:           change_subsystem.py      — change notifications, audit, status
 Task:             task_subsystem.py        — task registry, hierarchy, DLQ
 Visibility:       visibility_subsystem.py  — coordination graph, scan, assessment
+Locking:          locking_subsystem.py     — document lock acquire/release/admin
 
 Zero third-party dependencies.
 """
@@ -38,7 +38,6 @@ from .housekeeping import (
     is_enabled_by_env,
 )
 from .lock_cache import LockCache
-from .core_locking import LockingMixin
 from .core_broadcasts import BroadcastMixin
 from .core_identity import IdentityMixin
 from .spawner_subsystem import Spawner
@@ -50,12 +49,12 @@ from .handoff_subsystem import Handoff
 from .change_subsystem import Change
 from .task_subsystem import Task
 from .visibility_subsystem import Visibility
+from .locking_subsystem import Locking
 from .paths import detect_project_root
 from .plugins.graph import graphs as _g
 
 
 class CoordinationEngine(
-    LockingMixin,
     BroadcastMixin,
     IdentityMixin,
 ):
@@ -66,8 +65,9 @@ class CoordinationEngine(
     extracted from the mixin tree (T6.22) hang off the engine as
     composed attributes — ``self._spawner``, ``self._work_intent``,
     ``self._lease``, ``self._dependency``, ``self._messaging``,
-    ``self._handoff``, ``self._change``, and ``self._task`` — with
-    facade methods on the engine preserving the public API.
+    ``self._handoff``, ``self._change``, ``self._task``,
+    ``self._visibility``, and ``self._locking`` — with facade methods
+    on the engine preserving the public API.
     """
 
     DEFAULT_PORT = 9877
@@ -240,6 +240,36 @@ class CoordinationEngine(
         self._visibility = Visibility(
             connect_fn=self._connect,
             publish_event_fn=self._publish_event,
+            project_root_getter=lambda: self._storage.project_root,
+        )
+        # T6.22: composed subsystem replaces LockingMixin — tenth and
+        # most complex extraction of the series. Per the coupling audit
+        # LockingMixin had zero cross-mixin method calls, zero
+        # ``_hybrid_wait`` calls, three ``_publish_event`` notifications
+        # (``lock.acquired`` / ``lock.released`` / bulk ``lock.released``),
+        # and touched ``_storage.project_root`` plus the shared
+        # :class:`LockCache` instance. Unlike prior extractions this
+        # subsystem does NOT own its state — ``self._lock_cache`` stays
+        # on the engine because :class:`BroadcastMixin` (via
+        # ``wait_for_locks`` calling ``self.get_lock_status``) and
+        # :class:`IdentityMixin` (via ``deregister_agent`` calling
+        # ``self.release_agent_locks``) still reach into locking through
+        # MRO lookups on ``self``. Those cross-mixin calls resolve via
+        # the facade methods below; when Broadcast and Identity are
+        # later extracted they will take an explicit ``locking`` dep.
+        # ``CoordinationEngine.start()`` also warms the cache directly,
+        # so keeping it owned by the engine avoids an extra indirection.
+        # Follows the :class:`Change` / :class:`Visibility`
+        # ``project_root_getter`` closure pattern (commits ``e0c21a8``
+        # and ``64c3ff4``). See commits ``1ee46c6`` (Spawner),
+        # ``3d1bd48`` (WorkIntent), ``b4a3e6b`` (Lease), ``d6c8796``
+        # (Dependency), ``d9f84d3`` (Messaging), ``ded641d`` (Handoff),
+        # ``e0c21a8`` (Change), ``8182c7a`` (Task), and ``64c3ff4``
+        # (Visibility) for the nine prior extractions in this series.
+        self._locking = Locking(
+            connect_fn=self._connect,
+            publish_event_fn=self._publish_event,
+            lock_cache=self._lock_cache,
             project_root_getter=lambda: self._storage.project_root,
         )
 
@@ -1050,6 +1080,102 @@ class CoordinationEngine(
             max_age_seconds=max_age_seconds,
         )
 
+    # ------------------------------------------------------------------ #
+    # Locking facade (T6.22)
+    # ------------------------------------------------------------------ #
+    # These one-liners delegate to ``self._locking`` (a :class:`Locking`
+    # composed in ``__init__``). They preserve the pre-extraction public
+    # API — MCP dispatch (``acquire_lock``, ``release_lock``,
+    # ``refresh_lock``, ``get_lock_status``, ``list_locks``,
+    # ``admin_locks``), CLI (``cli_locks.py``), hooks (``hooks/base.py``
+    # calls ``acquire_lock`` / ``release_lock`` / ``release_agent_locks``
+    # / ``reap_expired_locks``), housekeeping (``build_default_scheduler``
+    # calls ``engine.reap_expired_locks`` and ``engine.reap_stale_agents``),
+    # and tests all continue to call ``engine.acquire_lock(...)`` etc.
+    # verbatim. Critically, :class:`BroadcastMixin.wait_for_locks` calling
+    # ``self.get_lock_status`` and :class:`IdentityMixin.deregister_agent``
+    # calling ``self.release_agent_locks`` both still resolve because the
+    # facade methods stay on the engine class.
+
+    def acquire_lock(
+        self, document_path: str, agent_id: str,
+        lock_type: str = "exclusive", ttl: float = 300.0, force: bool = False,
+        region_start: int | None = None, region_end: int | None = None,
+        retry: bool = False, max_retries: int = 5, backoff_ms: float = 100.0,
+        timeout_ms: float = 5000.0,
+    ) -> dict[str, Any]:
+        return self._locking.acquire_lock(
+            document_path=document_path,
+            agent_id=agent_id,
+            lock_type=lock_type,
+            ttl=ttl,
+            force=force,
+            region_start=region_start,
+            region_end=region_end,
+            retry=retry,
+            max_retries=max_retries,
+            backoff_ms=backoff_ms,
+            timeout_ms=timeout_ms,
+        )
+
+    def release_lock(
+        self, document_path: str, agent_id: str,
+        region_start: int | None = None, region_end: int | None = None,
+    ) -> dict[str, Any]:
+        return self._locking.release_lock(
+            document_path=document_path,
+            agent_id=agent_id,
+            region_start=region_start,
+            region_end=region_end,
+        )
+
+    def refresh_lock(
+        self, document_path: str, agent_id: str, ttl: float = 300.0,
+        region_start: int | None = None, region_end: int | None = None,
+    ) -> dict[str, Any]:
+        return self._locking.refresh_lock(
+            document_path=document_path,
+            agent_id=agent_id,
+            ttl=ttl,
+            region_start=region_start,
+            region_end=region_end,
+        )
+
+    def get_lock_status(self, document_path: str) -> dict[str, Any]:
+        return self._locking.get_lock_status(document_path=document_path)
+
+    def list_locks(
+        self, agent_id: str | None = None, force_refresh: bool = False,
+    ) -> dict[str, Any]:
+        return self._locking.list_locks(
+            agent_id=agent_id, force_refresh=force_refresh,
+        )
+
+    def admin_locks(
+        self,
+        action: str,
+        agent_id: str | None = None,
+        grace_seconds: float = 0.0,
+        timeout: float = 600.0,
+    ) -> dict[str, Any]:
+        return self._locking.admin_locks(
+            action=action,
+            agent_id=agent_id,
+            grace_seconds=grace_seconds,
+            timeout=timeout,
+        )
+
+    def release_agent_locks(self, agent_id: str) -> dict[str, Any]:
+        return self._locking.release_agent_locks(agent_id=agent_id)
+
+    def reap_expired_locks(self, agent_grace_seconds: float = 0.0) -> dict[str, Any]:
+        return self._locking.reap_expired_locks(
+            agent_grace_seconds=agent_grace_seconds,
+        )
+
+    def reap_stale_agents(self, timeout: float = 600.0) -> dict[str, Any]:
+        return self._locking.reap_stale_agents(timeout=timeout)
+
     def read_only_engine(self) -> "CoordinationEngine":
         """Return a read-only view of this engine using direct WAL reads.
 
@@ -1134,5 +1260,19 @@ class CoordinationEngine(
         # ``get_file_agent_map``, ``validate_graph``) only need
         # ``_connect`` rebound.
         replica._visibility._connect = replica._connect
+        # T6.22: and the Locking subsystem — the most complex of the
+        # series (commit tenth). ``_publish_event`` was captured in
+        # ``_locking.__init__`` against the replica's own callable;
+        # lock mutations (acquire / release / refresh / admin) through
+        # a read-only replica are not a supported flow, and read-only
+        # lock operations (``get_lock_status``, ``list_locks``) only
+        # need ``_connect`` rebound. The shared ``_lock_cache`` passed
+        # to the replica's ``Locking`` is the replica's own instance
+        # (constructed fresh in ``__init__``) so there is no cache
+        # rebind to do. The ``project_root_getter`` is a closure over
+        # ``self._storage`` so it already picks up the replica's
+        # storage without a rebind (same pattern as Change /
+        # Visibility — commits ``e0c21a8`` and ``64c3ff4``).
+        replica._locking._connect = replica._connect
         return replica
 

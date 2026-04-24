@@ -1,41 +1,90 @@
-"""Locking methods for CoordinationEngine.
+"""Locking subsystem — document lock acquire/release/refresh/list/admin.
 
-Broadcast / handoff / multi-lock wait primitives live in
-:mod:`core_broadcasts` so both modules stay under the project's 500-LOC
-budget. CoordinationEngine inherits from both mixins.
+T6.22 tenth step: extracted out of ``core_locking.LockingMixin`` into a
+standalone class. Coupling audit confirmed LockingMixin had zero
+cross-mixin method calls, zero ``_hybrid_wait`` calls, three
+``_publish_event`` calls (``lock.acquired`` on acquire, ``lock.released``
+on release and bulk release-by-agent), and stateful access to the
+shared ``LockCache`` instance plus ``_storage.project_root`` for path
+normalization.
+
+**Shared ``_lock_cache`` ownership.** Unlike prior extractions where the
+subsystem owned its own state, the :class:`LockCache` instance lives on
+the engine (created in ``CoordinationEngine.__init__`` and warmed in
+``start()``) and is passed into this subsystem as a shared reference.
+The engine still exposes ``self._lock_cache`` because:
+
+- Two remaining mixins on the MRO (:class:`BroadcastMixin` and
+  :class:`IdentityMixin`) reach into locking via ``self.`` lookups
+  (``self.get_lock_status`` from ``wait_for_locks``, and
+  ``self.release_agent_locks`` from ``deregister_agent``). Those calls
+  keep resolving via the engine's facade methods, which delegate here.
+- ``CoordinationEngine.start()`` warms the cache directly from SQLite.
+  Keeping the cache on the engine avoids a redundant indirection.
+
+Path access follows the closure pattern from :class:`WorkIntent`,
+:class:`Change`, and :class:`Visibility` (commits ``3d1bd48``,
+``e0c21a8``, ``64c3ff4``): ``project_root_getter`` is a callable so a
+replica produced by ``read_only_engine`` picks up its own storage root
+without a rebind.
+
+See commits ``1ee46c6`` (Spawner), ``3d1bd48`` (WorkIntent),
+``b4a3e6b`` (Lease), ``d6c8796`` (Dependency), ``d9f84d3`` (Messaging),
+``ded641d`` (Handoff), ``e0c21a8`` (Change), ``8182c7a`` (Task), and
+``64c3ff4`` (Visibility) for the nine prior extractions in this series.
+
+Delegates to: lock_ops (lock_ops.py), conflict_log (conflict_log.py),
+agent_registry (agent_registry.py), work_intent (work_intent.py),
+notifications (notifications.py), lock_cache (lock_cache.py — instance
+owned by the engine).
 """
 
 from __future__ import annotations
 
 import sqlite3
 import time
-from typing import Any
+from pathlib import Path
+from typing import Any, Callable
 
 from . import conflict_log as _cl
 from . import lock_ops as _lo
 from . import agent_registry as _ar
 from . import work_intent as _wi
 from . import notifications as _cn
+from .lock_cache import LockCache
 from .paths import normalize_path
 
 
-class LockingMixin:
-    """Mixin providing document locking methods.
+class Locking:
+    """Document locking — acquire/release/refresh/list/admin.
 
-    Expects the host class to provide:
-    - ``_connect() -> sqlite3.Connection``
-    - ``_storage.project_root``
-    - ``_lock_cache``
-    - ``_publish_event(topic, payload)``
-    - ``DEFAULT_TTL``
+    Constructed by :class:`CoordinationEngine` and exposed as
+    ``engine._locking``. The engine keeps facade methods for each
+    public operation so the existing tool API is preserved and so the
+    remaining mixins (:class:`BroadcastMixin`, :class:`IdentityMixin`)
+    keep resolving ``self.get_lock_status`` / ``self.release_agent_locks``
+    via the engine MRO.
     """
 
     # T6.23: renamed from DEFAULT_TTL to disambiguate from
-    # LeaseMixin.DEFAULT_TTL (10s). Both attrs would land on the same
-    # engine via multiple inheritance. DEFAULT_TTL kept as a back-compat
-    # alias.
+    # LeaseMixin.DEFAULT_TTL (10s). Both attrs would otherwise land on
+    # the same engine. DEFAULT_TTL kept as a back-compat alias.
     DEFAULT_LOCK_TTL = 300.0
     DEFAULT_TTL = DEFAULT_LOCK_TTL  # legacy alias
+
+    def __init__(
+        self,
+        connect_fn: Callable[[], Any],
+        publish_event_fn: Callable[[str, dict[str, Any]], None],
+        lock_cache: LockCache,
+        project_root_getter: Callable[[], Path | None],
+    ) -> None:
+        self._connect = connect_fn
+        self._publish_event = publish_event_fn
+        # Shared instance: the engine owns it (warmed in ``start()``)
+        # and may be read by other call sites via ``self._lock_cache``.
+        self._lock_cache = lock_cache
+        self._project_root_getter = project_root_getter
 
     def acquire_lock(
         self, document_path: str, agent_id: str,
@@ -51,8 +100,9 @@ class LockingMixin:
             backoff_ms: Starting backoff in milliseconds (default 100ms).
             timeout_ms: Total timeout in milliseconds (default 5000ms).
         """
-        norm_path = normalize_path(document_path, self._storage.project_root)
-        worktree = str(self._storage.project_root)
+        project_root = self._project_root_getter()
+        norm_path = normalize_path(document_path, project_root)
+        worktree = str(project_root)
         start_time = time.time()
         attempt = 0
         current_backoff_ms = backoff_ms
@@ -214,8 +264,9 @@ class LockingMixin:
             return None
         if not scope_paths:
             return None
+        project_root = self._project_root_getter()
         for scope_prefix in scope_paths:
-            norm_scope = normalize_path(scope_prefix, self._storage.project_root)
+            norm_scope = normalize_path(scope_prefix, project_root)
             # T3.23: compare path components rather than using raw
             # startswith. Pre-fix ``docs/security`` matched scope
             # ``docs/sec`` (character prefix, not path prefix). The
@@ -255,7 +306,7 @@ class LockingMixin:
         )
         _cn.notify_change(
             self._connect, norm_path, "boundary_crossing", agent_id,
-            str(self._storage.project_root),
+            str(self._project_root_getter()),
         )
         return {"owned_by": owner, "message": f"File is assigned to {owner} in file_ownership"}
 
@@ -290,7 +341,7 @@ class LockingMixin:
         self, document_path: str, agent_id: str,
         region_start: int | None = None, region_end: int | None = None,
     ) -> dict[str, Any]:
-        norm_path = normalize_path(document_path, self._storage.project_root)
+        norm_path = normalize_path(document_path, self._project_root_getter())
         with self._connect() as conn:
             if region_start is not None:
                 rows = conn.execute(
@@ -311,7 +362,10 @@ class LockingMixin:
                 return {"released": False, "reason": "not_owner"}
             for r in owned:
                 conn.execute("DELETE FROM document_locks WHERE id = ?", (r["id"],))
-            _cn.notify_change(self._connect, norm_path, "unlocked", agent_id, str(self._storage.project_root))
+            _cn.notify_change(
+                self._connect, norm_path, "unlocked", agent_id,
+                str(self._project_root_getter()),
+            )
             self._lock_cache.remove_lock(norm_path, agent_id, region_start, region_end)
             self._publish_event(
                 "lock.released",
@@ -328,7 +382,7 @@ class LockingMixin:
         self, document_path: str, agent_id: str, ttl: float = DEFAULT_LOCK_TTL,
         region_start: int | None = None, region_end: int | None = None,
     ) -> dict[str, Any]:
-        norm_path = normalize_path(document_path, self._storage.project_root)
+        norm_path = normalize_path(document_path, self._project_root_getter())
         now = time.time()
         with self._connect() as conn:
             result = _lo.refresh_lock(
@@ -343,7 +397,7 @@ class LockingMixin:
         return result
 
     def get_lock_status(self, document_path: str) -> dict[str, Any]:
-        norm_path = normalize_path(document_path, self._storage.project_root)
+        norm_path = normalize_path(document_path, self._project_root_getter())
         now = time.time()
         return self._lock_cache.get_status(norm_path, now)
 

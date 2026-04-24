@@ -163,7 +163,10 @@ class TestLockAcquisition:
         """
         import time as _time
         from coordinationhub import lock_ops as _lo
-        from coordinationhub import core_locking as _cl
+        # T6.22 step 10: LockingMixin extracted to locking_subsystem;
+        # the Locking class imports ``lock_ops`` as ``_lo`` so the
+        # monkey-patch still needs to land on that module reference.
+        from coordinationhub import locking_subsystem as _cl
         from .conftest import run_concurrent
 
         victim = engine.generate_agent_id()

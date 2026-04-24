@@ -130,7 +130,9 @@ class IdentityMixin:
     def deregister_agent(self, agent_id: str) -> dict[str, Any]:
         """Deregister an agent, release its locks, and orphan its children."""
         result = _ar.deregister_agent(self._connect, agent_id)
-        # Cross-mixin call via MRO: LockingMixin.release_agent_locks is on the host
+        # Cross-mixin call via MRO: resolves to the engine's facade for
+        # ``release_agent_locks`` which delegates to ``self._locking``
+        # (T6.22 — commit extracting :class:`Locking`).
         lock_result = self.release_agent_locks(agent_id)
         result["locks_released"] = lock_result.get("released", 0)
         self._publish_event("agent.deregistered", {"agent_id": agent_id})

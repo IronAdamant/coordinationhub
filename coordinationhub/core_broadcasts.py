@@ -1,8 +1,12 @@
 """BroadcastMixin — broadcast, handoff dispatch, and cross-agent waits.
 
-Extracted from :mod:`core_locking` so both modules stay under the 500-LOC
-budget. Expects the host class to also mix in :class:`LockingMixin`
-(it calls :py:meth:`get_lock_status` from there).
+Historically extracted from ``core_locking`` to stay under the 500-LOC
+budget. Post-T6.22 LockingMixin is itself extracted to
+:mod:`locking_subsystem` as :class:`Locking`; this mixin still calls
+:py:meth:`get_lock_status` on ``self`` and the engine's facade method
+delegates to ``self._locking`` so the MRO lookup keeps working. When
+Broadcast is itself extracted later in the series it will take an
+explicit ``locking`` dep instead of relying on MRO resolution.
 """
 
 from __future__ import annotations
@@ -25,7 +29,9 @@ class BroadcastMixin:
     - ``_storage.project_root``
     - ``_publish_event(topic, payload)``
     - ``_hybrid_wait(topics, filter_fn, timeout)``
-    - ``get_lock_status(document_path)``  (provided by :class:`LockingMixin`)
+    - ``get_lock_status(document_path)``  (facade on the engine — resolves
+      to ``self._locking.get_lock_status`` via the :class:`Locking`
+      subsystem post-T6.22)
     """
 
     def broadcast(
