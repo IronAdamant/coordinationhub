@@ -1616,10 +1616,9 @@ Block markers for multi-line content:
 | `coordinationhub/cli_vis.py` | 241 | Change awareness, audit, graph, and assessment CLI commands |
 | `coordinationhub/conflict_log.py` | 43 | Conflict recording and querying for CoordinationHub |
 | `coordinationhub/context.py` | 104 | Context bundle builder for CoordinationHub agent registration responses |
-| `coordinationhub/core.py` | 364 | CoordinationEngine — host class that composes mixins and subsystems |
+| `coordinationhub/core.py` | 423 | CoordinationEngine — host class that composes mixins and subsystems |
 | `coordinationhub/core_broadcasts.py` | 188 | BroadcastMixin — broadcast, handoff dispatch, and cross-agent waits |
 | `coordinationhub/core_change.py` | 191 | ChangeMixin — change notifications, file ownership, conflict audit, status |
-| `coordinationhub/core_dependencies.py` | 120 | DependencyMixin — cross-agent dependency declarations and checks |
 | `coordinationhub/core_handoffs.py` | 117 | HandoffMixin — one-to-many handoff acknowledgment and lifecycle |
 | `coordinationhub/core_identity.py` | 139 | IdentityMixin — agent lifecycle and lineage management |
 | `coordinationhub/core_locking.py` | 394 | Locking methods for CoordinationEngine |
@@ -1630,6 +1629,7 @@ Block markers for multi-line content:
 | `coordinationhub/db_migrations.py` | 399 | Schema-version tracking, migration functions, and the ``init_schema`` driver |
 | `coordinationhub/db_schemas.py` | 301 | Canonical SQLite schema definitions for CoordinationHub |
 | `coordinationhub/dependencies.py` | 140 | Cross-agent dependency declaration and satisfaction tracking |
+| `coordinationhub/dependency_subsystem.py` | 143 | Dependency subsystem — cross-agent dependency declarations and checks |
 | `coordinationhub/dispatch.py` | 107 | Tool dispatch for CoordinationHub |
 | `coordinationhub/event_bus.py` | 127 | Lightweight thread-safe in-memory pub-sub event bus for CoordinationHub |
 | `coordinationhub/handoffs.py` | 200 | Handoff recording and acknowledgement primitives for CoordinationHub |

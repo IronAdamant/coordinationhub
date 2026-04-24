@@ -1076,10 +1076,9 @@ keep it in sync; CI checks for drift on every push.
 | `coordinationhub/cli_vis.py` | 241 | Change awareness, audit, graph, and assessment CLI commands |
 | `coordinationhub/conflict_log.py` | 43 | Conflict recording and querying for CoordinationHub |
 | `coordinationhub/context.py` | 104 | Context bundle builder for CoordinationHub agent registration responses |
-| `coordinationhub/core.py` | 364 | CoordinationEngine — host class that composes mixins and subsystems |
+| `coordinationhub/core.py` | 423 | CoordinationEngine — host class that composes mixins and subsystems |
 | `coordinationhub/core_broadcasts.py` | 188 | BroadcastMixin — broadcast, handoff dispatch, and cross-agent waits |
 | `coordinationhub/core_change.py` | 191 | ChangeMixin — change notifications, file ownership, conflict audit, status |
-| `coordinationhub/core_dependencies.py` | 120 | DependencyMixin — cross-agent dependency declarations and checks |
 | `coordinationhub/core_handoffs.py` | 117 | HandoffMixin — one-to-many handoff acknowledgment and lifecycle |
 | `coordinationhub/core_identity.py` | 139 | IdentityMixin — agent lifecycle and lineage management |
 | `coordinationhub/core_locking.py` | 394 | Locking methods for CoordinationEngine |
@@ -1090,6 +1089,7 @@ keep it in sync; CI checks for drift on every push.
 | `coordinationhub/db_migrations.py` | 399 | Schema-version tracking, migration functions, and the ``init_schema`` driver |
 | `coordinationhub/db_schemas.py` | 301 | Canonical SQLite schema definitions for CoordinationHub |
 | `coordinationhub/dependencies.py` | 140 | Cross-agent dependency declaration and satisfaction tracking |
+| `coordinationhub/dependency_subsystem.py` | 143 | Dependency subsystem — cross-agent dependency declarations and checks |
 | `coordinationhub/dispatch.py` | 107 | Tool dispatch for CoordinationHub |
 | `coordinationhub/event_bus.py` | 127 | Lightweight thread-safe in-memory pub-sub event bus for CoordinationHub |
 | `coordinationhub/handoffs.py` | 200 | Handoff recording and acknowledgement primitives for CoordinationHub |
@@ -1179,10 +1179,9 @@ coordinationhub/
   cli_vis.py            — Change awareness, audit, graph, and assessment CLI commands (~241 LOC)
   conflict_log.py       — Conflict recording and querying for CoordinationHub (~43 LOC)
   context.py            — Context bundle builder for CoordinationHub agent registration responses (~104 LOC)
-  core.py               — CoordinationEngine — host class that composes mixins and subsystems (~364 LOC)
+  core.py               — CoordinationEngine — host class that composes mixins and subsystems (~423 LOC)
   core_broadcasts.py    — BroadcastMixin — broadcast, handoff dispatch, and cross-agent waits (~188 LOC)
   core_change.py        — ChangeMixin — change notifications, file ownership, conflict audit, status (~191 LOC)
-  core_dependencies.py  — DependencyMixin — cross-agent dependency declarations and checks (~120 LOC)
   core_handoffs.py      — HandoffMixin — one-to-many handoff acknowledgment and lifecycle (~117 LOC)
   core_identity.py      — IdentityMixin — agent lifecycle and lineage management (~139 LOC)
   core_locking.py       — Locking methods for CoordinationEngine (~394 LOC)
@@ -1193,6 +1192,7 @@ coordinationhub/
   db_migrations.py      — Schema-version tracking, migration functions, and the ``init_schema`` driver (~399 LOC)
   db_schemas.py         — Canonical SQLite schema definitions for CoordinationHub (~301 LOC)
   dependencies.py       — Cross-agent dependency declaration and satisfaction tracking (~140 LOC)
+  dependency_subsystem.py — Dependency subsystem — cross-agent dependency declarations and checks (~143 LOC)
   dispatch.py           — Tool dispatch for CoordinationHub (~107 LOC)
   event_bus.py          — Lightweight thread-safe in-memory pub-sub event bus for CoordinationHub (~127 LOC)
   handoffs.py           — Handoff recording and acknowledgement primitives for CoordinationHub (~200 LOC)

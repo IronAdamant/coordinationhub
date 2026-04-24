@@ -1,20 +1,46 @@
-"""DependencyMixin — cross-agent dependency declarations and checks.
+"""Dependency subsystem — cross-agent dependency declarations and checks.
 
-Expects the host class to provide:
-    self._connect() — callable returning a sqlite3 connection
+T6.22 fourth step: extracted out of ``core_dependencies.DependencyMixin``
+into a standalone class. Coupling audit confirmed DependencyMixin had
+zero cross-mixin method calls, zero ``_hybrid_wait`` calls, and four
+``_publish_event`` calls (on declare / satisfy). DB access is via
+``_connect``. Both are now injected as constructor dependencies — same
+two-dep shape as :class:`Lease` (see commit ``b4a3e6b``). See commits
+``1ee46c6`` (Spawner) and ``3d1bd48`` (WorkIntent) for the earlier
+three-dep extractions in this series. This continues breaking the
+god-object inheritance chain on ``CoordinationEngine`` without changing
+observable behaviour.
 
-Delegates to: dependencies (dependencies.py)
+Note on cross-subsystem calls: ``TaskMixin.update_task_status`` calls
+``_deps.satisfy_dependencies_for_task(...)`` directly against the
+primitive module — that's a primitive-layer call, not a mixin-to-mixin
+call, and is unaffected by this refactor.
+
+Delegates to: dependencies (dependencies.py) for dependency DB primitives.
 """
 
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, Callable
 
 from . import dependencies as _deps
 
 
-class DependencyMixin:
-    """Declarative dependency graph between agents."""
+class Dependency:
+    """Declarative dependency graph between agents.
+
+    Constructed by :class:`CoordinationEngine` and exposed as
+    ``engine._dependency``. The engine keeps facade methods for each
+    public operation so the existing tool API is preserved.
+    """
+
+    def __init__(
+        self,
+        connect_fn: Callable[[], Any],
+        publish_event_fn: Callable[[str, dict[str, Any]], None],
+    ) -> None:
+        self._connect = connect_fn
+        self._publish_event = publish_event_fn
 
     def declare_dependency(
         self,

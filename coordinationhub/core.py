@@ -9,7 +9,6 @@ IdentityMixin:    core_identity.py    — agent registration, heartbeat, lineage
 MessagingMixin:   core_messaging.py  — inter-agent messages, await
 TaskMixin:        core_tasks.py       — task registry with hierarchy
 HandoffMixin:     core_handoffs.py    — handoff acknowledgment tracking
-DependencyMixin:  core_dependencies.py — cross-agent dependency declarations
 ChangeMixin:      core_change.py      — change notifications, audit, status
 VisibilityMixin:  core_visibility.py  — coordination graph, scan, assessment
 
@@ -17,6 +16,7 @@ Composed subsystems (T6.22 — extracted from the mixin tree):
 Spawner:          spawner_subsystem.py     — sub-agent spawn management
 WorkIntent:       work_intent_subsystem.py — cooperative work intent board
 Lease:            lease_subsystem.py       — HA coordinator leadership leases
+Dependency:       dependency_subsystem.py  — cross-agent dependency declarations
 
 Zero third-party dependencies.
 """
@@ -44,12 +44,12 @@ from .core_identity import IdentityMixin
 from .core_messaging import MessagingMixin
 from .core_tasks import TaskMixin
 from .core_handoffs import HandoffMixin
-from .core_dependencies import DependencyMixin
 from .core_change import ChangeMixin
 from .core_visibility import VisibilityMixin
 from .spawner_subsystem import Spawner
 from .work_intent_subsystem import WorkIntent
 from .lease_subsystem import Lease
+from .dependency_subsystem import Dependency
 from .paths import detect_project_root
 from .plugins.graph import graphs as _g
 
@@ -61,7 +61,6 @@ class CoordinationEngine(
     MessagingMixin,
     TaskMixin,
     HandoffMixin,
-    DependencyMixin,
     ChangeMixin,
     VisibilityMixin,
 ):
@@ -71,8 +70,8 @@ class CoordinationEngine(
     Most domain methods are provided by the mixins. Subsystems
     extracted from the mixin tree (T6.22) hang off the engine as
     composed attributes — ``self._spawner``, ``self._work_intent``,
-    and ``self._lease`` — with facade methods on the engine
-    preserving the public API.
+    ``self._lease``, and ``self._dependency`` — with facade methods on
+    the engine preserving the public API.
     """
 
     DEFAULT_PORT = 9877
@@ -130,6 +129,19 @@ class CoordinationEngine(
         # identical. See commits ``1ee46c6`` (Spawner) and ``3d1bd48``
         # (WorkIntent) for the two prior extractions in this series.
         self._lease = Lease(
+            connect_fn=self._connect,
+            publish_event_fn=self._publish_event,
+        )
+        # T6.22: composed subsystem replaces DependencyMixin. Per the
+        # coupling audit DependencyMixin had zero cross-mixin calls and
+        # zero ``_hybrid_wait`` calls — it only needed ``_connect`` and
+        # four ``_publish_event`` notifications for declare/satisfy.
+        # Same two-dep shape as :class:`Lease` (commit ``b4a3e6b``).
+        # ``TaskMixin.update_task_status`` still calls
+        # ``_deps.satisfy_dependencies_for_task(...)`` against the
+        # primitive module directly; that's a primitive-layer call, not
+        # a mixin-to-mixin one, so the refactor leaves it untouched.
+        self._dependency = Dependency(
             connect_fn=self._connect,
             publish_event_fn=self._publish_event,
         )
@@ -460,6 +472,75 @@ class CoordinationEngine(
     ) -> dict[str, Any]:
         return self._lease.claim_leadership(agent_id=agent_id, ttl=ttl)
 
+    # ------------------------------------------------------------------ #
+    # Dependency facade (T6.22)
+    # ------------------------------------------------------------------ #
+    # These one-liners delegate to ``self._dependency`` (a
+    # :class:`Dependency` composed in ``__init__``). They preserve the
+    # pre-extraction public API — MCP dispatch (``manage_dependencies``),
+    # CLI (``cli_deps.py``), and tests all continue to call
+    # ``engine.declare_dependency(...)`` etc. verbatim.
+
+    def declare_dependency(
+        self,
+        dependent_agent_id: str,
+        depends_on_agent_id: str,
+        depends_on_task_id: str | None = None,
+        condition: str = "task_completed",
+    ) -> dict[str, Any]:
+        return self._dependency.declare_dependency(
+            dependent_agent_id=dependent_agent_id,
+            depends_on_agent_id=depends_on_agent_id,
+            depends_on_task_id=depends_on_task_id,
+            condition=condition,
+        )
+
+    def manage_dependencies(
+        self,
+        mode: str,
+        agent_id: str | None = None,
+        dependent_agent_id: str | None = None,
+        depends_on_agent_id: str | None = None,
+        depends_on_task_id: str | None = None,
+        condition: str = "task_completed",
+        dep_id: int | None = None,
+        timeout_s: float = 60.0,
+        poll_interval_s: float = 2.0,
+    ) -> dict[str, Any]:
+        return self._dependency.manage_dependencies(
+            mode=mode,
+            agent_id=agent_id,
+            dependent_agent_id=dependent_agent_id,
+            depends_on_agent_id=depends_on_agent_id,
+            depends_on_task_id=depends_on_task_id,
+            condition=condition,
+            dep_id=dep_id,
+            timeout_s=timeout_s,
+            poll_interval_s=poll_interval_s,
+        )
+
+    def satisfy_dependency(self, dep_id: int) -> dict[str, Any]:
+        return self._dependency.satisfy_dependency(dep_id=dep_id)
+
+    def get_all_dependencies(
+        self, dependent_agent_id: str | None = None,
+    ) -> dict[str, Any]:
+        return self._dependency.get_all_dependencies(
+            dependent_agent_id=dependent_agent_id,
+        )
+
+    def wait_for_dependency(
+        self,
+        dep_id: int,
+        timeout_s: float = 60.0,
+        poll_interval_s: float = 2.0,
+    ) -> dict[str, Any]:
+        return self._dependency.wait_for_dependency(
+            dep_id=dep_id,
+            timeout_s=timeout_s,
+            poll_interval_s=poll_interval_s,
+        )
+
     def read_only_engine(self) -> "CoordinationEngine":
         """Return a read-only view of this engine using direct WAL reads.
 
@@ -490,5 +571,11 @@ class CoordinationEngine(
         # against the replica's (unused) writer pool; lease mutations
         # through a read-only replica are not a supported flow.
         replica._lease._connect = replica._connect
+        # T6.22: and the Dependency subsystem — same pattern. Same
+        # ``_publish_event`` rationale as Lease: the replica captured
+        # its own ``_publish_event`` in ``_dependency.__init__`` and
+        # dependency mutations through a read-only replica are not a
+        # supported flow.
+        replica._dependency._connect = replica._connect
         return replica
 
