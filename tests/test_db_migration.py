@@ -324,3 +324,99 @@ class TestFreshInstall:
             "FROM document_locks WHERE locked_by = ? AND locked_at + lock_ttl > ?",
             ("hub.any", 0.0),
         ).fetchall()
+
+
+class TestStatusCheckTriggers:
+    """T4.2 / T4.5: BEFORE INSERT/UPDATE triggers reject invalid enum
+    values on ``tasks.status`` and ``pending_tasks.status``. Installed
+    by schema migration v26.
+    """
+
+    def test_tasks_status_trigger_rejects_bad_value_on_update(self, tmp_path):
+        db = tmp_path / "t.db"
+        conn = sqlite3.connect(db)
+        init_schema(conn)
+        # Register a prerequisite agent row + a task.
+        conn.execute(
+            "INSERT INTO agents (agent_id, status, last_heartbeat, worktree_root, started_at) "
+            "VALUES (?, ?, ?, ?, ?)",
+            ("p.1", "active", 0.0, "/tmp", 0.0),
+        )
+        conn.execute(
+            "INSERT INTO tasks (id, parent_agent_id, description, status, created_at, updated_at) "
+            "VALUES (?, ?, ?, ?, ?, ?)",
+            ("t1", "p.1", "d", "pending", 0.0, 0.0),
+        )
+        conn.commit()
+        # Bad transition must be aborted by the trigger.
+        with pytest.raises(sqlite3.IntegrityError, match="tasks.status"):
+            conn.execute("UPDATE tasks SET status = ? WHERE id = ?",
+                         ("not_a_state", "t1"))
+        # Valid transition still works.
+        conn.execute("UPDATE tasks SET status = ? WHERE id = ?",
+                     ("in_progress", "t1"))
+        conn.commit()
+        row = conn.execute("SELECT status FROM tasks WHERE id = ?", ("t1",)).fetchone()
+        assert row[0] == "in_progress"
+
+    def test_tasks_status_trigger_rejects_bad_value_on_insert(self, tmp_path):
+        db = tmp_path / "t.db"
+        conn = sqlite3.connect(db)
+        init_schema(conn)
+        conn.execute(
+            "INSERT INTO agents (agent_id, status, last_heartbeat, worktree_root, started_at) "
+            "VALUES (?, ?, ?, ?, ?)",
+            ("p.1", "active", 0.0, "/tmp", 0.0),
+        )
+        conn.commit()
+        with pytest.raises(sqlite3.IntegrityError, match="tasks.status"):
+            conn.execute(
+                "INSERT INTO tasks (id, parent_agent_id, description, status, created_at, updated_at) "
+                "VALUES (?, ?, ?, ?, ?, ?)",
+                ("t1", "p.1", "d", "garbage", 0.0, 0.0),
+            )
+
+    def test_pending_tasks_status_trigger(self, tmp_path):
+        db = tmp_path / "t.db"
+        conn = sqlite3.connect(db)
+        init_schema(conn)
+        # Valid insert.
+        conn.execute(
+            "INSERT INTO pending_tasks (task_id, scope_id, status, created_at) "
+            "VALUES (?, ?, ?, ?)",
+            ("s1", "p.1", "pending", 0.0),
+        )
+        conn.commit()
+        # Invalid update blocked.
+        with pytest.raises(sqlite3.IntegrityError, match="pending_tasks.status"):
+            conn.execute(
+                "UPDATE pending_tasks SET status = ? WHERE task_id = ?",
+                ("bogus", "s1"),
+            )
+        # Valid transition still works.
+        conn.execute(
+            "UPDATE pending_tasks SET status = ? WHERE task_id = ?",
+            ("registered", "s1"),
+        )
+        conn.commit()
+        row = conn.execute(
+            "SELECT status FROM pending_tasks WHERE task_id = ?", ("s1",),
+        ).fetchone()
+        assert row[0] == "registered"
+
+    def test_triggers_are_installed_on_fresh_db(self, tmp_path):
+        """CREATE TRIGGER IF NOT EXISTS means fresh DBs get the triggers
+        via init_schema; verify via sqlite_master that the four
+        triggers are present after one-shot init."""
+        db = tmp_path / "t.db"
+        conn = sqlite3.connect(db)
+        init_schema(conn)
+        names = {
+            row[0] for row in conn.execute(
+                "SELECT name FROM sqlite_master WHERE type='trigger'"
+            )
+        }
+        assert "trg_tasks_status_check_insert" in names
+        assert "trg_tasks_status_check_update" in names
+        assert "trg_pending_tasks_status_check_insert" in names
+        assert "trg_pending_tasks_status_check_update" in names

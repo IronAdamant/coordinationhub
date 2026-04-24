@@ -15,7 +15,7 @@ import time
 from .db_schemas import _SCHEMAS, _INDEXES
 
 
-_CURRENT_SCHEMA_VERSION = 25
+_CURRENT_SCHEMA_VERSION = 26
 
 
 def _get_schema_version(conn: sqlite3.Connection) -> int:
@@ -69,6 +69,74 @@ def _migrate_v2_to_v3(conn: sqlite3.Connection) -> None:
         return
     conn.execute("ALTER TABLE agents ADD COLUMN claude_agent_id TEXT")
     conn.execute("CREATE INDEX IF NOT EXISTS idx_agents_claude_id ON agents(claude_agent_id)")
+
+
+def _migrate_v25_to_v26(conn: sqlite3.Connection) -> None:
+    """Install BEFORE INSERT/UPDATE triggers enforcing status enums on
+    ``tasks`` and ``pending_tasks`` (T4.2, T4.5).
+
+    SQLite cannot add CHECK constraints in place without a full table
+    rebuild. Triggers deliver the same guarantee (reject writes with an
+    invalid enum value) without the rebuild risk, and they're
+    idempotent via ``CREATE TRIGGER IF NOT EXISTS``.
+
+    tasks.status enum matches ``tasks.py::_VALID_TASK_STATUSES``.
+    pending_tasks.status covers the four states produced by the
+    spawner pipeline: pending (stashed), registered (child_agent_id
+    attached), consumed (legacy synonym for registered), expired
+    (cancelled or TTL-reaped).
+    """
+    # CREATE TRIGGER IF NOT EXISTS is idempotent. Each trigger is
+    # issued as a separate ``execute`` (not ``executescript``) because
+    # the migration driver wraps this call in BEGIN / COMMIT and
+    # ``executescript`` implicitly commits, which breaks the outer
+    # transaction boundary.
+    conn.execute("""
+        CREATE TRIGGER IF NOT EXISTS trg_tasks_status_check_insert
+        BEFORE INSERT ON tasks
+        FOR EACH ROW
+        WHEN NEW.status NOT IN (
+            'pending', 'in_progress', 'completed', 'blocked',
+            'failed', 'dead_letter'
+        )
+        BEGIN
+            SELECT RAISE(ABORT, 'tasks.status: invalid enum value');
+        END
+    """)
+    conn.execute("""
+        CREATE TRIGGER IF NOT EXISTS trg_tasks_status_check_update
+        BEFORE UPDATE OF status ON tasks
+        FOR EACH ROW
+        WHEN NEW.status NOT IN (
+            'pending', 'in_progress', 'completed', 'blocked',
+            'failed', 'dead_letter'
+        )
+        BEGIN
+            SELECT RAISE(ABORT, 'tasks.status: invalid enum value');
+        END
+    """)
+    conn.execute("""
+        CREATE TRIGGER IF NOT EXISTS trg_pending_tasks_status_check_insert
+        BEFORE INSERT ON pending_tasks
+        FOR EACH ROW
+        WHEN NEW.status NOT IN (
+            'pending', 'registered', 'consumed', 'expired'
+        )
+        BEGIN
+            SELECT RAISE(ABORT, 'pending_tasks.status: invalid enum value');
+        END
+    """)
+    conn.execute("""
+        CREATE TRIGGER IF NOT EXISTS trg_pending_tasks_status_check_update
+        BEFORE UPDATE OF status ON pending_tasks
+        FOR EACH ROW
+        WHEN NEW.status NOT IN (
+            'pending', 'registered', 'consumed', 'expired'
+        )
+        BEGIN
+            SELECT RAISE(ABORT, 'pending_tasks.status: invalid enum value');
+        END
+    """)
 
 
 def _migrate_v24_to_v25(conn: sqlite3.Connection) -> None:
@@ -368,6 +436,7 @@ _MIGRATIONS = {
     23: _migrate_v22_to_v23,  # work_intent PK: (agent_id, document_path) (T1.16)
     24: _migrate_v23_to_v24,  # agents.ide_vendor + unique(raw_ide_id, ide_vendor) (T3.12)
     25: _migrate_v24_to_v25,  # tasks.error column (T6.39)
+    26: _migrate_v25_to_v26,  # tasks/pending_tasks status CHECK triggers (T4.2, T4.5)
 }
 
 
