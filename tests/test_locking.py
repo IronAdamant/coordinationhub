@@ -814,6 +814,116 @@ class TestGetMessagesNoAutoAck:
         assert status["pending_acks"] == []
 
 
+class TestDeniedAcquireLogged:
+    """T6.31: normal denied acquires (no force=True) must be recorded
+    in the conflict log. Pre-fix only force-steals were logged, so
+    ``get_conflicts`` saw only a fraction of actual contention.
+    """
+
+    def test_denied_acquire_logs_as_denied(self, engine, two_agents):
+        a = two_agents["child"]
+        b = two_agents["other"]
+        engine.acquire_lock("/a.txt", a)
+        # Second agent's non-force acquire is denied.
+        result = engine.acquire_lock("/a.txt", b)
+        assert result["acquired"] is False
+
+        conflicts = engine.get_conflicts(document_path="/a.txt")["conflicts"]
+        denied = [c for c in conflicts if c.get("conflict_type") == "denied"]
+        assert len(denied) == 1
+        assert denied[0]["agent_b"] == b  # the requester
+        assert denied[0]["agent_a"] == a  # the current holder
+        assert denied[0].get("resolution") == "rejected"
+
+    def test_force_steal_still_logs_as_stolen(self, engine, two_agents):
+        """T1.1 regression guard — the force path uses its own conflict_type
+        (``lock_stolen``) and must not collide with the new ``denied`` type.
+        """
+        a = two_agents["child"]
+        b = two_agents["other"]
+        engine.acquire_lock("/b.txt", a)
+        engine.acquire_lock("/b.txt", b, force=True)
+        conflicts = engine.get_conflicts(document_path="/b.txt")["conflicts"]
+        stolen = [c for c in conflicts if c.get("conflict_type") == "lock_stolen"]
+        assert len(stolen) == 1
+
+
+class TestAcknowledgeBroadcastIdempotency:
+    """T6.26: acknowledge_broadcast now surfaces ``already_acked: bool``
+    so callers can distinguish a fresh ack from a duplicate without
+    re-reading the broadcast status.
+    """
+
+    def _heartbeat(self, engine, *ids):
+        for aid in ids:
+            engine.heartbeat(aid)
+
+    def test_first_ack_reports_not_already_acked(self, engine, two_agents):
+        self._heartbeat(engine, two_agents["parent"], two_agents["child"], two_agents["other"])
+        broadcast = engine.broadcast(two_agents["child"], require_ack=True, message="m")
+        result = engine.acknowledge_broadcast(broadcast["broadcast_id"], two_agents["other"])
+        assert result["acknowledged"] is True
+        assert result["already_acked"] is False
+
+    def test_duplicate_ack_reports_already_acked(self, engine, two_agents):
+        self._heartbeat(engine, two_agents["parent"], two_agents["child"], two_agents["other"])
+        broadcast = engine.broadcast(two_agents["child"], require_ack=True, message="m")
+        bid = broadcast["broadcast_id"]
+        first = engine.acknowledge_broadcast(bid, two_agents["other"])
+        second = engine.acknowledge_broadcast(bid, two_agents["other"])
+        assert first["already_acked"] is False
+        assert second["already_acked"] is True
+        # Status is still correct — one distinct ack.
+        status = engine.get_broadcast_status(bid)
+        assert status["acknowledged_by"] == [two_agents["other"]]
+
+
+class TestGetMessagesSinceIdCursor:
+    """T6.25: ``since_id`` enables cursor-based incremental polling.
+    Without it, ``ORDER BY created_at DESC`` produces indeterminate
+    ordering on ties (two messages created in the same 1-ms bucket)
+    and callers can't reliably page forward.
+    """
+
+    def test_since_id_returns_only_newer_messages(self, engine, two_agents):
+        a = two_agents["child"]
+        b = two_agents["other"]
+        # Three messages: 1, 2, 3
+        r1 = engine.send_message(a, b, "hi", payload={"n": 1})
+        r2 = engine.send_message(a, b, "hi", payload={"n": 2})
+        r3 = engine.send_message(a, b, "hi", payload={"n": 3})
+
+        # Pull everything. newest-first ordering means id 3 is first.
+        first = engine.get_messages(b)
+        assert first["count"] == 3
+        highest = max(m["id"] for m in first["messages"])
+        assert highest == r3["message_id"]
+
+        # since_id equal to the highest should return nothing.
+        empty = engine.get_messages(b, since_id=highest)
+        assert empty["count"] == 0
+
+        # since_id below the middle message returns only the two newer.
+        middle_id = r2["message_id"]
+        newer = engine.get_messages(b, since_id=middle_id - 1)
+        ids = {m["id"] for m in newer["messages"]}
+        assert r2["message_id"] in ids
+        assert r3["message_id"] in ids
+        assert r1["message_id"] not in ids
+
+    def test_since_id_respects_unread_only(self, engine, two_agents):
+        a = two_agents["child"]
+        b = two_agents["other"]
+        r1 = engine.send_message(a, b, "hi", payload={})
+        engine.mark_messages_read(b, message_ids=[r1["message_id"]])
+        r2 = engine.send_message(a, b, "hi", payload={})
+
+        # since_id=0 + unread_only should return only r2.
+        result = engine.get_messages(b, unread_only=True, since_id=0)
+        assert result["count"] == 1
+        assert result["messages"][0]["id"] == r2["message_id"]
+
+
 class TestScopeBoundaryPrecision:
     """T3.23: scope check must compare path components, not character
     prefixes. Pre-fix ``docs/security`` leaked through a scope of

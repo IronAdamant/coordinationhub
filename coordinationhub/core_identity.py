@@ -11,7 +11,6 @@ Delegates to: agent_registry (agent_registry.py)
 
 from __future__ import annotations
 
-import os
 import time
 from typing import Any
 
@@ -37,7 +36,7 @@ class IdentityMixin:
             connect_fn=self._connect,
             agent_id=agent_id,
             parent_id=parent_id,
-            project_root=str(self._storage.project_root) if self._storage.project_root else os.getcwd(),
+            project_root=str(self._storage.effective_worktree_root),
             graph_getter=_g.get_graph,
             list_agents_fn=_ar.list_agents,
             default_port=self.DEFAULT_PORT,
@@ -71,9 +70,11 @@ class IdentityMixin:
         if an active agent already exists at ``agent_id`` under a different PID
         (T1.2 cross-process collision guard).
         """
-        worktree = worktree_root or (
-            str(self._storage.project_root) if self._storage.project_root else os.getcwd()
-        )
+        # T6.16: fall back to the storage-level ``effective_worktree_root``
+        # which was captured at engine init. Prior code re-read ``os.getcwd()``
+        # per call, so a chdir mid-run would give different agents different
+        # roots.
+        worktree = worktree_root or str(self._storage.effective_worktree_root)
         ar_result = _ar.register_agent(
             self._connect, agent_id, worktree, parent_id,
             raw_ide_id=raw_ide_id, ide_vendor=ide_vendor,

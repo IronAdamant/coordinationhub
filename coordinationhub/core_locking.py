@@ -81,6 +81,16 @@ class LockingMixin:
                     conn, "document_locks", norm_path, agent_id, lock_type, region_start, region_end,
                 )
                 if conflicts and not force:
+                    # T6.31: log every denied acquire (not just force-steals).
+                    # Joins the outer BEGIN IMMEDIATE tx so the log write
+                    # and the denial are atomic. Pre-fix get_conflicts only
+                    # saw forced-steal events; normal contention was invisible.
+                    for c in conflicts:
+                        _lo.record_conflict(
+                            conn, "lock_conflicts", norm_path,
+                            c["locked_by"], agent_id,
+                            "denied", resolution="rejected",
+                        )
                     conn.execute("COMMIT")
                     first = conflicts[0]
                     result = {
@@ -384,7 +394,7 @@ class LockingMixin:
             if not agent_id:
                 return {"error": "agent_id is required for release_by_agent"}
             with self._connect() as conn:
-                result = _lo.release_agent_locks(conn, "document_locks", agent_id, delete=True)
+                result = _lo.release_agent_locks(conn, "document_locks", agent_id)
             removed = self._lock_cache.remove_by_agent(agent_id)
             if removed:
                 self._publish_event(

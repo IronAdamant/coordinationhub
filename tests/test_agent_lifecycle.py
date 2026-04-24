@@ -2,7 +2,59 @@
 
 from __future__ import annotations
 
+from pathlib import Path
+
 import pytest
+
+from coordinationhub.core import CoordinationEngine
+
+
+class TestWorktreeRootStableAcrossChdir:
+    """T6.16: ``worktree_root`` is resolved once at engine init. A later
+    ``os.chdir`` in the hub process does not affect agents registered
+    afterwards — pre-fix each new registration called ``os.getcwd()``
+    afresh and handed out whatever the current directory happened to be.
+    """
+
+    def test_register_uses_init_time_cwd_when_no_project_root(
+        self, tmp_path, monkeypatch
+    ):
+        # Construct an engine in tmp_path WITHOUT an explicit project_root so
+        # the cwd-capture path is exercised.
+        original = tmp_path / "home"
+        other = tmp_path / "other"
+        original.mkdir()
+        other.mkdir()
+        monkeypatch.chdir(original)
+
+        storage_dir = tmp_path / "_storage"
+        storage_dir.mkdir()
+        eng = CoordinationEngine(storage_dir=str(storage_dir))  # no project_root
+        eng.start()
+        try:
+            # chdir AFTER engine construction — must not change what agents see.
+            monkeypatch.chdir(other)
+            aid = eng.generate_agent_id()
+            result = eng.register_agent(aid)
+            assert Path(result["worktree_root"]).resolve() == original.resolve(), (
+                f"Agent got worktree_root={result['worktree_root']!r}; "
+                f"expected the init-time cwd {str(original)!r}, not the "
+                f"post-chdir cwd {str(other)!r}. T6.16 regression."
+            )
+        finally:
+            eng.close()
+
+    def test_effective_worktree_root_equals_project_root_when_set(self, tmp_path):
+        storage_dir = tmp_path / "_storage"
+        storage_dir.mkdir()
+        root = tmp_path / "my_project"
+        root.mkdir()
+        eng = CoordinationEngine(storage_dir=str(storage_dir), project_root=root)
+        eng.start()
+        try:
+            assert eng._storage.effective_worktree_root == root.resolve()
+        finally:
+            eng.close()
 
 
 class TestAgentRegistration:

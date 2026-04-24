@@ -38,6 +38,7 @@ TOOL_SCHEMAS_MESSAGING: dict[str, dict] = {
                 "unread_only": {"type": "boolean", "default": False, "description": "Only unread messages for get"},
                 "limit": {"type": "integer", "default": 50, "description": "Max messages for get"},
                 "message_ids": {"type": "array", "items": {"type": "integer"}, "description": "Specific IDs for mark_read"},
+                "since_id": {"type": "integer", "description": "Return only messages with id > since_id (cursor for incremental polling, action='get')"},
             },
             "required": ["action", "agent_id"],
         },

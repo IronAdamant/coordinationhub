@@ -50,7 +50,7 @@ TOOL_DISPATCH: dict[str, tuple[str, list[str]]] = {
     "run_assessment": ("run_assessment", ["suite_path", "format", "graph_agent_id", "scope"]),
     # Messaging
     "send_message": ("send_message", ["from_agent_id", "to_agent_id", "message_type", "payload"]),
-    "manage_messages": ("manage_messages", ["action", "agent_id", "from_agent_id", "to_agent_id", "message_type", "payload", "unread_only", "limit", "message_ids"]),
+    "manage_messages": ("manage_messages", ["action", "agent_id", "from_agent_id", "to_agent_id", "message_type", "payload", "unread_only", "limit", "message_ids", "since_id"]),
     # Task Registry
     "create_task": ("create_task", ["task_id", "parent_agent_id", "description", "depends_on", "priority"]),
     "assign_task": ("assign_task", ["task_id", "assigned_agent_id"]),

@@ -223,17 +223,18 @@ def release_agent_locks(
     conn: sqlite3.Connection,
     table: str,
     agent_id: str,
-    delete: bool = True,
 ) -> dict[str, int]:
-    """Release all locks held by a given agent. Returns rowcount via 'released' key."""
-    if delete:
-        cursor = conn.execute(
-            f"DELETE FROM {table} WHERE locked_by = ?",
-            (agent_id,),
-        )
-    else:
-        cursor = conn.execute(
-            f"UPDATE {table} SET locked_by = NULL WHERE locked_by = ?",
-            (agent_id,),
-        )
+    """Release (delete) all locks held by a given agent.
+
+    T6.34: the prior ``delete=False`` mode SET locked_by=NULL on the row
+    and relied on callers to reap the orphan. Nothing used the option —
+    grep showed zero external call sites — and the cache path had no
+    handling for NULL-owner rows so they would accumulate undetected.
+    The option has been removed; all callers now take the same
+    ``DELETE`` path.
+    """
+    cursor = conn.execute(
+        f"DELETE FROM {table} WHERE locked_by = ?",
+        (agent_id,),
+    )
     return {"released": cursor.rowcount}

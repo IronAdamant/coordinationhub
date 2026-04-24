@@ -33,6 +33,7 @@ class MessagingMixin:
         unread_only: bool = False,
         limit: int = 50,
         message_ids: list[int] | None = None,
+        since_id: int | None = None,
     ) -> dict[str, Any]:
         """Unified messaging: send | get | mark_read."""
         if action == "send":
@@ -56,7 +57,10 @@ class MessagingMixin:
             # crash between fetching the message and acting on it no
             # longer produces a ghost-ack. Callers that want the old
             # implicit-ack semantics can opt in via auto_ack=True.
-            messages = _msg.get_messages(self._connect, agent_id, unread_only, limit)
+            # T6.25: ``since_id`` supports incremental polling.
+            messages = _msg.get_messages(
+                self._connect, agent_id, unread_only, limit, since_id=since_id,
+            )
             return {"messages": messages, "count": len(messages)}
         if action == "mark_read":
             return _msg.mark_messages_read(self._connect, agent_id, message_ids)
@@ -84,14 +88,20 @@ class MessagingMixin:
 
     def get_messages(
         self, agent_id: str, unread_only: bool = False, limit: int = 50,
+        since_id: int | None = None,
     ) -> dict[str, Any]:
         """Get messages for an agent.
 
         T6.24: read is now read-only. Acknowledging a broadcast must be
         an explicit call to ``acknowledge_broadcast`` — a crash between
         fetching and acting on a message no longer ghost-acks it.
+
+        T6.25: ``since_id`` enables cursor-based incremental polling;
+        pass the previous batch's highest id to get only newer messages.
         """
-        messages = _msg.get_messages(self._connect, agent_id, unread_only, limit)
+        messages = _msg.get_messages(
+            self._connect, agent_id, unread_only, limit, since_id=since_id,
+        )
         return {"messages": messages, "count": len(messages)}
 
     def mark_messages_read(

@@ -38,23 +38,32 @@ def get_messages(
     agent_id: str,
     unread_only: bool = False,
     limit: int = 50,
+    since_id: int | None = None,
 ) -> list[dict[str, Any]]:
-    """Get messages for an agent, optionally filtering to unread only."""
+    """Get messages for an agent, optionally filtering to unread only.
+
+    T6.25: ``since_id`` is a monotonic cursor — pass the highest
+    ``id`` from the previous batch and subsequent calls return only
+    messages with a strictly greater id. Timestamp ordering is kept
+    for display (newest first), but the filter lets pollers make
+    progress without relying on indeterminate ``ORDER BY created_at``
+    tie-breaks.
+    """
+    clauses = ["to_agent_id = ?"]
+    params: list[Any] = [agent_id]
+    if unread_only:
+        clauses.append("read_at IS NULL")
+    if since_id is not None:
+        clauses.append("id > ?")
+        params.append(since_id)
+    where = " AND ".join(clauses)
+    params.append(limit)
     with connect() as conn:
-        if unread_only:
-            rows = conn.execute(
-                """SELECT * FROM messages
-                WHERE to_agent_id = ? AND read_at IS NULL
-                ORDER BY created_at DESC LIMIT ?""",
-                (agent_id, limit),
-            ).fetchall()
-        else:
-            rows = conn.execute(
-                """SELECT * FROM messages
-                WHERE to_agent_id = ?
-                ORDER BY created_at DESC LIMIT ?""",
-                (agent_id, limit),
-            ).fetchall()
+        rows = conn.execute(
+            f"SELECT * FROM messages WHERE {where} "
+            "ORDER BY created_at DESC, id DESC LIMIT ?",
+            tuple(params),
+        ).fetchall()
         messages = []
         for row in rows:
             d = dict(row)

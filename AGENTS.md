@@ -15,10 +15,10 @@ Zero third-party dependencies in core. Works standalone or alongside Stele, Chis
 coordinationhub/
   __init__.py           — CoordinationHub — multi-agent swarm coordination MCP server (~14 LOC)
   __main__.py           — ``python -m coordinationhub`` entry point — delegates to :mod:`cli` (~10 LOC)
-  _storage.py           — Storage backend for CoordinationHub — SQLite pool, path resolution, lifecycle (~122 LOC)
+  _storage.py           — Storage backend for CoordinationHub — SQLite pool, path resolution, lifecycle (~133 LOC)
   agent_registry.py     — Agent lifecycle: register, heartbeat, deregister, lineage management (~424 LOC)
   agent_status.py       — Agent status and file-map query helpers for CoordinationHub (~282 LOC)
-  broadcasts.py         — Broadcast acknowledgment primitives for CoordinationHub (~134 LOC)
+  broadcasts.py         — Broadcast acknowledgment primitives for CoordinationHub (~146 LOC)
   cli.py                — CoordinationHub CLI — command-line interface for all coordination tool methods (~102 LOC)
   cli_agents.py         — Agent identity and lifecycle CLI commands (~110 LOC)
   cli_commands.py       — CoordinationHub CLI command handlers (~98 LOC)
@@ -41,10 +41,10 @@ coordinationhub/
   core_change.py        — ChangeMixin — change notifications, file ownership, conflict audit, status (~182 LOC)
   core_dependencies.py  — DependencyMixin — cross-agent dependency declarations and checks (~120 LOC)
   core_handoffs.py      — HandoffMixin — one-to-many handoff acknowledgment and lifecycle (~117 LOC)
-  core_identity.py      — IdentityMixin — agent lifecycle and lineage management (~125 LOC)
+  core_identity.py      — IdentityMixin — agent lifecycle and lineage management (~122 LOC)
   core_leases.py        — LeaseMixin — HA coordinator lease management (~149 LOC)
-  core_locking.py       — Locking methods for CoordinationEngine (~388 LOC)
-  core_messaging.py     — MessagingMixin — inter-agent messages and await (~113 LOC)
+  core_locking.py       — Locking methods for CoordinationEngine (~394 LOC)
+  core_messaging.py     — MessagingMixin — inter-agent messages and await (~121 LOC)
   core_spawner.py       — SpawnerMixin — HA coordinator sub-agent spawn management (~196 LOC)
   core_tasks.py         — TaskMixin — shared task registry with hierarchy support (~200 LOC)
   core_visibility.py    — VisibilityMixin — coordination graph, project scan, agent status, assessment (~127 LOC)
@@ -61,7 +61,7 @@ coordinationhub/
   lock_ops.py           — Shared lock primitives used by both local locks and coordination locks (~204 LOC)
   mcp_server.py         — HTTP-based MCP server for CoordinationHub — zero external dependencies (~469 LOC)
   mcp_stdio.py          — Stdio-based MCP server for CoordinationHub using the ``mcp`` Python package (~147 LOC)
-  messages.py           — Inter-agent messaging primitives for CoordinationHub (~90 LOC)
+  messages.py           — Inter-agent messaging primitives for CoordinationHub (~98 LOC)
   notifications.py      — Change notification storage and retrieval for CoordinationHub (~136 LOC)
   paths.py              — Path normalization and project-root detection utilities (~38 LOC)
   pending_tasks.py      — Pending sub-agent task storage for CoordinationHub (~106 LOC)
@@ -104,14 +104,14 @@ coordinationhub/
     intent.py           — Work Intent Board tool schemas for CoordinationHub (~20 LOC)
     leases.py           — HA Coordinator Leases tool schemas for CoordinationHub (~35 LOC)
     locking.py          — Document Locking tool schemas for CoordinationHub (~202 LOC)
-    messaging.py        — Messaging tool schemas for CoordinationHub (~41 LOC)
+    messaging.py        — Messaging tool schemas for CoordinationHub (~42 LOC)
     spawner.py          — Spawner tool schemas for CoordinationHub (~193 LOC)
     tasks.py            — Task Registry tool schemas for CoordinationHub (~220 LOC)
     visibility.py       — Graph & Visibility tool schemas for CoordinationHub (~159 LOC)
 ```
 <!-- /GEN -->
 
-The `tests/` directory contains the pytest suite (<!-- GEN:test-count -->611<!-- /GEN --> tests across 28 files), including `tests/fixtures/claude_code_events/` contract fixtures.
+The `tests/` directory contains the pytest suite (<!-- GEN:test-count -->619<!-- /GEN --> tests across 28 files), including `tests/fixtures/claude_code_events/` contract fixtures.
 
 ## Module Design
 
@@ -235,7 +235,7 @@ To disable hooks temporarily, add `"disableAllHooks": true` to `~/.claude/settin
 
 ```bash
 python -m pytest tests/ -v
-# <!-- GEN:test-count -->611<!-- /GEN --> tests across 28 test files:
+# <!-- GEN:test-count -->619<!-- /GEN --> tests across 28 test files:
 #   test_agent_lifecycle.py    — 27 tests
 #   test_locking.py            — 46 tests (includes smart reap)
 #   test_notifications.py      — 8 tests

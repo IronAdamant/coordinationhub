@@ -68,7 +68,14 @@ def acknowledge_broadcast(
     broadcast_id: int,
     agent_id: str,
 ) -> dict[str, Any]:
-    """Acknowledge receipt of a broadcast."""
+    """Acknowledge receipt of a broadcast.
+
+    T6.26: the return value carries ``already_acked: bool`` so idempotent
+    retries are observable. Pre-fix the ``INSERT OR IGNORE`` swallowed
+    the duplicate, callers had no way to distinguish a fresh ack from a
+    re-send, and any counter built on top could double-count if the
+    caller did its own deduplication.
+    """
     now = time.time()
     with connect() as conn:
         row = conn.execute(
@@ -78,7 +85,7 @@ def acknowledge_broadcast(
         if not row:
             return {"acknowledged": False, "reason": "expired_or_not_found"}
 
-        conn.execute(
+        cursor = conn.execute(
             """
             INSERT OR IGNORE INTO broadcast_acks
             (broadcast_id, agent_id, acknowledged_at)
@@ -86,7 +93,13 @@ def acknowledge_broadcast(
             """,
             (broadcast_id, agent_id, now),
         )
-    return {"acknowledged": True, "broadcast_id": broadcast_id, "agent_id": agent_id}
+        already_acked = cursor.rowcount == 0
+    return {
+        "acknowledged": True,
+        "broadcast_id": broadcast_id,
+        "agent_id": agent_id,
+        "already_acked": already_acked,
+    }
 
 
 def get_broadcast_status(

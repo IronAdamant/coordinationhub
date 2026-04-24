@@ -32,6 +32,14 @@ class CoordinationStorage:
     ) -> None:
         self._namespace = namespace
         self._project_root = project_root
+        # T6.16: resolve cwd once at init. Agents registering later will
+        # read ``effective_worktree_root`` rather than calling
+        # ``os.getcwd()`` themselves — a hub that chdirs mid-run would
+        # otherwise hand out inconsistent worktree roots to different
+        # agents.
+        self._effective_worktree_root: Path = (
+            Path(project_root).resolve() if project_root is not None else Path.cwd().resolve()
+        )
         self._storage_dir = self._resolve_storage_dir(storage_dir)
         self._pool: _db.ConnectionPool | None = None
         self._db_path: Path | None = None
@@ -54,6 +62,16 @@ class CoordinationStorage:
     @property
     def project_root(self) -> Path | None:
         return self._project_root
+
+    @property
+    def effective_worktree_root(self) -> Path:
+        """The effective worktree root resolved once at init.
+
+        Equals ``project_root`` when set, otherwise the cwd at engine
+        construction time. Safe to consult even if the process later
+        ``chdir``s — the value is frozen (T6.16).
+        """
+        return self._effective_worktree_root
 
     # ------------------------------------------------------------------ #
     # Lifecycle
