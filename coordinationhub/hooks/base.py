@@ -45,6 +45,15 @@ def _sanitize_session_id(session_id: str | None) -> str:
     return digest[:12]
 
 
+def build_session_agent_id(ide_prefix: str, session_id: str | None) -> str:
+    """Build the canonical ``hub.{ide_prefix}.{sanitized_session}`` agent id.
+
+    T6.28: single shared formatter so ``BaseHook.session_agent_id`` and
+    the module-level ``stdio_adapter._session_agent_id`` can't drift.
+    """
+    return f"hub.{ide_prefix}.{_sanitize_session_id(session_id)}"
+
+
 # T2.1: prompts are stored into agents.current_task and then surfaced on
 # the dashboard (exposed over HTTP to any local process). Unfiltered
 # prompt text often contains API keys, tokens, PII, or internal URLs.
@@ -147,8 +156,9 @@ class BaseHook:
     # ------------------------------------------------------------------ #
 
     def session_agent_id(self, session_id: str) -> str:
-        short = _sanitize_session_id(session_id)
-        return f"hub.{self.IDE_PREFIX}.{short}"
+        # T6.28: delegate to the shared formatter so this path can't
+        # drift from stdio_adapter._session_agent_id.
+        return build_session_agent_id(self.IDE_PREFIX, session_id)
 
     def resolve_agent_id(self, session_id: str, raw_ide_id: str | None = None) -> str:
         if raw_ide_id:

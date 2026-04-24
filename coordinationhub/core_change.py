@@ -43,6 +43,11 @@ class ChangeMixin:
             self._connect, norm_path, change_type, agent_id,
             str(self._storage.project_root),
         )
+        # T6.6: include notification_id in the event payload so long-poll
+        # waiters can resume from a monotonic cursor instead of a
+        # drift-prone timestamp. T7.20: created_at is now actually
+        # populated by the primitive, so the ``or time.time()`` fallback
+        # is no longer reachable; kept as a belt-and-braces default.
         self._publish_event(
             "notification.created",
             {
@@ -50,6 +55,7 @@ class ChangeMixin:
                 "change_type": change_type,
                 "agent_id": agent_id,
                 "created_at": result.get("created_at") or time.time(),
+                "notification_id": result.get("notification_id"),
             },
         )
         return result
@@ -90,7 +96,6 @@ class ChangeMixin:
         if prune_max_age_seconds is not None or prune_max_entries is not None:
             _cn.prune_notifications(self._connect, prune_max_age_seconds, prune_max_entries)
         if timeout_s > 0:
-            start = time.time()
             event = self._hybrid_wait(
                 ["notification.created"],
                 filter_fn=lambda e: e.get("agent_id") != exclude_agent if exclude_agent else True,
@@ -98,10 +103,24 @@ class ChangeMixin:
             )
             if event is None:
                 return {"notifications": [], "timed_out": True}
-            since_val = event.get("created_at", start) - 1.0
-            result = _cn.get_notifications(
-                self._connect, since=since_val, exclude_agent=exclude_agent, limit=limit
-            )
+            # T6.6: use the monotonic notification_id cursor instead of
+            # the pre-fix 1-second backwards timestamp window. Subtract
+            # one so the event's own row is included in the fetch.
+            notification_id = event.get("notification_id")
+            if notification_id is not None:
+                result = _cn.get_notifications(
+                    self._connect,
+                    since_id=notification_id - 1,
+                    exclude_agent=exclude_agent,
+                    limit=limit,
+                )
+            else:
+                # Legacy event (pre-T6.6 publisher): fall back to the
+                # timestamp path. Still better than a missed wake-up.
+                since_val = event.get("created_at", time.time()) - 1.0
+                result = _cn.get_notifications(
+                    self._connect, since=since_val, exclude_agent=exclude_agent, limit=limit,
+                )
             result["timed_out"] = False
             return result
         return _cn.get_notifications(self._connect, since, exclude_agent, limit)

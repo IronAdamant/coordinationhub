@@ -30,6 +30,18 @@ try:
 except (TypeError, ValueError):
     _SPAWN_TTL_SECONDS = 600.0
 
+# T6.9: cap on the number of simultaneously-pending spawn rows. Pre-fix
+# a caller (or a chain of failed IDE integrations) could stash unbounded
+# pending_tasks rows, each carrying a prompt string that's never read.
+# Memory-exhaustion DoS is trivial without a ceiling. Override via the
+# ``COORDINATIONHUB_MAX_PENDING_SPAWNS`` environment variable.
+try:
+    MAX_PENDING_SPAWNS = int(
+        _os.environ.get("COORDINATIONHUB_MAX_PENDING_SPAWNS", "1000")
+    )
+except (TypeError, ValueError):
+    MAX_PENDING_SPAWNS = 1000
+
 
 class PendingSpawn(NamedTuple):
     """A pending sub-agent spawn record."""
@@ -150,6 +162,21 @@ def stash_pending_spawn(
             "WHERE status = 'pending' AND created_at < ?",
             (cutoff,),
         )
+        # T6.9: enforce the pending-spawn ceiling post-expiry so stale
+        # rows don't count against live ones.
+        pending_count_row = conn.execute(
+            "SELECT COUNT(*) AS cnt FROM pending_tasks WHERE status = 'pending'"
+        ).fetchone()
+        pending_count = pending_count_row["cnt"] if pending_count_row else 0
+        if pending_count >= MAX_PENDING_SPAWNS:
+            if began:
+                conn.execute("COMMIT")
+            return {
+                "stashed": False,
+                "reason": "max_pending_spawns_reached",
+                "pending_count": pending_count,
+                "max_pending_spawns": MAX_PENDING_SPAWNS,
+            }
         if spawn_id is None:
             if subagent_type is None:
                 raise TypeError(

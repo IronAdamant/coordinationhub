@@ -302,30 +302,49 @@ def _populate_agent_responsibilities_from_graph(
     connect,
     graph: CoordinationGraph,
 ) -> None:
-    """For each graph agent whose id matches a registered agent, upsert agent_responsibilities."""
+    """For each graph agent whose id matches a registered agent, upsert agent_responsibilities.
+
+    T6.2: a single connection prefetches the set of active agent IDs
+    and then executemany's the upserts. The pre-fix loop opened 2
+    connections per graph agent (one to check existence, one to upsert),
+    which on a graph with dozens of agents dominated the scan cost.
+    """
     now = _time.time()
-    for graph_id, agent_def in graph.agents.items():
-        with connect() as conn:
-            row = conn.execute(
-                "SELECT agent_id FROM agents WHERE agent_id = ? AND status = 'active'",
-                (graph_id,),
-            ).fetchone()
-        if row:
+    if not graph.agents:
+        return
+    with connect() as conn:
+        graph_ids = list(graph.agents.keys())
+        placeholders = ",".join("?" * len(graph_ids))
+        rows = conn.execute(
+            f"SELECT agent_id FROM agents WHERE status = 'active' "
+            f"AND agent_id IN ({placeholders})",
+            graph_ids,
+        ).fetchall()
+        active_ids = {row["agent_id"] for row in rows}
+        if not active_ids:
+            return
+        upserts = []
+        for graph_id, agent_def in graph.agents.items():
+            if graph_id not in active_ids:
+                continue
             role = agent_def.get("role", "")
             model = agent_def.get("model", "")
             responsibilities = agent_def.get("responsibilities", [])
-            with connect() as conn:
-                conn.execute("""
-                    INSERT INTO agent_responsibilities
-                    (agent_id, graph_agent_id, role, model, responsibilities, updated_at)
-                    VALUES (?, ?, ?, ?, ?, ?)
-                    ON CONFLICT(agent_id) DO UPDATE SET
-                        graph_agent_id = excluded.graph_agent_id,
-                        role = excluded.role,
-                        model = excluded.model,
-                        responsibilities = excluded.responsibilities,
-                        updated_at = excluded.updated_at
-                """, (graph_id, graph_id, role, model, json.dumps(responsibilities), now))
+            upserts.append(
+                (graph_id, graph_id, role, model, json.dumps(responsibilities), now)
+            )
+        if upserts:
+            conn.executemany("""
+                INSERT INTO agent_responsibilities
+                (agent_id, graph_agent_id, role, model, responsibilities, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?)
+                ON CONFLICT(agent_id) DO UPDATE SET
+                    graph_agent_id = excluded.graph_agent_id,
+                    role = excluded.role,
+                    model = excluded.model,
+                    responsibilities = excluded.responsibilities,
+                    updated_at = excluded.updated_at
+            """, upserts)
 
 
 def build_implicit_graph(connect) -> CoordinationGraph:

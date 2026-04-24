@@ -19,10 +19,16 @@ def notify_change(
     agent_id: str,
     worktree_root: str | None = None,
 ) -> dict[str, Any]:
-    """Record a change event for other agents to poll."""
+    """Record a change event for other agents to poll.
+
+    T6.6: the return bundle now carries the inserted row's ``id`` so
+    event-bus subscribers can echo a monotonic cursor to waiting
+    pollers. Pre-fix, only a bool was returned and callers had to
+    compensate for timestamp drift with a 1-second backwards window.
+    """
     now = time.time()
     with connect() as conn:
-        conn.execute(
+        cursor = conn.execute(
             """
             INSERT INTO change_notifications
             (document_path, change_type, agent_id, worktree_root, created_at)
@@ -30,7 +36,12 @@ def notify_change(
             """,
             (document_path, change_type, agent_id, worktree_root, now),
         )
-    return {"recorded": True}
+        notification_id = cursor.lastrowid
+    return {
+        "recorded": True,
+        "notification_id": notification_id,
+        "created_at": now,
+    }
 
 
 def get_notifications(
@@ -38,18 +49,28 @@ def get_notifications(
     since: float | None = None,
     exclude_agent: str | None = None,
     limit: int = 100,
+    since_id: int | None = None,
 ) -> dict[str, Any]:
-    """Poll for changes since a timestamp."""
+    """Poll for changes since a timestamp or id.
+
+    T6.6: ``since_id`` is the preferred cursor — rowid is strictly
+    monotonic whereas ``created_at`` can tie at the millisecond
+    boundary. When both args are supplied ``since_id`` wins. The
+    legacy ``since`` (timestamp) path is retained for back-compat.
+    """
     with connect() as conn:
         query = "SELECT * FROM change_notifications WHERE 1=1"
         args: list[Any] = []
-        if since is not None:
+        if since_id is not None:
+            query += " AND id > ?"
+            args.append(since_id)
+        elif since is not None:
             query += " AND created_at > ?"
             args.append(since)
         if exclude_agent is not None:
             query += " AND agent_id != ?"
             args.append(exclude_agent)
-        query += " ORDER BY created_at DESC LIMIT ?"
+        query += " ORDER BY id DESC LIMIT ?"
         args.append(limit)
         rows = conn.execute(query, args).fetchall()
         return {

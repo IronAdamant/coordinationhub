@@ -202,3 +202,40 @@ class TestPendingTaskDoubleFire:
 
         consumed = consume_pending_task(engine._connect, session, "Plan")
         assert consumed["description"] == "v2"
+
+
+class TestPendingSpawnBackpressure:
+    """T6.9: cap on simultaneously-pending spawn rows prevents a
+    memory-exhaustion DoS from unbounded stash_pending_spawn calls.
+    """
+
+    def test_reject_at_cap(self, engine, registered_agent, monkeypatch):
+        """Pin the cap low to exercise the rejection path."""
+        import coordinationhub.spawner as spawner
+        monkeypatch.setattr(spawner, "MAX_PENDING_SPAWNS", 3)
+
+        for i in range(3):
+            r = engine.spawn_subagent(registered_agent, f"agent{i}")
+            assert r.get("stashed") is True
+
+        r = engine.spawn_subagent(registered_agent, "overflow")
+        assert r.get("stashed") is False
+        assert r.get("reason") == "max_pending_spawns_reached"
+        assert r.get("pending_count") == 3
+        assert r.get("max_pending_spawns") == 3
+
+    def test_expired_rows_do_not_count_against_cap(
+        self, engine, registered_agent, monkeypatch
+    ):
+        """Pre-expired pending rows should not block new spawns."""
+        import coordinationhub.spawner as spawner
+        monkeypatch.setattr(spawner, "MAX_PENDING_SPAWNS", 2)
+        # Very small TTL: stashes immediately expire on next stash.
+        monkeypatch.setattr(spawner, "_SPAWN_TTL_SECONDS", 0.0001)
+
+        # First stash — becomes expired before the second arrives.
+        assert engine.spawn_subagent(registered_agent, "a")["stashed"] is True
+        import time as _t
+        _t.sleep(0.001)
+        # Second stash should succeed because the first was expired mid-tx.
+        assert engine.spawn_subagent(registered_agent, "b")["stashed"] is True

@@ -41,6 +41,14 @@ def get_dashboard_data(connect: ConnectFn) -> dict[str, Any]:
             "dependencies": [...],
             "locks": [...],
         }
+
+    T6.7: every query uses an explicit column list instead of ``SELECT *``.
+    Adding a column to a table no longer silently leaks it over the API.
+    Sensitive free-text fields (``agents.current_task``) are already
+    redacted at write time by :func:`coordinationhub.hooks.base._redact_prompt`
+    (T2.1), but the explicit projection also means new columns won't
+    bypass the redactor. ``tasks.prompt`` is NOT in the projection —
+    prompts were deliberately dropped from the dashboard payload.
     """
     conn = connect()
 
@@ -52,7 +60,17 @@ def get_dashboard_data(connect: ConnectFn) -> dict[str, Any]:
     return {
         "agents": _dict(conn.execute(
             """
-            SELECT a.*, r.current_task, r.role, r.graph_agent_id
+            SELECT
+                a.agent_id,
+                a.worktree_root,
+                a.started_at,
+                a.status,
+                a.last_heartbeat,
+                a.parent_id,
+                a.ide_vendor,
+                r.current_task,
+                r.role,
+                r.graph_agent_id
             FROM agents a
             LEFT JOIN agent_responsibilities r ON r.agent_id = a.agent_id
             WHERE a.status != 'stopped'
@@ -60,20 +78,62 @@ def get_dashboard_data(connect: ConnectFn) -> dict[str, Any]:
             """
         ).fetchall()),
         "tasks": _dict(conn.execute(
-            "SELECT * FROM tasks ORDER BY created_at DESC"
+            """
+            SELECT
+                id,
+                parent_agent_id,
+                parent_task_id,
+                assigned_agent_id,
+                description,
+                status,
+                depends_on,
+                blocked_by,
+                summary,
+                priority,
+                error,
+                created_at,
+                updated_at
+            FROM tasks
+            ORDER BY created_at DESC
+            """
         ).fetchall()),
         "work_intents": _dict(conn.execute(
-            "SELECT * FROM work_intent ORDER BY declared_at DESC"
+            """
+            SELECT agent_id, document_path, intent, declared_at, ttl
+            FROM work_intent
+            ORDER BY declared_at DESC
+            """
         ).fetchall()),
         "handoffs": _dict(conn.execute(
-            "SELECT * FROM handoffs ORDER BY created_at DESC LIMIT 100"
+            """
+            SELECT id, from_agent_id, to_agents, document_path, handoff_type,
+                   status, created_at, acknowledged_at, completed_at
+            FROM handoffs
+            ORDER BY created_at DESC LIMIT 100
+            """
         ).fetchall()),
         "dependencies": _dict(conn.execute(
-            "SELECT * FROM agent_dependencies ORDER BY created_at DESC"
+            """
+            SELECT id, dependent_agent_id, depends_on_agent_id,
+                   depends_on_task_id, condition, satisfied, satisfied_at,
+                   created_at
+            FROM agent_dependencies
+            ORDER BY created_at DESC
+            """
         ).fetchall()),
         "locks": _dict(conn.execute(
             """
-            SELECT l.*, o.assigned_agent_id AS owner_agent_id
+            SELECT
+                l.id,
+                l.document_path,
+                l.locked_by,
+                l.locked_at,
+                l.lock_ttl,
+                l.lock_type,
+                l.region_start,
+                l.region_end,
+                l.worktree_root,
+                o.assigned_agent_id AS owner_agent_id
             FROM document_locks l
             LEFT JOIN file_ownership o ON o.document_path = l.document_path
             ORDER BY l.locked_at DESC

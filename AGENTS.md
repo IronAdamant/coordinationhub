@@ -38,7 +38,7 @@ coordinationhub/
   context.py            — Context bundle builder for CoordinationHub agent registration responses (~93 LOC)
   core.py               — CoordinationEngine — thin host class that inherits all mixins (~182 LOC)
   core_broadcasts.py    — BroadcastMixin — broadcast, handoff dispatch, and cross-agent waits (~188 LOC)
-  core_change.py        — ChangeMixin — change notifications, file ownership, conflict audit, status (~182 LOC)
+  core_change.py        — ChangeMixin — change notifications, file ownership, conflict audit, status (~191 LOC)
   core_dependencies.py  — DependencyMixin — cross-agent dependency declarations and checks (~120 LOC)
   core_handoffs.py      — HandoffMixin — one-to-many handoff acknowledgment and lifecycle (~117 LOC)
   core_identity.py      — IdentityMixin — agent lifecycle and lineage management (~122 LOC)
@@ -62,17 +62,17 @@ coordinationhub/
   mcp_server.py         — HTTP-based MCP server for CoordinationHub — zero external dependencies (~469 LOC)
   mcp_stdio.py          — Stdio-based MCP server for CoordinationHub using the ``mcp`` Python package (~147 LOC)
   messages.py           — Inter-agent messaging primitives for CoordinationHub (~98 LOC)
-  notifications.py      — Change notification storage and retrieval for CoordinationHub (~136 LOC)
+  notifications.py      — Change notification storage and retrieval for CoordinationHub (~155 LOC)
   paths.py              — Path normalization and project-root detection utilities (~38 LOC)
   pending_tasks.py      — Pending sub-agent task storage for CoordinationHub (~106 LOC)
   scan.py               — File ownership scan for CoordinationHub (~275 LOC)
-  spawner.py            — Zero-deps spawner primitives for HA coordinator sub-agent registry (~350 LOC)
+  spawner.py            — Zero-deps spawner primitives for HA coordinator sub-agent registry (~369 LOC)
   task_failures.py      — Task failure tracking and dead letter queue for CoordinationHub (~149 LOC)
   tasks.py              — Task registry primitives for CoordinationHub (work board) (~502 LOC)
   work_intent.py        — Work intent board primitives for CoordinationHub (~136 LOC)
   hooks/
     __init__.py         — Hooks package — IDE integration via stdin/stdout event protocol (~1 LOC)
-    base.py             — Base hook abstraction for CoordinationHub (~328 LOC)
+    base.py             — Base hook abstraction for CoordinationHub (~333 LOC)
     cursor.py           — CoordinationHub hook adapter for Cursor (~110 LOC)
     kimi_cli.py         — CoordinationHub hook adapter for Kimi CLI (~111 LOC)
     stdio_adapter.py    — CoordinationHub stdio event adapter (~298 LOC)
@@ -85,13 +85,13 @@ coordinationhub/
     assessment_scorers.py — Assessment metric scorers for CoordinationHub (~266 LOC)
   plugins/dashboard/
     __init__.py         — Dashboard plugin for CoordinationHub (~15 LOC)
-    dashboard.py        — Web dashboard for CoordinationHub — zero external dependencies (~82 LOC)
+    dashboard.py        — Web dashboard for CoordinationHub — zero external dependencies (~141 LOC)
     dashboard_css.py    — CSS for the CoordinationHub dashboard (~91 LOC)
     dashboard_html.py   — Self-contained HTML for the CoordinationHub dashboard (~98 LOC)
     dashboard_js.py     — Client-side JavaScript for the CoordinationHub dashboard (~447 LOC)
   plugins/graph/
     __init__.py         — Graph plugin for CoordinationHub (~31 LOC)
-    graphs.py           — Declarative coordination graph: loader, validator, in-memory representation (~309 LOC)
+    graphs.py           — Declarative coordination graph: loader, validator, in-memory representation (~327 LOC)
   schemas/
     __init__.py         — Tool schemas for CoordinationHub — all MCP tools (~56 LOC)
     audit.py            — Audit & Status tool schemas for CoordinationHub (~61 LOC)
@@ -111,7 +111,7 @@ coordinationhub/
 ```
 <!-- /GEN -->
 
-The `tests/` directory contains the pytest suite (<!-- GEN:test-count -->628<!-- /GEN --> tests across 28 files), including `tests/fixtures/claude_code_events/` contract fixtures.
+The `tests/` directory contains the pytest suite (<!-- GEN:test-count -->630<!-- /GEN --> tests across 28 files), including `tests/fixtures/claude_code_events/` contract fixtures.
 
 ## Module Design
 
@@ -235,7 +235,7 @@ To disable hooks temporarily, add `"disableAllHooks": true` to `~/.claude/settin
 
 ```bash
 python -m pytest tests/ -v
-# <!-- GEN:test-count -->628<!-- /GEN --> tests across 28 test files:
+# <!-- GEN:test-count -->630<!-- /GEN --> tests across 28 test files:
 #   test_agent_lifecycle.py    — 27 tests
 #   test_locking.py            — 46 tests (includes smart reap)
 #   test_notifications.py      — 8 tests

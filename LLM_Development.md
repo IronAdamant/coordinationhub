@@ -1618,7 +1618,7 @@ Block markers for multi-line content:
 | `coordinationhub/context.py` | 93 | Context bundle builder for CoordinationHub agent registration responses |
 | `coordinationhub/core.py` | 182 | CoordinationEngine — thin host class that inherits all mixins |
 | `coordinationhub/core_broadcasts.py` | 188 | BroadcastMixin — broadcast, handoff dispatch, and cross-agent waits |
-| `coordinationhub/core_change.py` | 182 | ChangeMixin — change notifications, file ownership, conflict audit, status |
+| `coordinationhub/core_change.py` | 191 | ChangeMixin — change notifications, file ownership, conflict audit, status |
 | `coordinationhub/core_dependencies.py` | 120 | DependencyMixin — cross-agent dependency declarations and checks |
 | `coordinationhub/core_handoffs.py` | 117 | HandoffMixin — one-to-many handoff acknowledgment and lifecycle |
 | `coordinationhub/core_identity.py` | 122 | IdentityMixin — agent lifecycle and lineage management |
@@ -1637,7 +1637,7 @@ Block markers for multi-line content:
 | `coordinationhub/event_bus.py` | 102 | Lightweight thread-safe in-memory pub-sub event bus for CoordinationHub |
 | `coordinationhub/handoffs.py` | 200 | Handoff recording and acknowledgement primitives for CoordinationHub |
 | `coordinationhub/hooks/__init__.py` | 1 | Hooks package — IDE integration via stdin/stdout event protocol |
-| `coordinationhub/hooks/base.py` | 328 | Base hook abstraction for CoordinationHub |
+| `coordinationhub/hooks/base.py` | 333 | Base hook abstraction for CoordinationHub |
 | `coordinationhub/hooks/cursor.py` | 110 | CoordinationHub hook adapter for Cursor |
 | `coordinationhub/hooks/kimi_cli.py` | 111 | CoordinationHub hook adapter for Kimi CLI |
 | `coordinationhub/hooks/stdio_adapter.py` | 298 | CoordinationHub stdio event adapter |
@@ -1647,7 +1647,7 @@ Block markers for multi-line content:
 | `coordinationhub/mcp_server.py` | 469 | HTTP-based MCP server for CoordinationHub — zero external dependencies |
 | `coordinationhub/mcp_stdio.py` | 147 | Stdio-based MCP server for CoordinationHub using the ``mcp`` Python package |
 | `coordinationhub/messages.py` | 98 | Inter-agent messaging primitives for CoordinationHub |
-| `coordinationhub/notifications.py` | 136 | Change notification storage and retrieval for CoordinationHub |
+| `coordinationhub/notifications.py` | 155 | Change notification storage and retrieval for CoordinationHub |
 | `coordinationhub/paths.py` | 38 | Path normalization and project-root detection utilities |
 | `coordinationhub/pending_tasks.py` | 106 | Pending sub-agent task storage for CoordinationHub |
 | `coordinationhub/plugins/__init__.py` | 8 | CoordinationHub plugin system |
@@ -1655,12 +1655,12 @@ Block markers for multi-line content:
 | `coordinationhub/plugins/assessment/assessment.py` | 322 | Assessment runner for CoordinationHub coordination test suites |
 | `coordinationhub/plugins/assessment/assessment_scorers.py` | 266 | Assessment metric scorers for CoordinationHub |
 | `coordinationhub/plugins/dashboard/__init__.py` | 15 | Dashboard plugin for CoordinationHub |
-| `coordinationhub/plugins/dashboard/dashboard.py` | 82 | Web dashboard for CoordinationHub — zero external dependencies |
+| `coordinationhub/plugins/dashboard/dashboard.py` | 141 | Web dashboard for CoordinationHub — zero external dependencies |
 | `coordinationhub/plugins/dashboard/dashboard_css.py` | 91 | CSS for the CoordinationHub dashboard |
 | `coordinationhub/plugins/dashboard/dashboard_html.py` | 98 | Self-contained HTML for the CoordinationHub dashboard |
 | `coordinationhub/plugins/dashboard/dashboard_js.py` | 447 | Client-side JavaScript for the CoordinationHub dashboard |
 | `coordinationhub/plugins/graph/__init__.py` | 31 | Graph plugin for CoordinationHub |
-| `coordinationhub/plugins/graph/graphs.py` | 309 | Declarative coordination graph: loader, validator, in-memory representation |
+| `coordinationhub/plugins/graph/graphs.py` | 327 | Declarative coordination graph: loader, validator, in-memory representation |
 | `coordinationhub/plugins/registry.py` | 59 | Plugin registry for CoordinationHub |
 | `coordinationhub/scan.py` | 275 | File ownership scan for CoordinationHub |
 | `coordinationhub/schemas/__init__.py` | 56 | Tool schemas for CoordinationHub — all MCP tools |
@@ -1678,7 +1678,7 @@ Block markers for multi-line content:
 | `coordinationhub/schemas/spawner.py` | 193 | Spawner tool schemas for CoordinationHub |
 | `coordinationhub/schemas/tasks.py` | 220 | Task Registry tool schemas for CoordinationHub |
 | `coordinationhub/schemas/visibility.py` | 159 | Graph & Visibility tool schemas for CoordinationHub |
-| `coordinationhub/spawner.py` | 350 | Zero-deps spawner primitives for HA coordinator sub-agent registry |
+| `coordinationhub/spawner.py` | 369 | Zero-deps spawner primitives for HA coordinator sub-agent registry |
 | `coordinationhub/task_failures.py` | 149 | Task failure tracking and dead letter queue for CoordinationHub |
 | `coordinationhub/tasks.py` | 502 | Task registry primitives for CoordinationHub (work board) |
 | `coordinationhub/work_intent.py` | 136 | Work intent board primitives for CoordinationHub |
@@ -1687,7 +1687,7 @@ Block markers for multi-line content:
 
 Inline markers for single values (render invisibly in Markdown):
 ```markdown
-This project has <!-- GEN:test-count -->628<!-- /GEN --> tests.
+This project has <!-- GEN:test-count -->630<!-- /GEN --> tests.
 ```
 
 Unknown marker names raise an error during rewrite (catches typos).
