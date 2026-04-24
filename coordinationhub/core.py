@@ -6,7 +6,6 @@ subsystems. Each mixin is in its own file under coordinationhub/.
 LockingMixin:     core_locking.py     — lock acquire/release/refresh/list/admin
 BroadcastMixin:   core_broadcasts.py  — broadcast, handoff dispatch, wait_for_locks
 IdentityMixin:    core_identity.py    — agent registration, heartbeat, lineage
-VisibilityMixin:  core_visibility.py  — coordination graph, scan, assessment
 
 Composed subsystems (T6.22 — extracted from the mixin tree):
 Spawner:          spawner_subsystem.py     — sub-agent spawn management
@@ -17,6 +16,7 @@ Messaging:        messaging_subsystem.py   — inter-agent messages, agent await
 Handoff:          handoff_subsystem.py     — handoff acknowledgment tracking
 Change:           change_subsystem.py      — change notifications, audit, status
 Task:             task_subsystem.py        — task registry, hierarchy, DLQ
+Visibility:       visibility_subsystem.py  — coordination graph, scan, assessment
 
 Zero third-party dependencies.
 """
@@ -41,7 +41,6 @@ from .lock_cache import LockCache
 from .core_locking import LockingMixin
 from .core_broadcasts import BroadcastMixin
 from .core_identity import IdentityMixin
-from .core_visibility import VisibilityMixin
 from .spawner_subsystem import Spawner
 from .work_intent_subsystem import WorkIntent
 from .lease_subsystem import Lease
@@ -50,6 +49,7 @@ from .messaging_subsystem import Messaging
 from .handoff_subsystem import Handoff
 from .change_subsystem import Change
 from .task_subsystem import Task
+from .visibility_subsystem import Visibility
 from .paths import detect_project_root
 from .plugins.graph import graphs as _g
 
@@ -58,7 +58,6 @@ class CoordinationEngine(
     LockingMixin,
     BroadcastMixin,
     IdentityMixin,
-    VisibilityMixin,
 ):
     """Host class that inherits capability mixins and holds subsystems.
 
@@ -217,6 +216,31 @@ class CoordinationEngine(
             connect_fn=self._connect,
             publish_event_fn=self._publish_event,
             hybrid_wait_fn=self._hybrid_wait,
+        )
+        # T6.22: composed subsystem replaces VisibilityMixin. Per the
+        # coupling audit VisibilityMixin had zero cross-mixin calls and
+        # zero ``_hybrid_wait`` calls — it needed ``_connect``, three
+        # ``_publish_event`` notifications (``graph.loaded``,
+        # ``scan.completed``, ``assessment.completed``), and
+        # ``_storage.project_root`` for ``scan_project`` and
+        # ``run_assessment(scope='project')``. Two infra callables +
+        # ``project_root_getter`` — same shape as :class:`WorkIntent`
+        # (commit ``3d1bd48``) and similar to :class:`Change` (commit
+        # ``e0c21a8``, which also carries ``_hybrid_wait``). Ninth and
+        # final extraction of the T6.22 series after :class:`Spawner`
+        # (``1ee46c6``), :class:`WorkIntent` (``3d1bd48``), :class:`Lease`
+        # (``b4a3e6b``), :class:`Dependency` (``d6c8796``),
+        # :class:`Messaging` (``d9f84d3``), :class:`Handoff`
+        # (``ded641d``), :class:`Change` (``e0c21a8``), and :class:`Task`
+        # (``8182c7a``). Note: the loaded coordination graph lives in
+        # ``plugins/graph/graphs.py`` module-level state (via
+        # ``set_graph`` / ``get_graph``), not on the engine — so no
+        # ``graph_getter`` / ``graph_setter`` dep is needed; the
+        # subsystem reads the singleton directly.
+        self._visibility = Visibility(
+            connect_fn=self._connect,
+            publish_event_fn=self._publish_event,
+            project_root_getter=lambda: self._storage.project_root,
         )
 
     def start(self) -> None:
@@ -957,6 +981,75 @@ class CoordinationEngine(
     def get_available_tasks(self, agent_id: str | None = None) -> dict[str, Any]:
         return self._task.get_available_tasks(agent_id=agent_id)
 
+    # ------------------------------------------------------------------ #
+    # Visibility facade (T6.22)
+    # ------------------------------------------------------------------ #
+    # These one-liners delegate to ``self._visibility`` (a
+    # :class:`Visibility` composed in ``__init__``). They preserve the
+    # pre-extraction public API — MCP dispatch (``load_coordination_spec``,
+    # ``validate_graph``, ``scan_project``, ``get_agent_status``,
+    # ``get_agent_tree``, ``get_file_agent_map``, ``update_agent_status``,
+    # ``run_assessment``), CLI (``cli_vis.py``, ``cli_setup.py``),
+    # hooks (``hooks/base.py`` calls ``update_agent_status``),
+    # housekeeping (``build_default_scheduler`` calls
+    # ``engine.prune_assessment_results``), and tests all continue to call
+    # ``engine.load_coordination_spec(...)`` etc. verbatim.
+
+    def load_coordination_spec(self, path: str | None = None) -> dict[str, Any]:
+        return self._visibility.load_coordination_spec(path=path)
+
+    def validate_graph(self) -> dict[str, Any]:
+        return self._visibility.validate_graph()
+
+    def scan_project(
+        self,
+        worktree_root: str | None = None,
+        extensions: list[str] | None = None,
+    ) -> dict[str, Any]:
+        return self._visibility.scan_project(
+            worktree_root=worktree_root, extensions=extensions,
+        )
+
+    def get_agent_status(self, agent_id: str) -> dict[str, Any]:
+        return self._visibility.get_agent_status(agent_id=agent_id)
+
+    def get_agent_tree(self, agent_id: str | None = None) -> dict[str, Any]:
+        return self._visibility.get_agent_tree(agent_id=agent_id)
+
+    def get_file_agent_map(self, agent_id: str | None = None) -> dict[str, Any]:
+        return self._visibility.get_file_agent_map(agent_id=agent_id)
+
+    def update_agent_status(
+        self,
+        agent_id: str,
+        current_task: str | None = None,
+        scope: list[str] | None = None,
+    ) -> dict[str, Any]:
+        return self._visibility.update_agent_status(
+            agent_id=agent_id, current_task=current_task, scope=scope,
+        )
+
+    def run_assessment(
+        self,
+        suite_path: str | None = None,
+        format: str = "markdown",
+        graph_agent_id: str | None = None,
+        scope: str = "project",
+    ) -> dict[str, Any]:
+        return self._visibility.run_assessment(
+            suite_path=suite_path,
+            format=format,
+            graph_agent_id=graph_agent_id,
+            scope=scope,
+        )
+
+    def prune_assessment_results(
+        self, max_age_seconds: float = 30 * 24 * 3600.0,
+    ) -> dict[str, Any]:
+        return self._visibility.prune_assessment_results(
+            max_age_seconds=max_age_seconds,
+        )
+
     def read_only_engine(self) -> "CoordinationEngine":
         """Return a read-only view of this engine using direct WAL reads.
 
@@ -1029,5 +1122,17 @@ class CoordinationEngine(
         # ``get_dead_letter_tasks``, ``get_task_failure_history``,
         # ``wait_for_task``) only need ``_connect`` rebound.
         replica._task._connect = replica._connect
+        # T6.22: and the Visibility subsystem — same pattern as
+        # WorkIntent / Change (commits ``3d1bd48`` and ``e0c21a8``). Its
+        # ``project_root_getter`` is a closure over ``self._storage`` so
+        # it already picks up the replica's storage without rebinding.
+        # ``_publish_event`` was captured against the replica's own
+        # callable in ``_visibility.__init__``; graph / scan /
+        # assessment mutations through a read-only replica are not a
+        # supported flow, and the read-only operations
+        # (``get_agent_status``, ``get_agent_tree``,
+        # ``get_file_agent_map``, ``validate_graph``) only need
+        # ``_connect`` rebound.
+        replica._visibility._connect = replica._connect
         return replica
 

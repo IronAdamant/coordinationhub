@@ -1077,11 +1077,10 @@ keep it in sync; CI checks for drift on every push.
 | `coordinationhub/cli_vis.py` | 241 | Change awareness, audit, graph, and assessment CLI commands |
 | `coordinationhub/conflict_log.py` | 43 | Conflict recording and querying for CoordinationHub |
 | `coordinationhub/context.py` | 104 | Context bundle builder for CoordinationHub agent registration responses |
-| `coordinationhub/core.py` | 703 | CoordinationEngine — host class that composes mixins and subsystems |
+| `coordinationhub/core.py` | 754 | CoordinationEngine — host class that composes mixins and subsystems |
 | `coordinationhub/core_broadcasts.py` | 188 | BroadcastMixin — broadcast, handoff dispatch, and cross-agent waits |
 | `coordinationhub/core_identity.py` | 139 | IdentityMixin — agent lifecycle and lineage management |
 | `coordinationhub/core_locking.py` | 394 | Locking methods for CoordinationEngine |
-| `coordinationhub/core_visibility.py` | 138 | VisibilityMixin — coordination graph, project scan, agent status, assessment |
 | `coordinationhub/db.py` | 93 | SQLite connection pool and public re-exports for CoordinationHub |
 | `coordinationhub/db_migrations.py` | 399 | Schema-version tracking, migration functions, and the ``init_schema`` driver |
 | `coordinationhub/db_schemas.py` | 301 | Canonical SQLite schema definitions for CoordinationHub |
@@ -1110,7 +1109,7 @@ keep it in sync; CI checks for drift on every push.
 | `coordinationhub/paths.py` | 39 | Path normalization and project-root detection utilities |
 | `coordinationhub/pending_tasks.py` | 109 | Pending sub-agent task storage for CoordinationHub |
 | `coordinationhub/plugins/__init__.py` | 8 | CoordinationHub plugin system |
-| `coordinationhub/plugins/assessment/__init__.py` | 29 | Assessment plugin for CoordinationHub |
+| `coordinationhub/plugins/assessment/__init__.py` | 28 | Assessment plugin for CoordinationHub |
 | `coordinationhub/plugins/assessment/assessment.py` | 337 | Assessment runner for CoordinationHub coordination test suites |
 | `coordinationhub/plugins/assessment/assessment_scorers.py` | 266 | Assessment metric scorers for CoordinationHub |
 | `coordinationhub/plugins/dashboard/__init__.py` | 15 | Dashboard plugin for CoordinationHub |
@@ -1143,6 +1142,7 @@ keep it in sync; CI checks for drift on every push.
 | `coordinationhub/task_subsystem.py` | 241 | Task subsystem — shared task registry with hierarchy + dead-letter queue |
 | `coordinationhub/tasks.py` | 517 | Task registry primitives for CoordinationHub (work board) |
 | `coordinationhub/validation.py` | 160 | Minimal stdlib jsonschema validator for MCP tool arguments |
+| `coordinationhub/visibility_subsystem.py` | 175 | Visibility subsystem — coordination graph, project scan, agent status, assessment |
 | `coordinationhub/work_intent.py` | 139 | Work intent board primitives for CoordinationHub |
 | `coordinationhub/work_intent_subsystem.py` | 92 | WorkIntent subsystem — cooperative work intent board |
 <!-- /GEN -->
@@ -1180,11 +1180,10 @@ coordinationhub/
   cli_vis.py            — Change awareness, audit, graph, and assessment CLI commands (~241 LOC)
   conflict_log.py       — Conflict recording and querying for CoordinationHub (~43 LOC)
   context.py            — Context bundle builder for CoordinationHub agent registration responses (~104 LOC)
-  core.py               — CoordinationEngine — host class that composes mixins and subsystems (~703 LOC)
+  core.py               — CoordinationEngine — host class that composes mixins and subsystems (~754 LOC)
   core_broadcasts.py    — BroadcastMixin — broadcast, handoff dispatch, and cross-agent waits (~188 LOC)
   core_identity.py      — IdentityMixin — agent lifecycle and lineage management (~139 LOC)
   core_locking.py       — Locking methods for CoordinationEngine (~394 LOC)
-  core_visibility.py    — VisibilityMixin — coordination graph, project scan, agent status, assessment (~138 LOC)
   db.py                 — SQLite connection pool and public re-exports for CoordinationHub (~93 LOC)
   db_migrations.py      — Schema-version tracking, migration functions, and the ``init_schema`` driver (~399 LOC)
   db_schemas.py         — Canonical SQLite schema definitions for CoordinationHub (~301 LOC)
@@ -1214,6 +1213,7 @@ coordinationhub/
   task_subsystem.py     — Task subsystem — shared task registry with hierarchy + dead-letter queue (~241 LOC)
   tasks.py              — Task registry primitives for CoordinationHub (work board) (~517 LOC)
   validation.py         — Minimal stdlib jsonschema validator for MCP tool arguments (~160 LOC)
+  visibility_subsystem.py — Visibility subsystem — coordination graph, project scan, agent status, assessment (~175 LOC)
   work_intent.py        — Work intent board primitives for CoordinationHub (~139 LOC)
   work_intent_subsystem.py — WorkIntent subsystem — cooperative work intent board (~92 LOC)
   hooks/
@@ -1226,7 +1226,7 @@ coordinationhub/
     __init__.py         — CoordinationHub plugin system (~8 LOC)
     registry.py         — Plugin registry for CoordinationHub (~59 LOC)
   plugins/assessment/
-    __init__.py         — Assessment plugin for CoordinationHub (~29 LOC)
+    __init__.py         — Assessment plugin for CoordinationHub (~28 LOC)
     assessment.py       — Assessment runner for CoordinationHub coordination test suites (~337 LOC)
     assessment_scorers.py — Assessment metric scorers for CoordinationHub (~266 LOC)
   plugins/dashboard/

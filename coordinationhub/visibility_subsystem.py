@@ -1,18 +1,42 @@
-"""VisibilityMixin — coordination graph, project scan, agent status, assessment.
+"""Visibility subsystem — coordination graph, project scan, agent status, assessment.
 
-Expects the host class to provide:
-    self._connect()     — callable returning a sqlite3 connection
-    self._storage        — CoordinationStorage instance (provides project_root)
-    self._graph          — loaded graph (or None) — set by host.start()
+T6.22 ninth step: extracted out of ``core_visibility.VisibilityMixin`` into
+a standalone class. Coupling audit confirmed VisibilityMixin had zero
+cross-mixin method calls and used three pieces of engine state —
+``_connect``, ``_publish_event``, and ``_storage.project_root`` (for
+``scan_project`` and ``run_assessment`` when ``scope='project'``) — which
+are now injected as constructor dependencies. Same path-access shape as
+:class:`WorkIntent` (commit ``3d1bd48``) and :class:`Change` (commit
+``e0c21a8``): ``project_root_getter`` is a callable so a replica
+produced by ``read_only_engine`` picks up its own storage root without
+a rebind. The two infra callables follow the :class:`Lease` /
+:class:`Dependency` pattern (commits ``b4a3e6b``, ``d6c8796``) — no
+``_hybrid_wait`` dep since VisibilityMixin never waited on events.
 
-Delegates to: graphs (graphs.py), scan (scan.py), agent_status (agent_status.py),
-assessment (assessment.py)
+Graph access note: while the VisibilityMixin docstring mentioned
+``self._graph``, the mixin never actually read that attribute. The
+loaded graph is stored at module level in ``plugins/graph/graphs.py``
+via ``set_graph`` / ``get_graph`` / ``clear_graph``;
+``_effective_graph`` reads that singleton directly. That means the
+Visibility subsystem needs no ``graph_getter`` / ``graph_setter`` —
+module-level state is shared automatically, so ``load_coordination_spec``
+moves into the subsystem cleanly along with every other method.
+
+See commits ``1ee46c6`` (Spawner), ``3d1bd48`` (WorkIntent),
+``b4a3e6b`` (Lease), ``d6c8796`` (Dependency), ``d9f84d3``
+(Messaging), ``ded641d`` (Handoff), ``e0c21a8`` (Change), and
+``8182c7a`` (Task) for the eight prior extractions in this series.
+This continues breaking the god-object inheritance chain on
+``CoordinationEngine`` without changing observable behaviour.
+
+Delegates to: graphs (plugins/graph/graphs.py), scan (scan.py),
+agent_status (agent_status.py), assessment (plugins/assessment/assessment.py).
 """
 
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 
 from .plugins.graph import graphs as _g
 from . import scan as _scan
@@ -21,8 +45,23 @@ from .plugins.assessment import assessment as _assess
 from . import agent_registry as _ar
 
 
-class VisibilityMixin:
-    """Coordination graph, file ownership scan, agent status, and assessment."""
+class Visibility:
+    """Coordination graph, file ownership scan, agent status, and assessment.
+
+    Constructed by :class:`CoordinationEngine` and exposed as
+    ``engine._visibility``. The engine keeps facade methods for each
+    public operation so the existing tool API is preserved.
+    """
+
+    def __init__(
+        self,
+        connect_fn: Callable[[], Any],
+        publish_event_fn: Callable[[str, dict[str, Any]], None],
+        project_root_getter: Callable[[], Path | None],
+    ) -> None:
+        self._connect = connect_fn
+        self._publish_event = publish_event_fn
+        self._project_root_getter = project_root_getter
 
     # ------------------------------------------------------------------ #
     # Graph & Visibility
@@ -34,7 +73,7 @@ class VisibilityMixin:
         if path and target and not target.is_file():
             return {"loaded": False, "error": f"Coordination spec not found: {path}"}
         result = _g.load_coordination_spec_from_disk(
-            self._connect, self._storage.project_root, target,
+            self._connect, self._project_root_getter(), target,
         )
         self._publish_event(
             "graph.loaded",
@@ -62,15 +101,16 @@ class VisibilityMixin:
         if extensions is not None and not extensions:
             return {"scanned": 0, "owned": 0, "error": "extensions list cannot be empty"}
         graph = self._effective_graph()
+        project_root = self._project_root_getter()
         result = _scan.scan_project_tool(
-            self._connect, self._storage.project_root, worktree_root, extensions, graph,
+            self._connect, project_root, worktree_root, extensions, graph,
         )
         self._publish_event(
             "scan.completed",
             {
                 "scanned": result.get("scanned", 0),
                 "owned": result.get("owned", 0),
-                "worktree_root": worktree_root or str(self._storage.project_root),
+                "worktree_root": worktree_root or str(project_root),
             },
         )
         return result
@@ -113,6 +153,7 @@ class VisibilityMixin:
         If suite_path is omitted, synthesizes a live session trace from DB state.
         """
         graph = self._effective_graph()
+        project_root = self._project_root_getter()
         if suite_path is not None:
             suite_file = Path(suite_path)
             if not suite_file.is_file():
@@ -123,8 +164,8 @@ class VisibilityMixin:
                 return {"error": f"Failed to load suite: {exc}"}
         else:
             worktree_root = (
-                str(self._storage.project_root)
-                if scope == "project" and self._storage.project_root
+                str(project_root)
+                if scope == "project" and project_root
                 else None
             )
             suite = _assess.build_suite_from_db(

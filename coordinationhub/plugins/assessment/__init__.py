@@ -24,7 +24,6 @@ __all__ = [
 
 def register_tools(dispatch_table: dict[str, tuple[str, list[str]]]) -> None:
     """Register assessment tools in the dispatch table."""
-    from coordinationhub.core_visibility import VisibilityMixin
     dispatch_table["run_assessment"] = ("run_assessment", ["suite_path", "format", "graph_agent_id"])
     dispatch_table["assess_current_session"] = (
         "assess_current_session", ["format", "graph_agent_id", "scope"]

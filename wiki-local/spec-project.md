@@ -318,11 +318,10 @@ coordinationhub/
   cli_vis.py            — Change awareness, audit, graph, and assessment CLI commands (~241 LOC)
   conflict_log.py       — Conflict recording and querying for CoordinationHub (~43 LOC)
   context.py            — Context bundle builder for CoordinationHub agent registration responses (~104 LOC)
-  core.py               — CoordinationEngine — host class that composes mixins and subsystems (~703 LOC)
+  core.py               — CoordinationEngine — host class that composes mixins and subsystems (~754 LOC)
   core_broadcasts.py    — BroadcastMixin — broadcast, handoff dispatch, and cross-agent waits (~188 LOC)
   core_identity.py      — IdentityMixin — agent lifecycle and lineage management (~139 LOC)
   core_locking.py       — Locking methods for CoordinationEngine (~394 LOC)
-  core_visibility.py    — VisibilityMixin — coordination graph, project scan, agent status, assessment (~138 LOC)
   db.py                 — SQLite connection pool and public re-exports for CoordinationHub (~93 LOC)
   db_migrations.py      — Schema-version tracking, migration functions, and the ``init_schema`` driver (~399 LOC)
   db_schemas.py         — Canonical SQLite schema definitions for CoordinationHub (~301 LOC)
@@ -352,6 +351,7 @@ coordinationhub/
   task_subsystem.py     — Task subsystem — shared task registry with hierarchy + dead-letter queue (~241 LOC)
   tasks.py              — Task registry primitives for CoordinationHub (work board) (~517 LOC)
   validation.py         — Minimal stdlib jsonschema validator for MCP tool arguments (~160 LOC)
+  visibility_subsystem.py — Visibility subsystem — coordination graph, project scan, agent status, assessment (~175 LOC)
   work_intent.py        — Work intent board primitives for CoordinationHub (~139 LOC)
   work_intent_subsystem.py — WorkIntent subsystem — cooperative work intent board (~92 LOC)
   hooks/
@@ -364,7 +364,7 @@ coordinationhub/
     __init__.py         — CoordinationHub plugin system (~8 LOC)
     registry.py         — Plugin registry for CoordinationHub (~59 LOC)
   plugins/assessment/
-    __init__.py         — Assessment plugin for CoordinationHub (~29 LOC)
+    __init__.py         — Assessment plugin for CoordinationHub (~28 LOC)
     assessment.py       — Assessment runner for CoordinationHub coordination test suites (~337 LOC)
     assessment_scorers.py — Assessment metric scorers for CoordinationHub (~266 LOC)
   plugins/dashboard/
