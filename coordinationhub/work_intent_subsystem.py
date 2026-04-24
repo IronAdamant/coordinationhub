@@ -1,26 +1,45 @@
-"""WorkIntentMixin — cooperative work intent board.
+"""WorkIntent subsystem — cooperative work intent board.
 
-Expects the host class to provide:
-    self._connect() — callable returning a sqlite3 connection
-    self._storage.project_root — for path normalization
+T6.22 second step: extracted out of ``core_work_intent.WorkIntentMixin``
+into a standalone class. Coupling audit confirmed WorkIntentMixin had
+zero cross-mixin method calls, zero ``_publish_event`` calls, and zero
+``_hybrid_wait`` calls — it only needed ``_connect`` for DB access and
+``_storage.project_root`` for path normalization. Both are now injected
+as constructor dependencies (see commit ``1ee46c6`` for the Spawner
+precedent). This continues breaking the god-object inheritance chain
+on ``CoordinationEngine`` without changing observable behaviour.
 
-Delegates to: work_intent (work_intent.py)
+Delegates to: work_intent (work_intent.py) for intent DB primitives.
 """
 
 from __future__ import annotations
 
-from typing import Any
+from pathlib import Path
+from typing import Any, Callable
 
 from . import work_intent as _wi
 from .paths import normalize_path
 
 
-class WorkIntentMixin:
-    """Cooperative work intent declarations before lock acquisition."""
+class WorkIntent:
+    """Cooperative work intent declarations before lock acquisition.
+
+    Constructed by :class:`CoordinationEngine` and exposed as
+    ``engine._work_intent``. The engine keeps facade methods for each
+    public operation so the existing tool API is preserved.
+    """
+
+    def __init__(
+        self,
+        connect_fn: Callable[[], Any],
+        project_root_getter: Callable[[], Path | None],
+    ) -> None:
+        self._connect = connect_fn
+        self._project_root_getter = project_root_getter
 
     def _normalize_intent_path(self, document_path: str) -> str:
-        """Route `document_path` through the engine's project-root normalizer."""
-        return normalize_path(document_path, self._storage.project_root)
+        """Route ``document_path`` through the engine's project-root normalizer."""
+        return normalize_path(document_path, self._project_root_getter())
 
     def manage_work_intents(
         self,

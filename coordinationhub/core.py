@@ -8,7 +8,6 @@ BroadcastMixin:   core_broadcasts.py  — broadcast, handoff dispatch, wait_for_
 IdentityMixin:    core_identity.py    — agent registration, heartbeat, lineage
 MessagingMixin:   core_messaging.py  — inter-agent messages, await
 TaskMixin:        core_tasks.py       — task registry with hierarchy
-WorkIntentMixin:  core_work_intent.py — cooperative work intent board
 HandoffMixin:     core_handoffs.py    — handoff acknowledgment tracking
 DependencyMixin:  core_dependencies.py — cross-agent dependency declarations
 ChangeMixin:      core_change.py      — change notifications, audit, status
@@ -16,7 +15,8 @@ VisibilityMixin:  core_visibility.py  — coordination graph, scan, assessment
 LeaseMixin:       core_leases.py      — HA coordinator leadership leases
 
 Composed subsystems (T6.22 — extracted from the mixin tree):
-Spawner:          spawner_subsystem.py — sub-agent spawn management
+Spawner:          spawner_subsystem.py     — sub-agent spawn management
+WorkIntent:       work_intent_subsystem.py — cooperative work intent board
 
 Zero third-party dependencies.
 """
@@ -43,13 +43,13 @@ from .core_broadcasts import BroadcastMixin
 from .core_identity import IdentityMixin
 from .core_messaging import MessagingMixin
 from .core_tasks import TaskMixin
-from .core_work_intent import WorkIntentMixin
 from .core_handoffs import HandoffMixin
 from .core_dependencies import DependencyMixin
 from .core_change import ChangeMixin
 from .core_visibility import VisibilityMixin
 from .core_leases import LeaseMixin
 from .spawner_subsystem import Spawner
+from .work_intent_subsystem import WorkIntent
 from .paths import detect_project_root
 from .plugins.graph import graphs as _g
 
@@ -60,7 +60,6 @@ class CoordinationEngine(
     IdentityMixin,
     MessagingMixin,
     TaskMixin,
-    WorkIntentMixin,
     HandoffMixin,
     DependencyMixin,
     ChangeMixin,
@@ -72,8 +71,9 @@ class CoordinationEngine(
     Provides storage lifecycle and wiring for cross-mixin calls.
     Most domain methods are provided by the mixins. Subsystems
     extracted from the mixin tree (T6.22) hang off the engine as
-    composed attributes — currently ``self._spawner`` — with facade
-    methods on the engine preserving the public API.
+    composed attributes — currently ``self._spawner`` and
+    ``self._work_intent`` — with facade methods on the engine
+    preserving the public API.
     """
 
     DEFAULT_PORT = 9877
@@ -111,6 +111,16 @@ class CoordinationEngine(
             connect_fn=self._connect,
             publish_event_fn=self._publish_event,
             hybrid_wait_fn=self._hybrid_wait,
+        )
+        # T6.22: composed subsystem replaces WorkIntentMixin. Per the
+        # coupling audit the mixin only touched ``_connect`` and
+        # ``_storage.project_root`` (for path normalization); both are
+        # injected here. ``project_root_getter`` is a callable so a
+        # replica produced by ``read_only_engine`` picks up its own
+        # storage's root without rebinding.
+        self._work_intent = WorkIntent(
+            connect_fn=self._connect,
+            project_root_getter=lambda: self._storage.project_root,
         )
 
     def start(self) -> None:
@@ -343,6 +353,59 @@ class CoordinationEngine(
             child_agent_id=child_agent_id, timeout=timeout,
         )
 
+    # ------------------------------------------------------------------ #
+    # WorkIntent facade (T6.22)
+    # ------------------------------------------------------------------ #
+    # These one-liners delegate to ``self._work_intent`` (a
+    # :class:`WorkIntent` composed in ``__init__``). They preserve the
+    # pre-extraction public API — MCP dispatch (``manage_work_intents``),
+    # CLI (``cli_intent.py``), housekeeping (``prune_work_intents``),
+    # and tests all continue to call ``engine.declare_work_intent(...)``
+    # etc. verbatim.
+
+    def manage_work_intents(
+        self,
+        action: str,
+        agent_id: str,
+        document_path: str | None = None,
+        intent: str | None = None,
+        ttl: float = 60.0,
+    ) -> dict[str, Any]:
+        return self._work_intent.manage_work_intents(
+            action=action,
+            agent_id=agent_id,
+            document_path=document_path,
+            intent=intent,
+            ttl=ttl,
+        )
+
+    def declare_work_intent(
+        self,
+        agent_id: str,
+        document_path: str,
+        intent: str,
+        ttl: float = 60.0,
+    ) -> dict[str, Any]:
+        return self._work_intent.declare_work_intent(
+            agent_id=agent_id,
+            document_path=document_path,
+            intent=intent,
+            ttl=ttl,
+        )
+
+    def get_work_intents(self, agent_id: str | None = None) -> dict[str, Any]:
+        return self._work_intent.get_work_intents(agent_id=agent_id)
+
+    def clear_work_intent(
+        self, agent_id: str, document_path: str | None = None,
+    ) -> dict[str, Any]:
+        return self._work_intent.clear_work_intent(
+            agent_id=agent_id, document_path=document_path,
+        )
+
+    def prune_work_intents(self) -> dict[str, Any]:
+        return self._work_intent.prune_work_intents()
+
     def read_only_engine(self) -> "CoordinationEngine":
         """Return a read-only view of this engine using direct WAL reads.
 
@@ -363,5 +426,9 @@ class CoordinationEngine(
         # its __init__; rebind to the read-only connection so replica
         # spawner calls don't punch through to the pool.
         replica._spawner._connect = replica._connect
+        # Same rebind for the WorkIntent subsystem. Its ``project_root_getter``
+        # is a closure over ``self._storage`` so it already picks up the
+        # replica's storage without further rebinding.
+        replica._work_intent._connect = replica._connect
         return replica
 
