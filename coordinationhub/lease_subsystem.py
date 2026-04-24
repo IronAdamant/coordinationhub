@@ -1,33 +1,50 @@
-"""LeaseMixin — HA coordinator lease management.
+"""Lease subsystem — HA coordinator lease management.
 
-Expects the host class to provide:
-    self._connect() — callable returning a sqlite3 connection
+T6.22 third step: extracted out of ``core_leases.LeaseMixin`` into a
+standalone class. Coupling audit confirmed LeaseMixin had zero
+cross-mixin method calls, zero ``_hybrid_wait`` calls, and only four
+``_publish_event`` calls (on acquire / refresh / release / claim).
+DB access is via ``_connect``. Both are now injected as constructor
+dependencies — see commits ``1ee46c6`` (Spawner, first extraction) and
+``3d1bd48`` (WorkIntent, second extraction) for precedent. This
+continues breaking the god-object inheritance chain on
+``CoordinationEngine`` without changing observable behaviour.
 
-Delegates to: leases (leases.py) for lease primitives.
+Delegates to: leases (leases.py) for lease DB primitives.
 """
 
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, Callable
 
 from . import leases as _leases
 
 
-class LeaseMixin:
-    """HA coordinator lease management via coordinator_leases table."""
+class Lease:
+    """HA coordinator lease management via coordinator_leases table.
+
+    Constructed by :class:`CoordinationEngine` and exposed as
+    ``engine._lease``. The engine keeps facade methods for each
+    public operation so the existing tool API is preserved.
+    """
 
     COORDINATOR_LEASE = "COORDINATOR_LEADER"
     # T6.23: renamed from DEFAULT_TTL so it doesn't collide with
-    # LockingMixin.DEFAULT_TTL (300s) when both mixins land on the same
-    # engine via multiple inheritance.
+    # LockingMixin.DEFAULT_TTL (300s) when both landed on the same
+    # engine via multiple inheritance. Retained on the subsystem so
+    # existing explicit references (``Lease.DEFAULT_LEASE_TTL``) keep
+    # working.
     DEFAULT_LEASE_TTL = 10.0  # 10-second lease — must refresh within TTL
-    # Back-compat alias (kept for callers that read LeaseMixin.DEFAULT_TTL
-    # explicitly). Prefer DEFAULT_LEASE_TTL going forward. NOTE: on a
-    # subclass that also inherits LockingMixin, bare ``self.DEFAULT_TTL``
-    # resolves to whichever mixin appears first in the MRO — always use
-    # the typed attribute (DEFAULT_LEASE_TTL / DEFAULT_LOCK_TTL) from
-    # new code.
+    # Back-compat alias. Prefer DEFAULT_LEASE_TTL in new code.
     DEFAULT_TTL = DEFAULT_LEASE_TTL
+
+    def __init__(
+        self,
+        connect_fn: Callable[[], Any],
+        publish_event_fn: Callable[[str, dict[str, Any]], None],
+    ) -> None:
+        self._connect = connect_fn
+        self._publish_event = publish_event_fn
 
     # ------------------------------------------------------------------ #
     # Lease Management

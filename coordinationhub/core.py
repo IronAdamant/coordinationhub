@@ -12,11 +12,11 @@ HandoffMixin:     core_handoffs.py    — handoff acknowledgment tracking
 DependencyMixin:  core_dependencies.py — cross-agent dependency declarations
 ChangeMixin:      core_change.py      — change notifications, audit, status
 VisibilityMixin:  core_visibility.py  — coordination graph, scan, assessment
-LeaseMixin:       core_leases.py      — HA coordinator leadership leases
 
 Composed subsystems (T6.22 — extracted from the mixin tree):
 Spawner:          spawner_subsystem.py     — sub-agent spawn management
 WorkIntent:       work_intent_subsystem.py — cooperative work intent board
+Lease:            lease_subsystem.py       — HA coordinator leadership leases
 
 Zero third-party dependencies.
 """
@@ -47,9 +47,9 @@ from .core_handoffs import HandoffMixin
 from .core_dependencies import DependencyMixin
 from .core_change import ChangeMixin
 from .core_visibility import VisibilityMixin
-from .core_leases import LeaseMixin
 from .spawner_subsystem import Spawner
 from .work_intent_subsystem import WorkIntent
+from .lease_subsystem import Lease
 from .paths import detect_project_root
 from .plugins.graph import graphs as _g
 
@@ -64,15 +64,14 @@ class CoordinationEngine(
     DependencyMixin,
     ChangeMixin,
     VisibilityMixin,
-    LeaseMixin,
 ):
     """Host class that inherits capability mixins and holds subsystems.
 
     Provides storage lifecycle and wiring for cross-mixin calls.
     Most domain methods are provided by the mixins. Subsystems
     extracted from the mixin tree (T6.22) hang off the engine as
-    composed attributes — currently ``self._spawner`` and
-    ``self._work_intent`` — with facade methods on the engine
+    composed attributes — ``self._spawner``, ``self._work_intent``,
+    and ``self._lease`` — with facade methods on the engine
     preserving the public API.
     """
 
@@ -121,6 +120,18 @@ class CoordinationEngine(
         self._work_intent = WorkIntent(
             connect_fn=self._connect,
             project_root_getter=lambda: self._storage.project_root,
+        )
+        # T6.22: composed subsystem replaces LeaseMixin. Per the coupling
+        # audit LeaseMixin had zero cross-mixin calls and zero
+        # ``_hybrid_wait`` calls — it only needed ``_connect`` and the
+        # four ``_publish_event`` notifications for lease state changes.
+        # Both are injected here; facade methods below delegate so the
+        # public API (``engine.acquire_coordinator_lease`` etc.) stays
+        # identical. See commits ``1ee46c6`` (Spawner) and ``3d1bd48``
+        # (WorkIntent) for the two prior extractions in this series.
+        self._lease = Lease(
+            connect_fn=self._connect,
+            publish_event_fn=self._publish_event,
         )
 
     def start(self) -> None:
@@ -406,6 +417,49 @@ class CoordinationEngine(
     def prune_work_intents(self) -> dict[str, Any]:
         return self._work_intent.prune_work_intents()
 
+    # ------------------------------------------------------------------ #
+    # Lease facade (T6.22)
+    # ------------------------------------------------------------------ #
+    # These one-liners delegate to ``self._lease`` (a :class:`Lease`
+    # composed in ``__init__``). They preserve the pre-extraction public
+    # API — MCP dispatch (``manage_leases`` / ``acquire_coordinator_lease``),
+    # CLI (``cli_leases.py``), housekeeping, and tests all continue to
+    # call ``engine.acquire_coordinator_lease(...)`` etc. verbatim.
+
+    def manage_leases(
+        self,
+        action: str,
+        agent_id: str | None = None,
+        ttl: float | None = None,
+    ) -> dict[str, Any]:
+        return self._lease.manage_leases(
+            action=action, agent_id=agent_id, ttl=ttl,
+        )
+
+    def acquire_coordinator_lease(
+        self,
+        agent_id: str,
+        ttl: float | None = None,
+    ) -> dict[str, Any]:
+        return self._lease.acquire_coordinator_lease(agent_id=agent_id, ttl=ttl)
+
+    def refresh_coordinator_lease(self, agent_id: str) -> dict[str, Any]:
+        return self._lease.refresh_coordinator_lease(agent_id=agent_id)
+
+    def release_coordinator_lease(self, agent_id: str) -> dict[str, Any]:
+        return self._lease.release_coordinator_lease(agent_id=agent_id)
+
+    def is_leader(self, agent_id: str) -> bool:
+        return self._lease.is_leader(agent_id=agent_id)
+
+    def get_leader(self) -> dict[str, Any] | None:
+        return self._lease.get_leader()
+
+    def claim_leadership(
+        self, agent_id: str, ttl: float | None = None,
+    ) -> dict[str, Any]:
+        return self._lease.claim_leadership(agent_id=agent_id, ttl=ttl)
+
     def read_only_engine(self) -> "CoordinationEngine":
         """Return a read-only view of this engine using direct WAL reads.
 
@@ -430,5 +484,11 @@ class CoordinationEngine(
         # is a closure over ``self._storage`` so it already picks up the
         # replica's storage without further rebinding.
         replica._work_intent._connect = replica._connect
+        # T6.22: and the Lease subsystem — same pattern. No
+        # ``_publish_event`` rebind is needed because the replica's
+        # ``_publish_event`` was captured by its own ``_lease.__init__``
+        # against the replica's (unused) writer pool; lease mutations
+        # through a read-only replica are not a supported flow.
+        replica._lease._connect = replica._connect
         return replica
 
