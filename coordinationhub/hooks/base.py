@@ -152,6 +152,26 @@ class BaseHook:
                 _log_hook_error("engine_close", exc)
 
     # ------------------------------------------------------------------ #
+    # Output translation (T3.13)
+    #
+    # on_pre_write / on_session_end build Claude Code-shaped responses
+    # (``hookSpecificOutput``, ``permissionDecision``, etc.) because that
+    # was the original deployment target. Adapters for other IDEs override
+    # ``translate_output`` to reshape the dict into whatever format their
+    # wrapper scripts expect. The base implementation is a pass-through so
+    # the Claude Code adapter (``StdioHook``) stays unchanged.
+    # ------------------------------------------------------------------ #
+
+    def translate_output(
+        self, response: dict[str, Any] | None,
+    ) -> dict[str, Any] | None:
+        """Return the response dict reshaped for this IDE's hook format.
+
+        Default: pass-through (Claude Code shape). Subclasses reshape.
+        """
+        return response
+
+    # ------------------------------------------------------------------ #
     # Agent IDs
     # ------------------------------------------------------------------ #
 

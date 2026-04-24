@@ -189,39 +189,84 @@ def _get_engine(cwd: str):
     return hook.engine
 
 
+class _HookRunner:
+    """Contextual helper: lazily builds one StdioHook and keeps it alive.
+
+    T3.2: each ``handle_*`` function previously constructed its own
+    ``StdioHook`` (which boots a ``CoordinationEngine``, opens SQLite,
+    runs migrations, warms the lock cache). When ``main()`` dispatches a
+    single event that's fine, but tests and future batch callers that
+    fire multiple handlers in one process paid the boot cost per call.
+    The runner centralises construction + cleanup so handlers can share
+    one engine. Each ``handle_*`` still accepts ``hook=None`` for
+    backwards compat — external callers that pre-date T3.2 keep working.
+    """
+
+    __slots__ = ("_cwd", "_hook")
+
+    def __init__(self, cwd: str) -> None:
+        self._cwd = cwd
+        self._hook: StdioHook | None = None
+
+    @property
+    def hook(self) -> StdioHook:
+        if self._hook is None:
+            self._hook = StdioHook.from_cwd(self._cwd)
+        return self._hook
+
+    def close(self) -> None:
+        if self._hook is not None:
+            self._hook.close()
+            self._hook = None
+
+
+def _resolve_hook(event: dict, hook: StdioHook | None) -> tuple[StdioHook, bool]:
+    """Return ``(hook, owns_it)``. If ``hook`` is None, construct one and
+    mark it as owned so the caller closes it; otherwise return the shared
+    hook with owns_it=False.
+    """
+    if hook is not None:
+        return hook, False
+    return StdioHook.from_cwd(event.get("cwd", ".")), True
+
+
 # ---------------------------------------------------------------------------
 # Event handlers (thin wrappers around StdioHook)
 # ---------------------------------------------------------------------------
 
 
-def handle_session_start(event: dict) -> dict | None:
-    hook = StdioHook.from_cwd(event.get("cwd", "."))
+def handle_session_start(event: dict, hook: StdioHook | None = None) -> dict | None:
+    h, owns = _resolve_hook(event, hook)
     try:
-        hook.on_session_start(event.get("session_id", ""))
+        h.on_session_start(event.get("session_id", ""))
     finally:
-        hook.close()
+        if owns:
+            h.close()
     return None
 
 
-def handle_user_prompt_submit(event: dict) -> dict | None:
-    hook = StdioHook.from_cwd(event.get("cwd", "."))
+def handle_user_prompt_submit(
+    event: dict, hook: StdioHook | None = None,
+) -> dict | None:
+    h, owns = _resolve_hook(event, hook)
     try:
-        hook.on_user_prompt(event.get("session_id", ""), event.get("prompt", ""))
+        h.on_user_prompt(event.get("session_id", ""), event.get("prompt", ""))
     finally:
-        hook.close()
+        if owns:
+            h.close()
     return None
 
 
-def handle_pre_agent(event: dict) -> dict | None:
+def handle_pre_agent(event: dict, hook: StdioHook | None = None) -> dict | None:
     tool_input = event.get("tool_input", {})
     tool_use_id = event.get("tool_use_id", "")
     subagent_type = tool_input.get("subagent_type", "")
     if not tool_use_id or not subagent_type:
         return None
 
-    hook = StdioHook.from_cwd(event.get("cwd", "."))
+    h, owns = _resolve_hook(event, hook)
     try:
-        hook.stash_subagent_description(
+        h.stash_subagent_description(
             session_id=event.get("session_id", ""),
             tool_use_id=tool_use_id,
             subagent_type=subagent_type,
@@ -229,44 +274,49 @@ def handle_pre_agent(event: dict) -> dict | None:
             prompt=tool_input.get("prompt", "") or "",
         )
     finally:
-        hook.close()
+        if owns:
+            h.close()
     return None
 
 
-def handle_pre_write(event: dict) -> dict | None:
+def handle_pre_write(event: dict, hook: StdioHook | None = None) -> dict | None:
     file_path = event.get("tool_input", {}).get("file_path")
     if not file_path:
         return None
 
-    hook = StdioHook.from_cwd(event.get("cwd", "."))
+    h, owns = _resolve_hook(event, hook)
     try:
-        return hook.on_pre_write(
+        return h.on_pre_write(
             session_id=event.get("session_id", ""),
             file_path=file_path,
             raw_ide_id=StdioHook._raw_agent_id(event),
         )
     finally:
-        hook.close()
+        if owns:
+            h.close()
 
 
-def handle_post_write(event: dict) -> dict | None:
+def handle_post_write(event: dict, hook: StdioHook | None = None) -> dict | None:
     file_path = event.get("tool_input", {}).get("file_path")
     if not file_path:
         return None
 
-    hook = StdioHook.from_cwd(event.get("cwd", "."))
+    h, owns = _resolve_hook(event, hook)
     try:
-        hook.on_post_write(
+        h.on_post_write(
             session_id=event.get("session_id", ""),
             file_path=file_path,
             raw_ide_id=StdioHook._raw_agent_id(event),
         )
     finally:
-        hook.close()
+        if owns:
+            h.close()
     return None
 
 
-def handle_post_stele_index(event: dict) -> dict | None:
+def handle_post_stele_index(
+    event: dict, hook: StdioHook | None = None,
+) -> dict | None:
     tool_input = event.get("tool_input", {})
     doc_path = tool_input.get("document_path") or tool_input.get("path")
     paths = tool_input.get("paths", [])
@@ -275,69 +325,80 @@ def handle_post_stele_index(event: dict) -> dict | None:
     if not paths:
         return None
 
-    hook = StdioHook.from_cwd(event.get("cwd", "."))
+    h, owns = _resolve_hook(event, hook)
     try:
-        hook.on_post_index(
+        h.on_post_index(
             session_id=event.get("session_id", ""),
             paths=[str(p) for p in paths],
             raw_ide_id=StdioHook._raw_agent_id(event),
         )
     finally:
-        hook.close()
+        if owns:
+            h.close()
     return None
 
 
-def handle_post_trammel_claim(event: dict) -> dict | None:
+def handle_post_trammel_claim(
+    event: dict, hook: StdioHook | None = None,
+) -> dict | None:
     tool_input = event.get("tool_input", {})
     step_id = tool_input.get("step_id", "")
     plan_id = tool_input.get("plan_id", "")
     task = f"trammel:{plan_id}/{step_id}" if plan_id else str(step_id)
 
-    hook = StdioHook.from_cwd(event.get("cwd", "."))
+    h, owns = _resolve_hook(event, hook)
     try:
-        hook.on_task_claim(
+        h.on_task_claim(
             session_id=event.get("session_id", ""),
             task=task,
             raw_ide_id=StdioHook._raw_agent_id(event),
         )
     finally:
-        hook.close()
+        if owns:
+            h.close()
     return None
 
 
-def handle_subagent_start(event: dict) -> dict | None:
-    hook = StdioHook.from_cwd(event.get("cwd", "."))
+def handle_subagent_start(
+    event: dict, hook: StdioHook | None = None,
+) -> dict | None:
+    h, owns = _resolve_hook(event, hook)
     try:
-        hook.on_subagent_start(
+        h.on_subagent_start(
             session_id=event.get("session_id", ""),
             raw_ide_id=StdioHook._raw_agent_id(event),
             agent_type=StdioHook._subagent_type(event),
             description=event.get("tool_input", {}).get("description") or "",
         )
     finally:
-        hook.close()
+        if owns:
+            h.close()
     return None
 
 
-def handle_subagent_stop(event: dict) -> dict | None:
-    hook = StdioHook.from_cwd(event.get("cwd", "."))
+def handle_subagent_stop(
+    event: dict, hook: StdioHook | None = None,
+) -> dict | None:
+    h, owns = _resolve_hook(event, hook)
     try:
-        hook.on_subagent_stop(
+        h.on_subagent_stop(
             session_id=event.get("session_id", ""),
             raw_ide_id=StdioHook._raw_agent_id(event),
             agent_type=StdioHook._subagent_type(event),
         )
     finally:
-        hook.close()
+        if owns:
+            h.close()
     return None
 
 
-def handle_session_end(event: dict) -> dict | None:
-    hook = StdioHook.from_cwd(event.get("cwd", "."))
+def handle_session_end(event: dict, hook: StdioHook | None = None) -> dict | None:
+    h, owns = _resolve_hook(event, hook)
     try:
-        return hook.on_session_end(event.get("session_id", ""))
+        return h.on_session_end(event.get("session_id", ""))
     finally:
-        hook.close()
+        if owns:
+            h.close()
 
 
 # ---------------------------------------------------------------------------
@@ -370,42 +431,49 @@ def main() -> None:
     hook_event = event.get("hook_event_name", "")
     tool_name = event.get("tool_name", "")
 
+    # T3.2: construct a single StdioHook up front and reuse it across
+    # every branch below. Pre-fix, each branch's ``handle_*`` built its
+    # own hook — fine when only one branch fires per invocation, but
+    # boot cost is non-trivial (engine __init__ + start + lock cache
+    # warm + graph load). Closing happens in the outer finally so the
+    # cleanup path runs even when a handler raises.
+    runner = _HookRunner(event.get("cwd", "."))
     try:
         result = None
 
         if hook_event == "SessionStart":
-            result = handle_session_start(event)
+            result = handle_session_start(event, hook=runner.hook)
 
         elif hook_event == "UserPromptSubmit":
-            result = handle_user_prompt_submit(event)
+            result = handle_user_prompt_submit(event, hook=runner.hook)
 
         elif hook_event == "PreToolUse" and tool_name in ("Write", "Edit"):
-            result = handle_pre_write(event)
+            result = handle_pre_write(event, hook=runner.hook)
 
         elif hook_event == "PreToolUse" and tool_name == "Agent":
-            result = handle_pre_agent(event)
+            result = handle_pre_agent(event, hook=runner.hook)
 
         elif hook_event == "PostToolUse":
             if tool_name in ("Write", "Edit"):
-                result = handle_post_write(event)
+                result = handle_post_write(event, hook=runner.hook)
             # T3.15: exact-match against an allow-list instead of loose
             # substring checks. Previously ``"stele" in tool_name and
             # "index" in tool_name`` matched any tool whose name
             # contained both words in any order (e.g.
             # ``unstele_reindexer``).
             elif tool_name in _STELE_INDEX_TOOLS:
-                result = handle_post_stele_index(event)
+                result = handle_post_stele_index(event, hook=runner.hook)
             elif tool_name in _TRAMMEL_CLAIM_TOOLS:
-                result = handle_post_trammel_claim(event)
+                result = handle_post_trammel_claim(event, hook=runner.hook)
 
         elif hook_event == "SubagentStart":
-            result = handle_subagent_start(event)
+            result = handle_subagent_start(event, hook=runner.hook)
 
         elif hook_event == "SubagentStop":
-            result = handle_subagent_stop(event)
+            result = handle_subagent_stop(event, hook=runner.hook)
 
         elif hook_event == "SessionEnd":
-            result = handle_session_end(event)
+            result = handle_session_end(event, hook=runner.hook)
 
         if result:
             json.dump(result, sys.stdout)
@@ -414,6 +482,8 @@ def main() -> None:
         pass
     except Exception as exc:
         _log_error(hook_event or "unknown", exc)
+    finally:
+        runner.close()
 
 
 if __name__ == "__main__":

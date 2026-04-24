@@ -1094,19 +1094,19 @@ keep it in sync; CI checks for drift on every push.
 | `coordinationhub/db_schemas.py` | 301 | Canonical SQLite schema definitions for CoordinationHub |
 | `coordinationhub/dependencies.py` | 140 | Cross-agent dependency declaration and satisfaction tracking |
 | `coordinationhub/dispatch.py` | 91 | Tool dispatch for CoordinationHub |
-| `coordinationhub/event_bus.py` | 102 | Lightweight thread-safe in-memory pub-sub event bus for CoordinationHub |
+| `coordinationhub/event_bus.py` | 127 | Lightweight thread-safe in-memory pub-sub event bus for CoordinationHub |
 | `coordinationhub/handoffs.py` | 200 | Handoff recording and acknowledgement primitives for CoordinationHub |
 | `coordinationhub/hooks/__init__.py` | 1 | Hooks package — IDE integration via stdin/stdout event protocol |
-| `coordinationhub/hooks/base.py` | 333 | Base hook abstraction for CoordinationHub |
-| `coordinationhub/hooks/cursor.py` | 110 | CoordinationHub hook adapter for Cursor |
-| `coordinationhub/hooks/kimi_cli.py` | 110 | CoordinationHub hook adapter for Kimi CLI |
-| `coordinationhub/hooks/stdio_adapter.py` | 298 | CoordinationHub stdio event adapter |
+| `coordinationhub/hooks/base.py` | 340 | Base hook abstraction for CoordinationHub |
+| `coordinationhub/hooks/cursor.py` | 146 | CoordinationHub hook adapter for Cursor |
+| `coordinationhub/hooks/kimi_cli.py` | 121 | CoordinationHub hook adapter for Kimi CLI |
+| `coordinationhub/hooks/stdio_adapter.py` | 353 | CoordinationHub stdio event adapter |
 | `coordinationhub/housekeeping.py` | 188 | HousekeepingScheduler — background periodic pruners for long-running hubs |
 | `coordinationhub/leases.py` | 220 | Zero-deps lease primitives for HA coordinator leadership |
 | `coordinationhub/limits.py` | 40 | String-length caps for user-supplied fields (T6.14) |
 | `coordinationhub/lock_cache.py` | 180 | In-memory lock cache for CoordinationHub |
 | `coordinationhub/lock_ops.py` | 209 | Shared lock primitives used by both local locks and coordination locks |
-| `coordinationhub/mcp_server.py` | 461 | HTTP-based MCP server for CoordinationHub — zero external dependencies |
+| `coordinationhub/mcp_server.py` | 578 | HTTP REST admin / dashboard endpoint for CoordinationHub |
 | `coordinationhub/mcp_stdio.py` | 183 | Stdio-based MCP server for CoordinationHub using the ``mcp`` Python package |
 | `coordinationhub/messages.py` | 105 | Inter-agent messaging primitives for CoordinationHub |
 | `coordinationhub/notifications.py` | 154 | Change notification storage and retrieval for CoordinationHub |
@@ -1146,7 +1146,7 @@ keep it in sync; CI checks for drift on every push.
 | `coordinationhub/work_intent.py` | 139 | Work intent board primitives for CoordinationHub |
 <!-- /GEN -->
 
-**Total: <!-- GEN:test-count -->661<!-- /GEN --> tests across 28 test files.**
+**Total: <!-- GEN:test-count -->676<!-- /GEN --> tests across 28 test files.**
 
 ---
 
@@ -1196,14 +1196,14 @@ coordinationhub/
   db_schemas.py         — Canonical SQLite schema definitions for CoordinationHub (~301 LOC)
   dependencies.py       — Cross-agent dependency declaration and satisfaction tracking (~140 LOC)
   dispatch.py           — Tool dispatch for CoordinationHub (~91 LOC)
-  event_bus.py          — Lightweight thread-safe in-memory pub-sub event bus for CoordinationHub (~102 LOC)
+  event_bus.py          — Lightweight thread-safe in-memory pub-sub event bus for CoordinationHub (~127 LOC)
   handoffs.py           — Handoff recording and acknowledgement primitives for CoordinationHub (~200 LOC)
   housekeeping.py       — HousekeepingScheduler — background periodic pruners for long-running hubs (~188 LOC)
   leases.py             — Zero-deps lease primitives for HA coordinator leadership (~220 LOC)
   limits.py             — String-length caps for user-supplied fields (T6.14) (~40 LOC)
   lock_cache.py         — In-memory lock cache for CoordinationHub (~180 LOC)
   lock_ops.py           — Shared lock primitives used by both local locks and coordination locks (~209 LOC)
-  mcp_server.py         — HTTP-based MCP server for CoordinationHub — zero external dependencies (~461 LOC)
+  mcp_server.py         — HTTP REST admin / dashboard endpoint for CoordinationHub (~578 LOC)
   mcp_stdio.py          — Stdio-based MCP server for CoordinationHub using the ``mcp`` Python package (~183 LOC)
   messages.py           — Inter-agent messaging primitives for CoordinationHub (~105 LOC)
   notifications.py      — Change notification storage and retrieval for CoordinationHub (~154 LOC)
@@ -1216,10 +1216,10 @@ coordinationhub/
   work_intent.py        — Work intent board primitives for CoordinationHub (~139 LOC)
   hooks/
     __init__.py         — Hooks package — IDE integration via stdin/stdout event protocol (~1 LOC)
-    base.py             — Base hook abstraction for CoordinationHub (~333 LOC)
-    cursor.py           — CoordinationHub hook adapter for Cursor (~110 LOC)
-    kimi_cli.py         — CoordinationHub hook adapter for Kimi CLI (~110 LOC)
-    stdio_adapter.py    — CoordinationHub stdio event adapter (~298 LOC)
+    base.py             — Base hook abstraction for CoordinationHub (~340 LOC)
+    cursor.py           — CoordinationHub hook adapter for Cursor (~146 LOC)
+    kimi_cli.py         — CoordinationHub hook adapter for Kimi CLI (~121 LOC)
+    stdio_adapter.py    — CoordinationHub stdio event adapter (~353 LOC)
   plugins/
     __init__.py         — CoordinationHub plugin system (~8 LOC)
     registry.py         — Plugin registry for CoordinationHub (~59 LOC)
@@ -1255,7 +1255,7 @@ coordinationhub/
 ```
 <!-- /GEN -->
 
-The `tests/` directory holds <!-- GEN:test-count -->661<!-- /GEN --> tests across 28 files,
+The `tests/` directory holds <!-- GEN:test-count -->676<!-- /GEN --> tests across 28 files,
 plus `tests/fixtures/claude_code_events/` for hook contract fixtures.
 
 **Module design principles:**
@@ -1722,7 +1722,7 @@ Air-gapped install: `pip install coordinationhub --no-deps`.
 
 ```bash
 python -m pytest tests/ -v
-# <!-- GEN:test-count -->661<!-- /GEN --> tests across 28 test files
+# <!-- GEN:test-count -->676<!-- /GEN --> tests across 28 test files
 ```
 
 ---

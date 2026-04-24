@@ -1,20 +1,28 @@
-"""HTTP-based MCP server for CoordinationHub — zero external dependencies.
+"""HTTP REST admin / dashboard endpoint for CoordinationHub.
 
-Exposes all CoordinationEngine tool methods over HTTP with JSON request/response.
+T3.6: **this is NOT the MCP transport.** The MCP server is
+``coordinationhub/mcp_stdio.py`` — JSON-RPC 2.0 over stdin/stdout, which
+is what LLM clients actually speak. This file implements a bespoke REST
+admin endpoint for operator use: dashboard, tool-exposure for scripts,
+and health checks. The filename (historical) is kept for backwards
+compatibility with existing imports; the public class is
+``CoordinationHubAdminServer`` with ``CoordinationHubMCPServer`` kept as
+a deprecated alias.
+
 Endpoints:
-    GET  /tools   — list available tool schemas (requires auth)
-    GET  /health  — health check (open)
-    POST /call    — invoke a tool by name with arguments (requires auth)
-    GET  /events  — SSE dashboard stream (requires auth)
-    GET  /api/dashboard-data — JSON snapshot (requires auth)
-    GET  /        — HTML dashboard (open, token embedded in response)
+    GET  /tools                — list tool schemas (requires auth; REST, not MCP)
+    GET  /health               — health check (open; includes tools_version)
+    POST /call                 — invoke a tool by name with JSON args (REST)
+    GET  /events               — SSE stream of coordination events (T3.8)
+    GET  /api/dashboard-data   — JSON snapshot (requires auth)
+    GET  /                     — HTML dashboard (open, embeds token)
 
-T2.1: every endpoint except ``/health`` requires a ``Authorization: Bearer
-<token>`` header. The token is generated at server startup and exposed on
-``CoordinationHubMCPServer.auth_token``; the dashboard HTML embeds it in
-a ``<meta name="coordhub-token" ...>`` tag so the browser can read it and
-use it for same-origin fetches. Cross-origin requests are rejected via
-``Origin`` / ``Host`` header checks (DNS-rebinding defense).
+T2.1 auth: every endpoint except ``/health`` and ``/`` requires a
+``Authorization: Bearer <token>`` header. The token is generated at
+server startup and exposed on ``.auth_token``; the dashboard HTML embeds
+it in a ``<meta name="coordhub-token" ...>`` tag for same-origin fetches.
+Cross-origin requests are rejected via ``Origin`` / ``Host`` checks
+(DNS-rebinding defense).
 """
 
 from __future__ import annotations
@@ -204,7 +212,20 @@ class MCPRequestHandler(BaseHTTPRequestHandler):
         self.wfile.write(body)
 
     def _serve_sse_events(self) -> None:
-        """GET /events — Server-Sent Events stream of dashboard data every 5s.
+        """GET /events — Server-Sent Events stream of dashboard snapshots.
+
+        T3.8: event-driven. Pre-fix the loop slept 5 s between pushes so
+        state changes arriving between ticks were invisible until the next
+        poll (and reconnects lost every event during the gap). Now the
+        handler subscribes to the engine's event bus; each publish wakes
+        the loop, triggers a fresh snapshot read, and pushes it to the
+        client. The 5 s cadence is retained as a fallback keepalive so
+        reverse proxies see bytes when the bus is quiet.
+
+        ``Last-Event-ID``: on reconnect the browser resends the last
+        ``id:`` it received. When present, we replay ``coordination_events``
+        rows with ``id > last`` before entering the live stream so the
+        client doesn't lose state from the disconnect gap.
 
         T2.6: enforces a per-remote-address cap on concurrent SSE
         connections. Without this a single misbehaving page could open
@@ -237,29 +258,70 @@ class MCPRequestHandler(BaseHTTPRequestHandler):
         # Set a socket timeout so dead connections don't hang forever
         self.request.settimeout(10.0)
         # T6.35: hard cap on how long a single SSE connection can live.
-        # The socket timeout above covers a stuck/dead client (no bytes
-        # can flow), but a client that's actively polling would otherwise
-        # hold a slot indefinitely. The EventSource in the browser
-        # auto-reconnects within 3 s so closing after 10 min is
-        # transparent to UX while bounding our worst-case resource hold.
         sse_max_lifetime = getattr(self.server, "sse_max_lifetime_s", 600.0)
         start_ts = _time.time()
+
+        # T3.8: parse Last-Event-ID (either header or query-string
+        # fallback). Browsers resend it on reconnect so we can backfill
+        # the missed window from the durable journal.
+        last_id = self._parse_last_event_id()
+
+        # T3.8: subscribe to every published topic so dashboards see
+        # every state change, not just a timer tick.
+        engine = self.server.engine
+        sub_id, sub = engine._event_bus.subscribe_all()
+
         try:
+            # T3.8 replay: if the client reconnected with Last-Event-ID,
+            # emit any journal rows that arrived after that id so the
+            # gap between disconnect and reconnect is backfilled.
+            if last_id is not None:
+                last_id = self._replay_missed_events(last_id)
+
+            # Initial snapshot — one push on connect so the dashboard
+            # has something to render immediately.
+            last_id = self._push_dashboard_snapshot(last_id)
+
             while True:
-                try:
-                    data = get_dashboard_data(self.server.engine._connect)
-                    payload = json.dumps(data, default=str)
-                    self.wfile.write(f"data: {payload}\n\n".encode("utf-8"))
-                    self.wfile.flush()
-                except (socket.timeout, BrokenPipeError, ConnectionResetError):
-                    break  # client disconnected or timed out
-                except Exception:
-                    break  # any other error — terminate the stream
-                # T6.35: terminate after the max lifetime.
                 if _time.time() - start_ts >= sse_max_lifetime:
                     break
-                _time.sleep(5)
+                # Wait for a bus event or the keepalive interval.
+                try:
+                    sub.get(timeout=5.0)
+                    got_event = True
+                except Exception:
+                    got_event = False
+
+                if got_event:
+                    # Coalesce bursts: drain any additional events that
+                    # arrived in the same tick before re-rendering so a
+                    # flurry of publishes only costs one snapshot read.
+                    drained = 0
+                    while drained < 32:
+                        try:
+                            sub.get(timeout=0.0)
+                            drained += 1
+                        except Exception:
+                            break
+                    try:
+                        last_id = self._push_dashboard_snapshot(last_id)
+                    except (socket.timeout, BrokenPipeError, ConnectionResetError):
+                        break
+                    except Exception:
+                        break
+                else:
+                    # Keepalive: an SSE comment line keeps the socket
+                    # warm for proxies without invoking the onmessage
+                    # handler in the browser.
+                    try:
+                        self.wfile.write(b": keepalive\n\n")
+                        self.wfile.flush()
+                    except (socket.timeout, BrokenPipeError, ConnectionResetError):
+                        break
+                    except Exception:
+                        break
         finally:
+            engine._event_bus.unsubscribe(sub_id)
             # T2.6: always decrement the per-IP counter so a slow client
             # disconnect doesn't leak a slot.
             if sse_lock is not None and sse_counts is not None:
@@ -269,6 +331,83 @@ class MCPRequestHandler(BaseHTTPRequestHandler):
                         sse_counts.pop(client_ip, None)
                     else:
                         sse_counts[client_ip] = current
+
+    def _parse_last_event_id(self) -> int | None:
+        """Return the integer Last-Event-ID from the request, or None.
+
+        EventSource resends the header on reconnect. We also accept a
+        ``?last-event-id=N`` query string so manual clients can replay
+        without setting headers.
+        """
+        raw = self.headers.get("Last-Event-ID")
+        if raw is None and "?" in self.path:
+            from urllib.parse import parse_qs, urlparse
+            qs = parse_qs(urlparse(self.path).query)
+            vals = qs.get("last-event-id") or qs.get("Last-Event-ID")
+            raw = vals[0] if vals else None
+        if raw is None:
+            return None
+        try:
+            return int(raw)
+        except (TypeError, ValueError):
+            return None
+
+    def _replay_missed_events(self, last_id: int) -> int:
+        """Emit snapshot pushes for any journal rows newer than last_id.
+
+        Returns the highest event id seen (the new cursor). Writes one
+        snapshot per row so the client can advance ``Last-Event-ID``
+        past the gap; in practice we could coalesce, but per-row ids
+        are what the EventSource spec expects for durable resume.
+        """
+        engine = self.server.engine
+        try:
+            with engine._connect() as conn:
+                rows = conn.execute(
+                    "SELECT id FROM coordination_events "
+                    "WHERE id > ? ORDER BY id ASC LIMIT 200",
+                    (last_id,),
+                ).fetchall()
+        except Exception:
+            return last_id
+        cursor = last_id
+        for row in rows:
+            cursor = row["id"]
+            try:
+                cursor = self._push_dashboard_snapshot(cursor)
+            except Exception:
+                break
+        return cursor
+
+    def _push_dashboard_snapshot(self, last_id: int | None) -> int | None:
+        """Render dashboard data and write one SSE message.
+
+        Advances the event id to whatever ``coordination_events`` has on
+        tap so the client's Last-Event-ID tracks the durable journal.
+        Raises if the socket is dead so the outer loop can bail out.
+        """
+        engine = self.server.engine
+        data = get_dashboard_data(engine._connect)
+        payload = json.dumps(data, default=str)
+        # Pick an id from the journal so reconnects can resume. If the
+        # journal is empty (fresh hub) we fall back to a monotonic tick
+        # so the client still sees distinct ids.
+        new_id: int | None
+        try:
+            with engine._connect() as conn:
+                row = conn.execute(
+                    "SELECT MAX(id) AS max_id FROM coordination_events"
+                ).fetchone()
+            new_id = row["max_id"] if row and row["max_id"] is not None else last_id
+        except Exception:
+            new_id = last_id
+        frame = f"data: {payload}\n"
+        if new_id is not None:
+            frame = f"id: {new_id}\n" + frame
+        frame += "\n"
+        self.wfile.write(frame.encode("utf-8"))
+        self.wfile.flush()
+        return new_id
 
     def _handle_list_tools(self) -> None:
         """GET /tools — return all tool schemas.
@@ -446,12 +585,19 @@ class ThreadedHTTPServer(ThreadingMixIn, HTTPServer):
 # High-level wrapper
 # ------------------------------------------------------------------ #
 
-class CoordinationHubMCPServer:
-    """Convenience wrapper around ThreadedHTTPServer + CoordinationEngine.
+class CoordinationHubAdminServer:
+    """REST admin / dashboard server. NOT an MCP transport.
+
+    T3.6: this class speaks a bespoke REST protocol
+    (``GET /tools``, ``POST /call``, etc.) for dashboards and scripts.
+    The MCP transport is ``mcp_stdio.py`` (JSON-RPC 2.0 over stdio), which
+    is what LLM clients actually speak. The historical name
+    ``CoordinationHubMCPServer`` remains as a deprecated alias to avoid
+    breaking external imports.
 
     Usage::
 
-        server = CoordinationHubMCPServer()
+        server = CoordinationHubAdminServer()
         server.start()          # blocks until Ctrl-C
         # or:
         server.start(blocking=False)  # runs in background thread
@@ -605,7 +751,13 @@ class CoordinationHubMCPServer:
         """
         if self._engine is None:
             raise RuntimeError(
-                "CoordinationHubMCPServer is stopped; start() it before "
+                "CoordinationHubAdminServer is stopped; start() it before "
                 "using the engine."
             )
         return self._engine
+
+
+# Deprecated: retained for backwards compatibility. Prefer
+# ``CoordinationHubAdminServer`` (T3.6 — the class has never been an MCP
+# server; it's a REST admin endpoint).
+CoordinationHubMCPServer = CoordinationHubAdminServer

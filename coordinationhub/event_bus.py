@@ -28,7 +28,9 @@ _DEFAULT_QUEUE_MAX = 10_000
 
 
 class _Sub:
-    __slots__ = ("sub_id", "topics", "filter_fn", "_queue", "dropped")
+    __slots__ = (
+        "sub_id", "topics", "filter_fn", "_queue", "dropped", "all_topics",
+    )
 
     def __init__(
         self,
@@ -36,12 +38,17 @@ class _Sub:
         topics: list[str],
         filter_fn: _SubFilter = None,
         maxsize: int = _DEFAULT_QUEUE_MAX,
+        all_topics: bool = False,
     ) -> None:
         self.sub_id = sub_id
         self.topics = topics
         self.filter_fn = filter_fn
         self._queue: queue.Queue[dict[str, Any]] = queue.Queue(maxsize=maxsize)
         self.dropped = 0
+        # T3.8: SSE streams want every event regardless of topic. Rather
+        # than enumerating 24+ topic strings, subscribe-all carries a
+        # flag that short-circuits the topic check in publish().
+        self.all_topics = all_topics
 
     def put(self, event: dict[str, Any]) -> None:
         """Enqueue *event*, dropping oldest if the queue is full.
@@ -97,6 +104,24 @@ class EventBus:
             self._subs[sub_id] = sub
         return sub_id, sub
 
+    def subscribe_all(
+        self, filter_fn: _SubFilter = None,
+    ) -> tuple[int, _Sub]:
+        """Register a subscription that matches every published topic.
+
+        T3.8: SSE dashboards want live notifications on any state change.
+        Rather than keeping an enumerated topic list in sync with every
+        new ``_publish_event`` site, subscribe-all receives the delivered
+        event as ``{"topic": <name>, ...payload}`` so the consumer can
+        discriminate by topic if it wants.
+        """
+        with self._lock:
+            self._next_id += 1
+            sub_id = self._next_id
+            sub = _Sub(sub_id, topics=[], filter_fn=filter_fn, all_topics=True)
+            self._subs[sub_id] = sub
+        return sub_id, sub
+
     def unsubscribe(self, sub_id: int) -> None:
         """Remove a subscription. Safe to call multiple times."""
         with self._lock:
@@ -107,9 +132,16 @@ class EventBus:
         with self._lock:
             subs = list(self._subs.values())
         for sub in subs:
-            if topic in sub.topics:
-                if sub.filter_fn is None or sub.filter_fn(payload):
-                    sub.put(payload)
+            matches = sub.all_topics or topic in sub.topics
+            if not matches:
+                continue
+            # T3.8: subscribe_all consumers receive the topic inline so
+            # a single receiver can route by event type.
+            delivered = (
+                {"topic": topic, **payload} if sub.all_topics else payload
+            )
+            if sub.filter_fn is None or sub.filter_fn(delivered):
+                sub.put(delivered)
 
     def wait_for_event(
         self,

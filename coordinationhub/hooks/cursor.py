@@ -30,6 +30,35 @@ import sys
 from coordinationhub.hooks.base import BaseHook
 
 
+def _to_generic_response(response):
+    """Map Claude-Code hookSpecificOutput to a flat decision/reason dict.
+
+    T3.13: Cursor and Kimi CLI don't honour Claude's
+    ``hookSpecificOutput`` / ``permissionDecision`` keys, so relaying the
+    raw Claude shape through is a no-op for their wrappers. Flatten to
+    a vendor-neutral response the wrapper can branch on directly.
+    """
+    if not response:
+        return None
+    hsp = response.get("hookSpecificOutput", response)
+    if not isinstance(hsp, dict):
+        return None
+    decision = hsp.get("permissionDecision")
+    out = {}
+    if decision is not None:
+        out["decision"] = decision
+    reason = hsp.get("permissionDecisionReason")
+    if reason:
+        out["reason"] = reason
+    additional = hsp.get("additionalContext")
+    if additional:
+        out["message"] = additional
+    event_name = hsp.get("hookEventName")
+    if event_name:
+        out["event"] = event_name
+    return out or None
+
+
 class CursorHook(BaseHook):
     """Cursor adapter over BaseHook."""
 
@@ -46,6 +75,19 @@ class CursorHook(BaseHook):
     @staticmethod
     def _agent_type(event: dict) -> str:
         return event.get("agent_type") or "agent"
+
+    def translate_output(self, response):
+        """T3.13: reshape BaseHook's Claude-specific response for Cursor.
+
+        Cursor doesn't have a native hook protocol yet, so this adapter
+        targets wrapper scripts. The emitted shape is a flat, easy-to-parse
+        dict::
+
+            {"decision": "allow"|"deny", "reason": "...", "message": "..."}
+
+        Pass-through returns None when BaseHook produced nothing.
+        """
+        return _to_generic_response(response)
 
 
 def main() -> None:
@@ -127,8 +169,12 @@ def main() -> None:
         elif hook_event == "SessionEnd":
             result = hook.on_session_end(session_id)
 
-        if result:
-            json.dump(result, sys.stdout)
+        # T3.13: reshape Claude's hookSpecificOutput into Cursor's flat
+        # response shape so wrapper scripts don't have to parse nested
+        # Claude-specific keys.
+        translated = hook.translate_output(result)
+        if translated:
+            json.dump(translated, sys.stdout)
 
     except ImportError:
         pass

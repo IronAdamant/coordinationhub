@@ -335,14 +335,14 @@ coordinationhub/
   db_schemas.py         — Canonical SQLite schema definitions for CoordinationHub (~301 LOC)
   dependencies.py       — Cross-agent dependency declaration and satisfaction tracking (~140 LOC)
   dispatch.py           — Tool dispatch for CoordinationHub (~91 LOC)
-  event_bus.py          — Lightweight thread-safe in-memory pub-sub event bus for CoordinationHub (~102 LOC)
+  event_bus.py          — Lightweight thread-safe in-memory pub-sub event bus for CoordinationHub (~127 LOC)
   handoffs.py           — Handoff recording and acknowledgement primitives for CoordinationHub (~200 LOC)
   housekeeping.py       — HousekeepingScheduler — background periodic pruners for long-running hubs (~188 LOC)
   leases.py             — Zero-deps lease primitives for HA coordinator leadership (~220 LOC)
   limits.py             — String-length caps for user-supplied fields (T6.14) (~40 LOC)
   lock_cache.py         — In-memory lock cache for CoordinationHub (~180 LOC)
   lock_ops.py           — Shared lock primitives used by both local locks and coordination locks (~209 LOC)
-  mcp_server.py         — HTTP-based MCP server for CoordinationHub — zero external dependencies (~461 LOC)
+  mcp_server.py         — HTTP REST admin / dashboard endpoint for CoordinationHub (~578 LOC)
   mcp_stdio.py          — Stdio-based MCP server for CoordinationHub using the ``mcp`` Python package (~183 LOC)
   messages.py           — Inter-agent messaging primitives for CoordinationHub (~105 LOC)
   notifications.py      — Change notification storage and retrieval for CoordinationHub (~154 LOC)
@@ -355,10 +355,10 @@ coordinationhub/
   work_intent.py        — Work intent board primitives for CoordinationHub (~139 LOC)
   hooks/
     __init__.py         — Hooks package — IDE integration via stdin/stdout event protocol (~1 LOC)
-    base.py             — Base hook abstraction for CoordinationHub (~333 LOC)
-    cursor.py           — CoordinationHub hook adapter for Cursor (~110 LOC)
-    kimi_cli.py         — CoordinationHub hook adapter for Kimi CLI (~110 LOC)
-    stdio_adapter.py    — CoordinationHub stdio event adapter (~298 LOC)
+    base.py             — Base hook abstraction for CoordinationHub (~340 LOC)
+    cursor.py           — CoordinationHub hook adapter for Cursor (~146 LOC)
+    kimi_cli.py         — CoordinationHub hook adapter for Kimi CLI (~121 LOC)
+    stdio_adapter.py    — CoordinationHub stdio event adapter (~353 LOC)
   plugins/
     __init__.py         — CoordinationHub plugin system (~8 LOC)
     registry.py         — Plugin registry for CoordinationHub (~59 LOC)
@@ -394,7 +394,7 @@ coordinationhub/
 ```
 <!-- /GEN -->
 
-`tests/` contains <!-- GEN:test-count -->661<!-- /GEN --> tests across 28 files plus `fixtures/claude_code_events/` (hook contract fixtures).
+`tests/` contains <!-- GEN:test-count -->676<!-- /GEN --> tests across 28 files plus `fixtures/claude_code_events/` (hook contract fixtures).
 
 Top-level project files: `pyproject.toml`, `coordination_spec.yaml`/`.json` (example specs), `README.md`, `CLAUDE.md`, `COMPLETE_PROJECT_DOCUMENTATION.md`, `LLM_Development.md`, and `wiki-local/` (this spec, glossary, index).
 

@@ -581,3 +581,157 @@ class TestServerLifecycle:
         assert wait_for_health(srv2.get_url(), timeout=5.0)
         assert srv2.get_port() == port
         srv2.stop()
+
+
+class TestAdminServerRename:
+    """T3.6: the class was renamed to CoordinationHubAdminServer to make
+    clear this is a REST admin endpoint, not an MCP transport. The old
+    name is kept as a back-compat alias.
+    """
+
+    def test_new_name_is_exported(self):
+        from coordinationhub.mcp_server import CoordinationHubAdminServer
+        assert CoordinationHubAdminServer is not None
+
+    def test_old_alias_points_at_new_class(self):
+        from coordinationhub.mcp_server import (
+            CoordinationHubAdminServer,
+            CoordinationHubMCPServer,
+        )
+        assert CoordinationHubMCPServer is CoordinationHubAdminServer
+
+
+class TestSSEEventDriven:
+    """T3.8: SSE subscribes to the event bus so state changes propagate
+    without waiting for the 5 s timer tick. Last-Event-ID replays the
+    gap from the durable journal on reconnect.
+    """
+
+    def test_event_bus_publish_wakes_sse(self, server):
+        """Publishing a bus event triggers an SSE frame within well under 5 s.
+
+        Pre-T3.8 the handler polled every 5 s so the window was
+        [now, now+5s]. Now it's bounded by event-dispatch latency.
+        """
+        import socket
+        port = server.get_port()
+        sock = socket.create_connection(("127.0.0.1", port))
+        try:
+            sock.sendall(
+                f"GET /events HTTP/1.1\r\nHost: 127.0.0.1:{port}\r\n"
+                f"Accept: text/event-stream\r\nConnection: close\r\n\r\n".encode()
+            )
+            sock.settimeout(10.0)
+            # Read the initial snapshot frame so we know the stream is live.
+            buf = b""
+            while b"\n\n" not in buf:
+                chunk = sock.recv(4096)
+                if not chunk:
+                    break
+                buf += chunk
+            assert b"data:" in buf
+
+            # Publish a bus event from the engine.
+            # Use an existing engine helper that fires through _publish_event.
+            engine = server.engine
+            aid = engine.generate_agent_id()
+            engine.register_agent(aid)
+
+            # We should see a new frame well before 5 s.
+            start = time.time()
+            buf = b""
+            while time.time() - start < 5.0 and b"\n\n" not in buf:
+                try:
+                    chunk = sock.recv(4096)
+                except socket.timeout:
+                    break
+                if not chunk:
+                    break
+                buf += chunk
+            assert b"data:" in buf, (
+                f"no SSE frame within 5s after publish; elapsed={time.time()-start:.2f}s"
+            )
+            # Frame should carry an id line so clients can resume.
+            assert b"id:" in buf
+        finally:
+            sock.close()
+
+    def test_last_event_id_triggers_replay(self, server):
+        """Reconnecting with Last-Event-ID emits stored journal rows."""
+        import socket
+
+        engine = server.engine
+        # Seed a few journal rows so replay has something to read.
+        with engine._connect() as conn:
+            conn.execute(
+                "INSERT INTO coordination_events (topic, payload_json, created_at) "
+                "VALUES (?, ?, ?)",
+                ("test.seed", '{"n": 1}', time.time()),
+            )
+            conn.execute(
+                "INSERT INTO coordination_events (topic, payload_json, created_at) "
+                "VALUES (?, ?, ?)",
+                ("test.seed", '{"n": 2}', time.time()),
+            )
+            conn.commit()
+            row = conn.execute(
+                "SELECT MIN(id) AS min_id, MAX(id) AS max_id FROM coordination_events"
+            ).fetchone()
+        min_id = row["min_id"]
+        max_id = row["max_id"]
+
+        # Connect with Last-Event-ID set to a value before our seeds so
+        # replay will emit snapshots for the gap.
+        port = server.get_port()
+        sock = socket.create_connection(("127.0.0.1", port))
+        try:
+            sock.sendall(
+                f"GET /events HTTP/1.1\r\nHost: 127.0.0.1:{port}\r\n"
+                f"Accept: text/event-stream\r\n"
+                f"Last-Event-ID: {min_id - 1}\r\n"
+                f"Connection: close\r\n\r\n".encode()
+            )
+            sock.settimeout(5.0)
+            buf = b""
+            # Read until we see at least two frames (replay pushes one
+            # per journal row).
+            deadline = time.time() + 5.0
+            while time.time() < deadline and buf.count(b"\n\n") < 2:
+                try:
+                    chunk = sock.recv(4096)
+                except socket.timeout:
+                    break
+                if not chunk:
+                    break
+                buf += chunk
+            # We expect multiple data: frames with id: lines >= min_id.
+            assert buf.count(b"data:") >= 1
+            assert f"id: {max_id}".encode() in buf
+        finally:
+            sock.close()
+
+    def test_keepalive_comment_on_idle(self, server):
+        """When no events arrive within the keepalive window the loop
+        still writes the ``: keepalive`` comment so proxies see bytes."""
+        import socket
+        port = server.get_port()
+        sock = socket.create_connection(("127.0.0.1", port))
+        try:
+            sock.sendall(
+                f"GET /events HTTP/1.1\r\nHost: 127.0.0.1:{port}\r\n"
+                f"Accept: text/event-stream\r\nConnection: close\r\n\r\n".encode()
+            )
+            sock.settimeout(8.0)
+            buf = b""
+            deadline = time.time() + 7.0
+            while time.time() < deadline and b"keepalive" not in buf:
+                try:
+                    chunk = sock.recv(4096)
+                except socket.timeout:
+                    break
+                if not chunk:
+                    break
+                buf += chunk
+            assert b"keepalive" in buf
+        finally:
+            sock.close()

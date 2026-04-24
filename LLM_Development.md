@@ -1634,19 +1634,19 @@ Block markers for multi-line content:
 | `coordinationhub/db_schemas.py` | 301 | Canonical SQLite schema definitions for CoordinationHub |
 | `coordinationhub/dependencies.py` | 140 | Cross-agent dependency declaration and satisfaction tracking |
 | `coordinationhub/dispatch.py` | 91 | Tool dispatch for CoordinationHub |
-| `coordinationhub/event_bus.py` | 102 | Lightweight thread-safe in-memory pub-sub event bus for CoordinationHub |
+| `coordinationhub/event_bus.py` | 127 | Lightweight thread-safe in-memory pub-sub event bus for CoordinationHub |
 | `coordinationhub/handoffs.py` | 200 | Handoff recording and acknowledgement primitives for CoordinationHub |
 | `coordinationhub/hooks/__init__.py` | 1 | Hooks package — IDE integration via stdin/stdout event protocol |
-| `coordinationhub/hooks/base.py` | 333 | Base hook abstraction for CoordinationHub |
-| `coordinationhub/hooks/cursor.py` | 110 | CoordinationHub hook adapter for Cursor |
-| `coordinationhub/hooks/kimi_cli.py` | 110 | CoordinationHub hook adapter for Kimi CLI |
-| `coordinationhub/hooks/stdio_adapter.py` | 298 | CoordinationHub stdio event adapter |
+| `coordinationhub/hooks/base.py` | 340 | Base hook abstraction for CoordinationHub |
+| `coordinationhub/hooks/cursor.py` | 146 | CoordinationHub hook adapter for Cursor |
+| `coordinationhub/hooks/kimi_cli.py` | 121 | CoordinationHub hook adapter for Kimi CLI |
+| `coordinationhub/hooks/stdio_adapter.py` | 353 | CoordinationHub stdio event adapter |
 | `coordinationhub/housekeeping.py` | 188 | HousekeepingScheduler — background periodic pruners for long-running hubs |
 | `coordinationhub/leases.py` | 220 | Zero-deps lease primitives for HA coordinator leadership |
 | `coordinationhub/limits.py` | 40 | String-length caps for user-supplied fields (T6.14) |
 | `coordinationhub/lock_cache.py` | 180 | In-memory lock cache for CoordinationHub |
 | `coordinationhub/lock_ops.py` | 209 | Shared lock primitives used by both local locks and coordination locks |
-| `coordinationhub/mcp_server.py` | 461 | HTTP-based MCP server for CoordinationHub — zero external dependencies |
+| `coordinationhub/mcp_server.py` | 578 | HTTP REST admin / dashboard endpoint for CoordinationHub |
 | `coordinationhub/mcp_stdio.py` | 183 | Stdio-based MCP server for CoordinationHub using the ``mcp`` Python package |
 | `coordinationhub/messages.py` | 105 | Inter-agent messaging primitives for CoordinationHub |
 | `coordinationhub/notifications.py` | 154 | Change notification storage and retrieval for CoordinationHub |
@@ -1689,7 +1689,7 @@ Block markers for multi-line content:
 
 Inline markers for single values (render invisibly in Markdown):
 ```markdown
-This project has <!-- GEN:test-count -->661<!-- /GEN --> tests.
+This project has <!-- GEN:test-count -->676<!-- /GEN --> tests.
 ```
 
 Unknown marker names raise an error during rewrite (catches typos).

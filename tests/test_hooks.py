@@ -1085,3 +1085,170 @@ class TestHookFailOpen:
         assert log.exists()
         assert "cursor.hook_init" in log.read_text()
         assert "db_init_boom" in log.read_text()
+
+
+class TestSharedHookAcrossHandlers:
+    """T3.2: one StdioHook serves every handler in a single main()
+    invocation. External callers (tests) that pass no ``hook`` keep the
+    old per-call construct/close behaviour for backwards compatibility.
+    """
+
+    def test_handlers_accept_shared_hook(self, hook_cwd):
+        """Passing a pre-built hook avoids a second engine construction."""
+        shared = StdioHook.from_cwd(hook_cwd)
+        try:
+            session = "sess12345678"
+            handle_session_start(
+                _make_event("SessionStart", cwd=hook_cwd, session_id=session),
+                hook=shared,
+            )
+            handle_user_prompt_submit(
+                _make_event(
+                    "UserPromptSubmit", cwd=hook_cwd, session_id=session,
+                    prompt="hello",
+                ),
+                hook=shared,
+            )
+            # Same engine survived both calls — otherwise shared.engine
+            # would be closed.
+            assert shared.engine is not None
+        finally:
+            shared.close()
+
+    def test_handlers_still_work_without_shared_hook(self, hook_cwd):
+        """Omitting ``hook`` constructs and closes per-call (pre-T3.2 API)."""
+        session = "sess12345678"
+        # Should not raise; covers the owns_it=True branch.
+        handle_session_start(
+            _make_event("SessionStart", cwd=hook_cwd, session_id=session),
+        )
+
+    def test_main_reuses_single_hook(self, hook_cwd, monkeypatch, tmp_path):
+        """main() should call StdioHook.from_cwd at most once per event."""
+        from coordinationhub.hooks import stdio_adapter
+
+        monkeypatch.setattr("pathlib.Path.home", lambda: tmp_path)
+        call_count = {"n": 0}
+        orig_from_cwd = StdioHook.from_cwd
+
+        def counting_from_cwd(cwd):
+            call_count["n"] += 1
+            return orig_from_cwd(cwd)
+
+        monkeypatch.setattr(StdioHook, "from_cwd", staticmethod(counting_from_cwd))
+
+        event_json = json.dumps({
+            "hook_event_name": "SessionStart",
+            "session_id": "sess12345678",
+            "cwd": hook_cwd,
+        })
+
+        import io
+        monkeypatch.setattr("sys.stdin", io.StringIO(event_json))
+        stdout = io.StringIO()
+        monkeypatch.setattr("sys.stdout", stdout)
+
+        stdio_adapter.main()
+
+        # Exactly one construction for this event.
+        assert call_count["n"] == 1
+
+
+class TestCursorOutputTranslator:
+    """T3.13: Cursor hooks emit a vendor-neutral response instead of
+    Claude's nested ``hookSpecificOutput`` — wrapper scripts don't have
+    to know Claude's shape.
+    """
+
+    def test_deny_response_flattened(self):
+        from coordinationhub.hooks.cursor import _to_generic_response
+        claude_shape = {
+            "hookSpecificOutput": {
+                "hookEventName": "PreToolUse",
+                "permissionDecision": "deny",
+                "permissionDecisionReason": "[CoordinationHub] locked by X",
+            }
+        }
+        out = _to_generic_response(claude_shape)
+        assert out == {
+            "decision": "deny",
+            "reason": "[CoordinationHub] locked by X",
+            "event": "PreToolUse",
+        }
+
+    def test_allow_response_flattened(self):
+        from coordinationhub.hooks.cursor import _to_generic_response
+        claude_shape = {
+            "hookSpecificOutput": {
+                "hookEventName": "PreToolUse",
+                "permissionDecision": "allow",
+                "additionalContext": "[CoordinationHub] Lock acquired",
+            }
+        }
+        out = _to_generic_response(claude_shape)
+        assert out["decision"] == "allow"
+        assert out["message"] == "[CoordinationHub] Lock acquired"
+        assert out["event"] == "PreToolUse"
+
+    def test_session_end_summary_flattened(self):
+        from coordinationhub.hooks.cursor import _to_generic_response
+        claude_shape = {
+            "hookSpecificOutput": {
+                "hookEventName": "SessionEnd",
+                "additionalContext": "[CoordinationHub] Session summary: ...",
+            }
+        }
+        out = _to_generic_response(claude_shape)
+        assert out["event"] == "SessionEnd"
+        assert "Session summary" in out["message"]
+        assert "decision" not in out
+
+    def test_pass_through_none(self):
+        from coordinationhub.hooks.cursor import _to_generic_response
+        assert _to_generic_response(None) is None
+        assert _to_generic_response({}) is None
+
+    def test_cursor_hook_translates(self, hook_cwd):
+        from coordinationhub.hooks.cursor import CursorHook
+        hook = CursorHook.from_cwd(hook_cwd)
+        try:
+            out = hook.translate_output({
+                "hookSpecificOutput": {
+                    "hookEventName": "PreToolUse",
+                    "permissionDecision": "deny",
+                    "permissionDecisionReason": "locked",
+                }
+            })
+            assert out == {"decision": "deny", "reason": "locked", "event": "PreToolUse"}
+        finally:
+            hook.close()
+
+    def test_kimi_hook_translates(self, hook_cwd):
+        from coordinationhub.hooks.kimi_cli import KimiCliHook
+        hook = KimiCliHook.from_cwd(hook_cwd)
+        try:
+            out = hook.translate_output({
+                "hookSpecificOutput": {
+                    "hookEventName": "PreToolUse",
+                    "permissionDecision": "allow",
+                    "additionalContext": "ok",
+                }
+            })
+            assert out["decision"] == "allow"
+            assert out["message"] == "ok"
+        finally:
+            hook.close()
+
+    def test_stdio_hook_passthrough(self, hook_cwd):
+        """StdioHook (Claude Code) must NOT translate — it uses Claude's shape."""
+        hook = StdioHook.from_cwd(hook_cwd)
+        try:
+            claude_shape = {
+                "hookSpecificOutput": {
+                    "hookEventName": "PreToolUse",
+                    "permissionDecision": "deny",
+                }
+            }
+            assert hook.translate_output(claude_shape) is claude_shape
+        finally:
+            hook.close()

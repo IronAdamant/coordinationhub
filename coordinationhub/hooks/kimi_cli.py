@@ -47,6 +47,18 @@ class KimiCliHook(BaseHook):
     def _agent_type(event: dict) -> str:
         return event.get("agent_type") or "agent"
 
+    def translate_output(self, response):
+        """T3.13: reshape BaseHook's Claude-specific response for Kimi.
+
+        Kimi CLI has no native hook protocol, so the adapter targets
+        wrapper scripts that expect a flat
+        ``{"decision": "allow"|"deny", "reason": "...", "message": "..."}``
+        dict. Re-uses cursor's flattener since the two IDEs consume the
+        same generic shape today.
+        """
+        from coordinationhub.hooks.cursor import _to_generic_response
+        return _to_generic_response(response)
+
 
 def main() -> None:
     try:
@@ -124,8 +136,11 @@ def main() -> None:
         elif hook_event == "SessionEnd":
             result = hook.on_session_end(session_id)
 
-        if result:
-            json.dump(result, sys.stdout)
+        # T3.13: reshape to the vendor-neutral response wrapper scripts
+        # expect — Kimi doesn't understand Claude's hookSpecificOutput.
+        translated = hook.translate_output(result)
+        if translated:
+            json.dump(translated, sys.stdout)
 
     except ImportError:
         pass
