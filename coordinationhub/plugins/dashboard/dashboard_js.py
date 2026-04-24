@@ -378,7 +378,7 @@ DASHBOARD_JS = r"""
         html.push('<div class="intent-agent">' + escapeHTML(it.agent_id) + '</div>');
         html.push('<div class="intent-file">' + escapeHTML(it.document_path) + '</div>');
         html.push('<div class="intent-desc">' + escapeHTML(it.intent) + '</div>');
-        html.push('<div class="intent-ttl">TTL: ' + (it.ttl || 60) + 's \u00b7 declared ' + ageAgo(it.declared_at) + '</div>');
+        html.push('<div class="intent-ttl">TTL: ' + escapeHTML(String(it.ttl == null ? 60 : it.ttl)) + 's \u00b7 declared ' + escapeHTML(ageAgo(it.declared_at)) + '</div>');
         html.push('</div>');
       }
       grid.innerHTML = html.join('');

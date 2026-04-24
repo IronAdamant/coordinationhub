@@ -11,6 +11,7 @@ import time
 from typing import Any
 
 from .db import ConnectFn
+from .limits import MAX_MESSAGE, truncate
 
 
 def send_message(
@@ -20,9 +21,16 @@ def send_message(
     message_type: str,
     payload: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
-    """Send a message to another agent. Returns the message ID."""
+    """Send a message to another agent. Returns the message ID.
+
+    T6.14: the JSON-serialized payload is truncated to ``MAX_MESSAGE``
+    characters. Larger payloads are clipped and annotated rather than
+    rejected — a message carrying a diagnostic blob loses detail but
+    the recipient still sees the message type and sender.
+    """
     now = time.time()
     payload_json = json.dumps(payload) if payload is not None else None
+    payload_json = truncate(payload_json, MAX_MESSAGE)
     with connect() as conn:
         cursor = conn.execute(
             """INSERT INTO messages

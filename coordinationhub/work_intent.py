@@ -18,6 +18,7 @@ import time
 from typing import Any
 
 from .db import ConnectFn
+from .limits import MAX_INTENT, truncate
 
 
 # T1.16: canonical intent categories. "read" is the only non-conflicting
@@ -46,7 +47,10 @@ def upsert_intent(
     ``(agent_id, document_path)``. A second declare for the same agent
     on a different file inserts a new row rather than clobbering the
     first.
+
+    T6.14: ``intent`` is truncated to ``MAX_INTENT`` before the write.
     """
+    intent = truncate(intent, MAX_INTENT)
     now = time.time()
     with connect() as conn:
         conn.execute(

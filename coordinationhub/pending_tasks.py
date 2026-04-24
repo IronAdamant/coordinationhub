@@ -21,6 +21,7 @@ import time
 from typing import Any
 
 from .db import ConnectFn
+from .limits import MAX_DESCRIPTION, MAX_PROMPT, truncate
 
 
 # Rows older than this are assumed orphaned (e.g. the Agent tool call
@@ -48,6 +49,9 @@ def stash_pending_task(
     cannot grow without bound if Agent tool calls fail before
     SubagentStart.
     """
+    # T6.14: truncate free-text fields at the write boundary.
+    description = truncate(description, MAX_DESCRIPTION)
+    prompt = truncate(prompt, MAX_PROMPT)
     now = time.time()
     cutoff = now - _STALE_TTL_SECONDS
     with connect() as conn:

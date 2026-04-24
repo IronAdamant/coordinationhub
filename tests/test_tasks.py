@@ -535,6 +535,50 @@ class TestUpdateTaskStatusAtomicSideEffects:
         assert history["count"] == 1
 
 
+class TestStringFieldLimits:
+    """T6.14: free-text fields are clipped at the primitive boundary
+    so a runaway caller can't wedge multi-MB payloads into SQLite.
+    """
+
+    def test_description_truncated_on_create_task(
+        self, engine, registered_agent, monkeypatch
+    ):
+        import coordinationhub.limits as limits
+        import coordinationhub.tasks as tasks_mod
+        monkeypatch.setattr(limits, "MAX_DESCRIPTION", 100)
+        monkeypatch.setattr(tasks_mod, "MAX_DESCRIPTION", 100)
+
+        oversized = "A" * 500
+        engine.create_task(
+            task_id="t.big", parent_agent_id=registered_agent, description=oversized
+        )
+        stored = engine.query_tasks(query_type="task", task_id="t.big")["task"]
+        assert len(stored["description"]) <= 100
+        assert "[truncated" in stored["description"]
+
+    def test_summary_truncated_on_update_status(
+        self, engine, registered_agent, monkeypatch
+    ):
+        import coordinationhub.limits as limits
+        import coordinationhub.tasks as tasks_mod
+        monkeypatch.setattr(limits, "MAX_SUMMARY", 100)
+        monkeypatch.setattr(tasks_mod, "MAX_SUMMARY", 100)
+
+        engine.create_task(
+            task_id="t.sum", parent_agent_id=registered_agent, description="x"
+        )
+        engine.update_task_status("t.sum", "completed", summary="B" * 500)
+        stored = engine.query_tasks(query_type="task", task_id="t.sum")["task"]
+        assert len(stored["summary"]) <= 100
+
+    def test_short_values_pass_through_unchanged(self, engine, registered_agent):
+        engine.create_task(
+            task_id="t.small", parent_agent_id=registered_agent, description="tiny"
+        )
+        stored = engine.query_tasks(query_type="task", task_id="t.small")["task"]
+        assert stored["description"] == "tiny"
+
+
 class TestAssignTaskReassignment:
     """T6.32: re-assigning a task clears the previous assignee's
     ``current_task`` row so it doesn't stale-reference work they no

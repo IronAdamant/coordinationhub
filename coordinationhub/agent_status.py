@@ -15,9 +15,16 @@ def update_agent_status_tool(
     current_task: str | None = None,
     scope: list[str] | None = None,
 ) -> dict[str, Any]:
-    """Tool implementation: update current_task and/or scope for an agent."""
+    """Tool implementation: update current_task and/or scope for an agent.
+
+    T6.14: ``current_task`` is truncated to ``MAX_CURRENT_TASK`` before
+    writing so an attacker-controlled IDE prompt can't wedge multiple
+    megabytes into agent_responsibilities.
+    """
     import time as _time
     import json as _json
+    from .limits import MAX_CURRENT_TASK, truncate as _truncate
+    current_task = _truncate(current_task, MAX_CURRENT_TASK)
     now = _time.time()
     with connect() as conn:
         row = conn.execute(

@@ -14,6 +14,12 @@ import time
 from typing import Any
 
 from .db import ConnectFn
+from .limits import (
+    MAX_DESCRIPTION,
+    MAX_ERROR,
+    MAX_SUMMARY,
+    truncate,
+)
 
 
 def create_task(
@@ -24,7 +30,13 @@ def create_task(
     depends_on: list[str] | None = None,
     priority: int = 0,
 ) -> dict[str, Any]:
-    """Create a new task in the task registry (work board)."""
+    """Create a new task in the task registry (work board).
+
+    T6.14: ``description`` is truncated to :data:`MAX_DESCRIPTION` so
+    a runaway caller can't wedge tens of megabytes into the DB. Override
+    the cap via ``COORDINATIONHUB_MAX_DESCRIPTION``.
+    """
+    description = truncate(description, MAX_DESCRIPTION)
     now = time.time()
     with connect() as conn:
         cursor = conn.execute(
@@ -132,6 +144,9 @@ def update_task_status(
             "status": status,
             "valid_statuses": sorted(_VALID_TASK_STATUSES),
         }
+    # T6.14: bound the free-text fields before they hit the DB.
+    summary = truncate(summary, MAX_SUMMARY)
+    error = truncate(error, MAX_ERROR)
     now = time.time()
     failure_record: dict[str, Any] | None = None
     satisfied_count = 0
@@ -331,7 +346,11 @@ def create_subtask(
     parent_task_id chain, or if the parent chain is already deeper than
     MAX_TASK_DEPTH. Returns ``{"created": False, "reason": "cycle"}`` or
     ``{"created": False, "reason": "parent_not_found"}`` in those cases.
+
+    T6.14: ``description`` is truncated to ``MAX_DESCRIPTION`` before
+    the write.
     """
+    description = truncate(description, MAX_DESCRIPTION)
     now = time.time()
     with connect() as conn:
         parent_row = conn.execute(

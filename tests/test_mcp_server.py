@@ -409,6 +409,87 @@ class TestPromptRedaction:
         assert _redact_prompt(text) == text
 
 
+class TestConcurrentCall:
+    """T6.10: the HTTP server uses ``ThreadingMixIn`` so tool
+    invocations run concurrently on the shared engine. Cross-tool
+    invariants (cache coherence, lock semantics) must survive
+    interleaving. This test doesn't prove any specific invariant —
+    it's a belt-and-braces smoke test that fires N concurrent /call
+    requests and asserts they all succeed without engine-state
+    corruption. Any added cross-tool invariant test should live here.
+    """
+
+    def test_concurrent_acquire_release_produces_consistent_state(self, server):
+        """Acquire-then-release cycle on distinct paths, N threads in parallel.
+
+        The final list_locks must return 0 — every acquire is paired
+        with a release, no stray cache rows survive, no stuck owners.
+        """
+        # Pre-register one agent per worker so register_agent isn't in
+        # the hot path.
+        n = 8
+        agents = [f"cc.agent.{i}" for i in range(n)]
+        for aid in agents:
+            _post(
+                f"{server.get_url()}/call",
+                {"tool": "register_agent", "arguments": {"agent_id": aid}},
+            )
+
+        errors: list[BaseException] = []
+        errors_lock = threading.Lock()
+        barrier = threading.Barrier(n)
+
+        def _worker(i: int) -> None:
+            try:
+                barrier.wait(timeout=5)
+                path = f"/tmp/concurrent/{i}.txt"
+                acq = _post(
+                    f"{server.get_url()}/call",
+                    {
+                        "tool": "acquire_lock",
+                        "arguments": {
+                            "document_path": path,
+                            "agent_id": agents[i],
+                            "lock_type": "exclusive",
+                            "ttl": 60,
+                        },
+                    },
+                )
+                assert acq["result"]["acquired"] is True
+                rel = _post(
+                    f"{server.get_url()}/call",
+                    {
+                        "tool": "release_lock",
+                        "arguments": {
+                            "document_path": path,
+                            "agent_id": agents[i],
+                        },
+                    },
+                )
+                assert rel["result"]["released"] is True
+            except BaseException as exc:
+                with errors_lock:
+                    errors.append(exc)
+
+        threads = [threading.Thread(target=_worker, args=(i,)) for i in range(n)]
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join(timeout=10)
+
+        assert not errors, f"Concurrent /call produced errors: {errors}"
+
+        # Cache and DB should now both show zero active locks.
+        after = _post(
+            f"{server.get_url()}/call",
+            {"tool": "list_locks", "arguments": {"force_refresh": True}},
+        )
+        assert after["result"]["count"] == 0, (
+            f"Expected 0 active locks after paired acquire/release, got "
+            f"{after['result']['count']}: {after['result']['locks']}"
+        )
+
+
 class TestServerLifecycle:
     def test_server_port_assignment(self, server):
         assert server.get_port() > 0

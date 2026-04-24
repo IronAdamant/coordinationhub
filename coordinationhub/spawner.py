@@ -15,6 +15,7 @@ import time
 from typing import Any, NamedTuple
 
 from .db import ConnectFn
+from .limits import MAX_DESCRIPTION, MAX_PROMPT, truncate
 
 
 # Rows older than this with status='pending' are marked expired.
@@ -141,6 +142,10 @@ def stash_pending_spawn(
     if parent_agent_id is None:
         raise TypeError("parent_agent_id is required")
 
+    # T6.14: bound free-text fields so a runaway IDE integration can't
+    # stash multi-MB prompts that then propagate through the dashboard.
+    description = truncate(description, MAX_DESCRIPTION)
+    prompt = truncate(prompt, MAX_PROMPT)
     now = time.time()
     cutoff = now - _SPAWN_TTL_SECONDS
     with connect() as conn:

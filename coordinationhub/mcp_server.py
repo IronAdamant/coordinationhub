@@ -266,6 +266,14 @@ class MCPRequestHandler(BaseHTTPRequestHandler):
         self.end_headers()
         # Set a socket timeout so dead connections don't hang forever
         self.request.settimeout(10.0)
+        # T6.35: hard cap on how long a single SSE connection can live.
+        # The socket timeout above covers a stuck/dead client (no bytes
+        # can flow), but a client that's actively polling would otherwise
+        # hold a slot indefinitely. The EventSource in the browser
+        # auto-reconnects within 3 s so closing after 10 min is
+        # transparent to UX while bounding our worst-case resource hold.
+        sse_max_lifetime = getattr(self.server, "sse_max_lifetime_s", 600.0)
+        start_ts = _time.time()
         try:
             while True:
                 try:
@@ -277,6 +285,9 @@ class MCPRequestHandler(BaseHTTPRequestHandler):
                     break  # client disconnected or timed out
                 except Exception:
                     break  # any other error — terminate the stream
+                # T6.35: terminate after the max lifetime.
+                if _time.time() - start_ts >= sse_max_lifetime:
+                    break
                 _time.sleep(5)
         finally:
             # T2.6: always decrement the per-IP counter so a slow client
@@ -407,6 +418,7 @@ class ThreadedHTTPServer(ThreadingMixIn, HTTPServer):
         allowed_origins: frozenset[str] | None = None,
         allowed_hosts: frozenset[str] | None = None,
         sse_max_per_ip: int = 4,
+        sse_max_lifetime_s: float = 600.0,
     ) -> None:
         self.engine = engine
         self.auth_token = auth_token or ""
@@ -416,6 +428,12 @@ class ThreadedHTTPServer(ThreadingMixIn, HTTPServer):
         # by a lock so the handler can increment/decrement safely from
         # multiple daemon threads.
         self.sse_max_per_ip = sse_max_per_ip
+        # T6.35: cap on individual SSE connection lifetime. A client
+        # whose socket stays alive forever would otherwise hold a
+        # per-IP slot plus a DB connection indefinitely. EventSource
+        # auto-reconnects within 3 s so dropping after the lifetime is
+        # UX-neutral.
+        self.sse_max_lifetime_s = sse_max_lifetime_s
         self._sse_lock = threading.Lock()
         self._sse_counts: dict[str, int] = {}
         # T3.7: track in-flight handlers so stop() can drain them before
