@@ -87,10 +87,23 @@ class CoordinationStorage:
             _db.init_schema(conn)
 
     def close(self) -> None:
-        """Checkpoint the WAL and close the connection pool."""
+        """Checkpoint the WAL and close the connection pool.
+
+        T7.27: ``PRAGMA wal_checkpoint(TRUNCATE)`` must run outside a
+        transaction — inside ``with self._pool.connect() as conn:`` the
+        contextmanager could commit a surrounding implicit tx, and the
+        pragma itself only drains the WAL when auto-commit mode is
+        active. Issuing it on the raw connection without the ``with``
+        avoids both footguns.
+        """
         if self._pool is not None:
-            with self._pool.connect() as conn:
+            conn = self._pool.connect()
+            try:
                 conn.execute("PRAGMA wal_checkpoint(TRUNCATE)")
+            except Exception:
+                # Best-effort checkpoint — don't block shutdown on a
+                # corrupt or busy WAL.
+                pass
             _db.clear_pool()
             self._pool = None
 

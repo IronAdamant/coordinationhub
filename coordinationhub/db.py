@@ -59,7 +59,12 @@ class ConnectionPool:
         if conn is not None:
             try:
                 conn.execute("SELECT 1")
-            except (sqlite3.ProgrammingError, sqlite3.OperationalError):
+            except sqlite3.DatabaseError:
+                # T7.24: catch the full DatabaseError hierarchy so a
+                # corruption indicator (NotADatabaseError, generic
+                # DatabaseError) drops the cached connection instead
+                # of propagating. The narrower pair (ProgrammingError,
+                # OperationalError) missed corruption shapes.
                 conn = None
         if conn is None:
             conn = _create_connection(self._db_path)

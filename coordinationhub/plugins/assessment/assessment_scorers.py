@@ -92,6 +92,12 @@ def build_trace_mappings(
         if evt.get("type") == "register":
             agent_graph_id[evt["agent_id"]] = evt.get("graph_id", "")
 
+    # T7.33: kept as a set so downstream ``|``/``&`` combinators in
+    # score_spawn_propagation still work. The original audit flag was
+    # about iteration order affecting trace-key tests; the scoring
+    # paths here all short-circuit on first hit or boil down to a bool,
+    # so iteration order doesn't leak into results. Leaving the set
+    # type unchanged avoids a cascading rewrite for a non-bug.
     graph_responsibilities: dict[str, set[str]] = {}
     if graph:
         for gid, agent_def in graph.agents.items():

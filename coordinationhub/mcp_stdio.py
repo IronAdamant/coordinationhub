@@ -133,7 +133,19 @@ def create_server(
 
 
 async def _run_server() -> None:
-    """Start the stdio MCP server and run until the client disconnects."""
+    """Start the stdio MCP server and run until the client disconnects.
+
+    T7.41: installs SIGTERM/SIGINT handlers on the running asyncio loop
+    so a supervisor that sends SIGTERM mid-write doesn't tear us down
+    with a half-flushed response. The handler flips an asyncio Event;
+    the stdio transport coroutine wakes, the ``finally`` runs
+    ``engine.close()`` which flushes the WAL, and the process exits
+    cleanly. Windows (no SIGTERM on the asyncio loop) silently skips
+    the install — the pre-fix abrupt-termination behaviour is a no-op
+    change there.
+    """
+    import signal as _signal
+
     storage_dir = os.environ.get("COORDINATIONHUB_STORAGE_DIR")
     project_root = os.environ.get("COORDINATIONHUB_PROJECT_ROOT")
     namespace = os.environ.get("COORDINATIONHUB_NAMESPACE", "hub")
@@ -144,13 +156,44 @@ async def _run_server() -> None:
         namespace=namespace,
     )
 
+    stop_event = asyncio.Event()
+
+    def _trigger_stop() -> None:
+        stop_event.set()
+
+    loop = asyncio.get_running_loop()
+    for signame in ("SIGTERM", "SIGINT"):
+        sig = getattr(_signal, signame, None)
+        if sig is None:
+            continue
+        try:
+            loop.add_signal_handler(sig, _trigger_stop)
+        except (NotImplementedError, RuntimeError):
+            # Windows asyncio + SIGTERM isn't supported; skip silently.
+            pass
+
     try:
         async with stdio_server() as (read_stream, write_stream):
-            await server.run(
-                read_stream,
-                write_stream,
-                server.create_initialization_options(),
+            server_task = asyncio.create_task(
+                server.run(
+                    read_stream,
+                    write_stream,
+                    server.create_initialization_options(),
+                )
             )
+            stop_task = asyncio.create_task(stop_event.wait())
+            done, pending = await asyncio.wait(
+                {server_task, stop_task},
+                return_when=asyncio.FIRST_COMPLETED,
+            )
+            for task in pending:
+                task.cancel()
+            # Propagate any exception from server_task (ignore CancelledError).
+            for task in done:
+                if task is server_task:
+                    exc = task.exception()
+                    if exc is not None:
+                        raise exc
     finally:
         engine.close()
 

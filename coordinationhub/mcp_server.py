@@ -33,45 +33,16 @@ from typing import Any
 MAX_BODY_BYTES = 1_000_000  # 1 MB — reject oversized requests
 
 from .core import CoordinationEngine
-from .dispatch import TOOL_DISPATCH
 from .schemas import TOOL_SCHEMAS, TOOLS_VERSION
 from .plugins.dashboard.dashboard import get_dashboard_data, DASHBOARD_HTML
 
 logger = logging.getLogger(__name__)
 
 
-def dispatch_tool(engine: CoordinationEngine, tool_name: str, arguments: dict[str, Any]) -> dict[str, Any]:
-    """Dispatch a tool call to the appropriate engine method.
-
-    Shared by the HTTP and stdio MCP servers so dispatch logic is not
-    duplicated. Raises ``ValueError`` for unknown tools, ``TypeError``
-    for invalid arguments.
-
-    T3.5: explicit ``None`` values used to be stripped along with
-    missing keys, causing spurious "missing required argument" errors
-    for tools whose signature genuinely accepts ``None``
-    (e.g. ``report_subagent_spawned(subagent_type: str | None)``).
-    Now preserves ``None`` and lets the callee decide.
-
-    Unknown keys are logged at WARNING so callers notice typos (e.g.
-    ``agent_ids`` vs ``agent_id``) instead of silently receiving
-    "missing required argument" later.
-    """
-    if tool_name not in TOOL_DISPATCH:
-        raise ValueError(
-            f"Unknown tool: {tool_name!r}. Available: {sorted(TOOL_DISPATCH)}"
-        )
-    method_name, allowed_args = TOOL_DISPATCH[tool_name]
-    unknown = set(arguments) - set(allowed_args)
-    if unknown:
-        logger.warning(
-            "tool %r called with unknown argument(s) %s; allowed=%s",
-            tool_name, sorted(unknown), sorted(allowed_args),
-        )
-    # T3.5: keep explicit None so the callee can distinguish "field
-    # intentionally unset" from "field missing entirely".
-    kwargs = {k: v for k, v in arguments.items() if k in allowed_args}
-    return getattr(engine, method_name)(**kwargs)
+# T7.42: dispatch_tool moved to ``dispatch`` module. Kept as an import
+# alias here so existing callers (tests, mcp_stdio) don't have to move
+# their imports immediately.
+from .dispatch import dispatch_tool  # noqa: F401,E402
 
 
 # ------------------------------------------------------------------ #
@@ -625,5 +596,16 @@ class CoordinationHubMCPServer:
 
     @property
     def engine(self) -> CoordinationEngine:
-        """Expose the underlying CoordinationEngine instance."""
+        """Expose the underlying CoordinationEngine instance.
+
+        T7.43: after ``stop()`` the engine is cleared to None. Accessing
+        the property in that state raises a clearer error than the
+        previous ``AttributeError: 'NoneType' object has no attribute X``
+        deep inside the first call.
+        """
+        if self._engine is None:
+            raise RuntimeError(
+                "CoordinationHubMCPServer is stopped; start() it before "
+                "using the engine."
+            )
         return self._engine

@@ -25,8 +25,13 @@ class LockCache:
     # Internal helpers
     # ------------------------------------------------------------------ #
 
-    def _entry_key(self, entry: dict[str, Any]) -> str:
-        return f"{entry['locked_by']}:{entry.get('region_start')}:{entry.get('region_end')}"
+    def _entry_key(self, entry: dict[str, Any]) -> tuple[Any, Any, Any]:
+        # T7.16: tuple keys instead of a ``:``-joined string so an agent
+        # id that happens to contain a colon can't collide with a
+        # different agent whose region bounds are shifted. The tuple
+        # form is hashable in the same way and the ``==`` semantics are
+        # unchanged for callers.
+        return (entry["locked_by"], entry.get("region_start"), entry.get("region_end"))
 
     # ------------------------------------------------------------------ #
     # Mutations

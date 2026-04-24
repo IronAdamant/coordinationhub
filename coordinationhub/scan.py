@@ -229,9 +229,19 @@ def scan_project_tool(
         ).fetchone()
         fallback_agent = fallback_row["agent_id"] if fallback_row else "unassigned"
 
-    # Build dir -> agent for nearest-ancestor lookup
+    # Build dir -> agent for nearest-ancestor lookup.
+    # T7.38: iterate paths in deterministic order so the first-write-wins
+    # rule (``if d not in dir_to_agent``) doesn't depend on dict insertion
+    # order. Sorting by path length descending means deeper assignments
+    # seed their directory tree before shallower ones, matching the
+    # semantic "a nested file's owner should win over a shallow sibling's
+    # owner when filling in the tree".
     dir_to_agent: dict[str, str] = {}
-    for doc_path, aid in path_to_agent.items():
+    ordered_paths = sorted(
+        path_to_agent.items(),
+        key=lambda kv: (-len(kv[0]), kv[0]),
+    )
+    for doc_path, aid in ordered_paths:
         d = str(Path(doc_path).parent)
         while d:
             if d not in dir_to_agent:
@@ -310,7 +320,11 @@ def scan_project_tool(
                     # branch below handles it.
                 assigned = assigned or fallback_agent
             to_upsert.append((rel, assigned, now))
-            owned += 1
+            # T7.37: ``owned`` means "files assigned to a real agent",
+            # not "files scanned". Unassigned fallback (no active agent
+            # registered) doesn't count as owned.
+            if assigned != "unassigned":
+                owned += 1
 
     if to_upsert:
         with connect() as conn:
