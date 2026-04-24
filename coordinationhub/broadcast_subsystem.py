@@ -1,38 +1,94 @@
-"""BroadcastMixin — broadcast, handoff dispatch, and cross-agent waits.
+"""Broadcast subsystem — sibling broadcasts, ack tracking, multi-lock wait.
 
-Historically extracted from ``core_locking`` to stay under the 500-LOC
-budget. Post-T6.22 LockingMixin is itself extracted to
-:mod:`locking_subsystem` as :class:`Locking`; this mixin still calls
-:py:meth:`get_lock_status` on ``self`` and the engine's facade method
-delegates to ``self._locking`` so the MRO lookup keeps working. When
-Broadcast is itself extracted later in the series it will take an
-explicit ``locking`` dep instead of relying on MRO resolution.
+T6.22 eleventh step: extracted out of ``core_broadcasts.BroadcastMixin``
+into a standalone class. Coupling audit confirmed BroadcastMixin had
+three ``_publish_event`` calls (``broadcast.created`` / ``broadcast.ack``
+/ ``handoff.created``), two ``_hybrid_wait`` calls (in
+``wait_for_broadcast_acks`` and ``wait_for_locks``), and **one**
+cross-mixin call — ``self.get_lock_status(...)`` from ``wait_for_locks``.
+
+**First extraction with an explicit cross-subsystem dependency.** The
+single cross-mixin call is wired by injecting the :class:`Locking`
+subsystem instance as a constructor dep and calling
+``self._locking.get_lock_status(...)`` directly, rather than routing
+through ``CoordinationEngine``'s MRO / facade. All prior extractions in
+the series (:class:`Spawner`, :class:`WorkIntent`, :class:`Lease`,
+:class:`Dependency`, :class:`Messaging`, :class:`Handoff`,
+:class:`Change`, :class:`Task`, :class:`Visibility`, :class:`Locking`)
+had zero cross-mixin calls, so this is the first subsystem that takes
+another subsystem as a dep.
+
+Path access follows the closure pattern from :class:`WorkIntent`,
+:class:`Change`, :class:`Visibility`, and :class:`Locking` (commits
+``3d1bd48``, ``e0c21a8``, ``64c3ff4``, ``0660785``):
+``project_root_getter`` is a callable so a replica produced by
+``read_only_engine`` picks up its own storage root without a rebind.
+
+**Handoff/broadcast split.** This subsystem owns the *creation* side of
+a handoff via ``broadcast(handoff_targets=...)`` — it writes the
+handoff row via :mod:`handoffs` and dispatches handoff messages to
+each target, then publishes ``handoff.created``. The *lifecycle* side
+(ack / complete / cancel / query / wait) lives in
+:class:`handoff_subsystem.Handoff`. Pre-extraction the internal
+``_handoff(...)`` dispatch method was shadowed on the engine by the
+``_handoff`` subsystem attribute set in ``CoordinationEngine.__init__``;
+no test covered the ``handoff_targets`` branch so this was latent.
+Inside the :class:`Broadcast` class the method resolves to the bound
+method on the class, not the engine's subsystem attribute — the
+extraction fixes this silently as a side effect. See commit ``ded641d``
+for the :class:`Handoff` extraction.
+
+See commits ``1ee46c6`` (Spawner), ``3d1bd48`` (WorkIntent),
+``b4a3e6b`` (Lease), ``d6c8796`` (Dependency), ``d9f84d3`` (Messaging),
+``ded641d`` (Handoff), ``e0c21a8`` (Change), ``8182c7a`` (Task),
+``64c3ff4`` (Visibility), and ``0660785`` (Locking) for the ten prior
+extractions in this series.
+
+Delegates to: agent_registry (agent_registry.py), broadcasts
+(broadcasts.py), handoffs (handoffs.py), messages (messages.py),
+locking_subsystem.Locking (for ``get_lock_status`` in ``wait_for_locks``).
 """
 
 from __future__ import annotations
 
 import time
-from typing import Any
+from pathlib import Path
+from typing import Any, Callable
 
 from . import agent_registry as _ar
 from . import broadcasts as _bc
 from . import handoffs as _handoffs
 from . import messages as _msg
+from .locking_subsystem import Locking
 from .paths import normalize_path
 
 
-class BroadcastMixin:
-    """Mixin providing broadcast, handoff, and multi-lock wait primitives.
+class Broadcast:
+    """Sibling broadcasts, acknowledgment tracking, and cross-agent waits.
 
-    Expects the host class to provide:
-    - ``_connect() -> sqlite3.Connection``
-    - ``_storage.project_root``
-    - ``_publish_event(topic, payload)``
-    - ``_hybrid_wait(topics, filter_fn, timeout)``
-    - ``get_lock_status(document_path)``  (facade on the engine — resolves
-      to ``self._locking.get_lock_status`` via the :class:`Locking`
-      subsystem post-T6.22)
+    Constructed by :class:`CoordinationEngine` and exposed as
+    ``engine._broadcast``. The engine keeps facade methods for each
+    public operation so the existing tool API is preserved.
+
+    Takes an explicit :class:`Locking` dep so ``wait_for_locks`` can
+    call ``self._locking.get_lock_status(...)`` directly instead of
+    routing through the engine's MRO — this is the first extraction in
+    the T6.22 series with a cross-subsystem dependency.
     """
+
+    def __init__(
+        self,
+        connect_fn: Callable[[], Any],
+        publish_event_fn: Callable[[str, dict[str, Any]], None],
+        hybrid_wait_fn: Callable[..., dict[str, Any] | None],
+        locking: Locking,
+        project_root_getter: Callable[[], Path | None],
+    ) -> None:
+        self._connect = connect_fn
+        self._publish_event = publish_event_fn
+        self._hybrid_wait = hybrid_wait_fn
+        self._locking = locking
+        self._project_root_getter = project_root_getter
 
     def broadcast(
         self, agent_id: str, document_path: str | None = None, ttl: float = 30.0,
@@ -89,7 +145,7 @@ class BroadcastMixin:
         conflicts: list[dict[str, Any]] = []
         sibling_ids = [s["agent_id"] for s in live_siblings]
         if document_path and sibling_ids:
-            norm_path = normalize_path(document_path, self._storage.project_root)
+            norm_path = normalize_path(document_path, self._project_root_getter())
             placeholders = ",".join("?" * len(sibling_ids))
             with self._connect() as conn:
                 lock_rows = conn.execute(
@@ -171,7 +227,11 @@ class BroadcastMixin:
         self, agent_id: str, to_agents: list[str],
         document_path: str | None = None, handoff_type: str = "scope_transfer",
     ) -> dict[str, Any]:
-        """Formal multi-recipient handoff."""
+        """Formal multi-recipient handoff (creation side).
+
+        Lifecycle (ack / complete / cancel / query / wait) lives in
+        :class:`handoff_subsystem.Handoff`.
+        """
         result = _handoffs.record_handoff(
             self._connect, agent_id, to_agents, document_path, handoff_type,
         )
@@ -197,11 +257,13 @@ class BroadcastMixin:
         self, document_paths: list[str], agent_id: str, timeout_s: float = 60.0,
     ) -> dict[str, Any]:
         start = time.time()
-        paths_set = {normalize_path(p, self._storage.project_root) for p in document_paths}
+        paths_set = {normalize_path(p, self._project_root_getter()) for p in document_paths}
         released: list[str] = []
 
         for path in list(paths_set):
-            status = self.get_lock_status(path)
+            # T6.22: cross-subsystem call wired via injected Locking dep
+            # rather than routing through the engine's MRO / facade.
+            status = self._locking.get_lock_status(path)
             if not status.get("locked", False) or status.get("locked_by") == agent_id:
                 released.append(path)
                 paths_set.remove(path)

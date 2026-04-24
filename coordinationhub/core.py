@@ -3,7 +3,6 @@
 Wires together storage, lifecycle, capability mixins, and extracted
 subsystems. Each mixin is in its own file under coordinationhub/.
 
-BroadcastMixin:   core_broadcasts.py  — broadcast, handoff dispatch, wait_for_locks
 IdentityMixin:    core_identity.py    — agent registration, heartbeat, lineage
 
 Composed subsystems (T6.22 — extracted from the mixin tree):
@@ -17,6 +16,7 @@ Change:           change_subsystem.py      — change notifications, audit, stat
 Task:             task_subsystem.py        — task registry, hierarchy, DLQ
 Visibility:       visibility_subsystem.py  — coordination graph, scan, assessment
 Locking:          locking_subsystem.py     — document lock acquire/release/admin
+Broadcast:        broadcast_subsystem.py   — broadcast, handoff dispatch, wait_for_locks
 
 Zero third-party dependencies.
 """
@@ -38,7 +38,6 @@ from .housekeeping import (
     is_enabled_by_env,
 )
 from .lock_cache import LockCache
-from .core_broadcasts import BroadcastMixin
 from .core_identity import IdentityMixin
 from .spawner_subsystem import Spawner
 from .work_intent_subsystem import WorkIntent
@@ -50,12 +49,12 @@ from .change_subsystem import Change
 from .task_subsystem import Task
 from .visibility_subsystem import Visibility
 from .locking_subsystem import Locking
+from .broadcast_subsystem import Broadcast
 from .paths import detect_project_root
 from .plugins.graph import graphs as _g
 
 
 class CoordinationEngine(
-    BroadcastMixin,
     IdentityMixin,
 ):
     """Host class that inherits capability mixins and holds subsystems.
@@ -66,8 +65,8 @@ class CoordinationEngine(
     composed attributes — ``self._spawner``, ``self._work_intent``,
     ``self._lease``, ``self._dependency``, ``self._messaging``,
     ``self._handoff``, ``self._change``, ``self._task``,
-    ``self._visibility``, and ``self._locking`` — with facade methods
-    on the engine preserving the public API.
+    ``self._visibility``, ``self._locking``, and ``self._broadcast`` —
+    with facade methods on the engine preserving the public API.
     """
 
     DEFAULT_PORT = 9877
@@ -250,13 +249,16 @@ class CoordinationEngine(
         # and touched ``_storage.project_root`` plus the shared
         # :class:`LockCache` instance. Unlike prior extractions this
         # subsystem does NOT own its state — ``self._lock_cache`` stays
-        # on the engine because :class:`BroadcastMixin` (via
-        # ``wait_for_locks`` calling ``self.get_lock_status``) and
-        # :class:`IdentityMixin` (via ``deregister_agent`` calling
-        # ``self.release_agent_locks``) still reach into locking through
-        # MRO lookups on ``self``. Those cross-mixin calls resolve via
-        # the facade methods below; when Broadcast and Identity are
-        # later extracted they will take an explicit ``locking`` dep.
+        # on the engine because :class:`IdentityMixin` (via
+        # ``deregister_agent`` calling ``self.release_agent_locks``)
+        # still reaches into locking through MRO lookups on ``self``;
+        # that cross-mixin call resolves via the facade method below.
+        # Post-T6.22 step 11 the Broadcast subsystem takes ``locking``
+        # as an explicit constructor dep (first extraction in the
+        # series with a cross-subsystem dep) so
+        # ``Broadcast.wait_for_locks`` calls
+        # ``self._locking.get_lock_status`` directly without routing
+        # through the engine's MRO / facade.
         # ``CoordinationEngine.start()`` also warms the cache directly,
         # so keeping it owned by the engine avoids an extra indirection.
         # Follows the :class:`Change` / :class:`Visibility`
@@ -270,6 +272,35 @@ class CoordinationEngine(
             connect_fn=self._connect,
             publish_event_fn=self._publish_event,
             lock_cache=self._lock_cache,
+            project_root_getter=lambda: self._storage.project_root,
+        )
+        # T6.22: composed subsystem replaces BroadcastMixin — eleventh
+        # and first cross-subsystem-dep extraction in the series. Per
+        # the coupling audit BroadcastMixin had three ``_publish_event``
+        # calls (``broadcast.created`` / ``broadcast.ack`` /
+        # ``handoff.created``), two ``_hybrid_wait`` calls
+        # (``wait_for_broadcast_acks`` and ``wait_for_locks``), touched
+        # ``_storage.project_root`` via ``normalize_path`` (in
+        # ``broadcast`` and ``wait_for_locks``), and — uniquely in this
+        # series — one cross-mixin call: ``self.get_lock_status`` from
+        # ``wait_for_locks``. Wiring the cross-mixin call cleanly means
+        # injecting ``self._locking`` as a dep so the subsystem calls
+        # ``self._locking.get_lock_status`` directly instead of routing
+        # through the engine's MRO / facade. Constructed AFTER
+        # ``self._locking`` so the reference exists. Follows the
+        # ``project_root_getter`` closure pattern from :class:`WorkIntent`,
+        # :class:`Change`, :class:`Visibility`, and :class:`Locking`
+        # (commits ``3d1bd48``, ``e0c21a8``, ``64c3ff4``, ``0660785``).
+        # See commits ``1ee46c6`` (Spawner), ``3d1bd48`` (WorkIntent),
+        # ``b4a3e6b`` (Lease), ``d6c8796`` (Dependency), ``d9f84d3``
+        # (Messaging), ``ded641d`` (Handoff), ``e0c21a8`` (Change),
+        # ``8182c7a`` (Task), ``64c3ff4`` (Visibility), and ``0660785``
+        # (Locking) for the ten prior extractions in this series.
+        self._broadcast = Broadcast(
+            connect_fn=self._connect,
+            publish_event_fn=self._publish_event,
+            hybrid_wait_fn=self._hybrid_wait,
+            locking=self._locking,
             project_root_getter=lambda: self._storage.project_root,
         )
 
@@ -1092,10 +1123,12 @@ class CoordinationEngine(
     # / ``reap_expired_locks``), housekeeping (``build_default_scheduler``
     # calls ``engine.reap_expired_locks`` and ``engine.reap_stale_agents``),
     # and tests all continue to call ``engine.acquire_lock(...)`` etc.
-    # verbatim. Critically, :class:`BroadcastMixin.wait_for_locks` calling
-    # ``self.get_lock_status`` and :class:`IdentityMixin.deregister_agent``
-    # calling ``self.release_agent_locks`` both still resolve because the
-    # facade methods stay on the engine class.
+    # verbatim. Critically, :class:`IdentityMixin.deregister_agent``
+    # calling ``self.release_agent_locks`` still resolves because the
+    # facade method stays on the engine class. Post-T6.22 step 11 the
+    # :class:`Broadcast` subsystem holds an explicit ``locking`` dep
+    # and calls ``self._locking.get_lock_status`` directly for
+    # ``wait_for_locks``, so no MRO routing is needed for that path.
 
     def acquire_lock(
         self, document_path: str, agent_id: str,
@@ -1175,6 +1208,67 @@ class CoordinationEngine(
 
     def reap_stale_agents(self, timeout: float = 600.0) -> dict[str, Any]:
         return self._locking.reap_stale_agents(timeout=timeout)
+
+    # ------------------------------------------------------------------ #
+    # Broadcast facade (T6.22)
+    # ------------------------------------------------------------------ #
+    # These one-liners delegate to ``self._broadcast`` (a :class:`Broadcast`
+    # composed in ``__init__``). They preserve the pre-extraction public
+    # API — MCP dispatch (``broadcast``, ``acknowledge_broadcast``,
+    # ``get_broadcast_status``, ``wait_for_broadcast_acks``,
+    # ``wait_for_locks``), CLI (``cli_locks.py``), and tests all continue
+    # to call ``engine.broadcast(...)`` etc. verbatim. ``broadcast`` with
+    # ``handoff_targets`` still dispatches the *creation* side of a
+    # handoff via the subsystem's internal ``_handoff`` method; the
+    # lifecycle (ack/complete/cancel/query/wait) stays on
+    # :class:`Handoff` (commit ``ded641d``).
+
+    def broadcast(
+        self,
+        agent_id: str,
+        document_path: str | None = None,
+        ttl: float = 30.0,
+        handoff_targets: list[str] | None = None,
+        require_ack: bool = False,
+        message: str | None = None,
+    ) -> dict[str, Any]:
+        return self._broadcast.broadcast(
+            agent_id=agent_id,
+            document_path=document_path,
+            ttl=ttl,
+            handoff_targets=handoff_targets,
+            require_ack=require_ack,
+            message=message,
+        )
+
+    def acknowledge_broadcast(
+        self, broadcast_id: int, agent_id: str,
+    ) -> dict[str, Any]:
+        return self._broadcast.acknowledge_broadcast(
+            broadcast_id=broadcast_id, agent_id=agent_id,
+        )
+
+    def get_broadcast_status(self, broadcast_id: int) -> dict[str, Any]:
+        return self._broadcast.get_broadcast_status(broadcast_id=broadcast_id)
+
+    def wait_for_broadcast_acks(
+        self, broadcast_id: int, timeout_s: float = 30.0,
+    ) -> dict[str, Any]:
+        return self._broadcast.wait_for_broadcast_acks(
+            broadcast_id=broadcast_id, timeout_s=timeout_s,
+        )
+
+    def wait_for_locks(
+        self,
+        document_paths: list[str],
+        agent_id: str,
+        timeout_s: float = 60.0,
+    ) -> dict[str, Any]:
+        return self._broadcast.wait_for_locks(
+            document_paths=document_paths,
+            agent_id=agent_id,
+            timeout_s=timeout_s,
+        )
 
     def read_only_engine(self) -> "CoordinationEngine":
         """Return a read-only view of this engine using direct WAL reads.
@@ -1274,5 +1368,23 @@ class CoordinationEngine(
         # storage without a rebind (same pattern as Change /
         # Visibility — commits ``e0c21a8`` and ``64c3ff4``).
         replica._locking._connect = replica._connect
+        # T6.22: and the Broadcast subsystem — eleventh and first
+        # cross-subsystem-dep extraction in the series. ``_publish_event``
+        # and ``_hybrid_wait`` were captured in ``_broadcast.__init__``
+        # against the replica's own callables; broadcast mutations
+        # (``broadcast`` / ``acknowledge_broadcast`` / ``_handoff``
+        # dispatch) through a read-only replica are not a supported
+        # flow, and the read-only operations (``get_broadcast_status``,
+        # ``wait_for_broadcast_acks``, ``wait_for_locks``) only need
+        # ``_connect`` rebound. The ``project_root_getter`` is a closure
+        # over ``self._storage`` so it already picks up the replica's
+        # storage without a rebind (same pattern as WorkIntent / Change
+        # / Visibility / Locking — commits ``3d1bd48``, ``e0c21a8``,
+        # ``64c3ff4``, ``0660785``). The ``locking`` reference passed in
+        # to this replica's ``Broadcast`` is the replica's own
+        # ``self._locking`` (since construction above ran against the
+        # replica itself), whose ``_connect`` we just rebound — so no
+        # explicit locking rebind is needed here.
+        replica._broadcast._connect = replica._connect
         return replica
 

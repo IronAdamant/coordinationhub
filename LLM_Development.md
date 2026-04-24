@@ -1598,6 +1598,7 @@ Block markers for multi-line content:
 | `coordinationhub/_storage.py` | 143 | Storage backend for CoordinationHub — SQLite pool, path resolution, lifecycle |
 | `coordinationhub/agent_registry.py` | 495 | Agent lifecycle: register, heartbeat, deregister, lineage management |
 | `coordinationhub/agent_status.py` | 288 | Agent status and file-map query helpers for CoordinationHub |
+| `coordinationhub/broadcast_subsystem.py` | 246 | Broadcast subsystem — sibling broadcasts, ack tracking, multi-lock wait |
 | `coordinationhub/broadcasts.py` | 147 | Broadcast acknowledgment primitives for CoordinationHub |
 | `coordinationhub/change_subsystem.py` | 219 | Change subsystem — change notifications, file ownership, conflict audit, status |
 | `coordinationhub/cli.py` | 102 | CoordinationHub CLI — command-line interface for all coordination tool methods |
@@ -1617,8 +1618,7 @@ Block markers for multi-line content:
 | `coordinationhub/cli_vis.py` | 241 | Change awareness, audit, graph, and assessment CLI commands |
 | `coordinationhub/conflict_log.py` | 43 | Conflict recording and querying for CoordinationHub |
 | `coordinationhub/context.py` | 104 | Context bundle builder for CoordinationHub agent registration responses |
-| `coordinationhub/core.py` | 831 | CoordinationEngine — host class that composes mixins and subsystems |
-| `coordinationhub/core_broadcasts.py` | 194 | BroadcastMixin — broadcast, handoff dispatch, and cross-agent waits |
+| `coordinationhub/core.py` | 880 | CoordinationEngine — host class that composes mixins and subsystems |
 | `coordinationhub/core_identity.py` | 139 | IdentityMixin — agent lifecycle and lineage management |
 | `coordinationhub/db.py` | 93 | SQLite connection pool and public re-exports for CoordinationHub |
 | `coordinationhub/db_migrations.py` | 399 | Schema-version tracking, migration functions, and the ``init_schema`` driver |
@@ -1640,7 +1640,7 @@ Block markers for multi-line content:
 | `coordinationhub/limits.py` | 40 | String-length caps for user-supplied fields (T6.14) |
 | `coordinationhub/lock_cache.py` | 180 | In-memory lock cache for CoordinationHub |
 | `coordinationhub/lock_ops.py` | 209 | Shared lock primitives used by both local locks and coordination locks |
-| `coordinationhub/locking_subsystem.py` | 441 | Locking subsystem — document lock acquire/release/refresh/list/admin |
+| `coordinationhub/locking_subsystem.py` | 445 | Locking subsystem — document lock acquire/release/refresh/list/admin |
 | `coordinationhub/mcp_server.py` | 578 | HTTP REST admin / dashboard endpoint for CoordinationHub |
 | `coordinationhub/mcp_stdio.py` | 197 | Stdio-based MCP server for CoordinationHub using the ``mcp`` Python package |
 | `coordinationhub/messages.py` | 105 | Inter-agent messaging primitives for CoordinationHub |

@@ -14,11 +14,14 @@ the engine (created in ``CoordinationEngine.__init__`` and warmed in
 ``start()``) and is passed into this subsystem as a shared reference.
 The engine still exposes ``self._lock_cache`` because:
 
-- Two remaining mixins on the MRO (:class:`BroadcastMixin` and
-  :class:`IdentityMixin`) reach into locking via ``self.`` lookups
-  (``self.get_lock_status`` from ``wait_for_locks``, and
-  ``self.release_agent_locks`` from ``deregister_agent``). Those calls
-  keep resolving via the engine's facade methods, which delegate here.
+- :class:`IdentityMixin` still reaches into locking via MRO
+  (``self.release_agent_locks`` from ``deregister_agent``). That call
+  resolves via the engine's facade method, which delegates here.
+  Post-T6.22 step 11 the :class:`broadcast_subsystem.Broadcast`
+  subsystem takes ``locking`` as an explicit constructor dep and
+  calls ``self._locking.get_lock_status(...)`` directly rather than
+  routing through the engine's MRO — this was the first extraction
+  in the series with a cross-subsystem dependency.
 - ``CoordinationEngine.start()`` warms the cache directly from SQLite.
   Keeping the cache on the engine avoids a redundant indirection.
 
@@ -60,10 +63,11 @@ class Locking:
 
     Constructed by :class:`CoordinationEngine` and exposed as
     ``engine._locking``. The engine keeps facade methods for each
-    public operation so the existing tool API is preserved and so the
-    remaining mixins (:class:`BroadcastMixin`, :class:`IdentityMixin`)
-    keep resolving ``self.get_lock_status`` / ``self.release_agent_locks``
-    via the engine MRO.
+    public operation so the existing tool API is preserved and so
+    :class:`IdentityMixin` keeps resolving ``self.release_agent_locks``
+    via the engine MRO. Post-T6.22 step 11 the
+    :class:`broadcast_subsystem.Broadcast` subsystem holds an explicit
+    reference to ``Locking`` and calls ``get_lock_status`` directly.
     """
 
     # T6.23: renamed from DEFAULT_TTL to disambiguate from
