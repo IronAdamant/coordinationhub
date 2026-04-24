@@ -53,7 +53,7 @@ coordinationhub/
   db_migrations.py      — Schema-version tracking, migration functions, and the ``init_schema`` driver (~339 LOC)
   db_schemas.py         — Canonical SQLite schema definitions for CoordinationHub (~301 LOC)
   dependencies.py       — Cross-agent dependency declaration and satisfaction tracking (~140 LOC)
-  dispatch.py           — Tool dispatch for CoordinationHub (~91 LOC)
+  dispatch.py           — Tool dispatch for CoordinationHub (~107 LOC)
   event_bus.py          — Lightweight thread-safe in-memory pub-sub event bus for CoordinationHub (~127 LOC)
   handoffs.py           — Handoff recording and acknowledgement primitives for CoordinationHub (~200 LOC)
   housekeeping.py       — HousekeepingScheduler — background periodic pruners for long-running hubs (~188 LOC)
@@ -71,6 +71,7 @@ coordinationhub/
   spawner.py            — Zero-deps spawner primitives for HA coordinator sub-agent registry (~380 LOC)
   task_failures.py      — Task failure tracking and dead letter queue for CoordinationHub (~149 LOC)
   tasks.py              — Task registry primitives for CoordinationHub (work board) (~517 LOC)
+  validation.py         — Minimal stdlib jsonschema validator for MCP tool arguments (~160 LOC)
   work_intent.py        — Work intent board primitives for CoordinationHub (~139 LOC)
   hooks/
     __init__.py         — Hooks package — IDE integration via stdin/stdout event protocol (~1 LOC)
@@ -103,17 +104,17 @@ coordinationhub/
     dlq.py              — Dead Letter Queue tool schemas for CoordinationHub (~23 LOC)
     handoffs.py         — Handoffs tool schemas for CoordinationHub (~23 LOC)
     identity.py         — Identity & Registration tool schemas for CoordinationHub (~112 LOC)
-    intent.py           — Work Intent Board tool schemas for CoordinationHub (~20 LOC)
+    intent.py           — Work Intent Board tool schemas for CoordinationHub (~58 LOC)
     leases.py           — HA Coordinator Leases tool schemas for CoordinationHub (~35 LOC)
     locking.py          — Document Locking tool schemas for CoordinationHub (~202 LOC)
-    messaging.py        — Messaging tool schemas for CoordinationHub (~42 LOC)
+    messaging.py        — Messaging tool schemas for CoordinationHub (~79 LOC)
     spawner.py          — Spawner tool schemas for CoordinationHub (~193 LOC)
-    tasks.py            — Task Registry tool schemas for CoordinationHub (~220 LOC)
+    tasks.py            — Task Registry tool schemas for CoordinationHub (~230 LOC)
     visibility.py       — Graph & Visibility tool schemas for CoordinationHub (~159 LOC)
 ```
 <!-- /GEN -->
 
-The `tests/` directory contains the pytest suite (<!-- GEN:test-count -->676<!-- /GEN --> tests across 28 files), including `tests/fixtures/claude_code_events/` contract fixtures.
+The `tests/` directory contains the pytest suite (<!-- GEN:test-count -->714<!-- /GEN --> tests across 28 files), including `tests/fixtures/claude_code_events/` contract fixtures.
 
 ## Module Design
 
@@ -237,7 +238,7 @@ To disable hooks temporarily, add `"disableAllHooks": true` to `~/.claude/settin
 
 ```bash
 python -m pytest tests/ -v
-# <!-- GEN:test-count -->676<!-- /GEN --> tests across 28 test files:
+# <!-- GEN:test-count -->714<!-- /GEN --> tests across 28 test files:
 #   test_agent_lifecycle.py    — 27 tests
 #   test_locking.py            — 46 tests (includes smart reap)
 #   test_notifications.py      — 8 tests

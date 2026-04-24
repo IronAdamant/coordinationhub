@@ -1,9 +1,18 @@
 """Task Registry tool schemas for CoordinationHub.
 
 Pure data declarations — no logic.  Re-exported by :mod:`coordinationhub.schemas`.
+
+T6.11 / T7.44: every string field describes its constraint inline
+(``maxLength`` where a cap exists in :mod:`coordinationhub.limits`).
+Where the engine applies an implicit default we document it in the
+``description`` rather than setting ``default: None`` with a non-null
+type (which validators interpret as "null is a valid value", masking
+bugs).
 """
 
 from __future__ import annotations
+
+from ..limits import MAX_DESCRIPTION, MAX_SUMMARY, MAX_ERROR
 
 
 TOOL_SCHEMAS_TASKS: dict[str, dict] = {
@@ -17,14 +26,17 @@ TOOL_SCHEMAS_TASKS: dict[str, dict] = {
             "properties": {
                 "task_id": {
                     "type": "string",
+                    "minLength": 1,
                     "description": "Unique task ID (e.g. hub.12345.0.task.0)",
                 },
                 "parent_agent_id": {
                     "type": "string",
+                    "minLength": 1,
                     "description": "Agent creating this task",
                 },
                 "description": {
                     "type": "string",
+                    "maxLength": MAX_DESCRIPTION,
                     "description": "What this task involves",
                 },
                 "depends_on": {
@@ -77,6 +89,7 @@ TOOL_SCHEMAS_TASKS: dict[str, dict] = {
                 },
                 "summary": {
                     "type": "string",
+                    "maxLength": MAX_SUMMARY,
                     "description": "Completion summary written by the agent (used for compression chains)",
                 },
                 "blocked_by": {
@@ -85,6 +98,7 @@ TOOL_SCHEMAS_TASKS: dict[str, dict] = {
                 },
                 "error": {
                     "type": "string",
+                    "maxLength": MAX_ERROR,
                     "description": "Error message when marking a task as failed (records to dead letter queue)",
                 },
             },
@@ -110,28 +124,23 @@ TOOL_SCHEMAS_TASKS: dict[str, dict] = {
                 },
                 "task_id": {
                     "type": "string",
-                    "description": "Task ID (required for query_type='task')",
-                    "default": None,
+                    "description": "Task ID (required for query_type='task'; omit otherwise)",
                 },
                 "parent_agent_id": {
                     "type": "string",
-                    "description": "Agent ID (required for query_type='child')",
-                    "default": None,
+                    "description": "Agent ID (required for query_type='child'; omit otherwise)",
                 },
                 "assigned_agent_id": {
                     "type": "string",
-                    "description": "Agent ID (required for query_type='by_agent')",
-                    "default": None,
+                    "description": "Agent ID (required for query_type='by_agent'; omit otherwise)",
                 },
                 "parent_task_id": {
                     "type": "string",
-                    "description": "Parent task ID (required for query_type='subtasks')",
-                    "default": None,
+                    "description": "Parent task ID (required for query_type='subtasks'; omit otherwise)",
                 },
                 "root_task_id": {
                     "type": "string",
-                    "description": "Root task ID (required for query_type='tree')",
-                    "default": None,
+                    "description": "Root task ID (required for query_type='tree'; omit otherwise)",
                 },
             },
             "required": ["query_type"],
@@ -160,6 +169,7 @@ TOOL_SCHEMAS_TASKS: dict[str, dict] = {
                 },
                 "description": {
                     "type": "string",
+                    "maxLength": MAX_DESCRIPTION,
                     "description": "What this subtask involves",
                 },
                 "depends_on": {
@@ -193,11 +203,13 @@ TOOL_SCHEMAS_TASKS: dict[str, dict] = {
                 },
                 "timeout_s": {
                     "type": "number",
+                    "minimum": 0,
                     "description": "Maximum seconds to wait (default: 60)",
                     "default": 60.0,
                 },
                 "poll_interval_s": {
                     "type": "number",
+                    "minimum": 0,
                     "description": "Polling interval in seconds (default: 2)",
                     "default": 2.0,
                 },

@@ -18,22 +18,20 @@ TOOL_SCHEMAS_IDENTITY: dict[str, dict] = {
             "properties": {
                 "agent_id": {
                     "type": "string",
+                    "minLength": 1,
                     "description": "Unique agent identifier (e.g. hub.12345.0)",
                 },
                 "parent_id": {
                     "type": "string",
-                    "description": "Parent agent ID if this is a spawned sub-agent",
-                    "default": None,
+                    "description": "Parent agent ID if this is a spawned sub-agent (omit for root agents)",
                 },
                 "graph_agent_id": {
                     "type": "string",
-                    "description": "ID in the coordination graph this agent implements (e.g. 'planner')",
-                    "default": None,
+                    "description": "ID in the coordination graph this agent implements (e.g. 'planner'; omit if not graph-mapped)",
                 },
                 "worktree_root": {
                     "type": "string",
-                    "description": "Worktree root path (defaults to project root)",
-                    "default": None,
+                    "description": "Worktree root path (omit to inherit project root)",
                 },
             },
             "required": ["agent_id"],
@@ -86,6 +84,7 @@ TOOL_SCHEMAS_IDENTITY: dict[str, dict] = {
                 },
                 "stale_timeout": {
                     "type": "number",
+                    "minimum": 0,
                     "description": "Seconds after which an agent is considered stale",
                     "default": 600.0,
                 },
@@ -106,7 +105,8 @@ TOOL_SCHEMAS_IDENTITY: dict[str, dict] = {
                 },
                 "mode": {
                     "type": "string",
-                    "description": "'lineage' (default) or 'siblings'",
+                    "enum": ["lineage", "siblings"],
+                    "description": "Query mode; default is 'lineage' (ancestor+descendant chain)",
                     "default": "lineage",
                 },
             },

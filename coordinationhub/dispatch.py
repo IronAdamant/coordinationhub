@@ -95,14 +95,22 @@ def dispatch_tool(engine, tool_name: str, arguments: dict[str, Any]) -> dict[str
     """Dispatch a tool call to the appropriate engine method.
 
     Shared by the HTTP and stdio MCP servers so dispatch logic is not
-    duplicated. Raises ``ValueError`` for unknown tools, ``TypeError``
-    for invalid arguments.
+    duplicated. Raises ``ValueError`` for unknown tools or schema
+    violations, ``TypeError`` for engine-level signature mismatches.
 
     T3.5: explicit ``None`` values used to be stripped along with
     missing keys, causing spurious "missing required argument" errors
     for tools whose signature genuinely accepts ``None``
     (e.g. ``report_subagent_spawned(subagent_type: str | None)``).
     Now preserves ``None`` and lets the callee decide.
+
+    T6.11: ``arguments`` are validated against ``TOOL_SCHEMAS[tool_name]
+    ["parameters"]`` before dispatch. Pre-fix, schemas were
+    display-only — a string where an integer was expected, an unknown
+    ``action`` value, or a maxLength-busting prompt would pass through
+    the boundary and either corrupt DB state or raise an opaque error
+    deep in a primitive. Validation is skipped when the schema is
+    absent (unknown-in-tools-version edge).
 
     Unknown keys are logged at WARNING so callers notice typos (e.g.
     ``agent_ids`` vs ``agent_id``) instead of silently receiving
@@ -112,6 +120,24 @@ def dispatch_tool(engine, tool_name: str, arguments: dict[str, Any]) -> dict[str
         raise ValueError(
             f"Unknown tool: {tool_name!r}. Available: {sorted(TOOL_DISPATCH)}"
         )
+
+    # T6.11: schema validation gate. Imported lazily so dispatch.py
+    # stays importable in minimal environments (e.g. the schema package
+    # depends on it transitively through nothing we wire here, but we
+    # prefer late binding for any future isolation need).
+    from . import validation as _validation
+    from .schemas import TOOL_SCHEMAS
+
+    schema = TOOL_SCHEMAS.get(tool_name)
+    if schema is not None:
+        params_schema = schema.get("parameters")
+        if params_schema is not None:
+            # Raises ValidationError (subclass of ValueError) on
+            # type/required/enum/bound violations.
+            _validation.validate_tool_arguments(
+                tool_name, arguments, params_schema,
+            )
+
     method_name, allowed_args = TOOL_DISPATCH[tool_name]
     unknown = set(arguments) - set(allowed_args)
     if unknown:

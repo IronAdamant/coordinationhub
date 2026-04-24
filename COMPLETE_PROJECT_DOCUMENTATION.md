@@ -1093,7 +1093,7 @@ keep it in sync; CI checks for drift on every push.
 | `coordinationhub/db_migrations.py` | 339 | Schema-version tracking, migration functions, and the ``init_schema`` driver |
 | `coordinationhub/db_schemas.py` | 301 | Canonical SQLite schema definitions for CoordinationHub |
 | `coordinationhub/dependencies.py` | 140 | Cross-agent dependency declaration and satisfaction tracking |
-| `coordinationhub/dispatch.py` | 91 | Tool dispatch for CoordinationHub |
+| `coordinationhub/dispatch.py` | 107 | Tool dispatch for CoordinationHub |
 | `coordinationhub/event_bus.py` | 127 | Lightweight thread-safe in-memory pub-sub event bus for CoordinationHub |
 | `coordinationhub/handoffs.py` | 200 | Handoff recording and acknowledgement primitives for CoordinationHub |
 | `coordinationhub/hooks/__init__.py` | 1 | Hooks package — IDE integration via stdin/stdout event protocol |
@@ -1133,20 +1133,21 @@ keep it in sync; CI checks for drift on every push.
 | `coordinationhub/schemas/dlq.py` | 23 | Dead Letter Queue tool schemas for CoordinationHub |
 | `coordinationhub/schemas/handoffs.py` | 23 | Handoffs tool schemas for CoordinationHub |
 | `coordinationhub/schemas/identity.py` | 112 | Identity & Registration tool schemas for CoordinationHub |
-| `coordinationhub/schemas/intent.py` | 20 | Work Intent Board tool schemas for CoordinationHub |
+| `coordinationhub/schemas/intent.py` | 58 | Work Intent Board tool schemas for CoordinationHub |
 | `coordinationhub/schemas/leases.py` | 35 | HA Coordinator Leases tool schemas for CoordinationHub |
 | `coordinationhub/schemas/locking.py` | 202 | Document Locking tool schemas for CoordinationHub |
-| `coordinationhub/schemas/messaging.py` | 42 | Messaging tool schemas for CoordinationHub |
+| `coordinationhub/schemas/messaging.py` | 79 | Messaging tool schemas for CoordinationHub |
 | `coordinationhub/schemas/spawner.py` | 193 | Spawner tool schemas for CoordinationHub |
-| `coordinationhub/schemas/tasks.py` | 220 | Task Registry tool schemas for CoordinationHub |
+| `coordinationhub/schemas/tasks.py` | 230 | Task Registry tool schemas for CoordinationHub |
 | `coordinationhub/schemas/visibility.py` | 159 | Graph & Visibility tool schemas for CoordinationHub |
 | `coordinationhub/spawner.py` | 380 | Zero-deps spawner primitives for HA coordinator sub-agent registry |
 | `coordinationhub/task_failures.py` | 149 | Task failure tracking and dead letter queue for CoordinationHub |
 | `coordinationhub/tasks.py` | 517 | Task registry primitives for CoordinationHub (work board) |
+| `coordinationhub/validation.py` | 160 | Minimal stdlib jsonschema validator for MCP tool arguments |
 | `coordinationhub/work_intent.py` | 139 | Work intent board primitives for CoordinationHub |
 <!-- /GEN -->
 
-**Total: <!-- GEN:test-count -->676<!-- /GEN --> tests across 28 test files.**
+**Total: <!-- GEN:test-count -->714<!-- /GEN --> tests across 28 test files.**
 
 ---
 
@@ -1195,7 +1196,7 @@ coordinationhub/
   db_migrations.py      — Schema-version tracking, migration functions, and the ``init_schema`` driver (~339 LOC)
   db_schemas.py         — Canonical SQLite schema definitions for CoordinationHub (~301 LOC)
   dependencies.py       — Cross-agent dependency declaration and satisfaction tracking (~140 LOC)
-  dispatch.py           — Tool dispatch for CoordinationHub (~91 LOC)
+  dispatch.py           — Tool dispatch for CoordinationHub (~107 LOC)
   event_bus.py          — Lightweight thread-safe in-memory pub-sub event bus for CoordinationHub (~127 LOC)
   handoffs.py           — Handoff recording and acknowledgement primitives for CoordinationHub (~200 LOC)
   housekeeping.py       — HousekeepingScheduler — background periodic pruners for long-running hubs (~188 LOC)
@@ -1213,6 +1214,7 @@ coordinationhub/
   spawner.py            — Zero-deps spawner primitives for HA coordinator sub-agent registry (~380 LOC)
   task_failures.py      — Task failure tracking and dead letter queue for CoordinationHub (~149 LOC)
   tasks.py              — Task registry primitives for CoordinationHub (work board) (~517 LOC)
+  validation.py         — Minimal stdlib jsonschema validator for MCP tool arguments (~160 LOC)
   work_intent.py        — Work intent board primitives for CoordinationHub (~139 LOC)
   hooks/
     __init__.py         — Hooks package — IDE integration via stdin/stdout event protocol (~1 LOC)
@@ -1245,17 +1247,17 @@ coordinationhub/
     dlq.py              — Dead Letter Queue tool schemas for CoordinationHub (~23 LOC)
     handoffs.py         — Handoffs tool schemas for CoordinationHub (~23 LOC)
     identity.py         — Identity & Registration tool schemas for CoordinationHub (~112 LOC)
-    intent.py           — Work Intent Board tool schemas for CoordinationHub (~20 LOC)
+    intent.py           — Work Intent Board tool schemas for CoordinationHub (~58 LOC)
     leases.py           — HA Coordinator Leases tool schemas for CoordinationHub (~35 LOC)
     locking.py          — Document Locking tool schemas for CoordinationHub (~202 LOC)
-    messaging.py        — Messaging tool schemas for CoordinationHub (~42 LOC)
+    messaging.py        — Messaging tool schemas for CoordinationHub (~79 LOC)
     spawner.py          — Spawner tool schemas for CoordinationHub (~193 LOC)
-    tasks.py            — Task Registry tool schemas for CoordinationHub (~220 LOC)
+    tasks.py            — Task Registry tool schemas for CoordinationHub (~230 LOC)
     visibility.py       — Graph & Visibility tool schemas for CoordinationHub (~159 LOC)
 ```
 <!-- /GEN -->
 
-The `tests/` directory holds <!-- GEN:test-count -->676<!-- /GEN --> tests across 28 files,
+The `tests/` directory holds <!-- GEN:test-count -->714<!-- /GEN --> tests across 28 files,
 plus `tests/fixtures/claude_code_events/` for hook contract fixtures.
 
 **Module design principles:**
@@ -1722,7 +1724,7 @@ Air-gapped install: `pip install coordinationhub --no-deps`.
 
 ```bash
 python -m pytest tests/ -v
-# <!-- GEN:test-count -->676<!-- /GEN --> tests across 28 test files
+# <!-- GEN:test-count -->714<!-- /GEN --> tests across 28 test files
 ```
 
 ---
