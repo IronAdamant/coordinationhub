@@ -25,7 +25,6 @@ This adapter is designed to be called by:
 from __future__ import annotations
 
 import json
-import os
 import sys
 
 from coordinationhub.hooks.base import BaseHook

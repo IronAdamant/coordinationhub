@@ -149,7 +149,7 @@ def wait_for_notifications(
     Returns {"notifications": [...], "timed_out": False} when new notifications arrive,
     or {"notifications": [], "timed_out": True} if timeout expires with no new notifications.
     """
-    import time
+    # T7.15: ``time`` is already imported at module top.
     start = time.time()
     # Track the latest notification we've seen
     last_notification_id = None

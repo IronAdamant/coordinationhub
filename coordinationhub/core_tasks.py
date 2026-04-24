@@ -12,6 +12,7 @@ task_id are automatically satisfied.
 
 from __future__ import annotations
 
+import time as _time
 from typing import Any
 
 from . import tasks as _tasks
@@ -199,7 +200,7 @@ class TaskMixin:
 
         Uses the event bus for low-latency notification.
         """
-        import time as _time
+        # T7.15: ``_time`` is imported at module top.
         start = _time.time()
         task = _tasks.get_task(self._connect, task_id)
         if task and task.get("status") in ("completed", "failed"):

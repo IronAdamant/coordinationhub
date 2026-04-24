@@ -178,7 +178,7 @@ def cmd_broadcast(engine, args):
     else:
         # Check if this was a handoff
         if result.get("handoff_id") is not None:
-            print(f"HOFF from {args.agent_id}: {result.get('handoff_id')}")
+            print(f"HANDOFF from {args.agent_id}: {result.get('handoff_id')}")
             print(f"  To: {', '.join(result.get('to_agents', []))}")
             print(f"  Document: {result.get('document_path') or '(none)'}")
             print(f"  Type: {result.get('handoff_type')}")

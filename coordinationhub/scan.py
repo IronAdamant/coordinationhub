@@ -121,7 +121,7 @@ def _get_spawned_agent_responsibilities(
             WHERE l.child_id = ?
         """, (assigned_agent_id,)).fetchone()
         if row:
-            import json
+            # T7.15: ``json`` is already imported at module top.
             graph_id = row["graph_agent_id"]
             resp = json.loads(row["responsibilities"]) if row["responsibilities"] else []
             return graph_id, resp

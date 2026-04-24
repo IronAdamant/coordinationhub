@@ -31,7 +31,7 @@ TOOL_SCHEMAS_LEASES: dict[str, dict] = {
             "properties": {
                 "action": {"type": "string", "enum": ["acquire", "refresh", "release", "get", "claim"], "description": "Lease action"},
                 "agent_id": {"type": "string", "description": "Agent ID"},
-                "ttl": {"type": "number", "description": "TTL for acquire/claim", "default": None},
+                "ttl": {"type": "number", "description": "TTL for acquire/claim (seconds, default 10 at the engine)", "minimum": 0},
             },
             "required": ["action", "agent_id"],
         },

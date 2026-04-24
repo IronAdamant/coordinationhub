@@ -336,16 +336,23 @@ def _migrate_v19_to_v20(conn: sqlite3.Connection) -> None:
         conn.execute("DROP TABLE pending_spawner_tasks")
 
 
+# T7.30: single shared no-op used for migrations where the table was
+# added via CREATE TABLE IF NOT EXISTS in _SCHEMAS (i.e. fresh installs
+# got it at init, and existing DBs never needed a backfill).
+def _noop_migration(conn: sqlite3.Connection) -> None:  # pragma: no cover
+    return None
+
+
 _MIGRATIONS = {
     2: _migrate_v1_to_v2,
     3: _migrate_v2_to_v3,
-    4: lambda conn: None,  # descendant_registry added via CREATE TABLE IF NOT EXISTS
-    5: lambda conn: None,  # messages table added via CREATE TABLE IF NOT EXISTS
-    6: lambda conn: None,  # scope column added via CREATE TABLE IF NOT EXISTS (legacy no-op)
-    7: lambda conn: None,  # tasks table added via CREATE TABLE IF NOT EXISTS
-    8: lambda conn: None,  # work_intent table added via CREATE TABLE IF NOT EXISTS
-    9: lambda conn: None,  # handoffs + handoff_acks tables added via CREATE TABLE IF NOT EXISTS
-    10: lambda conn: None,  # agent_dependencies table added via CREATE TABLE IF NOT EXISTS
+    4: _noop_migration,  # descendant_registry added via CREATE TABLE IF NOT EXISTS
+    5: _noop_migration,  # messages table added via CREATE TABLE IF NOT EXISTS
+    6: _noop_migration,  # scope column added via CREATE TABLE IF NOT EXISTS (legacy no-op)
+    7: _noop_migration,  # tasks table added via CREATE TABLE IF NOT EXISTS
+    8: _noop_migration,  # work_intent table added via CREATE TABLE IF NOT EXISTS
+    9: _noop_migration,  # handoffs + handoff_acks tables added via CREATE TABLE IF NOT EXISTS
+    10: _noop_migration,  # agent_dependencies table added via CREATE TABLE IF NOT EXISTS
     11: _migrate_v10_to_v11,  # parent_task_id column added via ALTER TABLE
     12: _migrate_v11_to_v12,  # priority column added via ALTER TABLE
     13: _migrate_v12_to_v13,  # task_failures table added

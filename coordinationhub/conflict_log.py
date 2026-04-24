@@ -5,7 +5,6 @@ Zero internal dependencies — receives connect() from caller.
 
 from __future__ import annotations
 
-import sqlite3
 from typing import Any
 
 from .db import ConnectFn

@@ -152,12 +152,15 @@ def get_broadcasts(
 ) -> list[dict[str, Any]]:
     """Get broadcasts with optional from_agent_id filtering."""
     with connect() as conn:
-        query = "SELECT * FROM broadcasts WHERE 1=1"
+        # T7.21: build the WHERE clause lazily instead of carrying a
+        # vacuous 1=1 predicate forward.
+        clauses: list[str] = []
         args: list[Any] = []
         if from_agent_id is not None:
-            query += " AND from_agent_id=?"
+            clauses.append("from_agent_id=?")
             args.append(from_agent_id)
-        query += " ORDER BY created_at DESC LIMIT ?"
+        where = (" WHERE " + " AND ".join(clauses)) if clauses else ""
+        query = f"SELECT * FROM broadcasts{where} ORDER BY created_at DESC LIMIT ?"
         args.append(limit)
         rows = conn.execute(query, args).fetchall()
 

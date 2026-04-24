@@ -314,9 +314,13 @@ def deregister_agent(
             )
             orphaned += 1
 
+        # T7.2: don't include a fake ``locks_released: 0`` here. The
+        # caller (core_identity.deregister_agent) invokes
+        # release_agent_locks and patches in the real count, so a
+        # literal 0 at this layer is just misleading if a downstream
+        # path ever consumes the primitive directly.
         return {
             "deregistered": True,
-            "locks_released": 0,  # Caller should call release_agent_locks separately
             "children_orphaned": orphaned,
         }
 
@@ -457,7 +461,11 @@ def get_lineage(
     descendants: list[dict[str, Any]] = []
 
     with connect() as conn:
-        # Walk up ancestors
+        # Walk up ancestors.
+        # T7.1: each ancestor entry records the ancestor's own
+        # parent_id (i.e. the next step up the chain), not the same
+        # id twice. Pre-fix both fields held ``parent_id`` and
+        # callers rendering "A -> B -> C" chains got duplicates.
         current_id: str | None = agent_id
         while current_id is not None:
             row = conn.execute(
@@ -469,7 +477,12 @@ def get_lineage(
             parent_id = row["parent_id"]
             if parent_id is None:
                 break
-            ancestors.append({"agent_id": parent_id, "parent_id": row["parent_id"]})
+            grandparent_row = conn.execute(
+                "SELECT parent_id FROM agents WHERE agent_id = ?",
+                (parent_id,),
+            ).fetchone()
+            grandparent_id = grandparent_row["parent_id"] if grandparent_row else None
+            ancestors.append({"agent_id": parent_id, "parent_id": grandparent_id})
             current_id = parent_id
 
         # Walk down descendants via agents parent_id

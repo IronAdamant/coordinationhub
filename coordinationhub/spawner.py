@@ -24,12 +24,21 @@ from .limits import MAX_DESCRIPTION, MAX_PROMPT, truncate
 # evaluator, etc.) that can exceed the default 10-minute window don't
 # have to patch source code.
 import os as _os
+import re as _re
 try:
     _SPAWN_TTL_SECONDS = float(
         _os.environ.get("COORDINATIONHUB_SPAWN_TTL_SECONDS", "600.0")
     )
 except (TypeError, ValueError):
     _SPAWN_TTL_SECONDS = 600.0
+
+# T7.3: ``subagent_type`` is baked into the spawn id via
+# ``{parent}.{subagent_type}.{seq}``. A dot in ``subagent_type`` would
+# make the id ambiguous — downstream consumers that split on dots could
+# pick the wrong seq, and a legitimate ``foo.bar`` agent would look like
+# a child of ``foo``. Restrict to a safe character class at the
+# boundary.
+_SAFE_SUBAGENT_TYPE = _re.compile(r"^[A-Za-z0-9_-]+$")
 
 # T6.9: cap on the number of simultaneously-pending spawn rows. Pre-fix
 # a caller (or a chain of failed IDE integrations) could stash unbounded
@@ -141,6 +150,14 @@ def stash_pending_spawn(
     """
     if parent_agent_id is None:
         raise TypeError("parent_agent_id is required")
+    # T7.3: reject dotted or shell-unsafe subagent_types so the
+    # derived spawn id stays unambiguous.
+    if subagent_type is not None and not _SAFE_SUBAGENT_TYPE.match(subagent_type):
+        return {
+            "stashed": False,
+            "reason": "invalid_subagent_type",
+            "subagent_type": subagent_type,
+        }
 
     # T6.14: bound free-text fields so a runaway IDE integration can't
     # stash multi-MB prompts that then propagate through the dashboard.

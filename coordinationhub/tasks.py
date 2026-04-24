@@ -492,7 +492,7 @@ def get_available_tasks(
     one SELECT for the task universe and one SELECT per distinct
     candidate agent.
     """
-    import json
+    # T7.15: ``json`` is already imported at module top.
     all_tasks = get_all_tasks(connect)
     available = []
 

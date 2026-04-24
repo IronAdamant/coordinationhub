@@ -150,9 +150,13 @@ def get_agent_tree_tool(
         if locks:
             lock_paths = [lk["path"] for lk in locks]
             placeholders = ",".join("?" * len(lock_paths))
+            # T7.4: string concatenation instead of f-string. The
+            # placeholders are ``?`` so no injection is possible today,
+            # but dropping the f-string removes the footgun if someone
+            # later edits the builder to interpolate anything else.
             ownership_rows = conn.execute(
-                f"SELECT document_path, assigned_agent_id FROM file_ownership "
-                f"WHERE document_path IN ({placeholders})", lock_paths,
+                "SELECT document_path, assigned_agent_id FROM file_ownership "
+                "WHERE document_path IN (" + placeholders + ")", lock_paths,
             ).fetchall()
             owner_map = {r["document_path"]: r["assigned_agent_id"] for r in ownership_rows}
             for lk in locks:
