@@ -1076,7 +1076,7 @@ keep it in sync; CI checks for drift on every push.
 | `coordinationhub/cli_vis.py` | 241 | Change awareness, audit, graph, and assessment CLI commands |
 | `coordinationhub/conflict_log.py` | 43 | Conflict recording and querying for CoordinationHub |
 | `coordinationhub/context.py` | 104 | Context bundle builder for CoordinationHub agent registration responses |
-| `coordinationhub/core.py` | 204 | CoordinationEngine — thin host class that inherits all mixins |
+| `coordinationhub/core.py` | 290 | CoordinationEngine — host class that composes mixins and subsystems |
 | `coordinationhub/core_broadcasts.py` | 188 | BroadcastMixin — broadcast, handoff dispatch, and cross-agent waits |
 | `coordinationhub/core_change.py` | 191 | ChangeMixin — change notifications, file ownership, conflict audit, status |
 | `coordinationhub/core_dependencies.py` | 120 | DependencyMixin — cross-agent dependency declarations and checks |
@@ -1085,7 +1085,6 @@ keep it in sync; CI checks for drift on every push.
 | `coordinationhub/core_leases.py` | 149 | LeaseMixin — HA coordinator lease management |
 | `coordinationhub/core_locking.py` | 394 | Locking methods for CoordinationEngine |
 | `coordinationhub/core_messaging.py` | 160 | MessagingMixin — inter-agent messages and await |
-| `coordinationhub/core_spawner.py` | 215 | SpawnerMixin — HA coordinator sub-agent spawn management |
 | `coordinationhub/core_tasks.py` | 202 | TaskMixin — shared task registry with hierarchy support |
 | `coordinationhub/core_visibility.py` | 138 | VisibilityMixin — coordination graph, project scan, agent status, assessment |
 | `coordinationhub/core_work_intent.py` | 75 | WorkIntentMixin — cooperative work intent board |
@@ -1141,6 +1140,7 @@ keep it in sync; CI checks for drift on every push.
 | `coordinationhub/schemas/tasks.py` | 230 | Task Registry tool schemas for CoordinationHub |
 | `coordinationhub/schemas/visibility.py` | 159 | Graph & Visibility tool schemas for CoordinationHub |
 | `coordinationhub/spawner.py` | 395 | Zero-deps spawner primitives for HA coordinator sub-agent registry |
+| `coordinationhub/spawner_subsystem.py` | 233 | Spawner subsystem — HA coordinator sub-agent spawn management |
 | `coordinationhub/task_failures.py` | 149 | Task failure tracking and dead letter queue for CoordinationHub |
 | `coordinationhub/tasks.py` | 517 | Task registry primitives for CoordinationHub (work board) |
 | `coordinationhub/validation.py` | 160 | Minimal stdlib jsonschema validator for MCP tool arguments |
@@ -1179,7 +1179,7 @@ coordinationhub/
   cli_vis.py            — Change awareness, audit, graph, and assessment CLI commands (~241 LOC)
   conflict_log.py       — Conflict recording and querying for CoordinationHub (~43 LOC)
   context.py            — Context bundle builder for CoordinationHub agent registration responses (~104 LOC)
-  core.py               — CoordinationEngine — thin host class that inherits all mixins (~204 LOC)
+  core.py               — CoordinationEngine — host class that composes mixins and subsystems (~290 LOC)
   core_broadcasts.py    — BroadcastMixin — broadcast, handoff dispatch, and cross-agent waits (~188 LOC)
   core_change.py        — ChangeMixin — change notifications, file ownership, conflict audit, status (~191 LOC)
   core_dependencies.py  — DependencyMixin — cross-agent dependency declarations and checks (~120 LOC)
@@ -1188,7 +1188,6 @@ coordinationhub/
   core_leases.py        — LeaseMixin — HA coordinator lease management (~149 LOC)
   core_locking.py       — Locking methods for CoordinationEngine (~394 LOC)
   core_messaging.py     — MessagingMixin — inter-agent messages and await (~160 LOC)
-  core_spawner.py       — SpawnerMixin — HA coordinator sub-agent spawn management (~215 LOC)
   core_tasks.py         — TaskMixin — shared task registry with hierarchy support (~202 LOC)
   core_visibility.py    — VisibilityMixin — coordination graph, project scan, agent status, assessment (~138 LOC)
   core_work_intent.py   — WorkIntentMixin — cooperative work intent board (~75 LOC)
@@ -1212,6 +1211,7 @@ coordinationhub/
   pending_tasks.py      — Pending sub-agent task storage for CoordinationHub (~109 LOC)
   scan.py               — File ownership scan for CoordinationHub (~279 LOC)
   spawner.py            — Zero-deps spawner primitives for HA coordinator sub-agent registry (~395 LOC)
+  spawner_subsystem.py  — Spawner subsystem — HA coordinator sub-agent spawn management (~233 LOC)
   task_failures.py      — Task failure tracking and dead letter queue for CoordinationHub (~149 LOC)
   tasks.py              — Task registry primitives for CoordinationHub (work board) (~517 LOC)
   validation.py         — Minimal stdlib jsonschema validator for MCP tool arguments (~160 LOC)

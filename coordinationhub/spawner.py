@@ -478,7 +478,7 @@ def is_stop_requested(
 
 
 # T6.5: the polling ``await_agent_stopped`` primitive was superseded by
-# :meth:`core_spawner.SpawnerMixin.await_subagent_stopped`, which waits
+# :meth:`spawner_subsystem.Spawner.await_subagent_stopped`, which waits
 # on the in-memory event bus (and falls back to the SQLite journal for
 # cross-process sync via _hybrid_wait). The polling version had no
 # callers. Deleted.

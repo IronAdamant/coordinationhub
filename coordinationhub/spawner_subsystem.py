@@ -1,23 +1,43 @@
-"""SpawnerMixin — HA coordinator sub-agent spawn management.
+"""Spawner subsystem — HA coordinator sub-agent spawn management.
 
-Expects the host class to provide:
-    self._connect() — callable returning a sqlite3 connection
+T6.22 first step: extracted out of ``core_spawner.SpawnerMixin`` into a
+standalone class. Coupling audit confirmed SpawnerMixin had zero
+cross-mixin method calls and only relied on three pieces of engine
+infrastructure — ``_connect``, ``_publish_event``, ``_hybrid_wait`` —
+which are now injected as constructor dependencies. This breaks the
+god-object inheritance chain on ``CoordinationEngine`` without changing
+any observable behaviour.
 
-Delegates to: spawner (spawner.py) for spawn primitives.
+Delegates to: spawner (spawner.py) for spawn DB primitives.
 """
 
 from __future__ import annotations
 
 import time
-from typing import Any
+from typing import Any, Callable
 
 from . import spawner as _spawner
 
 
-class SpawnerMixin:
-    """Sub-agent spawn management for HA coordinator."""
+class Spawner:
+    """Sub-agent spawn management for HA coordinator.
+
+    Constructed by :class:`CoordinationEngine` and exposed as
+    ``engine._spawner``. The engine keeps facade methods for each
+    public operation so the existing tool API is preserved.
+    """
 
     DEFAULT_SPAWN_TIMEOUT = 300.0  # 5 minutes
+
+    def __init__(
+        self,
+        connect_fn: Callable[[], Any],
+        publish_event_fn: Callable[[str, dict[str, Any]], None],
+        hybrid_wait_fn: Callable[..., dict[str, Any] | None],
+    ) -> None:
+        self._connect = connect_fn
+        self._publish_event = publish_event_fn
+        self._hybrid_wait = hybrid_wait_fn
 
     # ------------------------------------------------------------------ #
     # Spawn Management

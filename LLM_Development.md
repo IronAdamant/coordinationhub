@@ -1616,7 +1616,7 @@ Block markers for multi-line content:
 | `coordinationhub/cli_vis.py` | 241 | Change awareness, audit, graph, and assessment CLI commands |
 | `coordinationhub/conflict_log.py` | 43 | Conflict recording and querying for CoordinationHub |
 | `coordinationhub/context.py` | 104 | Context bundle builder for CoordinationHub agent registration responses |
-| `coordinationhub/core.py` | 204 | CoordinationEngine — thin host class that inherits all mixins |
+| `coordinationhub/core.py` | 290 | CoordinationEngine — host class that composes mixins and subsystems |
 | `coordinationhub/core_broadcasts.py` | 188 | BroadcastMixin — broadcast, handoff dispatch, and cross-agent waits |
 | `coordinationhub/core_change.py` | 191 | ChangeMixin — change notifications, file ownership, conflict audit, status |
 | `coordinationhub/core_dependencies.py` | 120 | DependencyMixin — cross-agent dependency declarations and checks |
@@ -1625,7 +1625,6 @@ Block markers for multi-line content:
 | `coordinationhub/core_leases.py` | 149 | LeaseMixin — HA coordinator lease management |
 | `coordinationhub/core_locking.py` | 394 | Locking methods for CoordinationEngine |
 | `coordinationhub/core_messaging.py` | 160 | MessagingMixin — inter-agent messages and await |
-| `coordinationhub/core_spawner.py` | 215 | SpawnerMixin — HA coordinator sub-agent spawn management |
 | `coordinationhub/core_tasks.py` | 202 | TaskMixin — shared task registry with hierarchy support |
 | `coordinationhub/core_visibility.py` | 138 | VisibilityMixin — coordination graph, project scan, agent status, assessment |
 | `coordinationhub/core_work_intent.py` | 75 | WorkIntentMixin — cooperative work intent board |
@@ -1681,6 +1680,7 @@ Block markers for multi-line content:
 | `coordinationhub/schemas/tasks.py` | 230 | Task Registry tool schemas for CoordinationHub |
 | `coordinationhub/schemas/visibility.py` | 159 | Graph & Visibility tool schemas for CoordinationHub |
 | `coordinationhub/spawner.py` | 395 | Zero-deps spawner primitives for HA coordinator sub-agent registry |
+| `coordinationhub/spawner_subsystem.py` | 233 | Spawner subsystem — HA coordinator sub-agent spawn management |
 | `coordinationhub/task_failures.py` | 149 | Task failure tracking and dead letter queue for CoordinationHub |
 | `coordinationhub/tasks.py` | 517 | Task registry primitives for CoordinationHub (work board) |
 | `coordinationhub/validation.py` | 160 | Minimal stdlib jsonschema validator for MCP tool arguments |

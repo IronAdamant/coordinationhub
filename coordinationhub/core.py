@@ -1,7 +1,7 @@
-"""CoordinationEngine — thin host class that inherits all mixins.
+"""CoordinationEngine — host class that composes mixins and subsystems.
 
-Wires together storage, lifecycle, and all capability mixins.
-Each mixin is in its own file under coordinationhub/.
+Wires together storage, lifecycle, capability mixins, and extracted
+subsystems. Each mixin is in its own file under coordinationhub/.
 
 LockingMixin:     core_locking.py     — lock acquire/release/refresh/list/admin
 BroadcastMixin:   core_broadcasts.py  — broadcast, handoff dispatch, wait_for_locks
@@ -13,6 +13,10 @@ HandoffMixin:     core_handoffs.py    — handoff acknowledgment tracking
 DependencyMixin:  core_dependencies.py — cross-agent dependency declarations
 ChangeMixin:      core_change.py      — change notifications, audit, status
 VisibilityMixin:  core_visibility.py  — coordination graph, scan, assessment
+LeaseMixin:       core_leases.py      — HA coordinator leadership leases
+
+Composed subsystems (T6.22 — extracted from the mixin tree):
+Spawner:          spawner_subsystem.py — sub-agent spawn management
 
 Zero third-party dependencies.
 """
@@ -45,7 +49,7 @@ from .core_dependencies import DependencyMixin
 from .core_change import ChangeMixin
 from .core_visibility import VisibilityMixin
 from .core_leases import LeaseMixin
-from .core_spawner import SpawnerMixin
+from .spawner_subsystem import Spawner
 from .paths import detect_project_root
 from .plugins.graph import graphs as _g
 
@@ -62,12 +66,14 @@ class CoordinationEngine(
     ChangeMixin,
     VisibilityMixin,
     LeaseMixin,
-    SpawnerMixin,
 ):
-    """Host class that inherits all capability mixins.
+    """Host class that inherits capability mixins and holds subsystems.
 
     Provides storage lifecycle and wiring for cross-mixin calls.
-    All domain methods are provided by the mixins.
+    Most domain methods are provided by the mixins. Subsystems
+    extracted from the mixin tree (T6.22) hang off the engine as
+    composed attributes — currently ``self._spawner`` — with facade
+    methods on the engine preserving the public API.
     """
 
     DEFAULT_PORT = 9877
@@ -97,6 +103,15 @@ class CoordinationEngine(
             is_enabled_by_env() if housekeeping is None else bool(housekeeping)
         )
         self._housekeeper: HousekeepingScheduler | None = None
+        # T6.22: composed subsystem replaces SpawnerMixin. The engine
+        # wires the three infra callables (_connect, _publish_event,
+        # _hybrid_wait) as deps; facade methods below delegate so the
+        # public API on ``engine`` stays identical.
+        self._spawner = Spawner(
+            connect_fn=self._connect,
+            publish_event_fn=self._publish_event,
+            hybrid_wait_fn=self._hybrid_wait,
+        )
 
     def start(self) -> None:
         """Start storage, warm lock cache, and load coordination graph."""
@@ -237,6 +252,97 @@ class CoordinationEngine(
                 return None
             time.sleep(sleep_for)
 
+    # ------------------------------------------------------------------ #
+    # Spawner facade (T6.22)
+    # ------------------------------------------------------------------ #
+    # These one-liners delegate to ``self._spawner`` (a :class:`Spawner`
+    # composed in ``__init__``). They preserve the pre-extraction public
+    # API — MCP dispatch, CLI, and tests all continue to call
+    # ``engine.spawn_subagent(...)`` etc. verbatim.
+
+    def spawn_subagent(
+        self,
+        parent_agent_id: str,
+        subagent_type: str,
+        description: str | None = None,
+        prompt: str | None = None,
+        source: str = "external",
+    ) -> dict[str, Any]:
+        return self._spawner.spawn_subagent(
+            parent_agent_id=parent_agent_id,
+            subagent_type=subagent_type,
+            description=description,
+            prompt=prompt,
+            source=source,
+        )
+
+    def get_pending_spawns(
+        self,
+        parent_agent_id: str,
+        include_consumed: bool = False,
+    ) -> list[dict[str, Any]]:
+        return self._spawner.get_pending_spawns(
+            parent_agent_id=parent_agent_id,
+            include_consumed=include_consumed,
+        )
+
+    def report_subagent_spawned(
+        self,
+        parent_agent_id: str,
+        subagent_type: str | None,
+        child_agent_id: str,
+        source: str = "external",
+        caller_agent_id: str | None = None,
+    ) -> dict[str, Any]:
+        return self._spawner.report_subagent_spawned(
+            parent_agent_id=parent_agent_id,
+            subagent_type=subagent_type,
+            child_agent_id=child_agent_id,
+            source=source,
+            caller_agent_id=caller_agent_id,
+        )
+
+    def await_subagent_registration(
+        self,
+        parent_agent_id: str,
+        subagent_type: str | None = None,
+        timeout: float | None = None,
+    ) -> dict[str, Any]:
+        return self._spawner.await_subagent_registration(
+            parent_agent_id=parent_agent_id,
+            subagent_type=subagent_type,
+            timeout=timeout,
+        )
+
+    def cancel_spawn(
+        self, spawn_id: str, caller_agent_id: str | None = None,
+    ) -> dict[str, Any]:
+        return self._spawner.cancel_spawn(
+            spawn_id=spawn_id, caller_agent_id=caller_agent_id,
+        )
+
+    def request_subagent_deregistration(
+        self,
+        parent_agent_id: str,
+        child_agent_id: str,
+    ) -> dict[str, Any]:
+        return self._spawner.request_subagent_deregistration(
+            parent_agent_id=parent_agent_id,
+            child_agent_id=child_agent_id,
+        )
+
+    def is_subagent_stop_requested(self, agent_id: str) -> dict[str, Any]:
+        return self._spawner.is_subagent_stop_requested(agent_id=agent_id)
+
+    def await_subagent_stopped(
+        self,
+        child_agent_id: str,
+        timeout: float = 30.0,
+    ) -> dict[str, Any]:
+        return self._spawner.await_subagent_stopped(
+            child_agent_id=child_agent_id, timeout=timeout,
+        )
+
     def read_only_engine(self) -> "CoordinationEngine":
         """Return a read-only view of this engine using direct WAL reads.
 
@@ -253,5 +359,9 @@ class CoordinationEngine(
         )
         # Don't call start() — we don't need the pool or graph, just storage
         replica._connect = self._storage.read_only_connection  # type: ignore[method-assign]
+        # T6.22: the Spawner subsystem captured the writer-pool connect in
+        # its __init__; rebind to the read-only connection so replica
+        # spawner calls don't punch through to the pool.
+        replica._spawner._connect = replica._connect
         return replica
 
