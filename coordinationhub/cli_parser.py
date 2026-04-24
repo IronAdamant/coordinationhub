@@ -18,7 +18,13 @@ def _make_shared() -> argparse.ArgumentParser:
     shared.add_argument("--storage-dir", default=None)
     shared.add_argument("--project-root", default=None)
     shared.add_argument("--namespace", default="hub")
-    shared.add_argument("--json", action="store_true", dest="json_output")
+    # T7.7: ``-j`` is the one widely-unambiguous short form worth adding
+    # to the shared flag set (every command inherits it). Other short
+    # forms would collide per-command (e.g. ``-t`` means ttl on some,
+    # timeout on others, tree on agent-status); scoped intentionally
+    # narrow to avoid foot-guns.
+    shared.add_argument("-j", "--json", action="store_true", dest="json_output",
+                        help="Emit structured JSON output instead of text")
     shared.add_argument("--replica", action="store_true",
                         help="Use read-replica mode (direct WAL read, no writer round-trip)")
     return shared
@@ -91,8 +97,17 @@ def _add_locking(sub, shared) -> None:
     p.add_argument("--region-end", type=int, default=None, help="End line for region lock")
     p.add_argument("--retry", action="store_true", help="Retry with exponential backoff on contention")
     p.add_argument("--max-retries", type=int, default=5, help="Maximum retry attempts (default: 5)")
-    p.add_argument("--backoff-ms", type=float, default=100.0, help="Starting backoff in ms (default: 100)")
-    p.add_argument("--timeout-ms", type=float, default=5000.0, help="Total timeout in ms (default: 5000)")
+    # T7.19: units are baked into the flag name (``-ms``) so a reader
+    # can't mistake the scale. Other timeout flags in this CLI use
+    # seconds; these two are milliseconds because the acquire-lock
+    # backoff ladder starts in the sub-second range where float-seconds
+    # would be awkward (--backoff-ms 100 vs --backoff-s 0.1).
+    p.add_argument("--backoff-ms", type=float, default=100.0,
+                   help="Starting backoff in MILLISECONDS (default: 100ms). "
+                        "Exponential-backoff ladder between retries.")
+    p.add_argument("--timeout-ms", type=float, default=5000.0,
+                   help="Total retry timeout in MILLISECONDS (default: 5000ms = 5s). "
+                        "Abandons the acquire when exceeded.")
 
     p = sub.add_parser("release-lock", parents=[shared], help="Release a held lock")
     p.add_argument("document_path", help="Path to the document")
@@ -184,8 +199,14 @@ def _add_notifications(sub, shared) -> None:
     p.add_argument("--limit", type=int, default=100)
 
     p = sub.add_parser("prune-notifications", parents=[shared], help="Clean up old notifications")
-    p.add_argument("--max-age", type=float, default=None, dest="max_age_seconds")
-    p.add_argument("--max-entries", type=int, default=None, dest="max_entries")
+    # T6.18: ``--max-age-seconds`` is the canonical name (unit suffix
+    # matches the engine parameter max_age_seconds). ``--max-age`` is a
+    # deprecated alias kept so existing scripts keep working.
+    p.add_argument("--max-age-seconds", "--max-age", type=float, default=None,
+                   dest="max_age_seconds",
+                   help="Prune notifications older than this many seconds")
+    p.add_argument("--max-entries", type=int, default=None, dest="max_entries",
+                   help="Keep at most this many notifications")
 
     p = sub.add_parser("wait-for-notifications", parents=[shared],
                        help="Long-poll for new notifications until one arrives or timeout expires")
@@ -262,7 +283,13 @@ def _add_setup(sub, shared) -> None:
 
     p = sub.add_parser("watch", parents=[shared], help="Live-refresh agent tree (Ctrl+C to stop)")
     p.add_argument("agent_id", nargs="?", default=None, help="Root agent (default: oldest root)")
-    p.add_argument("--interval", type=int, default=5, help="Refresh interval in seconds (default: 5)")
+    # T6.18: ``--poll-interval`` is the canonical name across the CLI
+    # (matches wait-for-task / wait-for-notifications / etc).
+    # ``--interval`` kept as an alias so existing watch invocations keep
+    # working.
+    p.add_argument("--poll-interval", "--interval", type=int, default=5,
+                   dest="interval",
+                   help="Refresh interval in seconds (default: 5)")
 
     p = sub.add_parser("await-agent", parents=[shared], help="Wait for an agent to complete")
     p.add_argument("agent_id", help="Agent to wait for")

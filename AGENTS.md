@@ -26,7 +26,7 @@ coordinationhub/
   cli_intent.py         — CLI commands for the work intent board (~35 LOC)
   cli_leases.py         — CLI commands for HA coordinator lease management (~96 LOC)
   cli_locks.py          — Document locking and coordination CLI commands (~272 LOC)
-  cli_parser.py         — Argument parser for the CoordinationHub CLI (~369 LOC)
+  cli_parser.py         — Argument parser for the CoordinationHub CLI (~379 LOC)
   cli_setup.py          — CLI commands for setup and diagnostics: ``init``, ``doctor``, ``watch`` (~313 LOC)
   cli_setup_doctor.py   — Diagnostic checks for ``coordinationhub doctor`` (~148 LOC)
   cli_spawner.py        — CLI commands for HA coordinator spawner — sub-agent registry management (~105 LOC)
@@ -114,7 +114,7 @@ coordinationhub/
 ```
 <!-- /GEN -->
 
-The `tests/` directory contains the pytest suite (<!-- GEN:test-count -->730<!-- /GEN --> tests across 28 files), including `tests/fixtures/claude_code_events/` contract fixtures.
+The `tests/` directory contains the pytest suite (<!-- GEN:test-count -->734<!-- /GEN --> tests across 28 files), including `tests/fixtures/claude_code_events/` contract fixtures.
 
 ## Module Design
 
@@ -238,7 +238,7 @@ To disable hooks temporarily, add `"disableAllHooks": true` to `~/.claude/settin
 
 ```bash
 python -m pytest tests/ -v
-# <!-- GEN:test-count -->730<!-- /GEN --> tests across 28 test files:
+# <!-- GEN:test-count -->734<!-- /GEN --> tests across 28 test files:
 #   test_agent_lifecycle.py    — 27 tests
 #   test_locking.py            — 46 tests (includes smart reap)
 #   test_notifications.py      — 8 tests

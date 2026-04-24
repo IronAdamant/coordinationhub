@@ -1606,7 +1606,7 @@ Block markers for multi-line content:
 | `coordinationhub/cli_intent.py` | 35 | CLI commands for the work intent board |
 | `coordinationhub/cli_leases.py` | 96 | CLI commands for HA coordinator lease management |
 | `coordinationhub/cli_locks.py` | 272 | Document locking and coordination CLI commands |
-| `coordinationhub/cli_parser.py` | 369 | Argument parser for the CoordinationHub CLI |
+| `coordinationhub/cli_parser.py` | 379 | Argument parser for the CoordinationHub CLI |
 | `coordinationhub/cli_setup.py` | 313 | CLI commands for setup and diagnostics: ``init``, ``doctor``, ``watch`` |
 | `coordinationhub/cli_setup_doctor.py` | 148 | Diagnostic checks for ``coordinationhub doctor`` |
 | `coordinationhub/cli_spawner.py` | 105 | CLI commands for HA coordinator spawner — sub-agent registry management |
@@ -1690,7 +1690,7 @@ Block markers for multi-line content:
 
 Inline markers for single values (render invisibly in Markdown):
 ```markdown
-This project has <!-- GEN:test-count -->730<!-- /GEN --> tests.
+This project has <!-- GEN:test-count -->734<!-- /GEN --> tests.
 ```
 
 Unknown marker names raise an error during rewrite (catches typos).

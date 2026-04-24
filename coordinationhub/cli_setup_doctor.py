@@ -156,6 +156,11 @@ def run_doctor() -> list[dict]:
     return results
 
 
+# T6.20: cmd_doctor intentionally skips ``@_command``. The decorator
+# constructs a CoordinationEngine before the handler runs, but doctor's
+# whole job is to diagnose states where engine startup FAILS (corrupt
+# DB, migration stuck, permission denied). It needs to probe each
+# layer independently and report, not crash out of the gate.
 def cmd_doctor(args):
     results = run_doctor()
     if getattr(args, "json_output", False):

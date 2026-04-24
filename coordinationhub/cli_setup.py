@@ -128,6 +128,12 @@ def _merge_hooks(existing: dict, new: dict) -> dict:
 # init
 # ------------------------------------------------------------------ #
 
+# T6.20: cmd_init intentionally skips the shared ``@_command`` decorator.
+# The decorator assumes an engine is ready to be started against an
+# existing storage dir, but ``init`` is the command that CREATES the
+# storage dir + runs the first migration. It also has to write hook
+# files that live outside the engine's purview. So engine construction
+# happens here, scoped to the project root detected on the spot.
 def cmd_init(args):
     python_path = sys.executable
 
@@ -312,6 +318,11 @@ def _install_ide_hooks(project_root: Path, python_path: str) -> None:
 # auto-start-dashboard
 # ------------------------------------------------------------------ #
 
+# T6.20: cmd_auto_start_dashboard intentionally skips ``@_command``. It
+# never constructs a CoordinationEngine — it's a pre-flight socket
+# probe that spawns ``serve-sse`` as a detached subprocess if the port
+# is free. Wrapping this in the engine-lifecycle decorator would add
+# DB startup cost to every IDE SessionStart hook for no benefit.
 def cmd_auto_start_dashboard(args) -> int:
     """Idempotently start the SSE dashboard server.
 
@@ -371,6 +382,10 @@ def cmd_auto_start_dashboard(args) -> int:
 # watch
 # ------------------------------------------------------------------ #
 
+# T6.20: cmd_watch intentionally skips ``@_command``. The decorator
+# does one engine start + close around the handler; ``watch`` needs a
+# FRESH engine per tick so stale in-memory caches don't produce stale
+# dashboard renders. Looping handles lifecycle explicitly instead.
 def cmd_watch(args):
     interval = getattr(args, "interval", 5)
     agent_id = getattr(args, "agent_id", None)

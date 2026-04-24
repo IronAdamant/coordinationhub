@@ -1066,7 +1066,7 @@ keep it in sync; CI checks for drift on every push.
 | `coordinationhub/cli_intent.py` | 35 | CLI commands for the work intent board |
 | `coordinationhub/cli_leases.py` | 96 | CLI commands for HA coordinator lease management |
 | `coordinationhub/cli_locks.py` | 272 | Document locking and coordination CLI commands |
-| `coordinationhub/cli_parser.py` | 369 | Argument parser for the CoordinationHub CLI |
+| `coordinationhub/cli_parser.py` | 379 | Argument parser for the CoordinationHub CLI |
 | `coordinationhub/cli_setup.py` | 313 | CLI commands for setup and diagnostics: ``init``, ``doctor``, ``watch`` |
 | `coordinationhub/cli_setup_doctor.py` | 148 | Diagnostic checks for ``coordinationhub doctor`` |
 | `coordinationhub/cli_spawner.py` | 105 | CLI commands for HA coordinator spawner — sub-agent registry management |
@@ -1147,7 +1147,7 @@ keep it in sync; CI checks for drift on every push.
 | `coordinationhub/work_intent.py` | 139 | Work intent board primitives for CoordinationHub |
 <!-- /GEN -->
 
-**Total: <!-- GEN:test-count -->730<!-- /GEN --> tests across 28 test files.**
+**Total: <!-- GEN:test-count -->734<!-- /GEN --> tests across 28 test files.**
 
 ---
 
@@ -1169,7 +1169,7 @@ coordinationhub/
   cli_intent.py         — CLI commands for the work intent board (~35 LOC)
   cli_leases.py         — CLI commands for HA coordinator lease management (~96 LOC)
   cli_locks.py          — Document locking and coordination CLI commands (~272 LOC)
-  cli_parser.py         — Argument parser for the CoordinationHub CLI (~369 LOC)
+  cli_parser.py         — Argument parser for the CoordinationHub CLI (~379 LOC)
   cli_setup.py          — CLI commands for setup and diagnostics: ``init``, ``doctor``, ``watch`` (~313 LOC)
   cli_setup_doctor.py   — Diagnostic checks for ``coordinationhub doctor`` (~148 LOC)
   cli_spawner.py        — CLI commands for HA coordinator spawner — sub-agent registry management (~105 LOC)
@@ -1257,7 +1257,7 @@ coordinationhub/
 ```
 <!-- /GEN -->
 
-The `tests/` directory holds <!-- GEN:test-count -->730<!-- /GEN --> tests across 28 files,
+The `tests/` directory holds <!-- GEN:test-count -->734<!-- /GEN --> tests across 28 files,
 plus `tests/fixtures/claude_code_events/` for hook contract fixtures.
 
 **Module design principles:**
@@ -1724,7 +1724,7 @@ Air-gapped install: `pip install coordinationhub --no-deps`.
 
 ```bash
 python -m pytest tests/ -v
-# <!-- GEN:test-count -->730<!-- /GEN --> tests across 28 test files
+# <!-- GEN:test-count -->734<!-- /GEN --> tests across 28 test files
 ```
 
 ---

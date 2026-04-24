@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import argparse
 import io
 import tempfile
 import time
@@ -290,3 +291,65 @@ class TestListAgentsDashboardConsistency:
                 assert statuses == {"hub.live": "active", "hub.stale": "stopped"}
             finally:
                 eng2.close()
+
+
+class TestCliPolish:
+    """T6.18, T7.7, T7.19 regression tests."""
+
+    def test_json_short_form_parses(self):
+        """T7.7: ``-j`` is accepted as an alias for ``--json`` on every
+        subcommand. The flag lives on the shared parent parser, so it
+        must follow the subcommand name (argparse subparsers scope
+        flags that way)."""
+        parser = create_parser()
+        args = parser.parse_args(["status", "-j"])
+        assert args.json_output is True
+        args = parser.parse_args(["status", "--json"])
+        assert args.json_output is True
+
+    def test_max_age_seconds_alias(self):
+        """T6.18: ``--max-age-seconds`` is the canonical name;
+        ``--max-age`` is a back-compat alias."""
+        parser = create_parser()
+        canonical = parser.parse_args([
+            "prune-notifications", "--max-age-seconds", "3600",
+        ])
+        assert canonical.max_age_seconds == 3600.0
+        alias = parser.parse_args([
+            "prune-notifications", "--max-age", "3600",
+        ])
+        assert alias.max_age_seconds == 3600.0
+
+    def test_watch_poll_interval_alias(self):
+        """T6.18: ``watch`` accepts both ``--poll-interval`` (canonical,
+        matches other poll commands) and ``--interval`` (back-compat)."""
+        parser = create_parser()
+        canonical = parser.parse_args([
+            "watch", "--poll-interval", "3",
+        ])
+        assert canonical.interval == 3
+        alias = parser.parse_args([
+            "watch", "--interval", "7",
+        ])
+        assert alias.interval == 7
+
+    def test_acquire_lock_ms_flags_have_units_in_help(self):
+        """T7.19: --backoff-ms and --timeout-ms help text explicitly
+        calls out the MILLISECONDS unit so a reader who saw other
+        second-based flags doesn't mistake the scale."""
+        parser = create_parser()
+        # Locate the acquire-lock subparser to inspect its actions.
+        acquire = None
+        for action in parser._subparsers._group_actions:
+            if isinstance(action, argparse._SubParsersAction):
+                acquire = action.choices.get("acquire-lock")
+                break
+        assert acquire is not None
+        backoff = next(
+            a for a in acquire._actions if "--backoff-ms" in a.option_strings
+        )
+        timeout = next(
+            a for a in acquire._actions if "--timeout-ms" in a.option_strings
+        )
+        assert "MILLISECONDS" in backoff.help
+        assert "MILLISECONDS" in timeout.help
