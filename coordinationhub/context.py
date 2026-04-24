@@ -27,17 +27,27 @@ def build_context_bundle(
     list_agents_fn: Callable[[Callable[[], Any], bool, float], list[dict[str, Any]]],
     default_port: int = DEFAULT_PORT,
     descendants_fn: Callable[[], list[dict[str, Any]]] | None = None,
+    read_connect_fn: Callable[[], Any] | None = None,
 ) -> dict[str, Any]:
     """Assemble and return a context bundle for *agent_id*.
 
     Args:
-        connect_fn: callable returning a SQLite connection (context manager)
+        connect_fn: callable returning a SQLite connection (context manager).
+            Used for list_agents_fn / descendants_fn which some callers wire
+            to primitives that accept a writer-pool connect.
         agent_id: the registering agent's ID
         parent_id: the parent agent ID, if any
         project_root: resolved project root path string
         graph_getter: callable returning the current CoordinationGraph or None
         list_agents_fn: callable(connect_fn, active_only, stale_timeout) -> agent list
         default_port: default HTTP port for the coordination URL
+        read_connect_fn: optional read-only connection provider (T7.29).
+            When supplied, the inline SELECTs here use it instead of
+            ``connect_fn``, so registering an agent doesn't hold a
+            writer-pool slot for pure reads. The caller is responsible
+            for making this a context-manager-yielding callable (the
+            storage layer's ``read_only_connection`` is the intended
+            wiring). Falls back to ``connect_fn`` when None.
 
     Returns a dict containing the agent's identity, parent/child lineage, active
     locks held by other agents, recent change notifications, and coordination
@@ -45,7 +55,11 @@ def build_context_bundle(
     those via their own environment variables if they are running.
     """
     agents = list_agents_fn(connect_fn, active_only=True, stale_timeout=600.0)
-    with connect_fn() as conn:
+    # T7.29: bundle reads happen on the read replica when one is provided,
+    # so a burst of agent registrations doesn't serialize the writer pool
+    # on read-only queries.
+    read_fn = read_connect_fn if read_connect_fn is not None else connect_fn
+    with read_fn() as conn:
         locks = conn.execute(
             "SELECT document_path, locked_by, locked_at, lock_ttl FROM document_locks"
         ).fetchall()

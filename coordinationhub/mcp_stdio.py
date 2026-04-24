@@ -16,6 +16,7 @@ Requires the optional ``mcp`` dependency:
 from __future__ import annotations
 
 import asyncio
+import concurrent.futures
 import json
 import logging
 import os
@@ -37,13 +38,36 @@ except ImportError:
     _MCP_AVAILABLE = False
 
 
+# T7.40: explicit executor sizing. Pre-fix ``run_in_executor(None, ...)``
+# dispatched onto asyncio's default thread pool, which is shared with
+# any other ``to_thread`` consumer in-process (e.g. subprocess transport
+# helpers) and scales to ``min(32, cpu*5)`` — way more than any
+# coordinationhub tool needs. An explicit bounded pool makes executor
+# lifecycle deterministic (closed with the engine) and caps concurrent
+# DB pressure from tool calls. Override via
+# ``COORDINATIONHUB_MCP_EXECUTOR_MAX_WORKERS``.
+_MCP_EXECUTOR_MAX_WORKERS = int(
+    os.environ.get("COORDINATIONHUB_MCP_EXECUTOR_MAX_WORKERS", "8"),
+)
+
+
 def _configure_server(engine: CoordinationEngine):
     """Register all CoordinationHub tools on an MCP Server instance.
 
     Factored out of ``create_server`` so that ``_run_server`` can manage
     the engine lifecycle independently (ensuring it is closed on exit).
+
+    T7.40: each server instance gets its own ``ThreadPoolExecutor`` so
+    tool dispatch doesn't share asyncio's unbounded default pool.
     """
     server = Server("coordinationhub")
+    executor = concurrent.futures.ThreadPoolExecutor(
+        max_workers=_MCP_EXECUTOR_MAX_WORKERS,
+        thread_name_prefix="coordhub-mcp-tool",
+    )
+    # Attached to the server object so the caller (_run_server) can
+    # shut it down cleanly after the stdio transport drains.
+    server.coordhub_executor = executor  # type: ignore[attr-defined]
 
     @server.list_tools()
     async def list_tools():
@@ -70,8 +94,10 @@ def _configure_server(engine: CoordinationEngine):
         """
         try:
             loop = asyncio.get_running_loop()
+            # T7.40: dispatch onto the server-owned executor rather than
+            # asyncio's shared default pool.
             result = await loop.run_in_executor(
-                None, lambda: dispatch_tool(engine, name, arguments),
+                executor, lambda: dispatch_tool(engine, name, arguments),
             )
         except Exception as exc:
             import uuid as _uuid
@@ -195,6 +221,13 @@ async def _run_server() -> None:
                     if exc is not None:
                         raise exc
     finally:
+        # T7.40: shut down the tool-dispatch executor so worker threads
+        # don't leak past engine.close(). wait=True blocks until any
+        # in-flight dispatch finishes — bounded by how slow a single
+        # tool method can be (typically milliseconds).
+        executor = getattr(server, "coordhub_executor", None)
+        if executor is not None:
+            executor.shutdown(wait=True)
         engine.close()
 
 

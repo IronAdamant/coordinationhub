@@ -31,7 +31,14 @@ class IdentityMixin:
     # ------------------------------------------------------------------ #
 
     def _build_context_bundle(self, agent_id: str, parent_id: str | None = None) -> dict[str, Any]:
-        """Build the context bundle returned on agent registration."""
+        """Build the context bundle returned on agent registration.
+
+        T7.29: the inline SELECTs in ``build_context_bundle`` now open a
+        read-only connection (``self._storage.read_only_connection``)
+        instead of borrowing the writer pool. Bundle reads are
+        purely side-effect-free; pinning a writer slot for them
+        stalled concurrent registrations and lock acquires.
+        """
         return build_context_bundle(
             connect_fn=self._connect,
             agent_id=agent_id,
@@ -41,6 +48,7 @@ class IdentityMixin:
             list_agents_fn=_ar.list_agents,
             default_port=self.DEFAULT_PORT,
             descendants_fn=lambda: _ar.get_descendants_status(self._connect, agent_id),
+            read_connect_fn=self._storage.read_only_connection,
         )
 
     # ------------------------------------------------------------------ #
