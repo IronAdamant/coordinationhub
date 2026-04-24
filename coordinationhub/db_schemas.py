@@ -306,4 +306,6 @@ _INDEXES = [
     # - coordination_events(created_at) alone powers prune by age.
     "CREATE INDEX IF NOT EXISTS idx_messages_to_read ON messages(to_agent_id, read_at)",
     "CREATE INDEX IF NOT EXISTS idx_coordination_events_created ON coordination_events(created_at)",
+    "CREATE INDEX IF NOT EXISTS idx_assessment_results_run_at ON assessment_results(run_at)",
+    "CREATE INDEX IF NOT EXISTS idx_agents_status_heartbeat ON agents(status, last_heartbeat)",
 ]

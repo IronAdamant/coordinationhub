@@ -128,6 +128,18 @@ class IdentityMixin:
         self._publish_event("agent.deregistered", {"agent_id": agent_id})
         return result
 
+    def prune_stopped_agents(
+        self, retention_seconds: float = 7 * 24 * 3600.0,
+    ) -> dict[str, Any]:
+        """Delete agent rows stopped for longer than ``retention_seconds``.
+
+        T1.17 tail: pairs with ``reap_stale_agents`` — the reaper transitions
+        rows to ``status='stopped'``; this hard-deletes rows that have been in
+        that state long enough that post-mortem lookup is unlikely. Rows with
+        active children are preserved so live agents don't lose their parent.
+        """
+        return _ar.prune_stopped_agents(self._connect, retention_seconds)
+
     def list_agents(
         self, active_only: bool = True, stale_timeout: float = 600.0,
         include_stale: bool = False,

@@ -150,3 +150,16 @@ class VisibilityMixin:
             return result
         report = _assess.format_markdown_report(result)
         return {"report": report, "scores": result}
+
+    def prune_assessment_results(
+        self, max_age_seconds: float = 30 * 24 * 3600.0,
+    ) -> dict[str, Any]:
+        """Delete ``assessment_results`` rows older than ``max_age_seconds``.
+
+        T7.32: ``details_json`` carries the full trace per metric, so the
+        table grows quickly on a hub that runs assessments periodically.
+        Default retention is 30 days; the HousekeepingScheduler calls this
+        on a timer.
+        """
+        with self._connect() as conn:
+            return _assess.prune_assessment_results(conn, max_age_seconds)

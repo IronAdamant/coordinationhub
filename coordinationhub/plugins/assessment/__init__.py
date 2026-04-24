@@ -9,12 +9,14 @@ from .assessment import (
     build_trace_from_db,
     run_assessment,
     store_assessment_results,
+    prune_assessment_results,
 )
 __all__ = [
     "build_suite_from_db",
     "build_trace_from_db",
     "run_assessment",
     "store_assessment_results",
+    "prune_assessment_results",
     "register_tools",
     "register_cli",
 ]

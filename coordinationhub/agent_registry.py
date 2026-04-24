@@ -452,6 +452,79 @@ def reap_stale_agents(
         raise
 
 
+def prune_stopped_agents(
+    connect: ConnectFn,
+    retention_seconds: float = 7 * 24 * 3600.0,
+) -> dict[str, Any]:
+    """Hard-delete agent rows that have been stopped for ``retention_seconds``.
+
+    T1.17 tail: `reap_stale_agents` marks stale rows ``status='stopped'`` but
+    never removes them; a long-running hub accumulates tombstones. This primitive
+    DELETEs stopped rows whose ``last_heartbeat`` is older than the retention
+    window and that have no active children still pointing at them (so we can't
+    orphan a live agent's parent chain). Also clears related bookkeeping:
+    ``lineage``, ``descendant_registry``, and ``agent_responsibilities`` rows
+    for the pruned agent. Historical records (messages, handoffs, tasks,
+    broadcasts) are intentionally left intact for post-mortem.
+    """
+    now = time.time()
+    cutoff = now - retention_seconds
+    conn = connect()
+    conn.execute("BEGIN IMMEDIATE")
+    try:
+        candidates = conn.execute(
+            "SELECT agent_id FROM agents "
+            "WHERE status = 'stopped' AND last_heartbeat < ?",
+            (cutoff,),
+        ).fetchall()
+
+        pruned = 0
+        skipped_live_children = 0
+        for row in candidates:
+            agent_id = row["agent_id"]
+            active_children = conn.execute(
+                "SELECT 1 FROM agents "
+                "WHERE parent_id = ? AND status = 'active' LIMIT 1",
+                (agent_id,),
+            ).fetchone()
+            if active_children is not None:
+                skipped_live_children += 1
+                continue
+
+            conn.execute(
+                "DELETE FROM lineage WHERE parent_id = ? OR child_id = ?",
+                (agent_id, agent_id),
+            )
+            conn.execute(
+                "DELETE FROM descendant_registry "
+                "WHERE ancestor_id = ? OR descendant_id = ?",
+                (agent_id, agent_id),
+            )
+            conn.execute(
+                "DELETE FROM agent_responsibilities WHERE agent_id = ?",
+                (agent_id,),
+            )
+            cursor = conn.execute(
+                "DELETE FROM agents "
+                "WHERE agent_id = ? AND status = 'stopped' AND last_heartbeat < ?",
+                (agent_id, cutoff),
+            )
+            pruned += cursor.rowcount
+
+        conn.execute("COMMIT")
+        return {
+            "pruned": pruned,
+            "skipped_live_children": skipped_live_children,
+        }
+    except Exception:
+        try:
+            conn.execute("ROLLBACK")
+        except sqlite3.OperationalError as e:
+            if "no transaction is active" not in str(e):
+                raise
+        raise
+
+
 def get_lineage(
     connect: ConnectFn,
     agent_id: str,

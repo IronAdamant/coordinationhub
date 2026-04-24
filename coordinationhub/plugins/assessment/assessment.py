@@ -401,3 +401,21 @@ def store_assessment_results(
             "VALUES (?, ?, ?, ?, ?)",
             (suite_name, metric, score, json.dumps(details, default=str), now),
         )
+
+
+def prune_assessment_results(
+    conn: sqlite3.Connection,
+    max_age_seconds: float,
+) -> dict[str, Any]:
+    """Delete assessment_results rows older than ``max_age_seconds``.
+
+    T7.32: ``details_json`` carries the full trace per metric, so a hub
+    that runs assessments on a timer grows the table without bound.
+    Operators / the HousekeepingScheduler call this to cap retention.
+    """
+    cutoff = time.time() - max_age_seconds
+    cursor = conn.execute(
+        "DELETE FROM assessment_results WHERE run_at < ?",
+        (cutoff,),
+    )
+    return {"pruned": cursor.rowcount}

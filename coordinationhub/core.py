@@ -28,6 +28,11 @@ _log = logging.getLogger(__name__)
 
 from ._storage import CoordinationStorage
 from .event_bus import EventBus
+from .housekeeping import (
+    HousekeepingScheduler,
+    build_default_scheduler,
+    is_enabled_by_env,
+)
 from .lock_cache import LockCache
 from .core_locking import LockingMixin
 from .core_broadcasts import BroadcastMixin
@@ -74,6 +79,7 @@ class CoordinationEngine(
         storage_dir: Path | None = None,
         project_root: Path | None = None,
         namespace: str = "hub",
+        housekeeping: bool | None = None,
     ) -> None:
         self._storage = CoordinationStorage(
             storage_dir=storage_dir,
@@ -83,6 +89,14 @@ class CoordinationEngine(
         self._event_bus = EventBus()
         self._lock_cache = LockCache()
         self._graph = None  # set in start()
+        # Opt-in: housekeeping=True forces on, False forces off; None
+        # defers to the COORDINATIONHUB_HOUSEKEEPING env var so long-lived
+        # `serve` processes can enable it without a code change while
+        # short-lived CLI invocations stay thread-free by default.
+        self._housekeeping_enabled = (
+            is_enabled_by_env() if housekeeping is None else bool(housekeeping)
+        )
+        self._housekeeper: HousekeepingScheduler | None = None
 
     def start(self) -> None:
         """Start storage, warm lock cache, and load coordination graph."""
@@ -97,9 +111,21 @@ class CoordinationEngine(
         self._graph = _g.load_coordination_spec_from_disk(
             self._connect, self._storage.project_root,
         )
+        if self._housekeeping_enabled:
+            self._housekeeper = build_default_scheduler(self)
+            self._housekeeper.start()
 
     def close(self) -> None:
-        """Close storage, checkpoint WAL."""
+        """Close storage, checkpoint WAL.
+
+        Stops the housekeeping scheduler first so it can't race a DB close
+        with an in-flight prune. A stopped scheduler shuts down within a
+        few seconds; we log and move on past the join timeout to keep
+        engine shutdown bounded.
+        """
+        if self._housekeeper is not None:
+            self._housekeeper.stop()
+            self._housekeeper = None
         self._storage.close()
 
     def _connect(self):
@@ -223,6 +249,7 @@ class CoordinationEngine(
             storage_dir=self._storage._storage_dir,
             project_root=self._storage.project_root,
             namespace=self._storage._namespace,
+            housekeeping=False,
         )
         # Don't call start() — we don't need the pool or graph, just storage
         replica._connect = self._storage.read_only_connection  # type: ignore[method-assign]
