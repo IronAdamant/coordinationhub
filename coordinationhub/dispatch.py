@@ -59,8 +59,8 @@ TOOL_DISPATCH: dict[str, tuple[str, list[str]]] = {
     "get_agent_tree": ("get_agent_tree", ["agent_id"]),
     "run_assessment": ("run_assessment", ["suite_path", "format", "graph_agent_id", "scope"]),
     # Messaging
-    "send_message": ("send_message", ["from_agent_id", "to_agent_id", "message_type", "payload"]),
-    "manage_messages": ("manage_messages", ["action", "agent_id", "from_agent_id", "to_agent_id", "message_type", "payload", "unread_only", "limit", "message_ids", "since_id"]),
+    "send_message": ("send_message", ["from_agent_id", "to_agent_id", "message_type", "payload", "caller_agent_id"]),
+    "manage_messages": ("manage_messages", ["action", "agent_id", "from_agent_id", "to_agent_id", "message_type", "payload", "unread_only", "limit", "message_ids", "since_id", "caller_agent_id"]),
     # Task Registry
     "create_task": ("create_task", ["task_id", "parent_agent_id", "description", "depends_on", "priority"]),
     "assign_task": ("assign_task", ["task_id", "assigned_agent_id"]),
@@ -82,7 +82,7 @@ TOOL_DISPATCH: dict[str, tuple[str, list[str]]] = {
     "manage_leases": ("manage_leases", ["action", "agent_id", "ttl"]),
     # Spawner — Sub-Agent Registry
     "spawn_subagent": ("spawn_subagent", ["parent_agent_id", "subagent_type", "description", "prompt", "source"]),
-    "report_subagent_spawned": ("report_subagent_spawned", ["parent_agent_id", "subagent_type", "child_agent_id", "source"]),
+    "report_subagent_spawned": ("report_subagent_spawned", ["parent_agent_id", "subagent_type", "child_agent_id", "source", "caller_agent_id"]),
     "get_pending_spawns": ("get_pending_spawns", ["parent_agent_id", "include_consumed"]),
     "await_subagent_registration": ("await_subagent_registration", ["parent_agent_id", "subagent_type", "timeout"]),
     "request_subagent_deregistration": ("request_subagent_deregistration", ["parent_agent_id", "child_agent_id"]),

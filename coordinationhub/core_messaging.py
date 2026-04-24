@@ -34,11 +34,27 @@ class MessagingMixin:
         limit: int = 50,
         message_ids: list[int] | None = None,
         since_id: int | None = None,
+        caller_agent_id: str | None = None,
     ) -> dict[str, Any]:
-        """Unified messaging: send | get | mark_read."""
+        """Unified messaging: send | get | mark_read.
+
+        T2.4: ``caller_agent_id`` (optional) — when supplied, must equal
+        ``from_agent_id`` for send and ``agent_id`` for get/mark_read.
+        Prevents cross-agent impersonation where a compromised caller
+        sends messages "from" another agent or reads another agent's
+        inbox. The check is opt-in (omitted caller_agent_id preserves
+        the pre-T2.4 permissive behaviour) so existing internal callers
+        that already trust the agent_id are unchanged.
+        """
         if action == "send":
             if not from_agent_id or not to_agent_id or not message_type:
                 return {"error": "from_agent_id, to_agent_id, and message_type are required for send"}
+            if caller_agent_id is not None and caller_agent_id != from_agent_id:
+                return {
+                    "sent": False,
+                    "error": "caller_agent_id does not match from_agent_id",
+                    "reason": "caller_mismatch",
+                }
             result = _msg.send_message(self._connect, from_agent_id, to_agent_id, message_type, payload)
             self._publish_event(
                 "message.received",
@@ -51,6 +67,17 @@ class MessagingMixin:
             )
             return result
         if action == "get":
+            # T2.4: when caller_agent_id is supplied it must equal
+            # agent_id — an agent can't read another's inbox. Without
+            # this, a compromised agent could siphon messages routed to
+            # a sibling.
+            if caller_agent_id is not None and caller_agent_id != agent_id:
+                return {
+                    "messages": [],
+                    "count": 0,
+                    "error": "caller_agent_id does not match agent_id",
+                    "reason": "caller_mismatch",
+                }
             # T6.24: don't auto-ack on read. Acknowledgement must be an
             # explicit action (manage_messages action='ack_broadcast' or
             # the dedicated acknowledge_broadcast engine method); a
@@ -63,6 +90,12 @@ class MessagingMixin:
             )
             return {"messages": messages, "count": len(messages)}
         if action == "mark_read":
+            if caller_agent_id is not None and caller_agent_id != agent_id:
+                return {
+                    "marked_read": 0,
+                    "error": "caller_agent_id does not match agent_id",
+                    "reason": "caller_mismatch",
+                }
             return _msg.mark_messages_read(self._connect, agent_id, message_ids)
         return {"error": f"Unknown action: {action!r}"}
 
@@ -72,8 +105,20 @@ class MessagingMixin:
         to_agent_id: str,
         message_type: str,
         payload: dict[str, Any] | None = None,
+        caller_agent_id: str | None = None,
     ) -> dict[str, Any]:
-        """Send a message to another agent."""
+        """Send a message to another agent.
+
+        T2.4: ``caller_agent_id`` (optional) — when supplied, must equal
+        ``from_agent_id``. Prevents a compromised caller from forging a
+        message "from" another agent. Omitted = pre-T2.4 trust model.
+        """
+        if caller_agent_id is not None and caller_agent_id != from_agent_id:
+            return {
+                "sent": False,
+                "error": "caller_agent_id does not match from_agent_id",
+                "reason": "caller_mismatch",
+            }
         result = _msg.send_message(self._connect, from_agent_id, to_agent_id, message_type, payload)
         self._publish_event(
             "message.received",

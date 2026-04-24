@@ -44,8 +44,8 @@ coordinationhub/
   core_identity.py      — IdentityMixin — agent lifecycle and lineage management (~132 LOC)
   core_leases.py        — LeaseMixin — HA coordinator lease management (~149 LOC)
   core_locking.py       — Locking methods for CoordinationEngine (~394 LOC)
-  core_messaging.py     — MessagingMixin — inter-agent messages and await (~121 LOC)
-  core_spawner.py       — SpawnerMixin — HA coordinator sub-agent spawn management (~196 LOC)
+  core_messaging.py     — MessagingMixin — inter-agent messages and await (~160 LOC)
+  core_spawner.py       — SpawnerMixin — HA coordinator sub-agent spawn management (~215 LOC)
   core_tasks.py         — TaskMixin — shared task registry with hierarchy support (~202 LOC)
   core_visibility.py    — VisibilityMixin — coordination graph, project scan, agent status, assessment (~138 LOC)
   core_work_intent.py   — WorkIntentMixin — cooperative work intent board (~75 LOC)
@@ -68,7 +68,7 @@ coordinationhub/
   paths.py              — Path normalization and project-root detection utilities (~39 LOC)
   pending_tasks.py      — Pending sub-agent task storage for CoordinationHub (~109 LOC)
   scan.py               — File ownership scan for CoordinationHub (~279 LOC)
-  spawner.py            — Zero-deps spawner primitives for HA coordinator sub-agent registry (~380 LOC)
+  spawner.py            — Zero-deps spawner primitives for HA coordinator sub-agent registry (~395 LOC)
   task_failures.py      — Task failure tracking and dead letter queue for CoordinationHub (~149 LOC)
   tasks.py              — Task registry primitives for CoordinationHub (work board) (~517 LOC)
   validation.py         — Minimal stdlib jsonschema validator for MCP tool arguments (~160 LOC)
@@ -107,14 +107,14 @@ coordinationhub/
     intent.py           — Work Intent Board tool schemas for CoordinationHub (~58 LOC)
     leases.py           — HA Coordinator Leases tool schemas for CoordinationHub (~35 LOC)
     locking.py          — Document Locking tool schemas for CoordinationHub (~202 LOC)
-    messaging.py        — Messaging tool schemas for CoordinationHub (~79 LOC)
-    spawner.py          — Spawner tool schemas for CoordinationHub (~193 LOC)
+    messaging.py        — Messaging tool schemas for CoordinationHub (~95 LOC)
+    spawner.py          — Spawner tool schemas for CoordinationHub (~201 LOC)
     tasks.py            — Task Registry tool schemas for CoordinationHub (~230 LOC)
     visibility.py       — Graph & Visibility tool schemas for CoordinationHub (~159 LOC)
 ```
 <!-- /GEN -->
 
-The `tests/` directory contains the pytest suite (<!-- GEN:test-count -->714<!-- /GEN --> tests across 28 files), including `tests/fixtures/claude_code_events/` contract fixtures.
+The `tests/` directory contains the pytest suite (<!-- GEN:test-count -->730<!-- /GEN --> tests across 28 files), including `tests/fixtures/claude_code_events/` contract fixtures.
 
 ## Module Design
 
@@ -238,7 +238,7 @@ To disable hooks temporarily, add `"disableAllHooks": true` to `~/.claude/settin
 
 ```bash
 python -m pytest tests/ -v
-# <!-- GEN:test-count -->714<!-- /GEN --> tests across 28 test files:
+# <!-- GEN:test-count -->730<!-- /GEN --> tests across 28 test files:
 #   test_agent_lifecycle.py    — 27 tests
 #   test_locking.py            — 46 tests (includes smart reap)
 #   test_notifications.py      — 8 tests

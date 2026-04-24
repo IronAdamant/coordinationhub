@@ -35,6 +35,14 @@ TOOL_SCHEMAS_MESSAGING: dict[str, dict] = {
                         "at the primitive (T6.14) so a bloated payload can't corrupt storage."
                     ),
                 },
+                "caller_agent_id": {
+                    "type": "string",
+                    "description": (
+                        "Optional caller assertion (T2.4). When supplied, must equal "
+                        "from_agent_id — rejects impersonation where a compromised caller "
+                        "forges a message 'from' another agent."
+                    ),
+                },
             },
             "required": ["from_agent_id", "to_agent_id", "message_type"],
         },
@@ -61,6 +69,14 @@ TOOL_SCHEMAS_MESSAGING: dict[str, dict] = {
                 "limit": {"type": "integer", "minimum": 1, "default": 50, "description": "Max messages for get"},
                 "message_ids": {"type": "array", "items": {"type": "integer", "minimum": 1}, "description": "Specific IDs for mark_read"},
                 "since_id": {"type": "integer", "minimum": 0, "description": "Return only messages with id > since_id (cursor for incremental polling, action='get')"},
+                "caller_agent_id": {
+                    "type": "string",
+                    "description": (
+                        "Optional caller assertion (T2.4). For send, must equal "
+                        "from_agent_id; for get/mark_read, must equal agent_id. "
+                        "Blocks cross-agent impersonation / inbox siphoning."
+                    ),
+                },
             },
             "required": ["action", "agent_id"],
             "oneOf": [

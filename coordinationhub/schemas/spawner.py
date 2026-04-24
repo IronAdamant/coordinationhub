@@ -74,6 +74,14 @@ TOOL_SCHEMAS_SPAWNER: dict[str, dict] = {
                     "description": "Source system that performed the spawn (e.g. 'stdio_adapter', 'kimi_cli')",
                     "default": "external",
                 },
+                "caller_agent_id": {
+                    "type": "string",
+                    "description": (
+                        "Optional caller assertion (T2.4). When supplied, must equal "
+                        "parent_agent_id — rejects sibling agents trying to claim "
+                        "another parent's child and hijack the spawner.registered event."
+                    ),
+                },
             },
             "required": ["parent_agent_id", "child_agent_id"],
         },

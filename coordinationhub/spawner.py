@@ -382,21 +382,37 @@ def report_subagent_spawned(
 def cancel_spawn(
     connect: ConnectFn,
     spawn_id: str,
+    caller_agent_id: str | None = None,
 ) -> dict[str, Any]:
     """Cancel a pending spawn (mark as 'expired' if still pending).
 
     Returns ``cancelled`` if the spawn was pending and is now expired.
     Returns ``not_found`` if the spawn does not exist or is already consumed.
+
+    T2.4: ``caller_agent_id`` (optional) — when supplied, must equal the
+    pending spawn's ``scope_id`` (the parent agent that stashed the
+    spawn). Without this check any agent could cancel any pending spawn
+    — including siblings' — which would silently abort sub-agent
+    creation on unrelated trees. Omitted = pre-T2.4 permissive
+    behaviour, preserved for internal callers (scheduler reaps, CLI
+    admin).
     """
     with connect() as conn:
         row = conn.execute(
-            "SELECT status FROM pending_tasks WHERE task_id = ?",
+            "SELECT status, scope_id FROM pending_tasks WHERE task_id = ?",
             (spawn_id,),
         ).fetchone()
         if row is None:
             return {"not_found": True, "spawn_id": spawn_id}
         if row["status"] != "pending":
             return {"not_found": True, "spawn_id": spawn_id, "status": row["status"]}
+        if caller_agent_id is not None and caller_agent_id != row["scope_id"]:
+            return {
+                "cancelled": False,
+                "spawn_id": spawn_id,
+                "error": "caller_agent_id does not match spawn's parent (scope_id)",
+                "reason": "caller_mismatch",
+            }
         now = time.time()
         conn.execute(
             "UPDATE pending_tasks SET consumed_at = ?, status = 'expired' WHERE task_id = ?",

@@ -1624,8 +1624,8 @@ Block markers for multi-line content:
 | `coordinationhub/core_identity.py` | 132 | IdentityMixin — agent lifecycle and lineage management |
 | `coordinationhub/core_leases.py` | 149 | LeaseMixin — HA coordinator lease management |
 | `coordinationhub/core_locking.py` | 394 | Locking methods for CoordinationEngine |
-| `coordinationhub/core_messaging.py` | 121 | MessagingMixin — inter-agent messages and await |
-| `coordinationhub/core_spawner.py` | 196 | SpawnerMixin — HA coordinator sub-agent spawn management |
+| `coordinationhub/core_messaging.py` | 160 | MessagingMixin — inter-agent messages and await |
+| `coordinationhub/core_spawner.py` | 215 | SpawnerMixin — HA coordinator sub-agent spawn management |
 | `coordinationhub/core_tasks.py` | 202 | TaskMixin — shared task registry with hierarchy support |
 | `coordinationhub/core_visibility.py` | 138 | VisibilityMixin — coordination graph, project scan, agent status, assessment |
 | `coordinationhub/core_work_intent.py` | 75 | WorkIntentMixin — cooperative work intent board |
@@ -1676,11 +1676,11 @@ Block markers for multi-line content:
 | `coordinationhub/schemas/intent.py` | 58 | Work Intent Board tool schemas for CoordinationHub |
 | `coordinationhub/schemas/leases.py` | 35 | HA Coordinator Leases tool schemas for CoordinationHub |
 | `coordinationhub/schemas/locking.py` | 202 | Document Locking tool schemas for CoordinationHub |
-| `coordinationhub/schemas/messaging.py` | 79 | Messaging tool schemas for CoordinationHub |
-| `coordinationhub/schemas/spawner.py` | 193 | Spawner tool schemas for CoordinationHub |
+| `coordinationhub/schemas/messaging.py` | 95 | Messaging tool schemas for CoordinationHub |
+| `coordinationhub/schemas/spawner.py` | 201 | Spawner tool schemas for CoordinationHub |
 | `coordinationhub/schemas/tasks.py` | 230 | Task Registry tool schemas for CoordinationHub |
 | `coordinationhub/schemas/visibility.py` | 159 | Graph & Visibility tool schemas for CoordinationHub |
-| `coordinationhub/spawner.py` | 380 | Zero-deps spawner primitives for HA coordinator sub-agent registry |
+| `coordinationhub/spawner.py` | 395 | Zero-deps spawner primitives for HA coordinator sub-agent registry |
 | `coordinationhub/task_failures.py` | 149 | Task failure tracking and dead letter queue for CoordinationHub |
 | `coordinationhub/tasks.py` | 517 | Task registry primitives for CoordinationHub (work board) |
 | `coordinationhub/validation.py` | 160 | Minimal stdlib jsonschema validator for MCP tool arguments |
@@ -1690,7 +1690,7 @@ Block markers for multi-line content:
 
 Inline markers for single values (render invisibly in Markdown):
 ```markdown
-This project has <!-- GEN:test-count -->714<!-- /GEN --> tests.
+This project has <!-- GEN:test-count -->730<!-- /GEN --> tests.
 ```
 
 Unknown marker names raise an error during rewrite (catches typos).

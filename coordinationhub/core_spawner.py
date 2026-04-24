@@ -72,13 +72,26 @@ class SpawnerMixin:
         subagent_type: str | None,
         child_agent_id: str,
         source: str = "external",
+        caller_agent_id: str | None = None,
     ) -> dict[str, Any]:
         """Report that a sub-agent has been spawned by an external system.
 
         Any IDE/CLI (Kimi CLI, Cursor, etc.) calls this after
         spawning a sub-agent via its native mechanism. This consumes the
         pending spawn record and links it to the actual child agent ID.
+
+        T2.4: ``caller_agent_id`` (optional) — when supplied, must
+        equal ``parent_agent_id``. Prevents a sibling agent from
+        claiming another parent's child, which could hijack a
+        ``spawner.registered`` event and lure ``await_subagent_registration``
+        on the rightful parent. Omitted = pre-T2.4 permissive behaviour.
         """
+        if caller_agent_id is not None and caller_agent_id != parent_agent_id:
+            return {
+                "reported": False,
+                "error": "caller_agent_id does not match parent_agent_id",
+                "reason": "caller_mismatch",
+            }
         result = _spawner.report_subagent_spawned(
             self._connect, parent_agent_id, subagent_type, child_agent_id, source,
         )
@@ -159,15 +172,23 @@ class SpawnerMixin:
     # Health Polling + Deregistration Requests
     # ------------------------------------------------------------------ #
 
-    def cancel_spawn(self, spawn_id: str) -> dict[str, Any]:
+    def cancel_spawn(
+        self, spawn_id: str, caller_agent_id: str | None = None,
+    ) -> dict[str, Any]:
         """Cancel a pending spawn.
 
         T3.19: routes through the engine instead of reaching into
         ``engine._connect`` + ``_spawner.cancel_spawn`` directly from
-        the CLI. Keeps the engine API surface consistent — every other
-        spawner command already goes through the engine.
+        the CLI.
+
+        T2.4: ``caller_agent_id`` (optional) — when supplied, the
+        primitive verifies it matches the pending spawn's parent
+        ``scope_id``. Prevents cross-parent cancellations. Omitted =
+        pre-T2.4 permissive behaviour.
         """
-        return _spawner.cancel_spawn(self._connect, spawn_id)
+        return _spawner.cancel_spawn(
+            self._connect, spawn_id, caller_agent_id=caller_agent_id,
+        )
 
     def request_subagent_deregistration(
         self,
