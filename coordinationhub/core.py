@@ -6,7 +6,6 @@ subsystems. Each mixin is in its own file under coordinationhub/.
 LockingMixin:     core_locking.py     — lock acquire/release/refresh/list/admin
 BroadcastMixin:   core_broadcasts.py  — broadcast, handoff dispatch, wait_for_locks
 IdentityMixin:    core_identity.py    — agent registration, heartbeat, lineage
-TaskMixin:        core_tasks.py       — task registry with hierarchy
 VisibilityMixin:  core_visibility.py  — coordination graph, scan, assessment
 
 Composed subsystems (T6.22 — extracted from the mixin tree):
@@ -17,6 +16,7 @@ Dependency:       dependency_subsystem.py  — cross-agent dependency declaratio
 Messaging:        messaging_subsystem.py   — inter-agent messages, agent await
 Handoff:          handoff_subsystem.py     — handoff acknowledgment tracking
 Change:           change_subsystem.py      — change notifications, audit, status
+Task:             task_subsystem.py        — task registry, hierarchy, DLQ
 
 Zero third-party dependencies.
 """
@@ -41,7 +41,6 @@ from .lock_cache import LockCache
 from .core_locking import LockingMixin
 from .core_broadcasts import BroadcastMixin
 from .core_identity import IdentityMixin
-from .core_tasks import TaskMixin
 from .core_visibility import VisibilityMixin
 from .spawner_subsystem import Spawner
 from .work_intent_subsystem import WorkIntent
@@ -50,6 +49,7 @@ from .dependency_subsystem import Dependency
 from .messaging_subsystem import Messaging
 from .handoff_subsystem import Handoff
 from .change_subsystem import Change
+from .task_subsystem import Task
 from .paths import detect_project_root
 from .plugins.graph import graphs as _g
 
@@ -58,7 +58,6 @@ class CoordinationEngine(
     LockingMixin,
     BroadcastMixin,
     IdentityMixin,
-    TaskMixin,
     VisibilityMixin,
 ):
     """Host class that inherits capability mixins and holds subsystems.
@@ -68,8 +67,8 @@ class CoordinationEngine(
     extracted from the mixin tree (T6.22) hang off the engine as
     composed attributes — ``self._spawner``, ``self._work_intent``,
     ``self._lease``, ``self._dependency``, ``self._messaging``,
-    ``self._handoff``, and ``self._change`` — with facade methods on
-    the engine preserving the public API.
+    ``self._handoff``, ``self._change``, and ``self._task`` — with
+    facade methods on the engine preserving the public API.
     """
 
     DEFAULT_PORT = 9877
@@ -135,10 +134,11 @@ class CoordinationEngine(
         # zero ``_hybrid_wait`` calls — it only needed ``_connect`` and
         # four ``_publish_event`` notifications for declare/satisfy.
         # Same two-dep shape as :class:`Lease` (commit ``b4a3e6b``).
-        # ``TaskMixin.update_task_status`` still calls
-        # ``_deps.satisfy_dependencies_for_task(...)`` against the
-        # primitive module directly; that's a primitive-layer call, not
-        # a mixin-to-mixin one, so the refactor leaves it untouched.
+        # Post-T6.38 the Task subsystem's ``update_task_status`` no
+        # longer calls ``_deps.satisfy_dependencies_for_task(...)`` at
+        # this layer — the dep-satisfy side effect is folded into the
+        # tasks primitive's transaction, so no cross-subsystem wiring
+        # between ``_task`` and ``_dependency`` is required.
         self._dependency = Dependency(
             connect_fn=self._connect,
             publish_event_fn=self._publish_event,
@@ -195,6 +195,28 @@ class CoordinationEngine(
             publish_event_fn=self._publish_event,
             hybrid_wait_fn=self._hybrid_wait,
             project_root_getter=lambda: self._storage.project_root,
+        )
+        # T6.22: composed subsystem replaces TaskMixin. Per the coupling
+        # audit TaskMixin had zero cross-mixin calls and needed all three
+        # infra callables — ``_connect`` for the tasks/task_failures
+        # primitive modules, ``_publish_event`` for the four
+        # ``task.created`` / ``task.assigned`` / ``task.completed`` /
+        # ``task.failed`` notifications, and ``_hybrid_wait`` for
+        # ``wait_for_task``. Same three-dep shape as :class:`Spawner`
+        # (commit ``1ee46c6``), :class:`Messaging` (commit ``d9f84d3``),
+        # and :class:`Handoff` (commit ``ded641d``). Largest surface of
+        # the series (11+ public methods including the ``query_tasks``
+        # and ``task_failures`` dispatch-by-string entry points — T6.37
+        # keeps the string dispatch as-is for now). Preserves T1.13
+        # status-validation authz (the primitive owns
+        # ``_VALID_TASK_STATUSES``) and T6.38 / T6.39 / T6.40 atomic
+        # side-effect folding (dep-satisfy + DLQ record happen inside
+        # the primitive's transaction; events only fire when the stored
+        # status actually changed).
+        self._task = Task(
+            connect_fn=self._connect,
+            publish_event_fn=self._publish_event,
+            hybrid_wait_fn=self._hybrid_wait,
         )
 
     def start(self) -> None:
@@ -809,6 +831,132 @@ class CoordinationEngine(
     def status(self) -> dict[str, Any]:
         return self._change.status()
 
+    # ------------------------------------------------------------------ #
+    # Task facade (T6.22)
+    # ------------------------------------------------------------------ #
+    # These one-liners delegate to ``self._task`` (a :class:`Task`
+    # composed in ``__init__``). They preserve the pre-extraction public
+    # API — MCP dispatch (``create_task``, ``update_task_status``,
+    # ``assign_task``, ``query_tasks``, ``create_subtask``,
+    # ``wait_for_task``, ``get_available_tasks``, ``task_failures``,
+    # ``get_dead_letter_tasks``, ``retry_from_dead_letter``,
+    # ``get_task_failure_history``), CLI (``cli_tasks.py``), hooks, and
+    # tests all continue to call ``engine.create_task(...)`` etc.
+    # verbatim. ``query_tasks`` keeps its dispatch-by-string shape
+    # (T6.37 still deferred). ``update_task_status`` preserves T1.13
+    # status-validation authz via the primitive's ``_VALID_TASK_STATUSES``
+    # rejection path and T6.38 / T6.39 / T6.40 atomic-side-effect
+    # behaviour (dep-satisfy + DLQ record happen inside the primitive
+    # tx; ``error`` forwarded on every transition; events only fire
+    # when the stored status actually changed).
+
+    def create_task(
+        self,
+        task_id: str,
+        parent_agent_id: str,
+        description: str,
+        depends_on: list[str] | None = None,
+        priority: int = 0,
+    ) -> dict[str, Any]:
+        return self._task.create_task(
+            task_id=task_id,
+            parent_agent_id=parent_agent_id,
+            description=description,
+            depends_on=depends_on,
+            priority=priority,
+        )
+
+    def assign_task(self, task_id: str, assigned_agent_id: str) -> dict[str, Any]:
+        return self._task.assign_task(
+            task_id=task_id, assigned_agent_id=assigned_agent_id,
+        )
+
+    def update_task_status(
+        self,
+        task_id: str,
+        status: str,
+        summary: str | None = None,
+        blocked_by: str | None = None,
+        error: str | None = None,
+    ) -> dict[str, Any]:
+        return self._task.update_task_status(
+            task_id=task_id,
+            status=status,
+            summary=summary,
+            blocked_by=blocked_by,
+            error=error,
+        )
+
+    def query_tasks(
+        self,
+        query_type: str,
+        task_id: str | None = None,
+        parent_agent_id: str | None = None,
+        assigned_agent_id: str | None = None,
+        parent_task_id: str | None = None,
+        root_task_id: str | None = None,
+    ) -> dict[str, Any]:
+        return self._task.query_tasks(
+            query_type=query_type,
+            task_id=task_id,
+            parent_agent_id=parent_agent_id,
+            assigned_agent_id=assigned_agent_id,
+            parent_task_id=parent_task_id,
+            root_task_id=root_task_id,
+        )
+
+    def create_subtask(
+        self,
+        task_id: str,
+        parent_task_id: str,
+        parent_agent_id: str,
+        description: str,
+        depends_on: list[str] | None = None,
+        priority: int = 0,
+    ) -> dict[str, Any]:
+        return self._task.create_subtask(
+            task_id=task_id,
+            parent_task_id=parent_task_id,
+            parent_agent_id=parent_agent_id,
+            description=description,
+            depends_on=depends_on,
+            priority=priority,
+        )
+
+    def task_failures(
+        self,
+        action: str,
+        task_id: str | None = None,
+        limit: int = 50,
+    ) -> dict[str, Any]:
+        return self._task.task_failures(
+            action=action, task_id=task_id, limit=limit,
+        )
+
+    def retry_task(self, task_id: str) -> dict[str, Any]:
+        return self._task.retry_task(task_id=task_id)
+
+    def get_dead_letter_tasks(self, limit: int = 50) -> dict[str, Any]:
+        return self._task.get_dead_letter_tasks(limit=limit)
+
+    def get_task_failure_history(self, task_id: str) -> dict[str, Any]:
+        return self._task.get_task_failure_history(task_id=task_id)
+
+    def wait_for_task(
+        self,
+        task_id: str,
+        timeout_s: float = 60.0,
+        poll_interval_s: float = 2.0,
+    ) -> dict[str, Any]:
+        return self._task.wait_for_task(
+            task_id=task_id,
+            timeout_s=timeout_s,
+            poll_interval_s=poll_interval_s,
+        )
+
+    def get_available_tasks(self, agent_id: str | None = None) -> dict[str, Any]:
+        return self._task.get_available_tasks(agent_id=agent_id)
+
     def read_only_engine(self) -> "CoordinationEngine":
         """Return a read-only view of this engine using direct WAL reads.
 
@@ -871,5 +1019,15 @@ class CoordinationEngine(
         # (get_notifications, get_conflicts, get_contention_hotspots,
         # status) only need ``_connect`` rebound.
         replica._change._connect = replica._connect
+        # T6.22: and the Task subsystem — same three-dep pattern as
+        # Spawner, Messaging, and Handoff. ``_publish_event`` and
+        # ``_hybrid_wait`` were captured in ``_task.__init__`` against
+        # the replica's own callables; task mutations (create / assign /
+        # update_task_status / create_subtask / retry) through a
+        # read-only replica are not a supported flow, and the read-only
+        # task operations (``query_tasks``, ``get_available_tasks``,
+        # ``get_dead_letter_tasks``, ``get_task_failure_history``,
+        # ``wait_for_task``) only need ``_connect`` rebound.
+        replica._task._connect = replica._connect
         return replica
 

@@ -1617,11 +1617,10 @@ Block markers for multi-line content:
 | `coordinationhub/cli_vis.py` | 241 | Change awareness, audit, graph, and assessment CLI commands |
 | `coordinationhub/conflict_log.py` | 43 | Conflict recording and querying for CoordinationHub |
 | `coordinationhub/context.py` | 104 | Context bundle builder for CoordinationHub agent registration responses |
-| `coordinationhub/core.py` | 602 | CoordinationEngine — host class that composes mixins and subsystems |
+| `coordinationhub/core.py` | 703 | CoordinationEngine — host class that composes mixins and subsystems |
 | `coordinationhub/core_broadcasts.py` | 188 | BroadcastMixin — broadcast, handoff dispatch, and cross-agent waits |
 | `coordinationhub/core_identity.py` | 139 | IdentityMixin — agent lifecycle and lineage management |
 | `coordinationhub/core_locking.py` | 394 | Locking methods for CoordinationEngine |
-| `coordinationhub/core_tasks.py` | 202 | TaskMixin — shared task registry with hierarchy support |
 | `coordinationhub/core_visibility.py` | 138 | VisibilityMixin — coordination graph, project scan, agent status, assessment |
 | `coordinationhub/db.py` | 93 | SQLite connection pool and public re-exports for CoordinationHub |
 | `coordinationhub/db_migrations.py` | 399 | Schema-version tracking, migration functions, and the ``init_schema`` driver |
@@ -1681,6 +1680,7 @@ Block markers for multi-line content:
 | `coordinationhub/spawner.py` | 395 | Zero-deps spawner primitives for HA coordinator sub-agent registry |
 | `coordinationhub/spawner_subsystem.py` | 233 | Spawner subsystem — HA coordinator sub-agent spawn management |
 | `coordinationhub/task_failures.py` | 149 | Task failure tracking and dead letter queue for CoordinationHub |
+| `coordinationhub/task_subsystem.py` | 241 | Task subsystem — shared task registry with hierarchy + dead-letter queue |
 | `coordinationhub/tasks.py` | 517 | Task registry primitives for CoordinationHub (work board) |
 | `coordinationhub/validation.py` | 160 | Minimal stdlib jsonschema validator for MCP tool arguments |
 | `coordinationhub/work_intent.py` | 139 | Work intent board primitives for CoordinationHub |

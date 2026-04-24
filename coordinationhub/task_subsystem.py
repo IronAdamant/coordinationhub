@@ -1,26 +1,65 @@
-"""TaskMixin — shared task registry with hierarchy support.
+"""Task subsystem — shared task registry with hierarchy + dead-letter queue.
 
-Expects the host class to provide:
-    self._connect() — callable returning a sqlite3 connection
+T6.22 eighth step: extracted out of ``core_tasks.TaskMixin`` into a
+standalone class. Coupling audit confirmed TaskMixin had zero
+cross-mixin method calls and only relied on three pieces of engine
+infrastructure — ``_connect``, ``_publish_event``, ``_hybrid_wait`` —
+which are now injected as constructor dependencies. Same three-dep
+shape as :class:`Spawner` (commit ``1ee46c6``), :class:`Messaging`
+(commit ``d9f84d3``), and :class:`Handoff` (commit ``ded641d``).
+See commits ``3d1bd48`` (WorkIntent), ``b4a3e6b`` (Lease),
+``d6c8796`` (Dependency), and ``e0c21a8`` (Change) for the other
+extractions in this series. This is the largest surface extracted so
+far (11+ public methods) and continues breaking the god-object
+inheritance chain on ``CoordinationEngine`` without changing
+observable behaviour.
 
-Delegates to: tasks (tasks.py), dependencies (dependencies.py) for auto-trigger,
-task_failures (task_failures.py) for dead letter queue.
+Preserves T1.13's status-validation authz — the primitive
+``_VALID_TASK_STATUSES`` set in :mod:`tasks` rejects unknown
+``update_task_status`` transitions; this layer does not duplicate
+that check, it just propagates the primitive's error payload.
+Preserves T6.38 / T6.39 / T6.40: dependency-satisfy and DLQ-record
+side effects are folded into the primitive's transaction, the
+``error`` argument is forwarded on every transition (not only on
+``status=='failed'``), and events only fire when the stored status
+actually changed (``prior_status != status``).
 
-Auto-trigger: when a task is marked completed, dependencies referencing that
-task_id are automatically satisfied.
+Preserves T6.37: ``query_tasks`` keeps its dispatch-by-string shape
+— splitting it into separate methods is deferred.
+
+Delegates to: tasks (tasks.py) for registry primitives, task_failures
+(task_failures.py) for dead-letter queue primitives. Auto-trigger of
+dependency satisfaction happens inside the ``_tasks.update_task_status``
+primitive (T6.38), so this layer does not call into the Dependency
+subsystem directly.
 """
 
 from __future__ import annotations
 
 import time as _time
-from typing import Any
+from typing import Any, Callable
 
 from . import tasks as _tasks
 from . import task_failures as _tf
 
 
-class TaskMixin:
-    """Task registry with parent-child hierarchy and dependency tracking."""
+class Task:
+    """Task registry with parent-child hierarchy and dependency tracking.
+
+    Constructed by :class:`CoordinationEngine` and exposed as
+    ``engine._task``. The engine keeps facade methods for each
+    public operation so the existing tool API is preserved.
+    """
+
+    def __init__(
+        self,
+        connect_fn: Callable[[], Any],
+        publish_event_fn: Callable[[str, dict[str, Any]], None],
+        hybrid_wait_fn: Callable[..., dict[str, Any] | None],
+    ) -> None:
+        self._connect = connect_fn
+        self._publish_event = publish_event_fn
+        self._hybrid_wait = hybrid_wait_fn
 
     # ------------------------------------------------------------------ #
     # Task Registry
@@ -73,7 +112,7 @@ class TaskMixin:
         task row.
 
         T6.38: dependency-satisfy and DLQ-record side effects are now
-        folded into the primitive's transaction. The mixin's job is
+        folded into the primitive's transaction. The subsystem's job is
         only to fan events out after the write commits — this layer
         can no longer crash between status write and side effect.
 
@@ -158,19 +197,23 @@ class TaskMixin:
         task_id: str | None = None,
         limit: int = 50,
     ) -> dict[str, Any]:
-        """Unified dead-letter queue operations: retry | list_dead_letter | history."""
+        """Unified dead-letter queue operations: retry | list_dead_letter | history.
+
+        Routes through this subsystem's own methods (``retry_task``,
+        ``get_dead_letter_tasks``, ``get_task_failure_history``) so the
+        class stays self-contained and the engine facade does not need
+        to be involved in internal dispatch.
+        """
         if action == "retry":
             if not task_id:
                 return {"error": "task_id is required for retry"}
-            return _tf.retry_from_dead_letter(self._connect, task_id)
+            return self.retry_task(task_id)
         if action == "list_dead_letter":
-            tasks = _tf.get_dead_letter_tasks(self._connect, limit)
-            return {"dead_letter_tasks": tasks, "count": len(tasks)}
+            return self.get_dead_letter_tasks(limit)
         if action == "history":
             if not task_id:
                 return {"error": "task_id is required for history"}
-            history = _tf.get_task_failure_history(self._connect, task_id)
-            return {"task_id": task_id, "history": history, "count": len(history)}
+            return self.get_task_failure_history(task_id)
         return {"error": f"Unknown action: {action!r}"}
 
     def retry_task(self, task_id: str) -> dict[str, Any]:
