@@ -15,7 +15,7 @@ import time
 from .db_schemas import _SCHEMAS, _INDEXES
 
 
-_CURRENT_SCHEMA_VERSION = 26
+_CURRENT_SCHEMA_VERSION = 27
 
 
 def _get_schema_version(conn: sqlite3.Connection) -> int:
@@ -69,6 +69,101 @@ def _migrate_v2_to_v3(conn: sqlite3.Connection) -> None:
         return
     conn.execute("ALTER TABLE agents ADD COLUMN claude_agent_id TEXT")
     conn.execute("CREATE INDEX IF NOT EXISTS idx_agents_claude_id ON agents(claude_agent_id)")
+
+
+def _migrate_v26_to_v27(conn: sqlite3.Connection) -> None:
+    """Bundle four small actionable cleanups (T0.4 tail, T1.4, T1.7, T4.6).
+
+    1. ``ALTER TABLE agents DROP COLUMN claude_agent_id`` for DBs that
+       were stamped before the T0.4 fix and still carry the vestigial
+       column (NULL on every row since v21 renamed it to ``raw_ide_id``).
+    2. Defence-in-depth ``UNIQUE`` index on ``document_locks``
+       ``(document_path, locked_by, COALESCE(region_start, -1),
+       COALESCE(region_end, -1))``. The ``find_own_lock`` fix (T1.4)
+       already prevents acquire-path duplicates; this rejects direct
+       INSERT bypasses (tests, admin tooling). ``COALESCE`` is required
+       because SQLite treats ``NULL`` as distinct in ``UNIQUE``
+       constraints, which would let duplicate file-level (region-NULL)
+       locks accumulate. Pre-existing duplicates are pruned first
+       (keep highest ``id`` per group) so the index can succeed on
+       real DBs that may have accumulated them.
+    3. Defence-in-depth ``UNIQUE(task_id, attempt)`` on
+       ``task_failures``. The ``BEGIN IMMEDIATE`` serialisation in
+       ``record_task_failure`` already prevents the race; this is the
+       DB-level guard. Same prune-first dance.
+    4. ``DROP INDEX idx_locks_path`` — redundant since
+       ``idx_locks_locked_by`` and the new partial UNIQUE index cover
+       the ``document_path`` read paths.
+
+    Each step is idempotent (``IF EXISTS`` / ``IF NOT EXISTS`` /
+    ``PRAGMA table_info`` guard), so re-running on a partially or
+    fully migrated DB is a no-op.
+    """
+    # 1. Drop vestigial claude_agent_id column if present. SQLite
+    # refuses ALTER TABLE DROP COLUMN while any index still references
+    # the column (the legacy idx_agents_claude_id from v3 does on
+    # truly-pre-T0.4 DBs that never got renamed by v21), so drop the
+    # index first.
+    cols = [row[1] for row in conn.execute("PRAGMA table_info(agents)").fetchall()]
+    if "claude_agent_id" in cols:
+        conn.execute("DROP INDEX IF EXISTS idx_agents_claude_id")
+        conn.execute("ALTER TABLE agents DROP COLUMN claude_agent_id")
+
+    # 2. document_locks defence-in-depth UNIQUE.
+    # Prune duplicates first by (document_path, locked_by,
+    # COALESCE(region_start, -1), COALESCE(region_end, -1)), keeping
+    # the highest id per group. The COALESCE substitutes -1 for NULL
+    # so file-level (region-NULL) duplicates collapse correctly.
+    #
+    # Guard the prune+create against the existence of the unique
+    # index: re-running init_schema on every process start would
+    # otherwise issue a redundant DELETE under BEGIN IMMEDIATE on
+    # every call, serialising concurrent init paths and triggering
+    # "database is locked" under contention. Once the index exists,
+    # the constraint itself prevents new duplicates so re-pruning
+    # is unnecessary.
+    indexes = {
+        row[0]
+        for row in conn.execute(
+            "SELECT name FROM sqlite_master WHERE type='index'"
+        )
+    }
+    if "idx_document_locks_unique" not in indexes:
+        conn.execute(
+            """
+            DELETE FROM document_locks
+            WHERE id NOT IN (
+                SELECT MAX(id) FROM document_locks
+                GROUP BY document_path, locked_by,
+                         COALESCE(region_start, -1), COALESCE(region_end, -1)
+            )
+            """
+        )
+        conn.execute(
+            "CREATE UNIQUE INDEX IF NOT EXISTS idx_document_locks_unique "
+            "ON document_locks(document_path, locked_by, "
+            "COALESCE(region_start, -1), COALESCE(region_end, -1))"
+        )
+
+    # 3. task_failures UNIQUE(task_id, attempt). Same guard pattern.
+    if "idx_task_failures_unique" not in indexes:
+        conn.execute(
+            """
+            DELETE FROM task_failures
+            WHERE id NOT IN (
+                SELECT MAX(id) FROM task_failures
+                GROUP BY task_id, attempt
+            )
+            """
+        )
+        conn.execute(
+            "CREATE UNIQUE INDEX IF NOT EXISTS idx_task_failures_unique "
+            "ON task_failures(task_id, attempt)"
+        )
+
+    # 4. Drop redundant idx_locks_path. idx_locks_locked_by plus the
+    # new partial UNIQUE index cover the document_path read paths.
+    conn.execute("DROP INDEX IF EXISTS idx_locks_path")
 
 
 def _migrate_v25_to_v26(conn: sqlite3.Connection) -> None:
@@ -437,6 +532,7 @@ _MIGRATIONS = {
     24: _migrate_v23_to_v24,  # agents.ide_vendor + unique(raw_ide_id, ide_vendor) (T3.12)
     25: _migrate_v24_to_v25,  # tasks.error column (T6.39)
     26: _migrate_v25_to_v26,  # tasks/pending_tasks status CHECK triggers (T4.2, T4.5)
+    27: _migrate_v26_to_v27,  # T0.4 tail / T1.4 / T1.7 / T4.6 cleanup bundle
 }
 
 

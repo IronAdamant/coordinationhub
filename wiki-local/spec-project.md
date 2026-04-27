@@ -321,8 +321,8 @@ coordinationhub/
   context.py            — Context bundle builder for CoordinationHub agent registration responses (~104 LOC)
   core.py               — CoordinationEngine — host class that composes twelve subsystems (~948 LOC)
   db.py                 — SQLite connection pool and public re-exports for CoordinationHub (~93 LOC)
-  db_migrations.py      — Schema-version tracking, migration functions, and the ``init_schema`` driver (~399 LOC)
-  db_schemas.py         — Canonical SQLite schema definitions for CoordinationHub (~301 LOC)
+  db_migrations.py      — Schema-version tracking, migration functions, and the ``init_schema`` driver (~467 LOC)
+  db_schemas.py         — Canonical SQLite schema definitions for CoordinationHub (~305 LOC)
   dependencies.py       — Cross-agent dependency declaration and satisfaction tracking (~140 LOC)
   dependency_subsystem.py — Dependency subsystem — cross-agent dependency declarations and checks (~143 LOC)
   dispatch.py           — Tool dispatch for CoordinationHub (~107 LOC)
@@ -334,7 +334,7 @@ coordinationhub/
   lease_subsystem.py    — Lease subsystem — HA coordinator lease management (~167 LOC)
   leases.py             — Zero-deps lease primitives for HA coordinator leadership (~220 LOC)
   limits.py             — String-length caps for user-supplied fields (T6.14) (~40 LOC)
-  lock_cache.py         — In-memory lock cache for CoordinationHub (~180 LOC)
+  lock_cache.py         — In-memory lock cache for CoordinationHub (~188 LOC)
   lock_ops.py           — Shared lock primitives used by both local locks and coordination locks (~209 LOC)
   locking_subsystem.py  — Locking subsystem — document lock acquire/release/refresh/list/admin (~445 LOC)
   mcp_server.py         — HTTP REST admin / dashboard endpoint for CoordinationHub (~578 LOC)
@@ -395,7 +395,7 @@ coordinationhub/
 ```
 <!-- /GEN -->
 
-`tests/` contains <!-- GEN:test-count -->738<!-- /GEN --> tests across 28 files plus `fixtures/claude_code_events/` (hook contract fixtures).
+`tests/` contains <!-- GEN:test-count -->744<!-- /GEN --> tests across 28 files plus `fixtures/claude_code_events/` (hook contract fixtures).
 
 Top-level project files: `pyproject.toml`, `coordination_spec.yaml`/`.json` (example specs), `README.md`, `CLAUDE.md`, `COMPLETE_PROJECT_DOCUMENTATION.md`, `LLM_Development.md`, and `wiki-local/` (this spec, glossary, index).
 

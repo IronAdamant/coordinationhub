@@ -66,7 +66,7 @@ def build_context_bundle(
         active_locks = []
         now = time.time()
         for row in locks:
-            if now <= row["locked_at"] + row["lock_ttl"]:
+            if now < row["locked_at"] + row["lock_ttl"]:
                 active_locks.append({
                     "document_path": row["document_path"],
                     "locked_by": row["locked_by"],

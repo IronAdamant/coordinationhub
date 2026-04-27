@@ -136,10 +136,19 @@ class LockCache:
     # ------------------------------------------------------------------ #
 
     def get_status(self, document_path: str, now: float) -> dict[str, Any]:
-        """Return lock status for a path, identical format to SQLite query."""
+        """Return lock status for a path, identical format to SQLite query.
+
+        T1.4 (v27 cleanup): the canonical "still valid" predicate is
+        ``now < locked_at + lock_ttl`` (strict less-than). A row with
+        ``locked_at + lock_ttl == now`` is *just expired* and treated
+        as gone. The same convention applies to every reader in the
+        codebase (``lock_ops.find_conflicting_locks``,
+        ``locking_subsystem`` warm/reap, ``agent_status``,
+        ``context.get_context_bundle``).
+        """
         with self._lock:
             entries = self._locks.get(document_path, [])
-            active = [e for e in entries if e["locked_at"] + e["lock_ttl"] >= now]
+            active = [e for e in entries if e["locked_at"] + e["lock_ttl"] > now]
             if not active:
                 self._locks.pop(document_path, None)
                 return {"locked": False}
@@ -164,7 +173,7 @@ class LockCache:
         locks: list[dict[str, Any]] = []
         with self._lock:
             for path, entries in list(self._locks.items()):
-                active = [e for e in entries if e["locked_at"] + e["lock_ttl"] >= now]
+                active = [e for e in entries if e["locked_at"] + e["lock_ttl"] > now]
                 if not active:
                     self._locks.pop(path, None)
                     continue

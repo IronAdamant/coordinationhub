@@ -1689,8 +1689,8 @@ Block markers for multi-line content:
 | `coordinationhub/context.py` | 104 | Context bundle builder for CoordinationHub agent registration responses |
 | `coordinationhub/core.py` | 948 | CoordinationEngine — host class that composes twelve subsystems |
 | `coordinationhub/db.py` | 93 | SQLite connection pool and public re-exports for CoordinationHub |
-| `coordinationhub/db_migrations.py` | 399 | Schema-version tracking, migration functions, and the ``init_schema`` driver |
-| `coordinationhub/db_schemas.py` | 301 | Canonical SQLite schema definitions for CoordinationHub |
+| `coordinationhub/db_migrations.py` | 467 | Schema-version tracking, migration functions, and the ``init_schema`` driver |
+| `coordinationhub/db_schemas.py` | 305 | Canonical SQLite schema definitions for CoordinationHub |
 | `coordinationhub/dependencies.py` | 140 | Cross-agent dependency declaration and satisfaction tracking |
 | `coordinationhub/dependency_subsystem.py` | 143 | Dependency subsystem — cross-agent dependency declarations and checks |
 | `coordinationhub/dispatch.py` | 107 | Tool dispatch for CoordinationHub |
@@ -1707,7 +1707,7 @@ Block markers for multi-line content:
 | `coordinationhub/lease_subsystem.py` | 167 | Lease subsystem — HA coordinator lease management |
 | `coordinationhub/leases.py` | 220 | Zero-deps lease primitives for HA coordinator leadership |
 | `coordinationhub/limits.py` | 40 | String-length caps for user-supplied fields (T6.14) |
-| `coordinationhub/lock_cache.py` | 180 | In-memory lock cache for CoordinationHub |
+| `coordinationhub/lock_cache.py` | 188 | In-memory lock cache for CoordinationHub |
 | `coordinationhub/lock_ops.py` | 209 | Shared lock primitives used by both local locks and coordination locks |
 | `coordinationhub/locking_subsystem.py` | 445 | Locking subsystem — document lock acquire/release/refresh/list/admin |
 | `coordinationhub/mcp_server.py` | 578 | HTTP REST admin / dashboard endpoint for CoordinationHub |
@@ -1759,7 +1759,7 @@ Block markers for multi-line content:
 
 Inline markers for single values (render invisibly in Markdown):
 ```markdown
-This project has <!-- GEN:test-count -->738<!-- /GEN --> tests.
+This project has <!-- GEN:test-count -->744<!-- /GEN --> tests.
 ```
 
 Unknown marker names raise an error during rewrite (catches typos).

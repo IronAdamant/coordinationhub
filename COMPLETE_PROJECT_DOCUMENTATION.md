@@ -1080,8 +1080,8 @@ keep it in sync; CI checks for drift on every push.
 | `coordinationhub/context.py` | 104 | Context bundle builder for CoordinationHub agent registration responses |
 | `coordinationhub/core.py` | 948 | CoordinationEngine — host class that composes twelve subsystems |
 | `coordinationhub/db.py` | 93 | SQLite connection pool and public re-exports for CoordinationHub |
-| `coordinationhub/db_migrations.py` | 399 | Schema-version tracking, migration functions, and the ``init_schema`` driver |
-| `coordinationhub/db_schemas.py` | 301 | Canonical SQLite schema definitions for CoordinationHub |
+| `coordinationhub/db_migrations.py` | 467 | Schema-version tracking, migration functions, and the ``init_schema`` driver |
+| `coordinationhub/db_schemas.py` | 305 | Canonical SQLite schema definitions for CoordinationHub |
 | `coordinationhub/dependencies.py` | 140 | Cross-agent dependency declaration and satisfaction tracking |
 | `coordinationhub/dependency_subsystem.py` | 143 | Dependency subsystem — cross-agent dependency declarations and checks |
 | `coordinationhub/dispatch.py` | 107 | Tool dispatch for CoordinationHub |
@@ -1098,7 +1098,7 @@ keep it in sync; CI checks for drift on every push.
 | `coordinationhub/lease_subsystem.py` | 167 | Lease subsystem — HA coordinator lease management |
 | `coordinationhub/leases.py` | 220 | Zero-deps lease primitives for HA coordinator leadership |
 | `coordinationhub/limits.py` | 40 | String-length caps for user-supplied fields (T6.14) |
-| `coordinationhub/lock_cache.py` | 180 | In-memory lock cache for CoordinationHub |
+| `coordinationhub/lock_cache.py` | 188 | In-memory lock cache for CoordinationHub |
 | `coordinationhub/lock_ops.py` | 209 | Shared lock primitives used by both local locks and coordination locks |
 | `coordinationhub/locking_subsystem.py` | 445 | Locking subsystem — document lock acquire/release/refresh/list/admin |
 | `coordinationhub/mcp_server.py` | 578 | HTTP REST admin / dashboard endpoint for CoordinationHub |
@@ -1147,7 +1147,7 @@ keep it in sync; CI checks for drift on every push.
 | `coordinationhub/work_intent_subsystem.py` | 92 | WorkIntent subsystem — cooperative work intent board |
 <!-- /GEN -->
 
-**Total: <!-- GEN:test-count -->738<!-- /GEN --> tests across 28 test files.**
+**Total: <!-- GEN:test-count -->744<!-- /GEN --> tests across 28 test files.**
 
 ---
 
@@ -1183,8 +1183,8 @@ coordinationhub/
   context.py            — Context bundle builder for CoordinationHub agent registration responses (~104 LOC)
   core.py               — CoordinationEngine — host class that composes twelve subsystems (~948 LOC)
   db.py                 — SQLite connection pool and public re-exports for CoordinationHub (~93 LOC)
-  db_migrations.py      — Schema-version tracking, migration functions, and the ``init_schema`` driver (~399 LOC)
-  db_schemas.py         — Canonical SQLite schema definitions for CoordinationHub (~301 LOC)
+  db_migrations.py      — Schema-version tracking, migration functions, and the ``init_schema`` driver (~467 LOC)
+  db_schemas.py         — Canonical SQLite schema definitions for CoordinationHub (~305 LOC)
   dependencies.py       — Cross-agent dependency declaration and satisfaction tracking (~140 LOC)
   dependency_subsystem.py — Dependency subsystem — cross-agent dependency declarations and checks (~143 LOC)
   dispatch.py           — Tool dispatch for CoordinationHub (~107 LOC)
@@ -1196,7 +1196,7 @@ coordinationhub/
   lease_subsystem.py    — Lease subsystem — HA coordinator lease management (~167 LOC)
   leases.py             — Zero-deps lease primitives for HA coordinator leadership (~220 LOC)
   limits.py             — String-length caps for user-supplied fields (T6.14) (~40 LOC)
-  lock_cache.py         — In-memory lock cache for CoordinationHub (~180 LOC)
+  lock_cache.py         — In-memory lock cache for CoordinationHub (~188 LOC)
   lock_ops.py           — Shared lock primitives used by both local locks and coordination locks (~209 LOC)
   locking_subsystem.py  — Locking subsystem — document lock acquire/release/refresh/list/admin (~445 LOC)
   mcp_server.py         — HTTP REST admin / dashboard endpoint for CoordinationHub (~578 LOC)
@@ -1257,7 +1257,7 @@ coordinationhub/
 ```
 <!-- /GEN -->
 
-The `tests/` directory holds <!-- GEN:test-count -->738<!-- /GEN --> tests across 28 files,
+The `tests/` directory holds <!-- GEN:test-count -->744<!-- /GEN --> tests across 28 files,
 plus `tests/fixtures/claude_code_events/` for hook contract fixtures.
 
 **Module design principles:**
@@ -1724,7 +1724,7 @@ Air-gapped install: `pip install coordinationhub --no-deps`.
 
 ```bash
 python -m pytest tests/ -v
-# <!-- GEN:test-count -->738<!-- /GEN --> tests across 28 test files
+# <!-- GEN:test-count -->744<!-- /GEN --> tests across 28 test files
 ```
 
 ---

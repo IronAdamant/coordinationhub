@@ -425,7 +425,7 @@ class Locking:
             conn.execute("BEGIN IMMEDIATE")
             try:
                 rows = conn.execute(
-                    "SELECT * FROM document_locks WHERE locked_at + lock_ttl >= ?",
+                    "SELECT * FROM document_locks WHERE locked_at + lock_ttl > ?",
                     (now,),
                 ).fetchall()
                 self._lock_cache.warm([dict(r) for r in rows])
@@ -482,7 +482,7 @@ class Locking:
                 )
                 now = time.time()
                 rows = conn.execute(
-                    "SELECT * FROM document_locks WHERE locked_at + lock_ttl >= ?",
+                    "SELECT * FROM document_locks WHERE locked_at + lock_ttl > ?",
                     (now,),
                 ).fetchall()
                 self._lock_cache.warm([dict(r) for r in rows])

@@ -269,7 +269,8 @@ _INDEXES = [
     "CREATE INDEX IF NOT EXISTS idx_agents_parent ON agents(parent_id)",
     "CREATE INDEX IF NOT EXISTS idx_lineage_child ON lineage(child_id)",
     "CREATE INDEX IF NOT EXISTS idx_lineage_parent ON lineage(parent_id)",
-    "CREATE INDEX IF NOT EXISTS idx_locks_path ON document_locks(document_path)",
+    # T4.6: idx_locks_path dropped at v27 — redundant with
+    # idx_locks_locked_by + the partial UNIQUE idx_document_locks_unique.
     "CREATE INDEX IF NOT EXISTS idx_locks_locked_by ON document_locks(locked_by)",
     "CREATE INDEX IF NOT EXISTS idx_conflicts_doc ON lock_conflicts(document_path)",
     "CREATE INDEX IF NOT EXISTS idx_conflicts_time ON lock_conflicts(created_at)",
@@ -308,4 +309,12 @@ _INDEXES = [
     "CREATE INDEX IF NOT EXISTS idx_coordination_events_created ON coordination_events(created_at)",
     "CREATE INDEX IF NOT EXISTS idx_assessment_results_run_at ON assessment_results(run_at)",
     "CREATE INDEX IF NOT EXISTS idx_agents_status_heartbeat ON agents(status, last_heartbeat)",
+    # v27 (T1.4 / T1.7): defence-in-depth UNIQUE indexes against direct
+    # INSERT bypasses of the app-layer guards (find_own_lock,
+    # record_task_failure's BEGIN IMMEDIATE).
+    "CREATE UNIQUE INDEX IF NOT EXISTS idx_document_locks_unique "
+    "ON document_locks(document_path, locked_by, "
+    "COALESCE(region_start, -1), COALESCE(region_end, -1))",
+    "CREATE UNIQUE INDEX IF NOT EXISTS idx_task_failures_unique "
+    "ON task_failures(task_id, attempt)",
 ]

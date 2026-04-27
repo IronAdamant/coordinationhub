@@ -420,3 +420,285 @@ class TestStatusCheckTriggers:
         assert "trg_tasks_status_check_update" in names
         assert "trg_pending_tasks_status_check_insert" in names
         assert "trg_pending_tasks_status_check_update" in names
+
+
+class TestSchemaV27Cleanup:
+    """v27 cleanup bundle: T0.4 tail / T1.4 / T1.7 / T4.6.
+
+    Migration ``_migrate_v26_to_v27`` performs four idempotent steps:
+
+    1. ``ALTER TABLE agents DROP COLUMN claude_agent_id`` if the
+       vestigial column survived from a pre-T0.4-fix DB.
+    2. Defence-in-depth ``UNIQUE`` index on
+       ``document_locks(document_path, locked_by,
+       COALESCE(region_start, -1), COALESCE(region_end, -1))`` after
+       pruning duplicates.
+    3. Defence-in-depth ``UNIQUE(task_id, attempt)`` on
+       ``task_failures`` after pruning duplicates.
+    4. ``DROP INDEX idx_locks_path`` (redundant with the partial
+       UNIQUE index + ``idx_locks_locked_by``).
+    """
+
+    def test_duplicate_document_locks_pruned(self, tmp_path: Path) -> None:
+        """A pre-existing duplicate (document_path, locked_by, region_*)
+        row must be collapsed to one (highest id) before the UNIQUE
+        index is created."""
+        db = tmp_path / "dup_locks.db"
+        conn = sqlite3.connect(db)
+        # Bootstrap pre-v27 schema: stamp v26, then create the
+        # document_locks shape that pre-dates the UNIQUE index. Inject
+        # two duplicate rows.
+        conn.execute(
+            "CREATE TABLE schema_version ("
+            "  version INTEGER PRIMARY KEY, applied_at REAL NOT NULL)"
+        )
+        conn.execute("INSERT INTO schema_version VALUES (26, 1.0)")
+        conn.execute(
+            "CREATE TABLE document_locks ("
+            "  id INTEGER PRIMARY KEY AUTOINCREMENT,"
+            "  document_path TEXT NOT NULL, locked_by TEXT NOT NULL,"
+            "  locked_at REAL NOT NULL, lock_ttl REAL DEFAULT 300.0,"
+            "  lock_type TEXT DEFAULT 'exclusive',"
+            "  region_start INTEGER, region_end INTEGER,"
+            "  worktree_root TEXT)"
+        )
+        # Two duplicates on (path, agent, NULL, NULL) — both file-level
+        conn.execute(
+            "INSERT INTO document_locks (document_path, locked_by, locked_at) "
+            "VALUES ('/x.py', 'a.1', 100.0)"
+        )
+        conn.execute(
+            "INSERT INTO document_locks (document_path, locked_by, locked_at) "
+            "VALUES ('/x.py', 'a.1', 200.0)"
+        )
+        # And a region-level duplicate pair on (1, 50)
+        conn.execute(
+            "INSERT INTO document_locks "
+            "(document_path, locked_by, locked_at, region_start, region_end) "
+            "VALUES ('/y.py', 'a.2', 100.0, 1, 50)"
+        )
+        conn.execute(
+            "INSERT INTO document_locks "
+            "(document_path, locked_by, locked_at, region_start, region_end) "
+            "VALUES ('/y.py', 'a.2', 200.0, 1, 50)"
+        )
+        # And a non-duplicate (different region) — must survive
+        conn.execute(
+            "INSERT INTO document_locks "
+            "(document_path, locked_by, locked_at, region_start, region_end) "
+            "VALUES ('/y.py', 'a.2', 100.0, 60, 90)"
+        )
+        conn.commit()
+        conn.close()
+
+        conn = _create_connection(db)
+        init_schema(conn)
+        conn.commit()
+
+        rows = conn.execute(
+            "SELECT document_path, locked_by, region_start, region_end, locked_at "
+            "FROM document_locks ORDER BY document_path, region_start"
+        ).fetchall()
+        assert len(rows) == 3, f"expected 3 surviving rows, got {len(rows)}: {[dict(r) for r in rows]}"
+        # Highest-id row in each duplicate group is kept (locked_at = 200.0).
+        x = [r for r in rows if r["document_path"] == "/x.py"]
+        assert len(x) == 1
+        assert x[0]["locked_at"] == 200.0
+        y_region = [r for r in rows if r["document_path"] == "/y.py" and r["region_start"] == 1]
+        assert len(y_region) == 1
+        assert y_region[0]["locked_at"] == 200.0
+
+    def test_duplicate_task_failures_pruned(self, tmp_path: Path) -> None:
+        db = tmp_path / "dup_tf.db"
+        conn = sqlite3.connect(db)
+        conn.execute(
+            "CREATE TABLE schema_version ("
+            "  version INTEGER PRIMARY KEY, applied_at REAL NOT NULL)"
+        )
+        conn.execute("INSERT INTO schema_version VALUES (26, 1.0)")
+        conn.execute(
+            "CREATE TABLE task_failures ("
+            "  id INTEGER PRIMARY KEY AUTOINCREMENT,"
+            "  task_id TEXT NOT NULL, error TEXT,"
+            "  attempt INTEGER NOT NULL DEFAULT 1,"
+            "  max_retries INTEGER NOT NULL DEFAULT 3,"
+            "  first_attempt_at REAL NOT NULL,"
+            "  last_attempt_at REAL NOT NULL,"
+            "  dead_letter_at REAL, status TEXT DEFAULT 'failed')"
+        )
+        # Three rows on (task_id='t1', attempt=1)
+        for ts in (100.0, 200.0, 300.0):
+            conn.execute(
+                "INSERT INTO task_failures "
+                "(task_id, attempt, first_attempt_at, last_attempt_at) "
+                "VALUES (?, ?, ?, ?)",
+                ("t1", 1, ts, ts),
+            )
+        # Distinct attempt — must survive
+        conn.execute(
+            "INSERT INTO task_failures "
+            "(task_id, attempt, first_attempt_at, last_attempt_at) "
+            "VALUES (?, ?, ?, ?)",
+            ("t1", 2, 400.0, 400.0),
+        )
+        conn.commit()
+        conn.close()
+
+        conn = _create_connection(db)
+        init_schema(conn)
+        conn.commit()
+
+        rows = conn.execute(
+            "SELECT task_id, attempt, last_attempt_at FROM task_failures "
+            "ORDER BY attempt"
+        ).fetchall()
+        assert len(rows) == 2
+        assert rows[0]["attempt"] == 1
+        assert rows[0]["last_attempt_at"] == 300.0  # MAX(id) wins
+        assert rows[1]["attempt"] == 2
+
+    def test_idx_locks_path_dropped(self, tmp_path: Path) -> None:
+        """v27 drops the redundant idx_locks_path index."""
+        db = tmp_path / "drop_idx.db"
+        conn = _create_connection(db)
+        init_schema(conn)
+        conn.commit()
+
+        names = {
+            row[0]
+            for row in conn.execute(
+                "SELECT name FROM sqlite_master WHERE type='index'"
+            )
+        }
+        assert "idx_locks_path" not in names, (
+            f"idx_locks_path should have been dropped at v27. "
+            f"present indexes: {sorted(names)}"
+        )
+        # The replacement coverage indexes must be present.
+        assert "idx_locks_locked_by" in names
+        assert "idx_document_locks_unique" in names
+
+    def test_claude_agent_id_dropped_when_present(self, tmp_path: Path) -> None:
+        """Synthesise a pre-v21-style DB carrying claude_agent_id and
+        confirm v27 drops it. Pre-v21 had both columns coexisting; v21
+        renamed claude_agent_id -> raw_ide_id so post-v21 fresh DBs
+        never had the column."""
+        db = tmp_path / "vestigial.db"
+        conn = sqlite3.connect(db)
+        conn.execute(
+            "CREATE TABLE schema_version ("
+            "  version INTEGER PRIMARY KEY, applied_at REAL NOT NULL)"
+        )
+        conn.execute("INSERT INTO schema_version VALUES (26, 1.0)")
+        # Build agents with BOTH legacy claude_agent_id and modern
+        # raw_ide_id, to mimic a DB stamped before T0.4 fix.
+        conn.execute(
+            "CREATE TABLE agents ("
+            "  agent_id TEXT PRIMARY KEY, parent_id TEXT,"
+            "  worktree_root TEXT NOT NULL, pid INTEGER,"
+            "  started_at REAL NOT NULL, last_heartbeat REAL NOT NULL,"
+            "  status TEXT DEFAULT 'active',"
+            "  raw_ide_id TEXT, ide_vendor TEXT, claude_agent_id TEXT,"
+            "  stop_requested_at REAL)"
+        )
+        conn.execute(
+            "INSERT INTO agents (agent_id, worktree_root, started_at, last_heartbeat) "
+            "VALUES ('hub.preT04', '/tmp', 1.0, 1.0)"
+        )
+        conn.commit()
+        conn.close()
+
+        conn = _create_connection(db)
+        init_schema(conn)
+        conn.commit()
+
+        cols = _cols(conn, "agents")
+        assert "claude_agent_id" not in cols, (
+            f"v27 must drop claude_agent_id. agents columns: {cols}"
+        )
+        # Existing row preserved, raw_ide_id still present.
+        assert "raw_ide_id" in cols
+        rows = conn.execute(
+            "SELECT agent_id FROM agents WHERE agent_id = ?", ("hub.preT04",)
+        ).fetchall()
+        assert len(rows) == 1
+
+    def test_unique_index_rejects_duplicate_insert(self, tmp_path: Path) -> None:
+        """Direct INSERT bypassing acquire_lock must hit the partial
+        UNIQUE index and raise IntegrityError. This is the
+        defence-in-depth guarantee of T1.4."""
+        db = tmp_path / "unique_doc_locks.db"
+        conn = _create_connection(db)
+        init_schema(conn)
+        conn.commit()
+
+        # First insert: fine.
+        conn.execute(
+            "INSERT INTO document_locks "
+            "(document_path, locked_by, locked_at, lock_ttl) "
+            "VALUES (?, ?, ?, ?)",
+            ("/p.py", "a.1", 100.0, 60.0),
+        )
+        conn.commit()
+        # Same (document_path, locked_by, NULL region) — must be rejected.
+        with pytest.raises(sqlite3.IntegrityError):
+            conn.execute(
+                "INSERT INTO document_locks "
+                "(document_path, locked_by, locked_at, lock_ttl) "
+                "VALUES (?, ?, ?, ?)",
+                ("/p.py", "a.1", 200.0, 60.0),
+            )
+            conn.commit()
+        conn.rollback()
+        # Distinct region succeeds.
+        conn.execute(
+            "INSERT INTO document_locks "
+            "(document_path, locked_by, locked_at, lock_ttl, "
+            " region_start, region_end) "
+            "VALUES (?, ?, ?, ?, ?, ?)",
+            ("/p.py", "a.1", 200.0, 60.0, 1, 50),
+        )
+        conn.commit()
+        # Same region must also be rejected.
+        with pytest.raises(sqlite3.IntegrityError):
+            conn.execute(
+                "INSERT INTO document_locks "
+                "(document_path, locked_by, locked_at, lock_ttl, "
+                " region_start, region_end) "
+                "VALUES (?, ?, ?, ?, ?, ?)",
+                ("/p.py", "a.1", 300.0, 60.0, 1, 50),
+            )
+            conn.commit()
+        conn.rollback()
+
+    def test_task_failures_unique_rejects_duplicate(self, tmp_path: Path) -> None:
+        """Direct INSERT bypassing record_task_failure must hit the
+        UNIQUE(task_id, attempt) index."""
+        db = tmp_path / "unique_tf.db"
+        conn = _create_connection(db)
+        init_schema(conn)
+        conn.commit()
+        conn.execute(
+            "INSERT INTO task_failures "
+            "(task_id, attempt, first_attempt_at, last_attempt_at) "
+            "VALUES (?, ?, ?, ?)",
+            ("t1", 1, 100.0, 100.0),
+        )
+        conn.commit()
+        with pytest.raises(sqlite3.IntegrityError):
+            conn.execute(
+                "INSERT INTO task_failures "
+                "(task_id, attempt, first_attempt_at, last_attempt_at) "
+                "VALUES (?, ?, ?, ?)",
+                ("t1", 1, 200.0, 200.0),
+            )
+            conn.commit()
+        conn.rollback()
+        # Different attempt is fine.
+        conn.execute(
+            "INSERT INTO task_failures "
+            "(task_id, attempt, first_attempt_at, last_attempt_at) "
+            "VALUES (?, ?, ?, ?)",
+            ("t1", 2, 300.0, 300.0),
+        )
+        conn.commit()

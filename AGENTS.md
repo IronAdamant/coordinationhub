@@ -40,8 +40,8 @@ coordinationhub/
   context.py            — Context bundle builder for CoordinationHub agent registration responses (~104 LOC)
   core.py               — CoordinationEngine — host class that composes twelve subsystems (~948 LOC)
   db.py                 — SQLite connection pool and public re-exports for CoordinationHub (~93 LOC)
-  db_migrations.py      — Schema-version tracking, migration functions, and the ``init_schema`` driver (~399 LOC)
-  db_schemas.py         — Canonical SQLite schema definitions for CoordinationHub (~301 LOC)
+  db_migrations.py      — Schema-version tracking, migration functions, and the ``init_schema`` driver (~467 LOC)
+  db_schemas.py         — Canonical SQLite schema definitions for CoordinationHub (~305 LOC)
   dependencies.py       — Cross-agent dependency declaration and satisfaction tracking (~140 LOC)
   dependency_subsystem.py — Dependency subsystem — cross-agent dependency declarations and checks (~143 LOC)
   dispatch.py           — Tool dispatch for CoordinationHub (~107 LOC)
@@ -53,7 +53,7 @@ coordinationhub/
   lease_subsystem.py    — Lease subsystem — HA coordinator lease management (~167 LOC)
   leases.py             — Zero-deps lease primitives for HA coordinator leadership (~220 LOC)
   limits.py             — String-length caps for user-supplied fields (T6.14) (~40 LOC)
-  lock_cache.py         — In-memory lock cache for CoordinationHub (~180 LOC)
+  lock_cache.py         — In-memory lock cache for CoordinationHub (~188 LOC)
   lock_ops.py           — Shared lock primitives used by both local locks and coordination locks (~209 LOC)
   locking_subsystem.py  — Locking subsystem — document lock acquire/release/refresh/list/admin (~445 LOC)
   mcp_server.py         — HTTP REST admin / dashboard endpoint for CoordinationHub (~578 LOC)
@@ -114,7 +114,7 @@ coordinationhub/
 ```
 <!-- /GEN -->
 
-The `tests/` directory contains the pytest suite (<!-- GEN:test-count -->738<!-- /GEN --> tests across 28 files), including `tests/fixtures/claude_code_events/` contract fixtures.
+The `tests/` directory contains the pytest suite (<!-- GEN:test-count -->744<!-- /GEN --> tests across 28 files), including `tests/fixtures/claude_code_events/` contract fixtures.
 
 ## Module Design
 
@@ -238,7 +238,7 @@ To disable hooks temporarily, add `"disableAllHooks": true` to `~/.claude/settin
 
 ```bash
 python -m pytest tests/ -v
-# <!-- GEN:test-count -->738<!-- /GEN --> tests across 28 test files:
+# <!-- GEN:test-count -->744<!-- /GEN --> tests across 28 test files:
 #   test_agent_lifecycle.py    — 27 tests
 #   test_locking.py            — 46 tests (includes smart reap)
 #   test_notifications.py      — 8 tests
