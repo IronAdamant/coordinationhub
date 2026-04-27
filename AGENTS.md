@@ -114,7 +114,7 @@ coordinationhub/
 ```
 <!-- /GEN -->
 
-The `tests/` directory contains the pytest suite (<!-- GEN:test-count -->781<!-- /GEN --> tests across 28 files), including `tests/fixtures/claude_code_events/` contract fixtures.
+The `tests/` directory contains the pytest suite (<!-- GEN:test-count -->798<!-- /GEN --> tests across 28 files), including `tests/fixtures/claude_code_events/` contract fixtures.
 
 ## Module Design
 
@@ -293,7 +293,7 @@ To disable hooks temporarily, add `"disableAllHooks": true` to `~/.claude/settin
 
 ```bash
 python -m pytest tests/ -v
-# <!-- GEN:test-count -->781<!-- /GEN --> tests across 28 test files:
+# <!-- GEN:test-count -->798<!-- /GEN --> tests across 28 test files:
 #   test_agent_lifecycle.py    — 27 tests
 #   test_locking.py            — 46 tests (includes smart reap)
 #   test_notifications.py      — 8 tests

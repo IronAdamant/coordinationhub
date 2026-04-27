@@ -6,7 +6,7 @@
 
 This file is the **public record of which audit items have been fixed**. Each entry names the item code, a one-line description of the issue category, and (where present) the schema-version or test-suite milestone the fix landed at. Reproduction notes, exploit paths, and per-line scenarios live in the local `findings/opus_review_5_ultrareview/audit_findings.md` (gitignored — see *Visibility note* below).
 
-**Scoreboard at close-out:** 153 / 168 tier items closed. 754 → 780 tests (+121 over the cleanup pass, +26 from the post-audit dispatch-coverage follow-up). Schema at v27.
+**Scoreboard at close-out:** 153 / 168 tier items closed. 633 → 797 tests (+121 over the cleanup pass, +43 from the post-audit dispatch-coverage follow-up — first 26 added the zero-coverage tools, second 17 came from the audit-of-the-audit pass that found `await_subagent_registration` had only a docstring mention). Schema at v27.
 
 ---
 
@@ -141,7 +141,7 @@ These were reviewed during the cleanup pass and kept deferred — listed here so
 
 A separate set of forward-looking concerns surfaced during the cleanup itself (test-coverage gaps in the dispatch surface, LOC-discipline reconciliation, layer-count review, audit visibility). Those are tracked under `findings/post_opus_review_5_followups/` (also gitignored) and resolved as of 2026-04-27. The visible artefacts of those resolutions in this repo are:
 
-- `tests/test_dispatch_coverage.py` — meta-test that fails if any `TOOL_DISPATCH` entry has zero references in `tests/`.
+- `tests/test_dispatch_coverage.py` — meta-test that fails if any `TOOL_DISPATCH` entry has no call-site references in `tests/`. Strips docstrings before scanning (the original substring version passed `await_subagent_registration` because of a docstring word); prefers `engine.<tool>(` and `dispatch_tool(... "<tool>" ...)` matches.
 - `AGENTS.md` "LOC Policy" + "Layering Discipline" sections.
 - `scripts/gen_docs.py` `STALE_PHRASES` linter + `largest-files` GEN block.
 - This file (`SECURITY_FIXES.md`).

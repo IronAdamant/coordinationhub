@@ -360,47 +360,325 @@ class TestWaitForHandoff:
 
 
 # --------------------------------------------------------------------- #
+# Second-pass coverage: tools that the substring meta-test counted as
+# "covered" but whose only references were docstring mentions or
+# narrow validation-only paths. Discovered by manual audit per the
+# follow-up to findings/post_opus_review_5_followups/01.
+# --------------------------------------------------------------------- #
+
+
+class TestAwaitSubagentRegistration:
+    """``await_subagent_registration`` had ZERO real test coverage before
+    this class — its only mention in ``tests/`` was a docstring word in
+    ``test_authz.py``. The substring meta-test passed it as covered."""
+
+    def test_already_registered_returns_immediately(self, engine):
+        parent = engine.generate_agent_id()
+        engine.register_agent(parent)
+        engine.spawn_subagent(parent, "Explore", description="t")
+        child = engine.generate_agent_id(parent)
+        engine.register_agent(child, parent)
+        engine.report_subagent_spawned(parent, "Explore", child)
+
+        start = time.time()
+        result = engine.await_subagent_registration(parent, "Explore", timeout=5.0)
+        elapsed = time.time() - start
+
+        assert result["registered"] is True
+        assert result["spawn"]["status"] == "registered"
+        assert elapsed < 1.0, "should fast-path on already-registered spawn"
+
+    def test_wakes_on_report_subagent_spawned(self, engine):
+        parent = engine.generate_agent_id()
+        engine.register_agent(parent)
+        engine.spawn_subagent(parent, "Plan", description="t")
+
+        result_box: dict = {}
+
+        def _waiter() -> None:
+            result_box["r"] = engine.await_subagent_registration(
+                parent, "Plan", timeout=5.0,
+            )
+
+        t = threading.Thread(target=_waiter)
+        t.start()
+        time.sleep(0.1)  # let waiter park on event bus
+        child = engine.generate_agent_id(parent)
+        engine.register_agent(child, parent)
+        engine.report_subagent_spawned(parent, "Plan", child)
+        t.join(timeout=5.0)
+
+        assert "r" in result_box
+        assert result_box["r"]["registered"] is True
+
+    def test_subagent_type_filter_ignores_other_types(self, engine):
+        """Wait for ``Plan`` type; an ``Explore`` registration should NOT wake it."""
+        parent = engine.generate_agent_id()
+        engine.register_agent(parent)
+        engine.spawn_subagent(parent, "Plan", description="p")
+        engine.spawn_subagent(parent, "Explore", description="e")
+
+        result_box: dict = {}
+
+        def _waiter() -> None:
+            result_box["r"] = engine.await_subagent_registration(
+                parent, "Plan", timeout=0.4,
+            )
+
+        t = threading.Thread(target=_waiter)
+        t.start()
+        time.sleep(0.1)
+        # Register Explore — must not wake the Plan waiter.
+        explore_child = engine.generate_agent_id(parent)
+        engine.register_agent(explore_child, parent)
+        engine.report_subagent_spawned(parent, "Explore", explore_child)
+        t.join(timeout=2.0)
+
+        assert "r" in result_box
+        assert result_box["r"].get("timed_out") is True
+
+    def test_times_out_when_no_registration(self, engine):
+        parent = engine.generate_agent_id()
+        engine.register_agent(parent)
+        engine.spawn_subagent(parent, "Explore", description="t")
+
+        start = time.time()
+        result = engine.await_subagent_registration(parent, "Explore", timeout=0.2)
+        elapsed = time.time() - start
+
+        assert result.get("timed_out") is True
+        assert result["parent_agent_id"] == parent
+        assert 0.15 < elapsed < 1.5
+
+
+class TestManageDependenciesAllModes:
+    """Pre-audit, only ``mode='declare'`` was exercised (test_tasks.py:469).
+    Every other mode (``check``/``blockers``/``assert``/``satisfy``/``list``/``wait``)
+    had no test."""
+
+    def _two_agents_with_dep(self, engine):
+        a = engine.generate_agent_id()
+        engine.register_agent(a)
+        b = engine.generate_agent_id()
+        engine.register_agent(b)
+        result = engine.manage_dependencies(
+            mode="declare",
+            dependent_agent_id=a,
+            depends_on_agent_id=b,
+            condition="agent_stopped",
+        )
+        return a, b, result["dep_id"]
+
+    def test_check_mode_reports_blocked(self, engine):
+        a, _b, _dep = self._two_agents_with_dep(engine)
+        result = engine.manage_dependencies(mode="check", agent_id=a)
+
+        assert result["agent_id"] == a
+        assert result["blocked"] is True
+        assert len(result["unsatisfied"]) == 1
+
+    def test_check_mode_requires_agent_id(self, engine):
+        result = engine.manage_dependencies(mode="check")
+        assert "error" in result
+        assert "agent_id" in result["error"]
+
+    def test_assert_mode_blocks_until_satisfied(self, engine):
+        a, _b, dep = self._two_agents_with_dep(engine)
+
+        before = engine.manage_dependencies(mode="assert", agent_id=a)
+        assert before["can_start"] is False
+        assert len(before["blockers"]) == 1
+
+        engine.manage_dependencies(mode="satisfy", dep_id=dep)
+
+        after = engine.manage_dependencies(mode="assert", agent_id=a)
+        assert after["can_start"] is True
+
+    def test_satisfy_requires_dep_id(self, engine):
+        result = engine.manage_dependencies(mode="satisfy")
+        assert "error" in result
+        assert "dep_id" in result["error"]
+
+    def test_list_mode_returns_all_dependencies(self, engine):
+        a, _b, _dep = self._two_agents_with_dep(engine)
+
+        result = engine.manage_dependencies(mode="list", agent_id=a)
+
+        assert result["count"] == 1
+        assert result["dependencies"][0]["dependent_agent_id"] == a
+
+    def test_declare_requires_both_agent_ids(self, engine):
+        result = engine.manage_dependencies(
+            mode="declare", dependent_agent_id="hub.x.0",
+        )
+        assert "error" in result
+        assert "depends_on_agent_id" in result["error"]
+
+    def test_unknown_mode_returns_error(self, engine):
+        result = engine.manage_dependencies(mode="bogus", agent_id="hub.x.0")
+        assert "error" in result
+        assert "Unknown mode" in result["error"]
+
+
+class TestManageWorkIntentsBehaviour:
+    """Pre-audit, ``manage_work_intents`` had only validation-shape tests
+    (test_validation.py). The actual ``declare → get → clear`` lifecycle
+    + multi-file isolation (T1.16) were unverified at the dispatch layer."""
+
+    def test_declare_then_get_returns_intent(self, engine, registered_agent):
+        engine.manage_work_intents(
+            action="declare",
+            agent_id=registered_agent,
+            document_path="src/a.py",
+            intent="writing",
+            ttl=60.0,
+        )
+
+        result = engine.manage_work_intents(action="get", agent_id=registered_agent)
+
+        assert result["count"] == 1
+        assert result["intents"][0]["intent"] == "writing"
+
+    def test_clear_specific_path_leaves_others(self, engine, registered_agent):
+        engine.manage_work_intents(
+            action="declare", agent_id=registered_agent,
+            document_path="src/a.py", intent="writing",
+        )
+        engine.manage_work_intents(
+            action="declare", agent_id=registered_agent,
+            document_path="src/b.py", intent="reading",
+        )
+
+        engine.manage_work_intents(
+            action="clear", agent_id=registered_agent,
+            document_path="src/a.py",
+        )
+
+        remaining = engine.manage_work_intents(action="get", agent_id=registered_agent)
+        assert remaining["count"] == 1
+        assert remaining["intents"][0]["intent"] == "reading"
+
+    def test_clear_without_path_clears_all(self, engine, registered_agent):
+        engine.manage_work_intents(
+            action="declare", agent_id=registered_agent,
+            document_path="src/a.py", intent="writing",
+        )
+        engine.manage_work_intents(
+            action="declare", agent_id=registered_agent,
+            document_path="src/b.py", intent="reading",
+        )
+
+        engine.manage_work_intents(action="clear", agent_id=registered_agent)
+
+        result = engine.manage_work_intents(action="get", agent_id=registered_agent)
+        assert result["count"] == 0
+
+    def test_declare_missing_required_fields_returns_error(self, engine, registered_agent):
+        result = engine.manage_work_intents(
+            action="declare", agent_id=registered_agent,
+        )
+        assert "error" in result
+        assert "document_path" in result["error"]
+
+    def test_unknown_action_returns_error(self, engine, registered_agent):
+        result = engine.manage_work_intents(action="bogus", agent_id=registered_agent)
+        assert "error" in result
+        assert "Unknown action" in result["error"]
+
+
+class TestGetContentionHotspotsEmpty:
+    """Pre-audit, only the populated path was exercised (test_conflicts.py).
+    The empty-state response shape was not pinned."""
+
+    def test_empty_returns_empty_list_not_error(self, engine):
+        result = engine.get_contention_hotspots()
+
+        assert isinstance(result, dict)
+        # Engine returns a dict containing a list. Keys vary; the
+        # invariant is "no exception, list-shaped result".
+        list_field = next(
+            (v for v in result.values() if isinstance(v, list)), None,
+        )
+        assert list_field is not None, f"expected a list in {result!r}"
+        assert list_field == []
+
+
+# --------------------------------------------------------------------- #
 # Regression guard: every dispatch entry must be referenced in tests/
 # --------------------------------------------------------------------- #
 
 
-def _gather_test_text() -> str:
-    """Read every .py under tests/ and return concatenated text.
+import re as _re
 
-    Uses raw substring search rather than AST parsing because a dispatch
-    name appearing in a docstring or comment still demonstrates intent;
-    the actual bug shape we're guarding against is "no test file even
-    mentions this tool by name."
+
+def _gather_test_callsites() -> str:
+    """Read every .py under tests/ and return code with docstrings AND
+    triple-quoted strings stripped, so the meta-test sees only callable
+    code.
+
+    The first version of this helper used a naive substring search
+    against the raw file text. That passed ``await_subagent_registration``
+    as "covered" because the only mention was a docstring word in
+    ``test_authz.py``. The strengthened version below removes triple-
+    quoted regions before scanning so that a docstring mention no
+    longer satisfies the regression guard.
     """
     here = os.path.dirname(os.path.abspath(__file__))
+    triple = _re.compile(r'(?s)"""(?:.|\n)*?"""|\'\'\'(?:.|\n)*?\'\'\'')
     parts = []
     for fn in sorted(os.listdir(here)):
         if not fn.endswith(".py"):
             continue
         with open(os.path.join(here, fn), encoding="utf-8") as fh:
-            parts.append(fh.read())
+            text = fh.read()
+        # Drop docstrings + multi-line strings so prose mentions don't count.
+        parts.append(triple.sub("", text))
     return "\n".join(parts)
 
 
+def _tool_is_invoked(tool: str, code: str) -> bool:
+    """Return True if ``tool`` appears in a position consistent with
+    actually being called from the test:
+
+    1. ``engine.<tool>(``                — direct engine invocation
+    2. ``dispatch_tool(..., "<tool>"...`` — MCP dispatch invocation
+    3. ``"<tool>"`` followed by ``,`` or ``:`` (TOOL_SCHEMAS keys, etc.)
+
+    The substring fallback (mention anywhere in code) still counts —
+    it's the floor, not the ceiling. The point of the structured checks
+    is to surface tools whose only mention is a stale comment / module
+    docstring, which is what the original meta-test missed.
+    """
+    if f"engine.{tool}(" in code:
+        return True
+    if f'dispatch_tool(engine, "{tool}"' in code:
+        return True
+    if f'"{tool}"' in code or f"'{tool}'" in code:
+        return True
+    return False
+
+
 def test_every_dispatch_tool_has_test_coverage():
-    """Every entry in ``TOOL_DISPATCH`` must be referenced by at least
+    """Every entry in ``TOOL_DISPATCH`` must be invoked from at least
     one test file under ``tests/``.
 
-    Substring search — not a real coverage measurement — but catches the
-    case where a dispatch entry has zero test mentions at all. The
-    ``_handoff`` shadowing bug (commit ``fb9e200``) sat unnoticed for 6
-    commits because ``broadcast(handoff_targets=...)`` had zero
-    coverage. Don't let it regress.
+    Strengthened from the original substring meta-test: the post-audit
+    pass (findings/post_opus_review_5_followups/01 follow-up) found that
+    ``await_subagent_registration`` had only a docstring mention and
+    no actual call. The substring check passed it as covered. The
+    current version strips docstrings before scanning and prefers
+    structured ``engine.<tool>(`` / ``dispatch_tool(... "<tool>" ...)``
+    matches.
 
     If you intentionally remove a test that covered tool X, add a
     replacement before deleting the old one.
     """
-    text = _gather_test_text()
+    code = _gather_test_callsites()
     uncovered = sorted(
-        tool for tool in TOOL_DISPATCH if tool not in text
+        tool for tool in TOOL_DISPATCH if not _tool_is_invoked(tool, code)
     )
     assert not uncovered, (
-        "Dispatch tools with zero references in tests/: "
+        "Dispatch tools without call-site references in tests/: "
         + ", ".join(uncovered)
         + ". Add at least one test per tool — see "
         "findings/post_opus_review_5_followups/01_test_coverage_gaps for "
