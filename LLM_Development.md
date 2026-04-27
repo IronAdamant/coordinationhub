@@ -1,11 +1,80 @@
 # LLM_Development.md — CoordinationHub
 
 **Version:** <!-- GEN:version -->0.7.7<!-- /GEN -->
-**Last updated:** 2026-04-21
+**Last updated:** 2026-04-27
 
 ## Change Log
 
 All significant changes to the CoordinationHub project are documented here in reverse chronological order.
+
+---
+
+## 2026-04-24 — T6.22 god-object decomposition (CoordinationEngine: 12 mixins → 12 composed subsystems, zero MRO inheritance)
+
+`CoordinationEngine` was a 12-mixin host class. The original audit (T6.22) deferred decomposition as a major-version rewrite. A coupling-audit subagent investigation flipped that read: the 12 mixins were 12 independent namespaces sharing infrastructure (`_connect`, `_publish_event`, `_hybrid_wait`), not entangled state, with **only 2 cross-mixin calls in the entire codebase** (`BroadcastMixin → get_lock_status`, `IdentityMixin → release_agent_locks`) — which made incremental extraction viable. Twelve sequential commits; 737 tests green at every step; zero regressions.
+
+### Pattern
+
+Each mixin lifted into a standalone class taking infra callables as constructor deps (`connect_fn`, `publish_event_fn`, optional `hybrid_wait_fn`, optional lazy `project_root_getter`). `CoordinationEngine.__init__` instantiates each as a composed attribute (`self._spawner`, `self._work_intent`, etc.). One-liner facade methods on the engine preserve the public API exactly — dispatch table, CLI, hooks, and tests didn't move. Cross-subsystem calls (Broadcast → `get_lock_status`, Identity → `release_agent_locks`) are wired by passing the dependency subsystem at construction, never via MRO.
+
+Two refinements emerged during the rollout:
+- **`read_only_engine()` rebind** — subsystems capture bound methods at construction; replicas need explicit `replica._<sub>._connect = replica._connect`. Spawner extraction surfaced this; applied to every subsequent step.
+- **Lazy `project_root_getter` closure** — instead of capturing `_storage.project_root` as a value, pass a callable that closes over `self._storage`. Replicas auto-pick up their own root, no extra rebind.
+
+### Steps
+
+| # | Subsystem | File | Commit | Notes |
+|---|-----------|------|--------|-------|
+| 1 | Spawner | `spawner_subsystem.py` | `1ee46c6` | Discovered the `read_only_engine` rebind requirement |
+| 2 | WorkIntent | `work_intent_subsystem.py` | `3d1bd48` | Introduced lazy `project_root_getter` |
+| 3 | Lease | `lease_subsystem.py` | `b4a3e6b` | 2-dep, no waits |
+| 4 | Dependency | `dependency_subsystem.py` | `d6c8796` | 2-dep |
+| 5 | Messaging | `messaging_subsystem.py` | `d9f84d3` | Preserved T2.4 `caller_agent_id` + T7.23 dual-path |
+| 6 | Handoff | `handoff_subsystem.py` | `ded641d` | Preserved T1.15 caller-vs-row authz |
+| 7 | Change | `change_subsystem.py` | `e0c21a8` | Preserved housekeeping `prune_notifications` |
+| 8 | Task | `task_subsystem.py` | `8182c7a` | Largest surface; preserved T1.13 / T6.38 / T6.39 / T6.40 |
+| 9 | Visibility | `visibility_subsystem.py` | `64c3ff4` | Incidental finding: `self._graph` was a dead attribute |
+| 10 | Locking | `locking_subsystem.py` | `0660785` | Takes `_lock_cache` as a shared dep (engine still owns it) |
+| 11 | Broadcast | `broadcast_subsystem.py` | `fb9e200` | First explicit cross-subsystem dep (`locking=self._locking`) |
+| 12 | Identity | `identity_subsystem.py` | `5cf75ef` | Final step; `CoordinationEngine.__mro__ == [CoordinationEngine, object]` |
+
+### Outcome
+
+`CoordinationEngine` is now a pure composition with zero mixins in its MRO. The audit's "12 independent namespaces" characterization held up: 10 of 12 subsystems had zero cross-subsystem deps; only Broadcast and Identity needed explicit `Locking` injection.
+
+### Latent bug fixed incidentally (Broadcast extraction, `fb9e200`)
+
+`BroadcastMixin._handoff(...)` private helper had been silently shadowed by `self._handoff` (the Handoff subsystem attribute introduced at step 6 / `ded641d`). No test exercised the `broadcast(handoff_targets=...)` branch, so the shadowing never surfaced. The Broadcast extraction relocated the helper inside the new class, fixing the path. **Follow-up:** add a regression test for `broadcast(handoff_targets=...)` to lock in the fix (tracked).
+
+### Files added / removed
+
+- Added: 12 `*_subsystem.py` files in `coordinationhub/`.
+- Removed: 12 `core_*.py` mixin files.
+- `core.py` reshaped from "host class with 12 mixin parents" to "host class composing 12 subsystems behind facade methods."
+
+---
+
+## 2026-04-24 — opus_review_5 audit cleanup (8 deferred milestones closed, 7 commits, +104 tests)
+
+Earlier deferred audit items grouped into 8 standalone milestones. All closed except for items explicitly re-deferred with documented risk/benefit reasoning (T4.1 full FK rollout, T4.8 schema rebaseline, T6.4 async event bus, T6.37 / T7.23 breaking-API concerns).
+
+### Commits in order
+
+- **`32568e8` — Periodic housekeeping (T1.17 tail, T4.7, T7.32).** New `coordinationhub/housekeeping.py` with `HousekeepingScheduler` daemon thread. Runs four pruners on independent intervals: `coordination_events`, stuck-stopped agents (new `prune_stopped_agents` primitive in `agent_registry.py`), `assessment_results.details_json` (new `prune_assessment_results` primitive), and expired work intents. Opt-in via `CoordinationEngine(housekeeping=True)` or `COORDINATIONHUB_HOUSEKEEPING=1`. Default off so short CLI invocations stay thread-free. New indexes: `idx_assessment_results_run_at`, `idx_agents_status_heartbeat`. 27 new tests in `tests/test_housekeeping.py`.
+- **`f26a2e3` — MCP transport (T3.2, T3.6, T3.8, T3.13).** T3.2: `stdio_adapter` handlers now accept an optional shared `hook` kwarg; `main()` builds one `StdioHook` per event via `_HookRunner` and threads it through every branch (no more per-handler engine boot). T3.6: renamed `CoordinationHubMCPServer` → `CoordinationHubAdminServer` with the old name kept as a back-compat alias; module/class docstrings now state plainly the HTTP endpoint is REST admin, not MCP transport. T3.8: SSE is event-driven via new `EventBus.subscribe_all()`; `Last-Event-ID` triggers replay from `coordination_events`; idle ticks emit `: keepalive` comments. T3.13: new `BaseHook.translate_output()` (pass-through default for Claude Code); `CursorHook` and `KimiCliHook` flatten Claude's nested `hookSpecificOutput` into a vendor-neutral `{decision, reason, message, event}` shape. 15 new tests.
+- **`49d2caa` — Schema validation (T6.11, T6.12, T7.44, T7.46, T7.49).** New `coordinationhub/validation.py` — zero-dep stdlib JSON-Schema subset (type, required, properties, additionalProperties, enum, minimum/maximum, minLength/maxLength, items, oneOf, null/type-list). `dispatch_tool` now validates `arguments` against `TOOL_SCHEMAS[name]["parameters"]` before dispatch. Treats explicit `None` on optional non-null fields as "absent" (preserves T3.5). Tightened identity / messaging / intent / tasks schemas with `minLength`, `maxLength` from `limits.MAX_*`, enum on mode/action fields, `oneOf` for action-gated required fields. 38 new tests.
+- **`60ca946` — Authz gaps (T2.4).** Added optional `caller_agent_id` parameter on `send_message`, `manage_messages`, `report_subagent_spawned`, and `cancel_spawn`. When supplied, must match the row's owner; mismatch returns `{"sent": False, "reason": "caller_mismatch"}` (or analogous) before any DB work. Closes the three named impersonation gaps: `send_message` forging, `manage_messages` inbox siphon, `report_subagent_spawned` child claim, `cancel_spawn` cross-parent. Dispatch table whitelists the new param for the three MCP-surface tools; `cancel_spawn` is CLI-only. Schemas document the field. 16 new tests in `tests/test_authz.py`.
+- **`571606d` — CLI polish (T6.18, T6.20, T7.7, T7.19).** `prune-notifications` accepts `--max-age-seconds` (canonical) + `--max-age` (alias). `watch` accepts `--poll-interval` (canonical) + `--interval` (alias). `-j` short-form for `--json` on the shared parser. Explicit MILLISECONDS unit in `--backoff-ms` / `--timeout-ms` help text. "Why skipped" comments above each `@command`-decorator holdout (`cmd_init`, `cmd_doctor`, `cmd_auto_start_dashboard`, `cmd_watch`).
+- **`a795787` — Schema CHECK triggers (T4.2, T4.5).** New schema migration v26 installs `BEFORE INSERT/UPDATE` triggers on `tasks.status` and `pending_tasks.status` enforcing the canonical enums via `RAISE(ABORT, ...)`. SQLite can't add CHECK constraints in place — would need a full table rebuild — but triggers deliver the same guarantee with no rebuild risk. `pending_tasks.source` deliberately unchecked (open-ended IDE-prefix vocabulary). 4 new tests.
+- **`754204c` — MCP executor sizing + context replica read (T7.29, T7.40).** T7.40: `mcp_stdio` now creates an explicitly sized `ThreadPoolExecutor` (default 8, env-tunable) instead of using asyncio's default pool. Lifecycle wired into `_run_server` finally block (shutdown precedes engine close). T7.29: `context.build_context_bundle` accepts an optional `read_connect_fn`; `IdentityMixin._build_context_bundle` passes `self._storage.read_only_connection` so registration doesn't pin a writer slot for read-only queries.
+
+### Explicitly re-deferred with rationale documented
+
+T4.1 (full FK rollout) — 12 table rebuilds for modest correctness benefit since app-layer guards are tight and a live-DB orphan audit confirmed zero orphans across all 30 conventional FK edges. T4.8 (schema rebaseline) — pure cleanup, no correctness benefit. T6.4 (async event bus) — would break T1.10's durable-before-publish contract. T6.37 (`query_tasks` dispatch split) and T7.23 (`send_message` duplicate paths) — both breaking-API changes with no correctness benefit.
+
+### Test count
+
+633 tests at start of session → 737 after the audit cleanup (T6.22 added no tests beyond the existing coverage).
 
 ---
 
