@@ -524,6 +524,56 @@ class TestCliExitCodes:
         err = capsys.readouterr().err
         assert "FAILED" in err  # denial message on stderr, not stdout
 
+    def test_request_deregistration_unknown_child_exits_3(
+        self, tmp_path, capsys,
+    ):
+        """T3.16 tail: cmd_request_subagent_deregistration on an unknown
+        child must return exit code 3 with the message on stderr.
+        """
+        from coordinationhub.cli_agents import cmd_register
+        from coordinationhub.cli_spawner import cmd_request_subagent_deregistration
+
+        cmd_register(_args(storage_dir=str(tmp_path), agent_id="parent.x",
+                            parent_id=None, raw_ide_id=None))
+        # Drain register's stdout so we only inspect the deregistration
+        # output below.
+        capsys.readouterr()
+
+        rc = cmd_request_subagent_deregistration(_args(
+            storage_dir=str(tmp_path),
+            parent_agent_id="parent.x",
+            child_agent_id="ghost.child.999",
+        ))
+        assert rc == 3
+        captured = capsys.readouterr()
+        # Not-found message goes to stderr.
+        assert "not found" in captured.err.lower()
+        # Stdout must be empty (no successful-looking output).
+        assert captured.out == ""
+
+    def test_refresh_lease_non_holder_exits_4(self, tmp_path, capsys):
+        """T3.16 tail: refreshing a lease the caller does not hold is a
+        denial → exit code 4. Mirrors cmd_acquire_lock's denial path.
+        """
+        from coordinationhub.cli_agents import cmd_register
+        from coordinationhub.cli_leases import cmd_refresh_coordinator_lease
+
+        # Register the agent but never acquire the lease — so refresh
+        # must be rejected by the engine.
+        cmd_register(_args(storage_dir=str(tmp_path), agent_id="not.the.leader",
+                            parent_id=None, raw_ide_id=None))
+        capsys.readouterr()  # drain register's stdout
+
+        rc = cmd_refresh_coordinator_lease(_args(
+            storage_dir=str(tmp_path),
+            agent_id="not.the.leader",
+        ))
+        assert rc == 4
+        captured = capsys.readouterr()
+        # Denial message on stderr, stdout empty.
+        assert "refresh failed" in captured.err.lower()
+        assert captured.out == ""
+
 
 class TestStatusCommand:
     def test_status_json(self, tmp_path):

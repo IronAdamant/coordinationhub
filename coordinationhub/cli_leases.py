@@ -39,11 +39,24 @@ def cmd_refresh_coordinator_lease(engine, args):
     result = engine.refresh_coordinator_lease(agent_id=args.agent_id)
     if args.json_output:
         _print_json(result)
-    elif result.get("refreshed"):
+        # T3.16 tail: propagate exit codes even with --json so scripts
+        # can branch on rc directly. "Not the current lease holder" is
+        # a denial (4), not a not-found.
+        if not result.get("refreshed"):
+            return 4
+        return 0
+    if result.get("refreshed"):
         print(f"Lease refreshed: {result['lease_name']}")
         print(f"  New expiry: {result['expires_at']}")
-    else:
-        print(f"Refresh failed: {result.get('error', 'unknown error')}")
+        return 0
+    # T3.16 tail: caller is not the lease holder → denied (exit 4),
+    # message on stderr. Mirrors cmd_acquire_lock's denial path.
+    import sys as _sys
+    print(
+        f"Refresh failed: {result.get('error', 'unknown error')}",
+        file=_sys.stderr,
+    )
+    return 4
 
 
 # ------------------------------------------------------------------ #

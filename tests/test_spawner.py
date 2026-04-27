@@ -239,3 +239,73 @@ class TestPendingSpawnBackpressure:
         _t.sleep(0.001)
         # Second stash should succeed because the first was expired mid-tx.
         assert engine.spawn_subagent(registered_agent, "b")["stashed"] is True
+
+
+class TestSpawnSourceValidation:
+    """T3.12 tail: ``source`` is validated against
+    ``_VALID_SPAWN_SOURCES`` at the primitive boundary.
+
+    The DB column itself is intentionally open-ended (no CHECK
+    constraint per the audit), but the primitive enforces the closed
+    vocabulary so a typo (``cusor``, ``kimii``) doesn't silently land
+    in the table and break dashboard filters.
+    """
+
+    def test_stash_rejects_unknown_source(self, engine, registered_agent):
+        result = engine.spawn_subagent(
+            registered_agent, "Explore", source="bogus_source",
+        )
+        assert result["stashed"] is False
+        assert result["reason"] == "invalid_source"
+        assert result["source"] == "bogus_source"
+        assert "external" in result["valid_sources"]
+        assert "kimi_cli" in result["valid_sources"]
+
+    def test_stash_accepts_all_known_sources(self, engine):
+        """Sanity: every entry in the vocabulary must be accepted."""
+        from coordinationhub.spawner import _VALID_SPAWN_SOURCES
+
+        for src in _VALID_SPAWN_SOURCES:
+            parent = engine.generate_agent_id()
+            engine.register_agent(parent)
+            result = engine.spawn_subagent(parent, "Explore", source=src)
+            assert result["stashed"] is True, (
+                f"Source {src!r} from _VALID_SPAWN_SOURCES was rejected"
+            )
+
+    def test_stash_default_source_is_valid(self, engine, registered_agent):
+        """The default ``source='external'`` must remain in the
+        vocabulary — otherwise every default-source caller breaks.
+        """
+        result = engine.spawn_subagent(registered_agent, "Explore")
+        assert result["stashed"] is True
+
+    def test_report_rejects_unknown_source(self, engine, registered_agent):
+        """``report_subagent_spawned`` enforces the same vocabulary."""
+        child = engine.generate_agent_id(registered_agent)
+        engine.register_agent(child, registered_agent)
+
+        result = engine.report_subagent_spawned(
+            registered_agent, "Explore", child, source="bogus_source",
+        )
+        assert result.get("reported") is False
+        assert result["reason"] == "invalid_source"
+        assert result["source"] == "bogus_source"
+        # Critical: the pending-table row must NOT have been touched
+        # when the source is rejected.
+        spawns = engine.get_pending_spawns(registered_agent, include_consumed=True)
+        assert spawns == [], (
+            "report_subagent_spawned with invalid_source must not "
+            "consume or mutate any pending row"
+        )
+
+    def test_report_accepts_known_source(self, engine, registered_agent):
+        """Sanity: a valid source still reports successfully."""
+        engine.spawn_subagent(registered_agent, "Explore", description="t")
+        child = engine.generate_agent_id(registered_agent)
+        engine.register_agent(child, registered_agent)
+
+        result = engine.report_subagent_spawned(
+            registered_agent, "Explore", child, source="cursor",
+        )
+        assert result["reported"] is True

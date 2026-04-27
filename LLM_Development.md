@@ -1675,12 +1675,12 @@ Block markers for multi-line content:
 | `coordinationhub/cli_commands.py` | 98 | CoordinationHub CLI command handlers |
 | `coordinationhub/cli_deps.py` | 64 | CLI commands for cross-agent dependency declarations |
 | `coordinationhub/cli_intent.py` | 35 | CLI commands for the work intent board |
-| `coordinationhub/cli_leases.py` | 96 | CLI commands for HA coordinator lease management |
+| `coordinationhub/cli_leases.py` | 104 | CLI commands for HA coordinator lease management |
 | `coordinationhub/cli_locks.py` | 272 | Document locking and coordination CLI commands |
 | `coordinationhub/cli_parser.py` | 379 | Argument parser for the CoordinationHub CLI |
 | `coordinationhub/cli_setup.py` | 313 | CLI commands for setup and diagnostics: ``init``, ``doctor``, ``watch`` |
 | `coordinationhub/cli_setup_doctor.py` | 148 | Diagnostic checks for ``coordinationhub doctor`` |
-| `coordinationhub/cli_spawner.py` | 105 | CLI commands for HA coordinator spawner — sub-agent registry management |
+| `coordinationhub/cli_spawner.py` | 121 | CLI commands for HA coordinator spawner — sub-agent registry management |
 | `coordinationhub/cli_sse.py` | 56 | CLI commands for SSE dashboard server |
 | `coordinationhub/cli_tasks.py` | 163 | CLI commands for the task registry |
 | `coordinationhub/cli_utils.py` | 51 | Shared CLI helper functions used by all cli_* sub-modules |
@@ -1745,7 +1745,7 @@ Block markers for multi-line content:
 | `coordinationhub/schemas/spawner.py` | 201 | Spawner tool schemas for CoordinationHub |
 | `coordinationhub/schemas/tasks.py` | 230 | Task Registry tool schemas for CoordinationHub |
 | `coordinationhub/schemas/visibility.py` | 159 | Graph & Visibility tool schemas for CoordinationHub |
-| `coordinationhub/spawner.py` | 395 | Zero-deps spawner primitives for HA coordinator sub-agent registry |
+| `coordinationhub/spawner.py` | 414 | Zero-deps spawner primitives for HA coordinator sub-agent registry |
 | `coordinationhub/spawner_subsystem.py` | 233 | Spawner subsystem — HA coordinator sub-agent spawn management |
 | `coordinationhub/task_failures.py` | 149 | Task failure tracking and dead letter queue for CoordinationHub |
 | `coordinationhub/task_subsystem.py` | 241 | Task subsystem — shared task registry with hierarchy + dead-letter queue |
@@ -1759,7 +1759,7 @@ Block markers for multi-line content:
 
 Inline markers for single values (render invisibly in Markdown):
 ```markdown
-This project has <!-- GEN:test-count -->744<!-- /GEN --> tests.
+This project has <!-- GEN:test-count -->755<!-- /GEN --> tests.
 ```
 
 Unknown marker names raise an error during rewrite (catches typos).

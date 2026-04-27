@@ -26,12 +26,12 @@ coordinationhub/
   cli_commands.py       — CoordinationHub CLI command handlers (~98 LOC)
   cli_deps.py           — CLI commands for cross-agent dependency declarations (~64 LOC)
   cli_intent.py         — CLI commands for the work intent board (~35 LOC)
-  cli_leases.py         — CLI commands for HA coordinator lease management (~96 LOC)
+  cli_leases.py         — CLI commands for HA coordinator lease management (~104 LOC)
   cli_locks.py          — Document locking and coordination CLI commands (~272 LOC)
   cli_parser.py         — Argument parser for the CoordinationHub CLI (~379 LOC)
   cli_setup.py          — CLI commands for setup and diagnostics: ``init``, ``doctor``, ``watch`` (~313 LOC)
   cli_setup_doctor.py   — Diagnostic checks for ``coordinationhub doctor`` (~148 LOC)
-  cli_spawner.py        — CLI commands for HA coordinator spawner — sub-agent registry management (~105 LOC)
+  cli_spawner.py        — CLI commands for HA coordinator spawner — sub-agent registry management (~121 LOC)
   cli_sse.py            — CLI commands for SSE dashboard server (~56 LOC)
   cli_tasks.py          — CLI commands for the task registry (~163 LOC)
   cli_utils.py          — Shared CLI helper functions used by all cli_* sub-modules (~51 LOC)
@@ -64,7 +64,7 @@ coordinationhub/
   paths.py              — Path normalization and project-root detection utilities (~39 LOC)
   pending_tasks.py      — Pending sub-agent task storage for CoordinationHub (~109 LOC)
   scan.py               — File ownership scan for CoordinationHub (~279 LOC)
-  spawner.py            — Zero-deps spawner primitives for HA coordinator sub-agent registry (~395 LOC)
+  spawner.py            — Zero-deps spawner primitives for HA coordinator sub-agent registry (~414 LOC)
   spawner_subsystem.py  — Spawner subsystem — HA coordinator sub-agent spawn management (~233 LOC)
   task_failures.py      — Task failure tracking and dead letter queue for CoordinationHub (~149 LOC)
   task_subsystem.py     — Task subsystem — shared task registry with hierarchy + dead-letter queue (~241 LOC)
@@ -114,7 +114,7 @@ coordinationhub/
 ```
 <!-- /GEN -->
 
-The `tests/` directory contains the pytest suite (<!-- GEN:test-count -->744<!-- /GEN --> tests across 28 files), including `tests/fixtures/claude_code_events/` contract fixtures.
+The `tests/` directory contains the pytest suite (<!-- GEN:test-count -->755<!-- /GEN --> tests across 28 files), including `tests/fixtures/claude_code_events/` contract fixtures.
 
 ## Module Design
 
@@ -238,7 +238,7 @@ To disable hooks temporarily, add `"disableAllHooks": true` to `~/.claude/settin
 
 ```bash
 python -m pytest tests/ -v
-# <!-- GEN:test-count -->744<!-- /GEN --> tests across 28 test files:
+# <!-- GEN:test-count -->755<!-- /GEN --> tests across 28 test files:
 #   test_agent_lifecycle.py    — 27 tests
 #   test_locking.py            — 46 tests (includes smart reap)
 #   test_notifications.py      — 8 tests

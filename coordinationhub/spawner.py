@@ -40,6 +40,17 @@ except (TypeError, ValueError):
 # boundary.
 _SAFE_SUBAGENT_TYPE = _re.compile(r"^[A-Za-z0-9_-]+$")
 
+# T3.12 tail: the ``source`` column on ``pending_tasks`` is the
+# IDE/origin tag (``cc``, ``cursor``, ``kimi``, ``stdio_adapter``,
+# ``kimi_cli``, ``external``). The DB column itself is intentionally
+# open-ended — no CHECK constraint — but the primitive boundary
+# enforces a closed vocabulary so a typo (``cusor``, ``kimii``) doesn't
+# silently land in the table and break dashboard filters. Mirrors the
+# T7.3 ``_SAFE_SUBAGENT_TYPE`` pattern.
+_VALID_SPAWN_SOURCES = frozenset({
+    "external", "stdio_adapter", "kimi_cli", "cursor", "cc", "kimi",
+})
+
 # T6.9: cap on the number of simultaneously-pending spawn rows. Pre-fix
 # a caller (or a chain of failed IDE integrations) could stash unbounded
 # pending_tasks rows, each carrying a prompt string that's never read.
@@ -157,6 +168,15 @@ def stash_pending_spawn(
             "stashed": False,
             "reason": "invalid_subagent_type",
             "subagent_type": subagent_type,
+        }
+    # T3.12 tail: enforce the closed source vocabulary at the primitive
+    # boundary. DB column stays unconstrained by design.
+    if source not in _VALID_SPAWN_SOURCES:
+        return {
+            "stashed": False,
+            "reason": "invalid_source",
+            "source": source,
+            "valid_sources": sorted(_VALID_SPAWN_SOURCES),
         }
 
     # T6.14: bound free-text fields so a runaway IDE integration can't
@@ -336,6 +356,17 @@ def report_subagent_spawned(
     Cursor, etc.) can call this after spawning a sub-agent via its
     native mechanism.
     """
+    # T3.12 tail: enforce the closed source vocabulary at the primitive
+    # boundary. Same check as ``stash_pending_spawn``.
+    if source not in _VALID_SPAWN_SOURCES:
+        return {
+            "reported": False,
+            "reason": "invalid_source",
+            "source": source,
+            "valid_sources": sorted(_VALID_SPAWN_SOURCES),
+            "parent_agent_id": parent_agent_id,
+            "child_agent_id": child_agent_id,
+        }
     now = time.time()
     with connect() as conn:
         if subagent_type:

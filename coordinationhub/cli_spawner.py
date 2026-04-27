@@ -129,10 +129,31 @@ def cmd_request_subagent_deregistration(engine, args):
     )
     if args.json_output:
         _print_json(result)
-    elif result.get("requested"):
+        # T3.16 tail: still propagate exit codes when --json is set so
+        # scripted callers can branch on rc without re-parsing JSON.
+        if result.get("not_found"):
+            return 3
+        if not result.get("requested"):
+            return 1
+        return 0
+    if result.get("requested"):
         print(f"Stop requested for: {args.child_agent_id}")
-    elif result.get("not_found"):
-        print(f"Agent not found or not active: {args.child_agent_id}")
+        return 0
+    # T3.16 tail: not-found path → exit 3, message on stderr so stdout
+    # pipes don't pick up the error as successful output. Mirrors
+    # cmd_cancel_spawn.
+    import sys as _sys
+    if result.get("not_found"):
+        print(
+            f"Agent not found or not active: {args.child_agent_id}",
+            file=_sys.stderr,
+        )
+        return 3
+    print(
+        f"Stop request failed: {result.get('error', 'unknown')}",
+        file=_sys.stderr,
+    )
+    return 1
 
 
 # ------------------------------------------------------------------ #

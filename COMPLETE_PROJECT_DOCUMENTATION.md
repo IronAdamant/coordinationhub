@@ -1066,12 +1066,12 @@ keep it in sync; CI checks for drift on every push.
 | `coordinationhub/cli_commands.py` | 98 | CoordinationHub CLI command handlers |
 | `coordinationhub/cli_deps.py` | 64 | CLI commands for cross-agent dependency declarations |
 | `coordinationhub/cli_intent.py` | 35 | CLI commands for the work intent board |
-| `coordinationhub/cli_leases.py` | 96 | CLI commands for HA coordinator lease management |
+| `coordinationhub/cli_leases.py` | 104 | CLI commands for HA coordinator lease management |
 | `coordinationhub/cli_locks.py` | 272 | Document locking and coordination CLI commands |
 | `coordinationhub/cli_parser.py` | 379 | Argument parser for the CoordinationHub CLI |
 | `coordinationhub/cli_setup.py` | 313 | CLI commands for setup and diagnostics: ``init``, ``doctor``, ``watch`` |
 | `coordinationhub/cli_setup_doctor.py` | 148 | Diagnostic checks for ``coordinationhub doctor`` |
-| `coordinationhub/cli_spawner.py` | 105 | CLI commands for HA coordinator spawner — sub-agent registry management |
+| `coordinationhub/cli_spawner.py` | 121 | CLI commands for HA coordinator spawner — sub-agent registry management |
 | `coordinationhub/cli_sse.py` | 56 | CLI commands for SSE dashboard server |
 | `coordinationhub/cli_tasks.py` | 163 | CLI commands for the task registry |
 | `coordinationhub/cli_utils.py` | 51 | Shared CLI helper functions used by all cli_* sub-modules |
@@ -1136,7 +1136,7 @@ keep it in sync; CI checks for drift on every push.
 | `coordinationhub/schemas/spawner.py` | 201 | Spawner tool schemas for CoordinationHub |
 | `coordinationhub/schemas/tasks.py` | 230 | Task Registry tool schemas for CoordinationHub |
 | `coordinationhub/schemas/visibility.py` | 159 | Graph & Visibility tool schemas for CoordinationHub |
-| `coordinationhub/spawner.py` | 395 | Zero-deps spawner primitives for HA coordinator sub-agent registry |
+| `coordinationhub/spawner.py` | 414 | Zero-deps spawner primitives for HA coordinator sub-agent registry |
 | `coordinationhub/spawner_subsystem.py` | 233 | Spawner subsystem — HA coordinator sub-agent spawn management |
 | `coordinationhub/task_failures.py` | 149 | Task failure tracking and dead letter queue for CoordinationHub |
 | `coordinationhub/task_subsystem.py` | 241 | Task subsystem — shared task registry with hierarchy + dead-letter queue |
@@ -1147,7 +1147,7 @@ keep it in sync; CI checks for drift on every push.
 | `coordinationhub/work_intent_subsystem.py` | 92 | WorkIntent subsystem — cooperative work intent board |
 <!-- /GEN -->
 
-**Total: <!-- GEN:test-count -->744<!-- /GEN --> tests across 28 test files.**
+**Total: <!-- GEN:test-count -->755<!-- /GEN --> tests across 28 test files.**
 
 ---
 
@@ -1169,12 +1169,12 @@ coordinationhub/
   cli_commands.py       — CoordinationHub CLI command handlers (~98 LOC)
   cli_deps.py           — CLI commands for cross-agent dependency declarations (~64 LOC)
   cli_intent.py         — CLI commands for the work intent board (~35 LOC)
-  cli_leases.py         — CLI commands for HA coordinator lease management (~96 LOC)
+  cli_leases.py         — CLI commands for HA coordinator lease management (~104 LOC)
   cli_locks.py          — Document locking and coordination CLI commands (~272 LOC)
   cli_parser.py         — Argument parser for the CoordinationHub CLI (~379 LOC)
   cli_setup.py          — CLI commands for setup and diagnostics: ``init``, ``doctor``, ``watch`` (~313 LOC)
   cli_setup_doctor.py   — Diagnostic checks for ``coordinationhub doctor`` (~148 LOC)
-  cli_spawner.py        — CLI commands for HA coordinator spawner — sub-agent registry management (~105 LOC)
+  cli_spawner.py        — CLI commands for HA coordinator spawner — sub-agent registry management (~121 LOC)
   cli_sse.py            — CLI commands for SSE dashboard server (~56 LOC)
   cli_tasks.py          — CLI commands for the task registry (~163 LOC)
   cli_utils.py          — Shared CLI helper functions used by all cli_* sub-modules (~51 LOC)
@@ -1207,7 +1207,7 @@ coordinationhub/
   paths.py              — Path normalization and project-root detection utilities (~39 LOC)
   pending_tasks.py      — Pending sub-agent task storage for CoordinationHub (~109 LOC)
   scan.py               — File ownership scan for CoordinationHub (~279 LOC)
-  spawner.py            — Zero-deps spawner primitives for HA coordinator sub-agent registry (~395 LOC)
+  spawner.py            — Zero-deps spawner primitives for HA coordinator sub-agent registry (~414 LOC)
   spawner_subsystem.py  — Spawner subsystem — HA coordinator sub-agent spawn management (~233 LOC)
   task_failures.py      — Task failure tracking and dead letter queue for CoordinationHub (~149 LOC)
   task_subsystem.py     — Task subsystem — shared task registry with hierarchy + dead-letter queue (~241 LOC)
@@ -1257,7 +1257,7 @@ coordinationhub/
 ```
 <!-- /GEN -->
 
-The `tests/` directory holds <!-- GEN:test-count -->744<!-- /GEN --> tests across 28 files,
+The `tests/` directory holds <!-- GEN:test-count -->755<!-- /GEN --> tests across 28 files,
 plus `tests/fixtures/claude_code_events/` for hook contract fixtures.
 
 **Module design principles:**
@@ -1724,7 +1724,7 @@ Air-gapped install: `pip install coordinationhub --no-deps`.
 
 ```bash
 python -m pytest tests/ -v
-# <!-- GEN:test-count -->744<!-- /GEN --> tests across 28 test files
+# <!-- GEN:test-count -->755<!-- /GEN --> tests across 28 test files
 ```
 
 ---
