@@ -1147,7 +1147,7 @@ keep it in sync; CI checks for drift on every push.
 | `coordinationhub/work_intent_subsystem.py` | 92 | WorkIntent subsystem — cooperative work intent board |
 <!-- /GEN -->
 
-**Total: <!-- GEN:test-count -->755<!-- /GEN --> tests across 28 test files.**
+**Total: <!-- GEN:test-count -->781<!-- /GEN --> tests across 28 test files.**
 
 ---
 
@@ -1257,7 +1257,7 @@ coordinationhub/
 ```
 <!-- /GEN -->
 
-The `tests/` directory holds <!-- GEN:test-count -->755<!-- /GEN --> tests across 28 files,
+The `tests/` directory holds <!-- GEN:test-count -->781<!-- /GEN --> tests across 28 files,
 plus `tests/fixtures/claude_code_events/` for hook contract fixtures.
 
 **Module design principles:**
@@ -1724,7 +1724,7 @@ Air-gapped install: `pip install coordinationhub --no-deps`.
 
 ```bash
 python -m pytest tests/ -v
-# <!-- GEN:test-count -->755<!-- /GEN --> tests across 28 test files
+# <!-- GEN:test-count -->781<!-- /GEN --> tests across 28 test files
 ```
 
 ---

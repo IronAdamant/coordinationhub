@@ -114,7 +114,7 @@ coordinationhub/
 ```
 <!-- /GEN -->
 
-The `tests/` directory contains the pytest suite (<!-- GEN:test-count -->755<!-- /GEN --> tests across 28 files), including `tests/fixtures/claude_code_events/` contract fixtures.
+The `tests/` directory contains the pytest suite (<!-- GEN:test-count -->781<!-- /GEN --> tests across 28 files), including `tests/fixtures/claude_code_events/` contract fixtures.
 
 ## Module Design
 
@@ -129,6 +129,61 @@ The `tests/` directory contains the pytest suite (<!-- GEN:test-count -->755<!--
 - **CLI helpers consolidated**: `cli_utils.py` provides `print_json`, `engine_from_args`, and `close` shared by all `cli_*.py` modules.
 - **Dispatch separation**: the `schemas/` package (all <!-- GEN:tool-count -->50<!-- /GEN --> tool schemas as pure data, one module per functional group) and `dispatch.py` (dispatch table) are separate modules shared by both HTTP and stdio servers.
 - **Project root detection**: `detect_project_root()` in `paths.py` walks up from CWD looking for `.git`. Used by `CoordinationEngine.__init__`.
+
+## Audit Visibility
+
+`findings/`, `plan/`, and `*-plan.md` are gitignored — internal audit-and-review artefacts surface attack vectors and are kept local. The trade-off was reviewed in `findings/post_opus_review_5_followups/04` and decided **deliberately**: keep the full audit notes private, but publish a redacted closed-items summary at repo root (`SECURITY_FIXES.md`) so downstream consumers can verify "yes, this category of bug was addressed" without a re-review.
+
+If you find yourself wanting to commit anything under `findings/` directly, route it through `SECURITY_FIXES.md` first — the redaction step is the value here.
+
+## Layering Discipline
+
+Adding a new MCP tool touches a coherent set of files:
+
+1. **Primitive** (`<thing>.py`) — pure function(s) that take a `connect: ConnectFn` and write SQL. Zero internal deps; trivially mockable.
+2. **Subsystem** (`<thing>_subsystem.py`) — engine class that owns `_connect`, `_publish_event`, `_hybrid_wait`, applies authz checks, and wraps the primitive.
+3. **Engine facade** (one-liner method on `core.py`) — preserves the `engine.<method>(...)` public API so dispatch, CLI, hooks, and tests are unchanged.
+4. **Dispatch entry** (`dispatch.py` line in `TOOL_DISPATCH`) — wires the tool name to the engine method and its allowed kwargs.
+5. **Schema entry** (`schemas/<group>.py`) — JSON schema for argument validation at the MCP boundary.
+6. **CLI handler** (`cli_<group>.py`) — optional, when the tool needs a human-driven path.
+7. **Hook integration** (`hooks/...`) — optional, when the tool fires on a Claude Code event.
+
+This is **deliberately layered for a small project** (~15.5K LOC). The cost is real (5–6 files per tool); the wins are: primitive purity makes unit tests trivial, subsystem boundaries kept the T6.22 mixin-to-composition refactor a 12-commit zero-regression sequence (only 2 cross-subsystem calls in the entire codebase), and dispatch/schema separation lets the meta-test in `test_dispatch_coverage.py` enforce that every tool gets at least one test.
+
+**Deviations** from the layering should be deliberate and documented next to the new shape (e.g. a tool that genuinely is one-DB-call deep can collapse primitive + subsystem into one file; a tool with no failure paths can skip the failure-test). If you find yourself routinely fighting the layers, raise it as a finding under `findings/` — don't paper over it.
+
+The layering review documented in `findings/post_opus_review_5_followups/03` decided to keep this shape as-is.
+
+## LOC Policy
+
+The project's older "every file ≤ 500 code LOC" rule was a single global cap. After T6.22 collapsed twelve mixins into a composed engine, `core.py` ended up as a deliberate facade pile (one one-liner per delegated subsystem method) which is genuinely larger than 500 code-LOC and *should* stay that way for readability. The policy below replaces the flat cap with explicit tiers so the discipline still matches reality.
+
+**Tiered code-LOC caps** (where "code-LOC" = non-blank, non-comment lines, the same metric `scripts/gen_docs.py` computes):
+
+| Tier | Files | Cap | Rationale |
+|------|-------|-----|-----------|
+| Primitives & subsystems | `*.py` under `coordinationhub/` except those listed below | **550** | Soft cap with breathing room for one-or-two-helper additions before splitting becomes mandatory. Hard ceiling at 600; over that, plan a split. |
+| Engine composition | `core.py` | **exempt** | Must contain only `__init__` wiring, lifecycle, infra (`_publish_event`, `_hybrid_wait`, `read_only_engine`), and one-liner facades that delegate to a `_<subsystem>` attribute. Anything with real logic belongs in a subsystem file. |
+| Transport & CLI surface | `mcp_server.py`, `mcp_stdio.py`, `cli_parser.py` | **700** | Mixed handler/lifecycle/auth code where splitting along the obvious seam (REST vs SSE, parser vs dispatch) was already done in v0.7.6. Soft cap; a future SSE-extraction is still on the table for `mcp_server.py`. |
+| Migrations | `db_migrations.py` | **800** | Migrations only grow. Old migrations are immutable for replay correctness. Splitting by version range is reserved for >800. |
+| Generated/data | `plugins/dashboard/dashboard_js.py`, `plugins/dashboard/dashboard_css.py` | **exempt** | These are template strings, not code. |
+
+Today's snapshot:
+
+<!-- GEN:largest-files -->
+| Path | Code-LOC | Tier | Status |
+|------|----------|------|--------|
+| `coordinationhub/core.py` | 948 | engine | exempt |
+| `coordinationhub/mcp_server.py` | 578 | transport | OK (≤ 700) |
+| `coordinationhub/tasks.py` | 517 | primitive | OK (≤ 550) |
+| `coordinationhub/agent_registry.py` | 495 | primitive | OK (≤ 550) |
+| `coordinationhub/db_migrations.py` | 467 | migrations | OK (≤ 800) |
+| `coordinationhub/plugins/dashboard/dashboard_js.py` | 452 | data | exempt |
+| `coordinationhub/locking_subsystem.py` | 445 | primitive | OK (≤ 550) |
+| `coordinationhub/spawner.py` | 414 | primitive | OK (≤ 550) |
+<!-- /GEN -->
+
+If a file crosses its cap, the right move is **plan a split** (see the v0.7.6 splits as templates: `core_locking.py` → primitives + subsystem; `cli.py` → parser + dispatch; `dashboard.py` → html + css + js). Don't move LOC into comments to game the metric. <!-- ALLOW-STALE -->
 
 ## Key Design Decisions
 
@@ -238,7 +293,7 @@ To disable hooks temporarily, add `"disableAllHooks": true` to `~/.claude/settin
 
 ```bash
 python -m pytest tests/ -v
-# <!-- GEN:test-count -->755<!-- /GEN --> tests across 28 test files:
+# <!-- GEN:test-count -->781<!-- /GEN --> tests across 28 test files:
 #   test_agent_lifecycle.py    — 27 tests
 #   test_locking.py            — 46 tests (includes smart reap)
 #   test_notifications.py      — 8 tests

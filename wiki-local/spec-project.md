@@ -395,7 +395,7 @@ coordinationhub/
 ```
 <!-- /GEN -->
 
-`tests/` contains <!-- GEN:test-count -->755<!-- /GEN --> tests across 28 files plus `fixtures/claude_code_events/` (hook contract fixtures).
+`tests/` contains <!-- GEN:test-count -->781<!-- /GEN --> tests across 28 files plus `fixtures/claude_code_events/` (hook contract fixtures).
 
 Top-level project files: `pyproject.toml`, `coordination_spec.yaml`/`.json` (example specs), `README.md`, `CLAUDE.md`, `COMPLETE_PROJECT_DOCUMENTATION.md`, `LLM_Development.md`, and `wiki-local/` (this spec, glossary, index).
 
@@ -447,8 +447,8 @@ Default port: `9877`
 - Remaining: real integration test with CoordinationHub MCP server in a multi-agent workflow
 
 ### 0.3.4 — Core split, assessment synonyms, SQLite perf (2026-04-10)
-- `core.py` split: locking/coordination methods extracted to `core_locking.py` (~230 LOC) as `LockingMixin`
-- `core.py` reduced from ~495 to ~260 LOC; `CoordinationEngine` inherits `LockingMixin`
+- `core.py` split: locking/coordination methods extracted to `core_locking.py` (~230 LOC) as `LockingMixin` <!-- ALLOW-STALE: historical changelog -->
+- `core.py` reduced from ~495 to ~260 LOC; `CoordinationEngine` inherits `LockingMixin` <!-- ALLOW-STALE: historical changelog -->
 - `_EVENT_RESPONSIBILITY_MAP` expanded with ~20 synonyms + token-overlap fallback
 - SQLite perf: `cache_size=-8000`, `mmap_size=67108864`, composite `idx_locks_expiry` index
 

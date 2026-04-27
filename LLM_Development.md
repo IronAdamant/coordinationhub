@@ -1759,7 +1759,7 @@ Block markers for multi-line content:
 
 Inline markers for single values (render invisibly in Markdown):
 ```markdown
-This project has <!-- GEN:test-count -->755<!-- /GEN --> tests.
+This project has <!-- GEN:test-count -->781<!-- /GEN --> tests.
 ```
 
 Unknown marker names raise an error during rewrite (catches typos).
