@@ -200,58 +200,7 @@ python scripts/gen_docs.py
 When `coverage.json` is missing the table renders a one-line placeholder — `gen_docs.py --check` does not require the dev extra to pass.
 
 <!-- GEN:dispatch-coverage -->
-| Tool | Subsystem method | Line cov | Branch cov |
-|------|------------------|----------|------------|
-| `get_notifications` | `change_subsystem.Change.get_notifications` | 23% | 25% |
-| `wait_for_broadcast_acks` | `broadcast_subsystem.Broadcast.wait_for_broadcast_acks` | 50% | 42% |
-| `list_locks` | `locking_subsystem.Locking.list_locks` | 57% | 50% |
-| `manage_leases` | `lease_subsystem.Lease.manage_leases` | 60% | 58% |
-| `query_tasks` | `task_subsystem.Task.query_tasks` | 67% | 64% |
-| `manage_messages` | `messaging_subsystem.Messaging.manage_messages` | 69% | 71% |
-| `acquire_lock` | `locking_subsystem.Locking.acquire_lock` | 74% | 73% |
-| `admin_locks` | `locking_subsystem.Locking.admin_locks` | 76% | 75% |
-| `wait_for_task` | `task_subsystem.Task.wait_for_task` | 83% | 75% |
-| `await_subagent_registration` | `spawner_subsystem.Spawner.await_subagent_registration` | 87% | 79% |
-| `wait_for_locks` | `broadcast_subsystem.Broadcast.wait_for_locks` | 82% | 80% |
-| `manage_dependencies` | `dependency_subsystem.Dependency.manage_dependencies` | 86% | 83% |
-| `task_failures` | `task_subsystem.Task.task_failures` | 90% | 90% |
-| `broadcast` | `broadcast_subsystem.Broadcast.broadcast` | 97% | 92% |
-| `wait_for_handoff` | `handoff_subsystem.Handoff.wait_for_handoff` | 97% | 92% |
-| `acknowledge_broadcast` | `broadcast_subsystem.Broadcast.acknowledge_broadcast` | 100% | 100% |
-| `acquire_coordinator_lease` | `lease_subsystem.Lease.acquire_coordinator_lease` | 100% | 100% |
-| `assign_task` | `task_subsystem.Task.assign_task` | 100% | 100% |
-| `await_agent` | `messaging_subsystem.Messaging.await_agent` | 100% | 100% |
-| `await_subagent_stopped` | `spawner_subsystem.Spawner.await_subagent_stopped` | 100% | 100% |
-| `create_subtask` | `task_subsystem.Task.create_subtask` | 100% | 100% |
-| `create_task` | `task_subsystem.Task.create_task` | 100% | 100% |
-| `deregister_agent` | `identity_subsystem.Identity.deregister_agent` | 100% | 100% |
-| `get_agent_relations` | `identity_subsystem.Identity.get_agent_relations` | 100% | 100% |
-| `get_agent_status` | `visibility_subsystem.Visibility.get_agent_status` | 100% | 100% |
-| `get_agent_tree` | `visibility_subsystem.Visibility.get_agent_tree` | 100% | 100% |
-| `get_available_tasks` | `task_subsystem.Task.get_available_tasks` | 100% | 100% |
-| `get_conflicts` | `change_subsystem.Change.get_conflicts` | 100% | 100% |
-| `get_contention_hotspots` | `change_subsystem.Change.get_contention_hotspots` | 100% | 100% |
-| `get_file_agent_map` | `visibility_subsystem.Visibility.get_file_agent_map` | 100% | 100% |
-| `get_lock_status` | `locking_subsystem.Locking.get_lock_status` | 100% | 100% |
-| `get_pending_spawns` | `spawner_subsystem.Spawner.get_pending_spawns` | 100% | 100% |
-| `heartbeat` | `identity_subsystem.Identity.heartbeat` | 100% | 100% |
-| `is_subagent_stop_requested` | `spawner_subsystem.Spawner.is_subagent_stop_requested` | 100% | 100% |
-| `list_agents` | `identity_subsystem.Identity.list_agents` | 100% | 100% |
-| `load_coordination_spec` | `visibility_subsystem.Visibility.load_coordination_spec` | 100% | 100% |
-| `manage_work_intents` | `work_intent_subsystem.WorkIntent.manage_work_intents` | 100% | 100% |
-| `notify_change` | `change_subsystem.Change.notify_change` | 100% | 100% |
-| `refresh_lock` | `locking_subsystem.Locking.refresh_lock` | 100% | 100% |
-| `register_agent` | `identity_subsystem.Identity.register_agent` | 100% | 100% |
-| `release_lock` | `locking_subsystem.Locking.release_lock` | 100% | 100% |
-| `report_subagent_spawned` | `spawner_subsystem.Spawner.report_subagent_spawned` | 100% | 100% |
-| `request_subagent_deregistration` | `spawner_subsystem.Spawner.request_subagent_deregistration` | 100% | 100% |
-| `run_assessment` | `visibility_subsystem.Visibility.run_assessment` | 100% | 100% |
-| `scan_project` | `visibility_subsystem.Visibility.scan_project` | 100% | 100% |
-| `send_message` | `messaging_subsystem.Messaging.send_message` | 100% | 100% |
-| `spawn_subagent` | `spawner_subsystem.Spawner.spawn_subagent` | 100% | 100% |
-| `status` | `change_subsystem.Change.status` | 100% | 100% |
-| `update_agent_status` | `visibility_subsystem.Visibility.update_agent_status` | 100% | 100% |
-| `update_task_status` | `task_subsystem.Task.update_task_status` | 100% | 100% |
+_No `coverage.json` found. Run `pytest --cov=coordinationhub --cov-report=json --cov-branch` then `python scripts/gen_docs.py` to regenerate this table._
 <!-- /GEN -->
 
 ## Key Design Decisions
