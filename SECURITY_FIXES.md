@@ -12,7 +12,7 @@ If you find drift here, the pre-commit hook didn't run. Re-run
 `python scripts/gen_docs.py` to refresh; do not edit the numbers by hand.
 The narrative parentheses around the test delta are prose and stay hand-edited.
 -->
-**Scoreboard at close-out:** <!-- GEN:audit-closed-count -->153<!-- /GEN --> / 168 tier items closed. <!-- GEN:test-count-baseline -->633<!-- /GEN --> → <!-- GEN:test-count -->806<!-- /GEN --> tests (+121 over the cleanup pass; +43 from the post-audit dispatch-coverage follow-up — first 26 added the zero-coverage tools, second 17 came from the audit-of-the-audit pass that found `await_subagent_registration` had only a docstring mention; remainder from the post-self-review follow-ups including the `core.py` facade-shape invariant). Schema at v<!-- GEN:schema-version -->27<!-- /GEN -->.
+**Scoreboard at close-out:** <!-- GEN:audit-closed-count -->153<!-- /GEN --> / 168 tier items closed. <!-- GEN:test-count-baseline -->633<!-- /GEN --> → <!-- GEN:test-count -->807<!-- /GEN --> tests (+121 over the cleanup pass; +43 from the post-audit dispatch-coverage follow-up — first 26 added the zero-coverage tools, second 17 came from the audit-of-the-audit pass that found `await_subagent_registration` had only a docstring mention; remainder from the post-self-review follow-ups including the `core.py` facade-shape invariant). Schema at v<!-- GEN:schema-version -->27<!-- /GEN -->.
 
 ---
 

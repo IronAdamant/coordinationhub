@@ -360,6 +360,28 @@ class Locking:
                     (norm_path,),
                 ).fetchall()
             if not rows:
+                # T8.1: when a whole-file release misses but the agent holds
+                # region locks on this path, the previous "not_locked" reason
+                # was misleading (list-locks showed the lock, release said no).
+                # Surface a region_required reason listing the agent's region
+                # locks so callers can retry with --region-start/--region-end.
+                if region_start is None:
+                    region_rows = conn.execute(
+                        "SELECT region_start, region_end FROM document_locks "
+                        "WHERE document_path = ? AND locked_by = ? "
+                        "AND region_start IS NOT NULL",
+                        (norm_path, agent_id),
+                    ).fetchall()
+                    if region_rows:
+                        return {
+                            "released": False,
+                            "reason": "region_required",
+                            "region_locks": [
+                                {"region_start": r["region_start"],
+                                 "region_end": r["region_end"]}
+                                for r in region_rows
+                            ],
+                        }
                 return {"released": False, "reason": "not_locked"}
             owned = [r for r in rows if r["locked_by"] == agent_id]
             if not owned:

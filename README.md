@@ -189,8 +189,8 @@ coordinationhub agent-relations <id> [--mode lineage|siblings]
 
 # File locking
 coordinationhub acquire-lock <path> <id> [--region-start N --region-end N]
-coordinationhub release-lock <path> <id>
-coordinationhub refresh-lock <path> <id>
+coordinationhub release-lock <path> <id> [--region-start N --region-end N]
+coordinationhub refresh-lock <path> <id> [--region-start N --region-end N]
 coordinationhub lock-status <path>
 coordinationhub list-locks [--agent-id <id>]
 coordinationhub admin-locks <action>                         # release_agent_locks | reap_expired | reap_stale_agents
@@ -199,7 +199,7 @@ coordinationhub admin-locks <action>                         # release_agent_loc
 coordinationhub broadcast <id> [--document-path <path>]
 coordinationhub wait-for-locks <id> <paths...>
 coordinationhub notify-change <path> <type> <id>
-coordinationhub get-notifications
+coordinationhub get-notifications [--since T] [--exclude-agent <id>] [--limit N]
 coordinationhub wait-for-notifications <id> [--timeout S] [--exclude-agent <agent>]
 coordinationhub get-conflicts
 
@@ -220,6 +220,12 @@ coordinationhub task-failures <action>                       # retry | dlq | his
 ```
 
 Run `coordinationhub --help` for the full list (74+ commands; HA leases, spawner, work intents, dependencies, handoffs).
+
+#### Operational notes
+
+- **Region-locked release.** When an agent holds a region lock, `release-lock <path> <id>` (no region args) returns `released=false reason=region_required` with the active `region_locks` listed. Re-issue with the matching `--region-start`/`--region-end` to release. Whole-file releases continue to use the no-args form.
+- **Heartbeat decay.** A registered agent only counts toward `active_agents` while its `last_heartbeat` is recent (default stale-timeout: 600 s). Long-running flows must call `coordinationhub heartbeat <id>` periodically or they will drift to inactive even though the row remains in the agents table.
+- **Notification growth.** `notify-change` events accumulate in the notifications table; run `coordinationhub prune-notifications --max-age-seconds N` (or `--max-entries M`) periodically — there is no implicit prune on agent connect.
 
 ### Architecture
 
@@ -248,7 +254,7 @@ coordinationhub/
   plugins/{assessment,dashboard,graph}/
                               — assessment runner, web dashboard, coordination graph
   data/monitor_skill.md       — installable Claude Code skill template
-  tests/                      — <!-- GEN:test-count -->806<!-- /GEN --> tests across 28 files
+  tests/                      — <!-- GEN:test-count -->807<!-- /GEN --> tests across 28 files
 ```
 
 ### Zero-dependency guarantee

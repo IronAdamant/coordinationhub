@@ -9,6 +9,30 @@ All significant changes to the CoordinationHub project are documented here in re
 
 ---
 
+## 2026-04-29 — T8.1 release-lock region disambiguation + README ergonomics
+
+External MCP-findings review against the live v0.7.7 / schema v27 surface flagged three ergonomics gaps. None were correctness bugs — all observable, all fixed in one pass.
+
+### Code
+
+- **`release_lock` no longer returns the misleading `not_locked` for region-locked paths.** When a caller invokes `release_lock(path, agent_id)` with no region args but the agent in fact holds region locks on `path`, the response now carries `reason: region_required` and a `region_locks: [{region_start, region_end}, ...]` list so the caller can retry with the matching range. Whole-file releases continue to use the no-args form. `coordinationhub/locking_subsystem.py:362`.
+
+### Tests
+
+- New `TestLockRelease::test_release_without_region_args_when_region_lock_held` in `tests/test_locking.py` locking in the `region_required` reason + retry-with-args success path. Test count 806 → 807.
+
+### Docs
+
+- `README.md` — `release-lock` / `refresh-lock` synopses now show `[--region-start N --region-end N]`. `get-notifications` synopsis switched from positional to flag-form `[--since T] [--exclude-agent <id>] [--limit N]`. New "Operational notes" section documenting region-locked release semantics, heartbeat decay (`active_agents` drops without periodic `heartbeat <id>` — default stale-timeout 600 s), and notification growth (`prune-notifications` is not auto-fired).
+- `gen_docs.py` regenerated test-count and inventory blocks across `README.md`, `AGENTS.md`, `COMPLETE_PROJECT_DOCUMENTATION.md`, `LLM_Development.md`, `SECURITY_FIXES.md`, `wiki-local/spec-project.md`. `--check` clean.
+
+### Items confirmed already correct (no change)
+
+- `declare-dependency --condition` already defaults to `task_completed` (`cli_parser.py:401-403`); the review's "errors out without --condition" claim did not reproduce on v0.7.7.
+- `get-notifications` parser already takes only flag-form args; the misleading positional example lived only in the README synopsis (now fixed).
+
+---
+
 ## 2026-04-24 — T6.22 god-object decomposition (CoordinationEngine: 12 mixins → 12 composed subsystems, zero MRO inheritance)
 
 `CoordinationEngine` was a 12-mixin host class. The original audit (T6.22) deferred decomposition as a major-version rewrite. A coupling-audit subagent investigation flipped that read: the 12 mixins were 12 independent namespaces sharing infrastructure (`_connect`, `_publish_event`, `_hybrid_wait`), not entangled state, with **only 2 cross-mixin calls in the entire codebase** (`BroadcastMixin → get_lock_status`, `IdentityMixin → release_agent_locks`) — which made incremental extraction viable. Twelve sequential commits; 737 tests green at every step; zero regressions.
@@ -1709,7 +1733,7 @@ Block markers for multi-line content:
 | `coordinationhub/limits.py` | 40 | String-length caps for user-supplied fields (T6.14) |
 | `coordinationhub/lock_cache.py` | 188 | In-memory lock cache for CoordinationHub |
 | `coordinationhub/lock_ops.py` | 209 | Shared lock primitives used by both local locks and coordination locks |
-| `coordinationhub/locking_subsystem.py` | 445 | Locking subsystem — document lock acquire/release/refresh/list/admin |
+| `coordinationhub/locking_subsystem.py` | 462 | Locking subsystem — document lock acquire/release/refresh/list/admin |
 | `coordinationhub/mcp_server.py` | 578 | HTTP REST admin / dashboard endpoint for CoordinationHub |
 | `coordinationhub/mcp_stdio.py` | 197 | Stdio-based MCP server for CoordinationHub using the ``mcp`` Python package |
 | `coordinationhub/messages.py` | 105 | Inter-agent messaging primitives for CoordinationHub |
@@ -1759,7 +1783,7 @@ Block markers for multi-line content:
 
 Inline markers for single values (render invisibly in Markdown):
 ```markdown
-This project has <!-- GEN:test-count -->806<!-- /GEN --> tests.
+This project has <!-- GEN:test-count -->807<!-- /GEN --> tests.
 ```
 
 Unknown marker names raise an error during rewrite (catches typos).

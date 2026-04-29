@@ -358,6 +358,29 @@ class TestLockRelease:
         assert result["released"] is False
         assert result["reason"] == "not_locked"
 
+    def test_release_without_region_args_when_region_lock_held(
+        self, engine, registered_agent,
+    ):
+        """T8.1: release_lock with no region args returned the misleading
+        ``not_locked`` when the agent in fact held region locks on the path.
+        Reason is now ``region_required`` and the response surfaces the
+        active region locks so callers can retry with --region-start/--end.
+        """
+        engine.acquire_lock(
+            "/regional.txt", registered_agent,
+            region_start=1, region_end=30,
+        )
+        result = engine.release_lock("/regional.txt", registered_agent)
+        assert result["released"] is False
+        assert result["reason"] == "region_required"
+        assert result["region_locks"] == [{"region_start": 1, "region_end": 30}]
+        # Retrying with region args succeeds.
+        ok = engine.release_lock(
+            "/regional.txt", registered_agent,
+            region_start=1, region_end=30,
+        )
+        assert ok["released"] is True
+
 
 class TestLockRefresh:
     def test_refresh_owned_lock(self, engine, registered_agent):

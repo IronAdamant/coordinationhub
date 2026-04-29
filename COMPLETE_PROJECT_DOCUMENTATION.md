@@ -1100,7 +1100,7 @@ keep it in sync; CI checks for drift on every push.
 | `coordinationhub/limits.py` | 40 | String-length caps for user-supplied fields (T6.14) |
 | `coordinationhub/lock_cache.py` | 188 | In-memory lock cache for CoordinationHub |
 | `coordinationhub/lock_ops.py` | 209 | Shared lock primitives used by both local locks and coordination locks |
-| `coordinationhub/locking_subsystem.py` | 445 | Locking subsystem — document lock acquire/release/refresh/list/admin |
+| `coordinationhub/locking_subsystem.py` | 462 | Locking subsystem — document lock acquire/release/refresh/list/admin |
 | `coordinationhub/mcp_server.py` | 578 | HTTP REST admin / dashboard endpoint for CoordinationHub |
 | `coordinationhub/mcp_stdio.py` | 197 | Stdio-based MCP server for CoordinationHub using the ``mcp`` Python package |
 | `coordinationhub/messages.py` | 105 | Inter-agent messaging primitives for CoordinationHub |
@@ -1147,7 +1147,7 @@ keep it in sync; CI checks for drift on every push.
 | `coordinationhub/work_intent_subsystem.py` | 92 | WorkIntent subsystem — cooperative work intent board |
 <!-- /GEN -->
 
-**Total: <!-- GEN:test-count -->806<!-- /GEN --> tests across 28 test files.**
+**Total: <!-- GEN:test-count -->807<!-- /GEN --> tests across 28 test files.**
 
 ---
 
@@ -1198,7 +1198,7 @@ coordinationhub/
   limits.py             — String-length caps for user-supplied fields (T6.14) (~40 LOC)
   lock_cache.py         — In-memory lock cache for CoordinationHub (~188 LOC)
   lock_ops.py           — Shared lock primitives used by both local locks and coordination locks (~209 LOC)
-  locking_subsystem.py  — Locking subsystem — document lock acquire/release/refresh/list/admin (~445 LOC)
+  locking_subsystem.py  — Locking subsystem — document lock acquire/release/refresh/list/admin (~462 LOC)
   mcp_server.py         — HTTP REST admin / dashboard endpoint for CoordinationHub (~578 LOC)
   mcp_stdio.py          — Stdio-based MCP server for CoordinationHub using the ``mcp`` Python package (~197 LOC)
   messages.py           — Inter-agent messaging primitives for CoordinationHub (~105 LOC)
@@ -1257,7 +1257,7 @@ coordinationhub/
 ```
 <!-- /GEN -->
 
-The `tests/` directory holds <!-- GEN:test-count -->806<!-- /GEN --> tests across 28 files,
+The `tests/` directory holds <!-- GEN:test-count -->807<!-- /GEN --> tests across 28 files,
 plus `tests/fixtures/claude_code_events/` for hook contract fixtures.
 
 **Module design principles:**
@@ -1724,7 +1724,7 @@ Air-gapped install: `pip install coordinationhub --no-deps`.
 
 ```bash
 python -m pytest tests/ -v
-# <!-- GEN:test-count -->806<!-- /GEN --> tests across 28 test files
+# <!-- GEN:test-count -->807<!-- /GEN --> tests across 28 test files
 ```
 
 ---

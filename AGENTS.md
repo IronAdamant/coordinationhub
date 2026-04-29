@@ -55,7 +55,7 @@ coordinationhub/
   limits.py             — String-length caps for user-supplied fields (T6.14) (~40 LOC)
   lock_cache.py         — In-memory lock cache for CoordinationHub (~188 LOC)
   lock_ops.py           — Shared lock primitives used by both local locks and coordination locks (~209 LOC)
-  locking_subsystem.py  — Locking subsystem — document lock acquire/release/refresh/list/admin (~445 LOC)
+  locking_subsystem.py  — Locking subsystem — document lock acquire/release/refresh/list/admin (~462 LOC)
   mcp_server.py         — HTTP REST admin / dashboard endpoint for CoordinationHub (~578 LOC)
   mcp_stdio.py          — Stdio-based MCP server for CoordinationHub using the ``mcp`` Python package (~197 LOC)
   messages.py           — Inter-agent messaging primitives for CoordinationHub (~105 LOC)
@@ -114,7 +114,7 @@ coordinationhub/
 ```
 <!-- /GEN -->
 
-The `tests/` directory contains the pytest suite (<!-- GEN:test-count -->806<!-- /GEN --> tests across 28 files), including `tests/fixtures/claude_code_events/` contract fixtures.
+The `tests/` directory contains the pytest suite (<!-- GEN:test-count -->807<!-- /GEN --> tests across 28 files), including `tests/fixtures/claude_code_events/` contract fixtures.
 
 ## Module Design
 
@@ -178,8 +178,8 @@ Today's snapshot:
 | `coordinationhub/tasks.py` | 517 | primitive | OK (≤ 550) |
 | `coordinationhub/agent_registry.py` | 495 | primitive | OK (≤ 550) |
 | `coordinationhub/db_migrations.py` | 467 | migrations | OK (≤ 800) |
+| `coordinationhub/locking_subsystem.py` | 462 | primitive | OK (≤ 550) |
 | `coordinationhub/plugins/dashboard/dashboard_js.py` | 452 | data | exempt |
-| `coordinationhub/locking_subsystem.py` | 445 | primitive | OK (≤ 550) |
 | `coordinationhub/spawner.py` | 414 | primitive | OK (≤ 550) |
 <!-- /GEN -->
 
@@ -311,7 +311,7 @@ To disable hooks temporarily, add `"disableAllHooks": true` to `~/.claude/settin
 
 ```bash
 python -m pytest tests/ -v
-# <!-- GEN:test-count -->806<!-- /GEN --> tests across 28 test files:
+# <!-- GEN:test-count -->807<!-- /GEN --> tests across 28 test files:
 #   test_agent_lifecycle.py    — 27 tests
 #   test_locking.py            — 46 tests (includes smart reap)
 #   test_notifications.py      — 8 tests
