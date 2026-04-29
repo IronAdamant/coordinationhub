@@ -28,8 +28,16 @@ dependencies = []
 
 [project.optional-dependencies]
 mcp = ["mcp>=1.0.0"]
+# ``dev`` is the contract for "I want to run the full test + lint suite".
+# Coverage tooling stays here (not in ``dependencies``) so the runtime
+# package keeps the zero-third-party-deps invariant. The dispatch-coverage
+# generator in ``scripts/gen_docs.py`` reads ``coverage.json`` if it
+# exists and falls back to a placeholder otherwise — so check-only runs
+# in environments without the dev extra still work.
 dev = [
     "pytest>=7.0",
+    "coverage>=7.0",
+    "pytest-cov>=4.0",
 ]
 
 [project.scripts]

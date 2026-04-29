@@ -3,6 +3,7 @@ __pycache__/
 *.so
 .pytest_cache/
 .coverage
+coverage.json
 *.db
 *.db-wal
 *.db-shm

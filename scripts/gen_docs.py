@@ -23,14 +23,18 @@ The script is idempotent. Running twice produces the same output.
 Unknown marker names raise an error to catch typos.
 
 Available generators:
-    file-inventory    Full table of source files with LOC and summaries.
-    directory-tree    ASCII directory listing with per-file LOC.
-    largest-files     Top-N table of largest source files annotated with LOC tier.
-    mcp-tools         Table of all MCP tools with descriptions.
-    test-count        Integer test count from pytest --collect-only.
-    tool-count        Integer count from len(TOOL_SCHEMAS).
-    cli-count         Integer count from len(cli._COMMANDS).
-    version           Version string from pyproject.toml.
+    file-inventory       Full table of source files with LOC and summaries.
+    directory-tree       ASCII directory listing with per-file LOC.
+    largest-files        Top-N table of largest source files annotated with LOC tier.
+    mcp-tools            Table of all MCP tools with descriptions.
+    dispatch-coverage    Per-tool branch+line coverage table from coverage.json.
+    test-count           Integer test count from pytest --collect-only.
+    test-count-baseline  Pre-cleanup test count (frozen at 633 — see SECURITY_FIXES.md).
+    audit-closed-count   Closed-tier-item count (frozen at 153 — gitignored audit doc).
+    schema-version       Integer from _CURRENT_SCHEMA_VERSION in db_migrations.py.
+    tool-count           Integer count from len(TOOL_SCHEMAS).
+    cli-count            Integer count from len(cli._COMMANDS).
+    version              Version string from pyproject.toml.
 
 The ``--check`` mode also runs a stale-phrase scan against current-state
 docs (AGENTS.md + wiki-local/spec-project.md). Phrases in
@@ -148,6 +152,16 @@ def get_cli_count() -> int:
         sys.path.pop(0)
 
 
+def get_schema_version() -> str:
+    """Parse ``_CURRENT_SCHEMA_VERSION`` from db_migrations.py without import."""
+    path = REPO_ROOT / "coordinationhub" / "db_migrations.py"
+    for line in path.read_text(encoding="utf-8").splitlines():
+        m = re.match(r"^_CURRENT_SCHEMA_VERSION\s*=\s*(\d+)\s*$", line)
+        if m:
+            return m.group(1)
+    raise RuntimeError(f"_CURRENT_SCHEMA_VERSION not found in {path}")
+
+
 def get_mcp_tools() -> list[tuple[str, str]]:
     """Return [(name, first-sentence description), ...] for all MCP tools."""
     schemas = _import_schemas()
@@ -221,23 +235,82 @@ def render_mcp_tools(tools: list[tuple[str, str]]) -> str:
 # LOC tier policy (kept in sync with AGENTS.md "LOC Policy" section)
 # ------------------------------------------------------------------ #
 
-# (path-suffix match, tier name, soft cap; None = exempt)
-LOC_TIERS: list[tuple[str, str, int | None]] = [
-    ("coordinationhub/core.py", "engine", None),
-    ("coordinationhub/mcp_server.py", "transport", 700),
-    ("coordinationhub/mcp_stdio.py", "transport", 700),
-    ("coordinationhub/cli_parser.py", "transport", 700),
-    ("coordinationhub/db_migrations.py", "migrations", 800),
-    ("plugins/dashboard/dashboard_js.py", "data", None),
-    ("plugins/dashboard/dashboard_css.py", "data", None),
+# Each entry maps a path suffix to a tier name and soft cap (None means
+# exempt). Kept as a dataclass-shaped tuple so future fields (e.g. a
+# rationale string) slot in without churning every callsite. Order
+# matters: the first matching suffix wins.
+from dataclasses import dataclass
+
+
+@dataclass(frozen=True)
+class TierEntry:
+    """A single LOC-Policy tier assignment for a file path suffix."""
+    suffix: str           # path-suffix (matched via str.endswith)
+    tier: str             # tier name surfaced in the largest-files table
+    cap: int | None       # soft LOC cap, or None for exempt
+
+
+LOC_TIERS: list[TierEntry] = [
+    TierEntry("coordinationhub/core.py", "engine", None),
+    TierEntry("coordinationhub/mcp_server.py", "transport", 700),
+    TierEntry("coordinationhub/mcp_stdio.py", "transport", 700),
+    TierEntry("coordinationhub/cli_parser.py", "transport", 700),
+    TierEntry("coordinationhub/db_migrations.py", "migrations", 800),
+    TierEntry("plugins/dashboard/dashboard_js.py", "data", None),
+    TierEntry("plugins/dashboard/dashboard_css.py", "data", None),
+    TierEntry("plugins/dashboard/dashboard_html.py", "data", None),
+]
+
+
+# Inference patterns — used by ``--check-tier-coverage`` to flag files
+# whose path looks like a non-primitive tier but which are NOT listed in
+# ``LOC_TIERS``. The first matching pattern wins. Patterns are intentionally
+# conservative: only file shapes the policy explicitly recognizes today
+# (transport / migrations / data). A new file matching one of these
+# patterns is a nudge to update LOC_TIERS, not a hard error.
+TIER_INFERENCE: list[tuple[re.Pattern[str], str]] = [
+    (re.compile(r"^coordinationhub/mcp_.*\.py$"), "transport"),
+    (re.compile(r"^coordinationhub/cli_parser\.py$"), "transport"),
+    (re.compile(r"^coordinationhub/db_migrations\.py$"), "migrations"),
+    (re.compile(
+        r"^coordinationhub/plugins/dashboard/dashboard_.*\.py$",
+    ), "data"),
 ]
 
 
 def _tier_for(path: str) -> tuple[str, int | None]:
-    for suffix, tier, cap in LOC_TIERS:
-        if path.endswith(suffix):
-            return tier, cap
+    for entry in LOC_TIERS:
+        if path.endswith(entry.suffix):
+            return entry.tier, entry.cap
     return "primitive", 550
+
+
+def _explicit_paths() -> set[str]:
+    """Return the set of path suffixes explicitly listed in LOC_TIERS."""
+    return {e.suffix for e in LOC_TIERS}
+
+
+def check_tier_coverage(entries: list[dict]) -> list[tuple[str, str]]:
+    """Return [(path, inferred_tier), ...] for files whose name pattern
+    matches a non-primitive tier but which are NOT explicitly listed in
+    ``LOC_TIERS``. Used by ``--check-tier-coverage`` to surface drift
+    when a new file lands that should probably be on the policy table.
+
+    Returns an empty list when every non-primitive-shaped file already
+    has an explicit entry — that is the steady state after each new
+    file is registered."""
+    listed = _explicit_paths()
+    nudges: list[tuple[str, str]] = []
+    for entry in entries:
+        path = entry["path"]
+        # Already explicit — fine.
+        if any(path.endswith(s) for s in listed):
+            continue
+        for pattern, inferred_tier in TIER_INFERENCE:
+            if pattern.match(path):
+                nudges.append((path, inferred_tier))
+                break
+    return nudges
 
 
 def render_largest_files(entries: list[dict], top_n: int = 8) -> str:
@@ -259,6 +332,237 @@ def render_largest_files(entries: list[dict], top_n: int = 8) -> str:
             status = f"OVER (cap {cap}) — split planned"
         rows.append(f"| `{e['path']}` | {e['loc']} | {tier} | {status} |")
     return "\n".join(rows)
+
+
+# ------------------------------------------------------------------ #
+# Dispatch coverage (plan 01 of post_self_review_followups/)
+# ------------------------------------------------------------------ #
+#
+# The substring meta-test in tests/test_dispatch_coverage.py only
+# checks that each TOOL_DISPATCH entry is *invoked* somewhere under
+# tests/. That floor is honest about reach but silent about depth: a
+# tool whose only test calls it once and discards the return value
+# scores the same as a tool with happy + failure-path coverage.
+#
+# This generator reads coverage.json (produced by
+# ``pytest --cov=coordinationhub --cov-report=json --cov-branch``) and
+# renders a per-tool table:
+#
+#   1. Each tool name from TOOL_DISPATCH.
+#   2. Mapped via core.py to its subsystem target (e.g. spawn_subagent
+#      → Spawner.spawn_subagent in spawner_subsystem.py).
+#   3. Looked up in coverage.json's ``files[F]["functions"][C.M]``
+#      summary block for honest line + branch percentages.
+#
+# When coverage.json is absent (e.g. ``--check`` run from an env
+# without the dev extra), the table renders a one-line placeholder
+# instead of failing — see ``--check`` exit semantics in main().
+
+COVERAGE_JSON = REPO_ROOT / "coverage.json"
+
+
+def _build_engine_subsystem_map() -> dict[str, tuple[str, str]]:
+    """Walk core.py and return {attr_name: (class_name, module_name)} for
+    every ``self._<sub> = <Class>(...)`` assignment in __init__. The
+    module is inferred from the matching ``from .<module> import <Class>``
+    line at the top of the file.
+
+    Example return value:
+        {
+          "_spawner": ("Spawner", "spawner_subsystem"),
+          "_work_intent": ("WorkIntent", "work_intent_subsystem"),
+          ...
+        }
+    """
+    src = (REPO_ROOT / "coordinationhub" / "core.py").read_text(
+        encoding="utf-8",
+    )
+    tree = ast.parse(src)
+    class_to_module: dict[str, str] = {}
+    for node in tree.body:
+        if isinstance(node, ast.ImportFrom) and node.module:
+            for alias in node.names:
+                # Only record imports from sibling modules (relative).
+                if node.level >= 1:
+                    class_to_module[alias.name] = node.module
+
+    out: dict[str, tuple[str, str]] = {}
+    cls = next(
+        n for n in ast.walk(tree)
+        if isinstance(n, ast.ClassDef) and n.name == "CoordinationEngine"
+    )
+    init = next(
+        (n for n in cls.body if isinstance(n, ast.FunctionDef) and n.name == "__init__"),
+        None,
+    )
+    if init is None:
+        return out
+    for stmt in ast.walk(init):
+        if not isinstance(stmt, ast.Assign):
+            continue
+        if len(stmt.targets) != 1:
+            continue
+        target = stmt.targets[0]
+        if not (
+            isinstance(target, ast.Attribute)
+            and isinstance(target.value, ast.Name)
+            and target.value.id == "self"
+            and target.attr.startswith("_")
+        ):
+            continue
+        # Right-hand side must be a Call against a bare class name.
+        rhs = stmt.value
+        if not isinstance(rhs, ast.Call):
+            continue
+        if not isinstance(rhs.func, ast.Name):
+            continue
+        cls_name = rhs.func.id
+        module = class_to_module.get(cls_name)
+        if module is None:
+            continue
+        out[target.attr] = (cls_name, module)
+    return out
+
+
+def _engine_facade_target(method_name: str) -> tuple[str, str] | None:
+    """For an engine facade method, return (subsystem_attr, target_method)
+    or None if the method isn't a one-liner facade. Mirrors the shape
+    check in tests/test_core_facade_invariant.py."""
+    src = (REPO_ROOT / "coordinationhub" / "core.py").read_text(
+        encoding="utf-8",
+    )
+    tree = ast.parse(src)
+    cls = next(
+        n for n in ast.walk(tree)
+        if isinstance(n, ast.ClassDef) and n.name == "CoordinationEngine"
+    )
+    fn = next(
+        (
+            n for n in cls.body
+            if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef))
+            and n.name == method_name
+        ),
+        None,
+    )
+    if fn is None:
+        return None
+    body = [
+        s for s in fn.body
+        if not (
+            isinstance(s, ast.Expr) and isinstance(s.value, ast.Constant)
+        )
+    ]
+    if len(body) != 1 or not isinstance(body[0], ast.Return):
+        return None
+    call = body[0].value
+    if not isinstance(call, ast.Call):
+        return None
+    func = call.func
+    if not isinstance(func, ast.Attribute):
+        return None
+    receiver = func.value
+    if not (
+        isinstance(receiver, ast.Attribute)
+        and isinstance(receiver.value, ast.Name)
+        and receiver.value.id == "self"
+        and receiver.attr.startswith("_")
+    ):
+        return None
+    return receiver.attr, func.attr
+
+
+def _coverage_for_function(
+    coverage_data: dict, file_path: str, qualified_name: str,
+) -> tuple[str, str] | None:
+    """Return (line_pct, branch_pct) display strings for the named
+    function in the given file, or None if not present in coverage.json."""
+    file_entry = coverage_data.get("files", {}).get(file_path)
+    if not file_entry:
+        return None
+    fn_entry = file_entry.get("functions", {}).get(qualified_name)
+    if not fn_entry:
+        return None
+    summary = fn_entry.get("summary", {})
+    line_pct = summary.get("percent_covered_display", "?")
+    branch_pct = summary.get("percent_branches_covered_display", "?")
+    return f"{line_pct}%", f"{branch_pct}%"
+
+
+def render_dispatch_coverage() -> str:
+    """Return the dispatch-coverage GEN block content.
+
+    Skips gracefully when coverage.json is missing — rendering a
+    one-line placeholder so ``--check`` doesn't fail in CI envs that
+    haven't run with ``--cov``."""
+    if not COVERAGE_JSON.exists():
+        return (
+            "_No `coverage.json` found. Run `pytest --cov=coordinationhub "
+            "--cov-report=json --cov-branch` then `python scripts/gen_docs.py` "
+            "to regenerate this table._"
+        )
+    try:
+        coverage_data = _import_json_file(COVERAGE_JSON)
+    except Exception as exc:
+        return f"_coverage.json present but unreadable: {exc!r}_"
+
+    sub_map = _build_engine_subsystem_map()
+    schemas = _import_schemas()  # used to know which dispatch tools exist
+    sys.path.insert(0, str(REPO_ROOT))
+    try:
+        from coordinationhub.dispatch import TOOL_DISPATCH
+    finally:
+        sys.path.pop(0)
+
+    rows: list[tuple[str, str, str, str, float]] = []
+    # (tool, target_label, line_pct, branch_pct, sort_key=branch_float)
+    for tool in sorted(TOOL_DISPATCH):
+        engine_method, _allowed = TOOL_DISPATCH[tool]
+        target = _engine_facade_target(engine_method)
+        if target is None:
+            rows.append((tool, "_(non-facade)_", "—", "—", 999.0))
+            continue
+        attr, method = target
+        sub = sub_map.get(attr)
+        if sub is None:
+            rows.append((tool, f"_(unknown subsystem `{attr}`)_", "—", "—", 999.0))
+            continue
+        cls_name, module = sub
+        file_path = f"coordinationhub/{module}.py"
+        cov = _coverage_for_function(
+            coverage_data, file_path, f"{cls_name}.{method}",
+        )
+        if cov is None:
+            rows.append(
+                (tool, f"`{module}.{cls_name}.{method}`", "—", "—", 999.0),
+            )
+            continue
+        line_pct, branch_pct = cov
+        # Sort key: numeric branch percentage (lowest first); fall back
+        # to 999 when unparseable so unknowns sink.
+        try:
+            br = float(branch_pct.rstrip("%"))
+        except ValueError:
+            br = 999.0
+        rows.append((
+            tool, f"`{module}.{cls_name}.{method}`", line_pct, branch_pct, br,
+        ))
+
+    rows.sort(key=lambda r: (r[4], r[0]))  # lowest branch first, then name
+
+    out = [
+        "| Tool | Subsystem method | Line cov | Branch cov |",
+        "|------|------------------|----------|------------|",
+    ]
+    for tool, target_label, line_pct, branch_pct, _br in rows:
+        out.append(
+            f"| `{tool}` | {target_label} | {line_pct} | {branch_pct} |",
+        )
+    return "\n".join(out)
+
+
+def _import_json_file(path: Path) -> dict:
+    import json as _json
+    return _json.loads(path.read_text(encoding="utf-8"))
 
 
 # ------------------------------------------------------------------ #
@@ -286,24 +590,59 @@ STALE_SCAN_TARGETS: list[str] = [
 ]
 
 
+# A valid escape hatch must carry a non-empty reason after the colon, e.g.
+# ``<!-- ALLOW-STALE: historical changelog -->``. Bare ``<!-- ALLOW-STALE -->``
+# was previously accepted but it became a way to silence the linter without
+# documenting *why* the stale phrase is legitimate. The strict regex below
+# requires at least one non-whitespace character before the closing ``-->``.
+_ALLOW_STALE_VALID = re.compile(r"<!--\s*ALLOW-STALE:\s*\S[^>]*-->")
+_ALLOW_STALE_TOKEN = re.compile(r"<!--\s*ALLOW-STALE\b")
+
+
 def find_stale_phrases() -> list[tuple[str, int, str, str]]:
     """Return (path, line_no, phrase, reason) for every stale-phrase hit
-    in a current-state doc. A line that includes ``<!-- ALLOW-STALE -->``
-    is skipped — escape hatch for genuine cross-references."""
+    in a current-state doc. Lines with a valid ``<!-- ALLOW-STALE: <reason> -->``
+    are skipped. A bare ``<!-- ALLOW-STALE -->`` (no reason) is itself a
+    hit — it surfaces with phrase ``<malformed-allow-stale>`` so the
+    lint also reports escapes that evaded the rationale requirement."""
     hits: list[tuple[str, int, str, str]] = []
     for rel in STALE_SCAN_TARGETS:
         path = REPO_ROOT / rel
         if not path.exists():
             continue
         for n, line in enumerate(path.read_text(encoding="utf-8").splitlines(), 1):
-            # Escape hatch: ``<!-- ALLOW-STALE -->`` or
-            # ``<!-- ALLOW-STALE: <reason> -->`` skips the line.
-            if "<!-- ALLOW-STALE" in line:
+            has_token = _ALLOW_STALE_TOKEN.search(line) is not None
+            has_valid = _ALLOW_STALE_VALID.search(line) is not None
+            if has_token and not has_valid:
+                hits.append((
+                    rel, n, "<malformed-allow-stale>",
+                    "ALLOW-STALE escape requires a reason: "
+                    "<!-- ALLOW-STALE: <one-line reason> -->",
+                ))
+                # Don't skip phrase scanning — a malformed escape shouldn't
+                # mask the underlying drift it was trying to silence.
+            if has_valid:
                 continue
             for phrase, reason in STALE_PHRASES.items():
                 if phrase in line:
                     hits.append((rel, n, phrase, reason))
     return hits
+
+
+def list_allow_stale() -> list[tuple[str, int, str]]:
+    """Return (path, line_no, reason) for every valid ALLOW-STALE escape
+    in a scan target. Used by ``--list-allow-stale`` to audit the set."""
+    out: list[tuple[str, int, str]] = []
+    reason_re = re.compile(r"<!--\s*ALLOW-STALE:\s*(\S[^>]*?)\s*-->")
+    for rel in STALE_SCAN_TARGETS:
+        path = REPO_ROOT / rel
+        if not path.exists():
+            continue
+        for n, line in enumerate(path.read_text(encoding="utf-8").splitlines(), 1):
+            m = reason_re.search(line)
+            if m:
+                out.append((rel, n, m.group(1).strip()))
+    return out
 
 
 # ------------------------------------------------------------------ #
@@ -356,6 +695,7 @@ DOC_TARGETS = [
     "AGENTS.md",
     "COMPLETE_PROJECT_DOCUMENTATION.md",
     "LLM_Development.md",
+    "SECURITY_FIXES.md",
     "wiki-local/spec-project.md",
 ]
 
@@ -367,7 +707,11 @@ def build_generators() -> dict[str, str]:
         "directory-tree": render_directory_tree(entries),
         "largest-files": render_largest_files(entries),
         "mcp-tools": render_mcp_tools(get_mcp_tools()),
+        "dispatch-coverage": render_dispatch_coverage(),
         "test-count": str(get_test_count()),
+        "test-count-baseline": "633",  # frozen — pre-cleanup baseline
+        "audit-closed-count": "153",   # frozen — gitignored audit doc not in CI
+        "schema-version": get_schema_version(),
         "tool-count": str(get_tool_count()),
         "cli-count": str(get_cli_count()),
         "version": get_version(),
@@ -380,7 +724,42 @@ def main() -> int:
     )
     ap.add_argument("--check", action="store_true",
                     help="Exit 1 if any doc would change, don't write.")
+    ap.add_argument(
+        "--list-allow-stale", action="store_true",
+        help="Print every active <!-- ALLOW-STALE: ... --> escape with "
+             "its reason and exit. Useful for periodic audit.",
+    )
+    ap.add_argument(
+        "--check-tier-coverage", action="store_true",
+        help="Report files whose name pattern suggests a non-primitive "
+             "tier but which aren't explicitly listed in LOC_TIERS. "
+             "Exit 1 if any nudges are produced.",
+    )
     args = ap.parse_args()
+
+    if args.check_tier_coverage:
+        nudges = check_tier_coverage(scan_package())
+        if not nudges:
+            print("LOC_TIERS coverage is clean — every non-primitive-"
+                  "shaped file is explicitly listed.")
+            return 0
+        for path, inferred_tier in nudges:
+            print(
+                f"NUDGE: {path} pattern-matches tier {inferred_tier!r} "
+                f"but is not in LOC_TIERS. Add a TierEntry or move the "
+                f"file out of the matched namespace.",
+                file=sys.stderr,
+            )
+        return 1
+
+    if args.list_allow_stale:
+        rows = list_allow_stale()
+        if not rows:
+            print("No ALLOW-STALE escapes in current-state docs.")
+            return 0
+        for rel, n, reason in rows:
+            print(f"{rel}:{n}: {reason}")
+        return 0
 
     generators = build_generators()
 

@@ -395,7 +395,7 @@ coordinationhub/
 ```
 <!-- /GEN -->
 
-`tests/` contains <!-- GEN:test-count -->798<!-- /GEN --> tests across 28 files plus `fixtures/claude_code_events/` (hook contract fixtures).
+`tests/` contains <!-- GEN:test-count -->806<!-- /GEN --> tests across 28 files plus `fixtures/claude_code_events/` (hook contract fixtures).
 
 Top-level project files: `pyproject.toml`, `coordination_spec.yaml`/`.json` (example specs), `README.md`, `CLAUDE.md`, `COMPLETE_PROJECT_DOCUMENTATION.md`, `LLM_Development.md`, and `wiki-local/` (this spec, glossary, index).
 

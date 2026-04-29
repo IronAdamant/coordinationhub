@@ -1,0 +1,47 @@
+# Coverage.py configuration for CoordinationHub.
+#
+# Plan 01 of findings/post_self_review_followups/. The substring meta-test
+# only checks tool *invocation*; this config enables real branch + line
+# data so the dispatch-coverage generator in scripts/gen_docs.py can
+# render an honest table.
+#
+# Run:
+#   pip install -e '.[dev]'
+#   pytest --cov=coordinationhub --cov-report=json --cov-branch
+#   python scripts/gen_docs.py
+#
+# The generator skips gracefully when coverage.json is absent.
+
+[run]
+branch = True
+source = coordinationhub
+# These paths under coordinationhub/ are deliberately excluded:
+#   - tests/           — covering tests with tests is recursive nonsense
+#   - scripts/         — dev tooling, not part of the dispatch surface
+#   - data/            — markdown templates, not code
+#   - plugins/dashboard/dashboard_(js|css|html).py — template strings,
+#                          NOT code (they appear in LOC_TIERS as "data"
+#                          tier, which is exempt from the LOC cap; same
+#                          rationale applies to coverage)
+omit =
+    tests/*
+    scripts/*
+    coordinationhub/data/*
+    coordinationhub/plugins/dashboard/dashboard_js.py
+    coordinationhub/plugins/dashboard/dashboard_css.py
+    coordinationhub/plugins/dashboard/dashboard_html.py
+
+[report]
+# Don't fail the report; we let scripts/gen_docs.py surface the numbers
+# in the AGENTS.md "Dispatch Coverage" table instead.
+show_missing = False
+skip_covered = False
+exclude_lines =
+    pragma: no cover
+    if __name__ == .__main__.:
+    raise NotImplementedError
+    \.\.\.
+
+[json]
+output = coverage.json
+pretty_print = True
