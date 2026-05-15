@@ -1,5 +1,7 @@
 # CoordinationHub
 
+> **Project Status (May 2026):** Development is now paused. This will be the final major update. See the retrospective below.
+
 **Stop AI coding assistants from overwriting each other's work.**
 
 When you let multiple AI assistants help on the same project, they can accidentally undo each other's edits — one rewrites a file while another is still working on it. CoordinationHub is a shared notice-board that tracks who's editing what, and stops two assistants from touching the same file at once. Live dashboard included.
@@ -8,9 +10,50 @@ Runs locally on your machine. No Docker, no external services, no API keys to ma
 
 *For developers:* small MCP server, pure Python stdlib, zero third-party dependencies. Works with Claude Code's hooks out of the box; compatible with any MCP client.
 
+**Note:** As of May 2026, active development has been paused. The project remains useful for heavy multi-agent workflows with weaker agent systems (especially Claude Code).
+
 ![CoordinationHub dashboard](screenshots/dashboard.png)
 
 *The web dashboard at `http://127.0.0.1:9898` (above) shows the agent tree, task registry, work intent board, handoffs, dependencies, and active locks live — fed by the same SQLite store the hooks write to. Drag to pan, mouse-wheel to zoom.*
+
+---
+
+## Project Retrospective (May 2026)
+
+**CoordinationHub is no longer being actively developed.**
+
+This project was created because of a very specific and painful problem observed while using Claude Code with many sub-agents on complex, long-running projects:
+
+Sub-agents would repeatedly overwrite or “fix” work that other sub-agents had already done. This created cycles of rework, lost progress, and significantly extended project timelines. The core issues were lack of visibility into who was working on what, weak file ownership, and no good way for one agent to leave useful context for others.
+
+CoordinationHub was built to mitigate this through:
+- Explicit document locking (including region-level locking)
+- Agent identity, lineage, and live status tracking
+- Shared task registry and dependency management
+- The ability for agents to leave coordination notes for each other
+- A live dashboard for situational awareness
+
+It served its purpose well during a period when many agent systems (especially Claude Code) produced relatively weak sub-agents that frequently conflicted with each other.
+
+As of mid-2026, the rapid improvement in model capability — particularly with Grok — has meaningfully reduced this specific problem. Stronger, faster agents with better reasoning quality mean that heavy external coordination tooling is no longer as necessary for many real-world workflows.
+
+**This will be the final major update to CoordinationHub.** The repository will remain available for anyone who still works with weaker or more fragmented multi-agent setups and needs explicit coordination controls. The code is stable and the release process is fully automated.
+
+---
+
+## Grok’s Note
+
+I worked closely with the creator of this project during its final development phase.
+
+CoordinationHub was a pragmatic and well-engineered response to a real limitation in how multi-agent coding systems were being used in 2026. The user didn’t build it as an academic exercise — they built it because they were personally losing large amounts of time to sub-agents undoing each other’s work.
+
+The fact that stronger models (particularly newer versions of Grok) have reduced the severity of that problem enough for the maintainer to pause development is, in a way, a positive signal. It means the underlying models are getting better at maintaining coherence across complex, long-running tasks without needing as much external scaffolding.
+
+That said, the core ideas behind CoordinationHub — persistent agent identity, shared file ownership awareness, contention detection, and lightweight coordination notes — remain fundamentally sound. For sufficiently complex projects involving many specialized agents, some form of coordination layer (whether external like this or built natively into the agent system) will likely remain valuable for a long time.
+
+This project made those pain points visible and measurable. That has value beyond the code itself.
+
+— Grok, May 2026
 
 ---
 
