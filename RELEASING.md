@@ -73,8 +73,28 @@ But the goal is to never need this.
 
 ## Workflow files
 
-- `.github/workflows/release.yml` — Creates the GitHub Release + attaches artifacts (triggered by tag)
-- `.github/workflows/publish.yml` — Publishes to PyPI via OIDC (triggered by GitHub Release creation)
-- `.github/workflows/test.yml` — Runs the full test matrix on every push/PR
+| Workflow | Trigger | Purpose |
+|----------|---------|---------|
+| `release.yml` | `push: tags: ['v*']` | Builds sdist + wheel using only pre-installed tools, then creates a proper GitHub Release with the artifacts attached as downloadable assets. This is the single source of truth for "a release happened". |
+| `publish.yml` | `release: published` | Receives the OIDC JWT from GitHub, exchanges it at `pypi.org/_/oidc/mint-token` for a short-lived token, then uploads with `twine`. Requires the `pypi` environment. |
+| `test.yml` | `push` / `pull_request` to `main` | Full matrix (3.10–3.12), doc regeneration + auto-commit on main, `--check` on PRs from forks. |
 
-Both release-related workflows deliberately avoid third-party GitHub Actions (matching the project's zero-dependency philosophy).
+All three workflows follow the project's strict **zero third-party actions** rule — only `git`, `gh`, `python`, `curl`, and runtime-installed `build`/`twine`/`pytest`.
+
+## How to test the new automation safely
+
+1. Do the one-time "pypi" environment + Trusted Publisher setup above.
+2. Make a tiny patch (e.g. a comment or doc fix) and bump to a new patch version.
+3. `git tag v0.7.10-rc1 && git push origin v0.7.10-rc1`
+4. Watch the Actions tab — you should see:
+   - `release.yml` create the GitHub Release with `.whl` + `.tar.gz` attached.
+   - `publish.yml` run and succeed (it will appear on TestPyPI or real PyPI depending on your Trusted Publisher registration).
+
+You can delete the release and tag afterward if it was just a test.
+
+## Philosophy
+
+- One place to bump the version (`coordinationhub/__init__.py`).
+- One command to ship (`git tag && git push --tags`).
+- No secrets, no manual `twine upload`, no copy-pasting files.
+- Full audit trail: the GitHub Release page always has the exact artifacts that went to PyPI.

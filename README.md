@@ -24,6 +24,14 @@ When three AI coding assistants help refactor the same part of your project, the
 pip install coordinationhub
 ```
 
+For the stdio MCP server (used by many IDEs and custom agents):
+
+```bash
+pip install coordinationhub[mcp]
+```
+
+This also installs the `coordinationhub-mcp` console script (a direct entry point to the stdio server).
+
 ## 60-second quick start
 
 ```bash
@@ -168,8 +176,9 @@ coordinationhub doctor                                       # validate setup, d
 coordinationhub auto-start-dashboard                         # idempotent dashboard launcher (used by hook)
 
 # Servers
-coordinationhub serve --port 9877                            # HTTP MCP server
+coordinationhub serve --port 9877                            # HTTP MCP + admin API
 coordinationhub serve-mcp                                    # stdio MCP (requires coordinationhub[mcp])
+coordinationhub-mcp                                          # direct stdio entry point (same as above, nicer for some launchers)
 coordinationhub serve-sse --port 9898                        # web dashboard with SSE stream
 
 # See what's happening
@@ -265,7 +274,17 @@ Core uses **only the Python stdlib**. The `mcp` package is optional (stdio trans
 pip install coordinationhub --no-deps
 ```
 
-Even the GitHub Actions workflows are zero-dep — no marketplace actions, OIDC trusted publishing via inline `curl` + `twine`.
+**Release automation is also secret-free and zero-dep.** Push a version tag and everything happens automatically:
+
+```bash
+git tag v0.7.10 && git push origin v0.7.10
+```
+
+- A GitHub Release is created with the built wheel + sdist attached.
+- The release triggers PyPI publication using **GitHub OIDC Trusted Publishing** (short-lived token minted on the fly — no API tokens are ever stored in the repo or in GitHub secrets).
+- Both `release.yml` and `publish.yml` deliberately use only pre-installed tools (`git`, `gh`, `python`, `curl`) plus `build`/`twine` installed at runtime. No third-party GitHub Actions.
+
+See [`RELEASING.md`](RELEASING.md) for the exact one-time setup (PyPI Trusted Publisher + "pypi" environment) and the full release checklist.
 
 ### Port allocation
 
@@ -291,3 +310,32 @@ The `init` command merges hooks into `~/.claude/settings.json`:
 Bridges: `PostToolUse` on `mcp__stele-context__index` fires `notify_change` with type `"indexed"`; on `mcp__trammel__claim_step` calls `update_agent_status` with the step/plan ID.
 
 The hook script is `coordinationhub/hooks/claude_code.py`. It reads JSON from stdin, creates a lightweight engine per call (~5 ms), and fails open on any error so a hub problem never blocks a Claude Code session.
+
+---
+
+## For maintainers — releasing new versions
+
+CoordinationHub uses a fully automated, tokenless release pipeline:
+
+```bash
+# Bump version in the single source of truth
+vim coordinationhub/__init__.py          # __version__ = "0.7.10"
+
+python -m pytest tests/ -q               # full suite
+python scripts/gen_docs.py               # regenerate GEN sections
+
+git add coordinationhub/__init__.py AGENTS.md COMPLETE_PROJECT_DOCUMENTATION.md ...
+git commit -m "chore: prepare v0.7.10"
+git push origin main
+
+git tag v0.7.10
+git push origin v0.7.10
+```
+
+The tag push triggers:
+1. `.github/workflows/release.yml` — builds the package and creates a GitHub Release with the `.whl` + `.tar.gz` attached.
+2. The Release event triggers `.github/workflows/publish.yml` — publishes to PyPI using OIDC (no secrets).
+
+Full instructions, one-time PyPI Trusted Publisher setup, and troubleshooting live in [`RELEASING.md`](RELEASING.md).
+
+Recent robustness work (v0.7.9) hardened the system for large concurrent swarms (22+ sub-agents, 48-broadcast storms, worktree-isolated spawns, HA coordinator leases, region locks, etc.).
