@@ -41,6 +41,7 @@ def find_conflicting_locks(
     lock_type: str,
     region_start: int | None,
     region_end: int | None,
+    worktree_root: str | None = None,
 ) -> list[dict[str, Any]]:
     """Return existing locks that conflict with a proposed lock.
 
@@ -49,11 +50,17 @@ def find_conflicting_locks(
     - Their regions overlap (or either is whole-file)
     - At least one is exclusive
     - They are held by different agents
+    - (If worktree_root provided) they share the same worktree_root (or NULL)
     """
     now = time.time()
+    where = "document_path = ? AND locked_at + lock_ttl > ?"
+    params = [document_path, now]
+    if worktree_root is not None:
+        where += " AND (worktree_root IS NULL OR worktree_root = ?)"
+        params.append(worktree_root)
     rows = conn.execute(
-        f"SELECT * FROM {table} WHERE document_path = ? AND locked_at + lock_ttl > ?",
-        (document_path, now),
+        f"SELECT * FROM {table} WHERE {where}",
+        params,
     ).fetchall()
 
     conflicts = []
@@ -78,6 +85,7 @@ def find_own_lock(
     agent_id: str,
     region_start: int | None,
     region_end: int | None,
+    worktree_root: str | None = None,
 ) -> dict | None:
     """Find an existing lock held by the same agent on the same region.
 
@@ -87,9 +95,14 @@ def find_own_lock(
     locks invisible and caused duplicate rows to accumulate whenever
     the reaper hadn't run between expiry and re-acquire.
     """
+    where = "document_path = ? AND locked_by = ?"
+    params = [document_path, agent_id]
+    if worktree_root is not None:
+        where += " AND (worktree_root IS NULL OR worktree_root = ?)"
+        params.append(worktree_root)
     rows = conn.execute(
-        f"SELECT * FROM {table} WHERE document_path = ? AND locked_by = ?",
-        (document_path, agent_id),
+        f"SELECT * FROM {table} WHERE {where}",
+        params,
     ).fetchall()
     for row in rows:
         if row["region_start"] == region_start and row["region_end"] == region_end:

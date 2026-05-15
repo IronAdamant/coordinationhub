@@ -369,6 +369,11 @@ def report_subagent_spawned(
         }
     now = time.time()
     with connect() as conn:
+        try:
+            conn.execute("BEGIN IMMEDIATE")
+            began = True
+        except sqlite3.OperationalError:
+            began = False
         if subagent_type:
             row = conn.execute(
                 """
@@ -399,6 +404,9 @@ def report_subagent_spawned(
                 "UPDATE pending_tasks SET consumed_at = ?, status = 'registered', source = ? WHERE task_id = ?",
                 (now, source, spawn_id),
             )
+
+        if began:
+            conn.execute("COMMIT")
 
         return {
             "reported": True,

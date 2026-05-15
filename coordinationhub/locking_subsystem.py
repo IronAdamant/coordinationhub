@@ -116,7 +116,7 @@ class Locking:
             conn = self._connect()
             conn.execute("BEGIN IMMEDIATE")
             try:
-                own = _lo.find_own_lock(conn, "document_locks", norm_path, agent_id, region_start, region_end)
+                own = _lo.find_own_lock(conn, "document_locks", norm_path, agent_id, region_start, region_end, worktree)
                 if own is not None:
                     conn.execute(
                         "UPDATE document_locks SET locked_at = ?, lock_ttl = ?, lock_type = ? WHERE id = ?",
@@ -133,6 +133,7 @@ class Locking:
 
                 conflicts = _lo.find_conflicting_locks(
                     conn, "document_locks", norm_path, agent_id, lock_type, region_start, region_end,
+                    worktree,
                 )
                 if conflicts and not force:
                     # T6.31: log every denied acquire (not just force-steals).

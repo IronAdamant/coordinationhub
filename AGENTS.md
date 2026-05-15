@@ -18,7 +18,7 @@ coordinationhub/
   _storage.py           — Storage backend for CoordinationHub — SQLite pool, path resolution, lifecycle (~143 LOC)
   agent_registry.py     — Agent lifecycle: register, heartbeat, deregister, lineage management (~495 LOC)
   agent_status.py       — Agent status and file-map query helpers for CoordinationHub (~288 LOC)
-  broadcast_subsystem.py — Broadcast subsystem — sibling broadcasts, ack tracking, multi-lock wait (~246 LOC)
+  broadcast_subsystem.py — Broadcast subsystem — sibling broadcasts, ack tracking, multi-lock wait (~259 LOC)
   broadcasts.py         — Broadcast acknowledgment primitives for CoordinationHub (~147 LOC)
   change_subsystem.py   — Change subsystem — change notifications, file ownership, conflict audit, status (~219 LOC)
   cli.py                — CoordinationHub CLI — command-line interface for all coordination tool methods (~102 LOC)
@@ -38,7 +38,7 @@ coordinationhub/
   cli_vis.py            — Change awareness, audit, graph, and assessment CLI commands (~241 LOC)
   conflict_log.py       — Conflict recording and querying for CoordinationHub (~43 LOC)
   context.py            — Context bundle builder for CoordinationHub agent registration responses (~104 LOC)
-  core.py               — CoordinationEngine — host class that composes twelve subsystems (~948 LOC)
+  core.py               — CoordinationEngine — host class that composes twelve subsystems (~949 LOC)
   db.py                 — SQLite connection pool and public re-exports for CoordinationHub (~93 LOC)
   db_migrations.py      — Schema-version tracking, migration functions, and the ``init_schema`` driver (~467 LOC)
   db_schemas.py         — Canonical SQLite schema definitions for CoordinationHub (~305 LOC)
@@ -49,13 +49,13 @@ coordinationhub/
   handoff_subsystem.py  — Handoff subsystem — one-to-many handoff acknowledgment and lifecycle (~148 LOC)
   handoffs.py           — Handoff recording and acknowledgement primitives for CoordinationHub (~200 LOC)
   housekeeping.py       — HousekeepingScheduler — background periodic pruners for long-running hubs (~188 LOC)
-  identity_subsystem.py — Identity subsystem — agent registration, heartbeat, lineage, and ID generation (~203 LOC)
+  identity_subsystem.py — Identity subsystem — agent registration, heartbeat, lineage, and ID generation (~209 LOC)
   lease_subsystem.py    — Lease subsystem — HA coordinator lease management (~167 LOC)
   leases.py             — Zero-deps lease primitives for HA coordinator leadership (~220 LOC)
   limits.py             — String-length caps for user-supplied fields (T6.14) (~40 LOC)
   lock_cache.py         — In-memory lock cache for CoordinationHub (~188 LOC)
-  lock_ops.py           — Shared lock primitives used by both local locks and coordination locks (~209 LOC)
-  locking_subsystem.py  — Locking subsystem — document lock acquire/release/refresh/list/admin (~462 LOC)
+  lock_ops.py           — Shared lock primitives used by both local locks and coordination locks (~222 LOC)
+  locking_subsystem.py  — Locking subsystem — document lock acquire/release/refresh/list/admin (~463 LOC)
   mcp_server.py         — HTTP REST admin / dashboard endpoint for CoordinationHub (~578 LOC)
   mcp_stdio.py          — Stdio-based MCP server for CoordinationHub using the ``mcp`` Python package (~197 LOC)
   messages.py           — Inter-agent messaging primitives for CoordinationHub (~105 LOC)
@@ -64,7 +64,7 @@ coordinationhub/
   paths.py              — Path normalization and project-root detection utilities (~39 LOC)
   pending_tasks.py      — Pending sub-agent task storage for CoordinationHub (~109 LOC)
   scan.py               — File ownership scan for CoordinationHub (~279 LOC)
-  spawner.py            — Zero-deps spawner primitives for HA coordinator sub-agent registry (~414 LOC)
+  spawner.py            — Zero-deps spawner primitives for HA coordinator sub-agent registry (~421 LOC)
   spawner_subsystem.py  — Spawner subsystem — HA coordinator sub-agent spawn management (~233 LOC)
   task_failures.py      — Task failure tracking and dead letter queue for CoordinationHub (~149 LOC)
   task_subsystem.py     — Task subsystem — shared task registry with hierarchy + dead-letter queue (~241 LOC)
@@ -173,14 +173,14 @@ Today's snapshot:
 <!-- GEN:largest-files -->
 | Path | Code-LOC | Tier | Status |
 |------|----------|------|--------|
-| `coordinationhub/core.py` | 948 | engine | exempt |
+| `coordinationhub/core.py` | 949 | engine | exempt |
 | `coordinationhub/mcp_server.py` | 578 | transport | OK (≤ 700) |
 | `coordinationhub/tasks.py` | 517 | primitive | OK (≤ 550) |
 | `coordinationhub/agent_registry.py` | 495 | primitive | OK (≤ 550) |
 | `coordinationhub/db_migrations.py` | 467 | migrations | OK (≤ 800) |
-| `coordinationhub/locking_subsystem.py` | 462 | primitive | OK (≤ 550) |
+| `coordinationhub/locking_subsystem.py` | 463 | primitive | OK (≤ 550) |
 | `coordinationhub/plugins/dashboard/dashboard_js.py` | 452 | data | exempt |
-| `coordinationhub/spawner.py` | 414 | primitive | OK (≤ 550) |
+| `coordinationhub/spawner.py` | 421 | primitive | OK (≤ 550) |
 <!-- /GEN -->
 
 If a file crosses its cap, the right move is **plan a split** (see the v0.7.6 splits as templates: `core_locking.py` → primitives + subsystem; `cli.py` → parser + dispatch; `dashboard.py` → html + css + js). Don't move LOC into comments to game the metric. <!-- ALLOW-STALE: split history retained as a worked-example for future splits -->

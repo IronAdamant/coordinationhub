@@ -59,6 +59,7 @@ from typing import Any, Callable
 from . import agent_registry as _ar
 from . import scan as _scan
 from .context import build_context_bundle
+from .lease_subsystem import Lease
 from .locking_subsystem import Locking
 from .plugins.graph import graphs as _g
 
@@ -73,7 +74,8 @@ class Identity:
     Takes an explicit :class:`Locking` dep so ``deregister_agent`` can
     call ``self._locking.release_agent_locks(...)`` directly instead of
     routing through the engine's MRO / facade. Same pattern as
-    :class:`Broadcast` (commit ``fb9e200``).
+    :class:`Broadcast` (commit ``fb9e200``). Also takes :class:`Lease`
+    so deregister can release coordinator leases to avoid orphans.
     """
 
     def __init__(
@@ -81,6 +83,7 @@ class Identity:
         connect_fn: Callable[[], Any],
         publish_event_fn: Callable[[str, dict[str, Any]], None],
         locking: Locking,
+        lease: Lease,
         effective_worktree_root_getter: Callable[[], str],
         read_only_connect_fn: Callable[[], Any],
         generate_agent_id_fn: Callable[[str | None], str],
@@ -90,6 +93,7 @@ class Identity:
         self._connect = connect_fn
         self._publish_event = publish_event_fn
         self._locking = locking
+        self._lease = lease
         self._effective_worktree_root_getter = effective_worktree_root_getter
         self._read_only_connect = read_only_connect_fn
         self._generate_agent_id_fn = generate_agent_id_fn
@@ -208,6 +212,11 @@ class Identity:
         # ``self._locking.get_lock_status`` (commit ``fb9e200``).
         lock_result = self._locking.release_agent_locks(agent_id)
         result["locks_released"] = lock_result.get("released", 0)
+        # Release coordinator lease if this agent held it (prevents orphan leases
+        # when subagents holding leadership are deregistered via request_subagent_deregistration
+        # or storm-induced failures).
+        lease_result = self._lease.release_coordinator_lease(agent_id)
+        result["lease_released"] = lease_result.get("released", False)
         self._publish_event("agent.deregistered", {"agent_id": agent_id})
         return result
 

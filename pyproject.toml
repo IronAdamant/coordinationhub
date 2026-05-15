@@ -42,6 +42,7 @@ dev = [
 
 [project.scripts]
 coordinationhub = "coordinationhub.cli:main"
+coordinationhub-mcp = "coordinationhub.mcp_stdio:main"
 
 [project.urls]
 Homepage = "https://github.com/IronAdamant/coordinationhub"

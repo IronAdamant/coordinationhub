@@ -145,13 +145,19 @@ class Broadcast:
         conflicts: list[dict[str, Any]] = []
         sibling_ids = [s["agent_id"] for s in live_siblings]
         if document_path and sibling_ids:
-            norm_path = normalize_path(document_path, self._project_root_getter())
+            project_root = self._project_root_getter()
+            norm_path = normalize_path(document_path, project_root)
+            worktree = str(project_root) if project_root else None
             placeholders = ",".join("?" * len(sibling_ids))
             with self._connect() as conn:
+                where = f"document_path = ? AND locked_by IN ({placeholders})"
+                params = [norm_path] + sibling_ids
+                if worktree is not None:
+                    where += " AND (worktree_root IS NULL OR worktree_root = ?)"
+                    params.append(worktree)
                 lock_rows = conn.execute(
-                    f"SELECT locked_by FROM document_locks WHERE document_path = ? "
-                    f"AND locked_by IN ({placeholders})",
-                    [norm_path] + sibling_ids,
+                    f"SELECT locked_by FROM document_locks WHERE {where}",
+                    params,
                 ).fetchall()
                 for row in lock_rows:
                     if row["locked_by"] != agent_id:
@@ -215,11 +221,15 @@ class Broadcast:
                 break
             acked.add(event.get("agent_id"))
 
-        # T1.11: re-read status so pending_acks reflects the snapshot.
+        # T1.11 + robustness: always trust the final DB status for counts
+        # (events may be missed under storm; DB is authoritative). This
+        # prevents under-counting acks (e.g. 31/48) and ghost broadcast reports.
         final = self.get_broadcast_status(broadcast_id)
+        final_acked = final.get("acknowledged_by", [])
+        final_expected = final.get("expected_count", 0) or expected
         return {
-            "timed_out": len(acked) < expected,
-            "acknowledged_by": list(acked),
+            "timed_out": len(final_acked) < final_expected,
+            "acknowledged_by": final_acked,
             "pending_acks": final.get("pending_acks", []),
         }
 
@@ -281,5 +291,14 @@ class Broadcast:
                 break
             released.append(event["document_path"])
             paths_set.remove(event["document_path"])
+
+        # Robustness under storm: re-check any remaining via direct status.
+        # Catches releases whose events were missed by _hybrid_wait (e.g. 4
+        # contended resources timing out in wait_for_locks when leases held).
+        for path in list(paths_set):
+            status = self._locking.get_lock_status(path)
+            if not status.get("locked", False) or status.get("locked_by") == agent_id:
+                released.append(path)
+                paths_set.remove(path)
 
         return {"released": released, "timed_out": list(paths_set)}

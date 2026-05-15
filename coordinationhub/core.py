@@ -345,6 +345,7 @@ class CoordinationEngine:
             connect_fn=self._connect,
             publish_event_fn=self._publish_event,
             locking=self._locking,
+            lease=self._lease,
             effective_worktree_root_getter=(
                 lambda: str(self._storage.effective_worktree_root)
             ),
