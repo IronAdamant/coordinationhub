@@ -4,6 +4,7 @@ on:
   push:
     tags:
       - 'v*'
+  workflow_dispatch:     # Allows manual trigger from GitHub UI
 
 # Zero third-party actions. Uses only pre-installed tools + build/twine at runtime.
 #
@@ -53,7 +54,7 @@ jobs:
           python -m build
           ls -lh dist/
 
-      - name: Create GitHub Release + attach artifacts
+      - name: Create or update GitHub Release + attach artifacts
         env:
           GH_TOKEN: ${{ github.token }}
           TAG: ${{ github.ref_name }}
@@ -63,16 +64,21 @@ jobs:
 
           TITLE="${TAG} — $(git log -1 --pretty=%s || echo 'Release')"
 
-          gh release create "${TAG}" \
-            --repo "${REPO}" \
-            --title "${TITLE}" \
-            --generate-notes \
-            --verify-tag \
-            dist/*.tar.gz \
-            dist/*.whl
+          if gh release view "$TAG" --repo "$REPO" >/dev/null 2>&1; then
+            echo "Release $TAG already exists — updating assets (idempotent re-run)"
+            gh release upload "$TAG" --repo "$REPO" --clobber dist/*.tar.gz dist/*.whl || true
+          else
+            gh release create "$TAG" \
+              --repo "$REPO" \
+              --title "$TITLE" \
+              --generate-notes \
+              --verify-tag \
+              dist/*.tar.gz \
+              dist/*.whl
+            echo "Created GitHub Release $TAG with attached artifacts."
+          fi
 
-          echo "Created GitHub Release ${TAG} with attached artifacts."
-          gh release view "${TAG}" --repo "${REPO}" --json assets --jq '.assets[].name'
+          gh release view "$TAG" --repo "$REPO" --json assets --jq '.assets[].name'
 
   publish-pypi:
     needs: create-release

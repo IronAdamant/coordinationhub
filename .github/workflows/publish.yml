@@ -1,4 +1,4 @@
-name: Publish to PyPI
+name: Publish to PyPI (DEPRECATED)
 
 on:
   release:
@@ -47,7 +47,7 @@ jobs:
           pip install --disable-pip-version-check build
           python -m build
 
-      - name: Publish to PyPI via OIDC trusted publishing
+      - name: Publish to PyPI (DEPRECATED) via OIDC trusted publishing
         run: |
           set -euo pipefail
 

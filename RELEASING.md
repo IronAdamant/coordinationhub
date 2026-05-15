@@ -23,24 +23,46 @@ This project uses a fully automated, secret-free release pipeline based on Git t
 
 This allows the GitHub Actions OIDC token to be exchanged for a short-lived PyPI token **with no API token ever stored in the repo**.
 
-## Normal release process (fully automatic)
+## Normal release process (fully automatic) — Recommended
+
+The easiest way is to use the helper script:
 
 ```bash
-# 1. Bump the version (single source of truth)
-vim coordinationhub/__init__.py   # change __version__ = "0.7.10"
+# Option A: Let it auto-bump the patch version
+./scripts/release.sh
 
-# 2. Run tests + regenerate docs locally (recommended)
+# Option B: Specify an exact version
+./scripts/release.sh 0.7.13
+```
+
+The script will:
+- Bump the version
+- Run the full test suite
+- Regenerate documentation
+- Commit, tag, and push
+
+This will automatically trigger the `release.yml` workflow, which handles both the GitHub Release and PyPI publishing in one go.
+
+---
+
+### Manual process (if you prefer doing it by hand)
+
+```bash
+# 1. Bump version
+vim coordinationhub/__init__.py
+
+# 2. Run tests + docs
 python -m pytest tests/ -q
 python scripts/gen_docs.py
 
-# 3. Commit + push the version bump
+# 3. Commit + push
 git add coordinationhub/__init__.py AGENTS.md COMPLETE_PROJECT_DOCUMENTATION.md ...
-git commit -m "chore: prepare v0.7.10"
+git commit -m "chore: prepare v0.7.12"
 git push origin main
 
-# 4. Tag and push the tag (this is the trigger)
-git tag v0.7.10
-git push origin v0.7.10
+# 4. Tag and push (triggers the release workflow)
+git tag v0.7.12
+git push origin v0.7.12
 ```
 
 What happens automatically:
