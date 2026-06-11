@@ -6,8 +6,6 @@ import pytest
 
 from coordinationhub.hooks.base import BaseHook
 from coordinationhub.hooks.stdio_adapter import StdioHook
-from coordinationhub.hooks.kimi_cli import KimiCliHook
-from coordinationhub.hooks.cursor import CursorHook
 
 
 @pytest.fixture
@@ -46,24 +44,6 @@ class TestStdioHook:
         hook = StdioHook(project_root=hook_cwd)
         try:
             assert hook.session_agent_id("abc") == "hub.cc.abc"
-        finally:
-            hook.close()
-
-
-class TestKimiCliHook:
-    def test_ide_prefix(self, hook_cwd):
-        hook = KimiCliHook(project_root=hook_cwd)
-        try:
-            assert hook.session_agent_id("abc") == "hub.kimi.abc"
-        finally:
-            hook.close()
-
-
-class TestCursorHook:
-    def test_ide_prefix(self, hook_cwd):
-        hook = CursorHook(project_root=hook_cwd)
-        try:
-            assert hook.session_agent_id("abc") == "hub.cursor.abc"
         finally:
             hook.close()
 

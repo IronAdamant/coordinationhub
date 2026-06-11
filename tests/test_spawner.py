@@ -25,11 +25,11 @@ class TestSpawnSubagent:
         parent = engine.generate_agent_id()
         engine.register_agent(parent)
 
-        result = engine.spawn_subagent(parent, "Plan", source="kimi_cli")
+        result = engine.spawn_subagent(parent, "Plan", source="external")
         assert result["stashed"] is True
 
         spawns = engine.get_pending_spawns(parent)
-        assert spawns[0]["source"] == "kimi_cli"
+        assert spawns[0]["source"] == "external"
 
 
 class TestReportSubagentSpawned:
@@ -41,7 +41,7 @@ class TestReportSubagentSpawned:
         child = engine.generate_agent_id(parent)
         engine.register_agent(child, parent)
 
-        result = engine.report_subagent_spawned(parent, "Explore", child, source="kimi_cli")
+        result = engine.report_subagent_spawned(parent, "Explore", child, source="external")
         assert result["reported"] is True
         assert result["child_agent_id"] == child
         assert result["description"] == "test task"
@@ -49,7 +49,7 @@ class TestReportSubagentSpawned:
 
         spawns = engine.get_pending_spawns(parent, include_consumed=True)
         assert spawns[0]["status"] == "registered"
-        assert spawns[0]["source"] == "kimi_cli"
+        assert spawns[0]["source"] == "external"
 
     def test_report_subagent_spawned_without_pending(self, engine):
         parent = engine.generate_agent_id()
@@ -247,8 +247,8 @@ class TestSpawnSourceValidation:
 
     The DB column itself is intentionally open-ended (no CHECK
     constraint per the audit), but the primitive enforces the closed
-    vocabulary so a typo (``cusor``, ``kimii``) doesn't silently land
-    in the table and break dashboard filters.
+    vocabulary so a typo doesn't silently land in the table and break
+    dashboard filters.
     """
 
     def test_stash_rejects_unknown_source(self, engine, registered_agent):
@@ -259,7 +259,6 @@ class TestSpawnSourceValidation:
         assert result["reason"] == "invalid_source"
         assert result["source"] == "bogus_source"
         assert "external" in result["valid_sources"]
-        assert "kimi_cli" in result["valid_sources"]
 
     def test_stash_accepts_all_known_sources(self, engine):
         """Sanity: every entry in the vocabulary must be accepted."""
@@ -306,6 +305,6 @@ class TestSpawnSourceValidation:
         engine.register_agent(child, registered_agent)
 
         result = engine.report_subagent_spawned(
-            registered_agent, "Explore", child, source="cursor",
+            registered_agent, "Explore", child, source="external",
         )
         assert result["reported"] is True

@@ -24,9 +24,9 @@ class TestGraphValidation:
     def test_validate_valid_full_spec(self):
         data = {
             "agents": [
-                {"id": "planner", "role": "decompose tasks", "model": "minimax-m2.7",
+                {"id": "planner", "role": "decompose tasks", "model": "grok",
                  "responsibilities": ["break down stories", "assign subtasks"]},
-                {"id": "executor", "role": "implement", "model": "minimax-m2.7",
+                {"id": "executor", "role": "implement", "model": "grok",
                  "responsibilities": ["write code", "run tests"]},
             ],
             "handoffs": [

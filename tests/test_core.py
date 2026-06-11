@@ -19,7 +19,7 @@ class TestRegisterAgentWithGraph:
         spec = tmp_path / "coordination_spec.json"
         spec.write_text(json.dumps({
             "agents": [
-                {"id": "planner", "role": "decomposer", "model": "minimax-m2.7",
+                {"id": "planner", "role": "decomposer", "model": "grok",
                  "responsibilities": ["break_down", "assign"]},
             ],
             "handoffs": [],

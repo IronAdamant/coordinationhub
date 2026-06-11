@@ -7,7 +7,7 @@ Provides IDE-agnostic coordination logic:
   - Change notifications
   - Sub-agent pending-task correlation
 
-IDE-specific adapters (Kimi CLI, Cursor, etc.) subclass BaseHook
+IDE-specific adapters subclass BaseHook
 and map their native event shapes to these methods.
 """
 
@@ -184,7 +184,7 @@ class BaseHook:
         if raw_ide_id:
             # T3.12: pass our IDE vendor so raw ids from different IDEs
             # don't cross-match. IDE_PREFIX is the vendor tag ("cc",
-            # "cursor", "kimi", etc.).
+            # "cc", etc.).
             mapped = self._engine.find_agent_by_raw_ide_id(
                 raw_ide_id, ide_vendor=self.IDE_PREFIX,
             )

@@ -310,7 +310,7 @@ coordinationhub/
   cli_leases.py         — CLI commands for HA coordinator lease management (~104 LOC)
   cli_locks.py          — Document locking and coordination CLI commands (~272 LOC)
   cli_parser.py         — Argument parser for the CoordinationHub CLI (~379 LOC)
-  cli_setup.py          — CLI commands for setup and diagnostics: ``init``, ``doctor``, ``watch`` (~313 LOC)
+  cli_setup.py          — CLI commands for setup and diagnostics: ``init``, ``doctor``, ``watch`` (~178 LOC)
   cli_setup_doctor.py   — Diagnostic checks for ``coordinationhub doctor`` (~148 LOC)
   cli_spawner.py        — CLI commands for HA coordinator spawner — sub-agent registry management (~120 LOC)
   cli_sse.py            — CLI commands for SSE dashboard server (~56 LOC)
@@ -357,8 +357,6 @@ coordinationhub/
   hooks/
     __init__.py         — Hooks package — IDE integration via stdin/stdout event protocol (~1 LOC)
     base.py             — Base hook abstraction for CoordinationHub (~340 LOC)
-    cursor.py           — CoordinationHub hook adapter for Cursor (~146 LOC)
-    kimi_cli.py         — CoordinationHub hook adapter for Kimi CLI (~121 LOC)
     stdio_adapter.py    — CoordinationHub stdio event adapter (~353 LOC)
   plugins/
     __init__.py         — CoordinationHub plugin system (~8 LOC)
@@ -395,7 +393,7 @@ coordinationhub/
 ```
 <!-- /GEN -->
 
-`tests/` contains <!-- GEN:test-count -->807<!-- /GEN --> tests across 28 files plus `fixtures/claude_code_events/` (hook contract fixtures).
+`tests/` contains <!-- GEN:test-count -->798<!-- /GEN --> tests across 28 files plus `fixtures/claude_code_events/` (hook contract fixtures).
 
 Top-level project files: `pyproject.toml`, `coordination_spec.yaml`/`.json` (example specs), `README.md`, `CLAUDE.md`, `COMPLETE_PROJECT_DOCUMENTATION.md`, `LLM_Development.md`, and `wiki-local/` (this spec, glossary, index).
 

@@ -10,7 +10,6 @@ from unittest.mock import patch
 
 from coordinationhub.cli_setup import (
     run_doctor,
-    _merge_hooks,
     _fill_hook_command,
     _HOOKS_CONFIG,
 )
@@ -28,6 +27,7 @@ class TestDoctor:
         assert names == {"import", "hooks_config", "storage_dir", "schema_version", "hook_python"}
 
 
+@pytest.mark.skip(reason="Claude Code settings.json merge logic removed from cli_setup")
 class TestMergeHooks:
     def test_merge_into_empty(self):
         hooks = _fill_hook_command(_HOOKS_CONFIG, "/usr/bin/python3")
@@ -78,6 +78,7 @@ class TestMergeHooks:
         assert json.dumps(merged1, sort_keys=True) == json.dumps(merged2, sort_keys=True)
 
 
+@pytest.mark.skip(reason="Claude Code settings.json merge logic removed from cli_setup")
 class TestMergeHooksAntiAccumulation:
     """T2.7: repeated init runs must not accumulate stale coordinationhub
     matcher blocks. Pre-fix a drift in the matcher string (e.g. adding a
@@ -152,6 +153,7 @@ class TestMergeHooksAntiAccumulation:
         assert any("coordinationhub" in c for c in commands)
 
 
+@pytest.mark.skip(reason="Claude Code settings.json integration removed")
 class TestInitSettingsSafety:
     """T2.7: cmd_init backs up settings.json before writing and aborts
     rather than overwriting a file it can't parse.
@@ -222,6 +224,7 @@ class TestFillHookCommand:
         assert cmd == "/opt/special/python3.12 -m coordinationhub.hooks.stdio_adapter"
 
 
+@pytest.mark.skip(reason="Claude Code auto-dashboard hook removed")
 class TestAutoStartDashboard:
     """Validate the SessionStart-hook helper that idempotently launches serve-sse."""
 
@@ -277,6 +280,7 @@ class TestAutoStartDashboard:
         assert (tmp_path / ".coordinationhub" / "dashboard.log").exists()
 
 
+@pytest.mark.skip(reason="Claude Code --auto-dashboard / --monitor-skill opt-in removed")
 class TestInitOptInFlags:
     """Validate the --auto-dashboard and --monitor-skill flags on `init`."""
 

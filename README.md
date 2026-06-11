@@ -301,12 +301,12 @@ coordinationhub/
   mcp_server.py               — HTTP server (stdlib http.server only)
   mcp_stdio.py                — stdio MCP server (optional `mcp` package)
   cli.py + cli_*.py           — argparse parser + per-domain command handlers
-  hooks/{base,claude_code,kimi_cli,cursor}.py
-                              — IDE hook adapters
+  hooks/{base,stdio_adapter}.py
+                              — IDE hook adapters (vendor-neutral stdio)
   plugins/{assessment,dashboard,graph}/
                               — assessment runner, web dashboard, coordination graph
-  data/monitor_skill.md       — installable Claude Code skill template
-  tests/                      — <!-- GEN:test-count -->807<!-- /GEN --> tests across 28 files
+  data/monitor_skill.md       — optional monitor skill template
+  tests/                      — <!-- GEN:test-count -->798<!-- /GEN --> tests across 28 files
 ```
 
 ### Zero-dependency guarantee
@@ -339,20 +339,22 @@ See [`RELEASING.md`](RELEASING.md) for the exact one-time setup (PyPI Trusted Pu
 | Chisel | 8377 |
 | Trammel | 8737 |
 
-### Claude Code integration
+### IDE hook integration
 
-The `init` command merges hooks into `~/.claude/settings.json`:
+`coordinationhub init` writes a vendor-neutral hook configuration to
+`~/.coordinationhub/hooks.json`. IDEs that support a stdio hook protocol
+can invoke the main adapter:
 
-- **SessionStart** — register the root agent, stamp its `current_task` from the user's prompt.
-- **PreToolUse** Write/Edit — acquire a file lock; deny if another agent holds it.
-- **PreToolUse** Agent — stash the sub-agent's `description` for FIFO correlation with the next `SubagentStart`.
-- **PostToolUse** Write/Edit — fire `notify_change`, release the lock so other agents don't wait for TTL expiry.
-- **SubagentStart / SubagentStop** — register/deregister children, applying the stashed task description.
-- **SessionEnd** — release all locks, deregister the session agent.
+```
+python -m coordinationhub.hooks.stdio_adapter
+```
 
-Bridges: `PostToolUse` on `mcp__stele-context__index` fires `notify_change` with type `"indexed"`; on `mcp__trammel__claim_step` calls `update_agent_status` with the step/plan ID.
+The hooks provide the same events (SessionStart, PreToolUse Write/Edit/Agent,
+PostToolUse, SubagentStart/Stop, SessionEnd) and call into the shared
+`BaseHook` implementation for locking, agent tracking, and change notification.
 
-The hook script is `coordinationhub/hooks/claude_code.py`. It reads JSON from stdin, creates a lightweight engine per call (~5 ms), and fails open on any error so a hub problem never blocks a Claude Code session.
+Bridges for Stele index and Trammel step claim are also wired through
+PostToolUse in the stdio adapter.
 
 ---
 

@@ -29,7 +29,7 @@ coordinationhub/
   cli_leases.py         — CLI commands for HA coordinator lease management (~104 LOC)
   cli_locks.py          — Document locking and coordination CLI commands (~272 LOC)
   cli_parser.py         — Argument parser for the CoordinationHub CLI (~379 LOC)
-  cli_setup.py          — CLI commands for setup and diagnostics: ``init``, ``doctor``, ``watch`` (~313 LOC)
+  cli_setup.py          — CLI commands for setup and diagnostics: ``init``, ``doctor``, ``watch`` (~178 LOC)
   cli_setup_doctor.py   — Diagnostic checks for ``coordinationhub doctor`` (~148 LOC)
   cli_spawner.py        — CLI commands for HA coordinator spawner — sub-agent registry management (~120 LOC)
   cli_sse.py            — CLI commands for SSE dashboard server (~56 LOC)
@@ -76,8 +76,6 @@ coordinationhub/
   hooks/
     __init__.py         — Hooks package — IDE integration via stdin/stdout event protocol (~1 LOC)
     base.py             — Base hook abstraction for CoordinationHub (~340 LOC)
-    cursor.py           — CoordinationHub hook adapter for Cursor (~146 LOC)
-    kimi_cli.py         — CoordinationHub hook adapter for Kimi CLI (~121 LOC)
     stdio_adapter.py    — CoordinationHub stdio event adapter (~353 LOC)
   plugins/
     __init__.py         — CoordinationHub plugin system (~8 LOC)
@@ -114,7 +112,7 @@ coordinationhub/
 ```
 <!-- /GEN -->
 
-The `tests/` directory contains the pytest suite (<!-- GEN:test-count -->807<!-- /GEN --> tests across 28 files), including `tests/fixtures/claude_code_events/` contract fixtures.
+The `tests/` directory contains the pytest suite (<!-- GEN:test-count -->798<!-- /GEN --> tests across 28 files), including `tests/fixtures/stdio_events/` contract fixtures.
 
 ## Module Design
 
@@ -333,26 +331,27 @@ coordinationhub watch             # live agent tree refresh
 - Lock files before writing shared documents: `acquire_lock(path, agent_id, force=False)`
 - Use `get_agent_tree()` as a shared situational reference — every agent sees the same live hierarchy with current tasks, active locks, and boundary warnings
 
-## Claude Code Integration
+## IDE Hook Integration
 
-Project-level hooks in `.claude/settings.json` wire CoordinationHub into Claude Code sessions automatically:
+`coordinationhub init` writes a vendor-neutral configuration to
+`~/.coordinationhub/hooks.json`. The runtime is the stdio adapter:
 
-- **SessionStart**: Registers a root agent (`hub.cc.{session_id}`)
-- **UserPromptSubmit**: Stamps the root agent's `current_task` with the user's prompt (truncated to 120 chars, whitespace collapsed). Without this hook, `coordinationhub watch` and `get_agent_tree` show the root agent as task-less even while it holds locks.
-- **PreToolUse Write/Edit**: Acquires a file lock before writes; denies if another agent holds it
-- **PreToolUse Agent**: Stashes the sub-agent's `description`, `prompt`, and `subagent_type` in `pending_tasks` keyed by `tool_use_id`. The following `SubagentStart` consumes it. See the "Sub-agent task correlation" design note below.
-- **PostToolUse Write/Edit**: Fires `notify_change` after successful writes; releases the lock immediately so other agents can acquire the file without waiting for TTL expiry
-- **SubagentStart/SubagentStop**: Registers/deregisters child agents for spawned subagents. SubagentStart consumes the pending task stashed by the preceding `PreToolUse[Agent]` and applies the description as the child's `current_task`. Symmetric with the root agent, whose `current_task` is populated from `UserPromptSubmit`.
-- **SessionEnd**: Releases all locks and deregisters the session agent
+```
+python -m coordinationhub.hooks.stdio_adapter
+```
 
-**Stele bridge**: PostToolUse on `mcp__stele-context__index` fires `notify_change` with type `"indexed"`.
-**Trammel bridge**: PostToolUse on `mcp__trammel__claim_step` calls `update_agent_status` with the step/plan ID.
+This is the entry point used by any IDE that can invoke a stdio hook with
+the standard event shape (Claude Code historically, and other compatible tools).
 
-The hook script is at `coordinationhub/hooks/claude_code.py`. It reads JSON from stdin, creates a lightweight engine per call (~5ms), and fails open on any error.
+It delegates to the shared `BaseHook` implementation in `base.py` for all
+coordination logic (locking, agent registration, pending-task correlation,
+change notification). The `IDE_PREFIX` ("cc") only affects the generated
+agent ID namespace and raw-ID lookup isolation for that vendor.
 
-**Hooks are global** — configured in `~/.claude/settings.json` using `python3 -m coordinationhub.hooks.claude_code` so they fire across all projects. If coordinationhub is not installed in a project's environment, the hook silently no-ops.
-
-To disable hooks temporarily, add `"disableAllHooks": true` to `~/.claude/settings.json` or a project's `.claude/settings.json`.
+The event surface covers:
+SessionStart, UserPromptSubmit, PreToolUse (Write/Edit/Agent),
+PostToolUse, SubagentStart/Stop, SessionEnd, plus Stele/Trammel bridges on
+specific PostToolUse tool names.
 
 ## Known Issues
 
@@ -362,7 +361,7 @@ To disable hooks temporarily, add `"disableAllHooks": true` to `~/.claude/settin
 
 ```bash
 python -m pytest tests/ -v
-# <!-- GEN:test-count -->807<!-- /GEN --> tests across 28 test files:
+# <!-- GEN:test-count -->798<!-- /GEN --> tests across 28 test files:
 #   test_agent_lifecycle.py    — 27 tests
 #   test_locking.py            — 46 tests (includes smart reap)
 #   test_notifications.py      — 8 tests

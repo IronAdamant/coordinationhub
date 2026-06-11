@@ -16,7 +16,7 @@ agents:
 
   - id: builder
     role: implement features
-    model: minimax-m2.7
+    model: grok
     responsibilities:
       - write code
       - implement features

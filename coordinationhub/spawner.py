@@ -20,7 +20,7 @@ from .limits import MAX_DESCRIPTION, MAX_PROMPT, truncate
 
 # Rows older than this with status='pending' are marked expired.
 # T6.15: overridable via the ``COORDINATIONHUB_SPAWN_TTL_SECONDS``
-# environment variable so deployments running slow CLIs (Kimi, remote
+# environment variable so deployments running slow CLIs (remote
 # evaluator, etc.) that can exceed the default 10-minute window don't
 # have to patch source code.
 import os as _os
@@ -41,14 +41,12 @@ except (TypeError, ValueError):
 _SAFE_SUBAGENT_TYPE = _re.compile(r"^[A-Za-z0-9_-]+$")
 
 # T3.12 tail: the ``source`` column on ``pending_tasks`` is the
-# IDE/origin tag (``cc``, ``cursor``, ``kimi``, ``stdio_adapter``,
-# ``kimi_cli``, ``external``). The DB column itself is intentionally
-# open-ended — no CHECK constraint — but the primitive boundary
-# enforces a closed vocabulary so a typo (``cusor``, ``kimii``) doesn't
-# silently land in the table and break dashboard filters. Mirrors the
-# T7.3 ``_SAFE_SUBAGENT_TYPE`` pattern.
+# IDE/origin tag (``cc``, ``stdio_adapter``, ``external``).
+# The DB column itself is intentionally open-ended — no CHECK constraint —
+# but the primitive boundary enforces a closed vocabulary so a typo
+# doesn't silently land in the table and break dashboard filters.
 _VALID_SPAWN_SOURCES = frozenset({
-    "external", "stdio_adapter", "kimi_cli", "cursor", "cc", "kimi",
+    "external", "stdio_adapter", "cc",
 })
 
 # T6.9: cap on the number of simultaneously-pending spawn rows. Pre-fix
@@ -142,7 +140,7 @@ def stash_pending_spawn(
     """Record a pending sub-agent spawn from a parent agent.
 
     Called by a parent agent that intends to spawn a sub-agent. When
-    the external IDE (Kimi CLI, Cursor, etc.) spawns the agent,
+    the external IDE spawns the agent,
     it correlates the spawn with this pending record via
     ``report_subagent_spawned``.
 
@@ -352,8 +350,8 @@ def report_subagent_spawned(
     """Report that a sub-agent has been spawned by an external system.
 
     Consumes the oldest pending spawn for this parent + type and links
-    it to the actual child agent ID. Any IDE/CLI (Kimi,
-    Cursor, etc.) can call this after spawning a sub-agent via its
+    it to the actual child agent ID. Any IDE/CLI can call this after
+    spawning a sub-agent via its
     native mechanism.
     """
     # T3.12 tail: enforce the closed source vocabulary at the primitive

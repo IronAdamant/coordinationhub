@@ -1101,7 +1101,7 @@ Schema version: 10 → 11
 
 ### Motivation
 
-Phase 11 findings (`findings/minimax_review_4/coordinationhub.md`) evaluated CoordinationHub under a complex MultiAgentSubprojectOrchestrator workload. The review identified 5 gaps that were reclassified from "future features" to concrete implementation requests by the user. All were implemented in this release.
+Phase 11 findings (`(a MiniMax-powered external review)`) evaluated CoordinationHub under a complex MultiAgentSubprojectOrchestrator workload. The review identified 5 gaps that were reclassified from "future features" to concrete implementation requests by the user. All were implemented in this release.
 
 ### Features Added
 
@@ -1163,7 +1163,7 @@ v0.4.11: schema v6 → v0.5.0: schema v10 (+4 tables, +12 indexes)
 
 ### Motivation
 
-Phase 11 findings (`findings/minimax_review_4/coordinationhub.md`) evaluated CoordinationHub's multi-agent coordination under a complex MultiAgentSubprojectOrchestrator workload. The system demonstrated strong fundamentals but exposed gaps at scale:
+Phase 11 findings (`(a MiniMax-powered external review)`) evaluated CoordinationHub's multi-agent coordination under a complex MultiAgentSubprojectOrchestrator workload. The system demonstrated strong fundamentals but exposed gaps at scale:
 
 1. **Agent ID Propagation Through Hierarchies** — deep parent-child chains require careful manual tracking
 2. **Concurrent Lock Acquisition** — retry mechanism works but no guaranteed ordering, exponential backoff causes long waits at contention hotspots
@@ -1218,7 +1218,7 @@ v0.4.11 ships with no source changes. The Phase 11 review confirmed the system i
 
 ### Motivation
 
-Phase 10 findings (`findings/minimax_review_3/coordinationhub.md`) identified several gaps in CoordinationHub's coordination primitives:
+Phase 10 findings (`(a MiniMax-powered external review)`) identified several gaps in CoordinationHub's coordination primitives:
 
 1. **Lock contention is binary** — agents could only succeed or force-steal, no retry with backoff
 2. **Scope enforcement was warning-only** — agents could lock outside their declared scope
@@ -1721,7 +1721,7 @@ Block markers for multi-line content:
 | `coordinationhub/cli_leases.py` | 104 | CLI commands for HA coordinator lease management |
 | `coordinationhub/cli_locks.py` | 272 | Document locking and coordination CLI commands |
 | `coordinationhub/cli_parser.py` | 379 | Argument parser for the CoordinationHub CLI |
-| `coordinationhub/cli_setup.py` | 313 | CLI commands for setup and diagnostics: ``init``, ``doctor``, ``watch`` |
+| `coordinationhub/cli_setup.py` | 178 | CLI commands for setup and diagnostics: ``init``, ``doctor``, ``watch`` |
 | `coordinationhub/cli_setup_doctor.py` | 148 | Diagnostic checks for ``coordinationhub doctor`` |
 | `coordinationhub/cli_spawner.py` | 120 | CLI commands for HA coordinator spawner — sub-agent registry management |
 | `coordinationhub/cli_sse.py` | 56 | CLI commands for SSE dashboard server |
@@ -1742,8 +1742,6 @@ Block markers for multi-line content:
 | `coordinationhub/handoffs.py` | 200 | Handoff recording and acknowledgement primitives for CoordinationHub |
 | `coordinationhub/hooks/__init__.py` | 1 | Hooks package — IDE integration via stdin/stdout event protocol |
 | `coordinationhub/hooks/base.py` | 340 | Base hook abstraction for CoordinationHub |
-| `coordinationhub/hooks/cursor.py` | 146 | CoordinationHub hook adapter for Cursor |
-| `coordinationhub/hooks/kimi_cli.py` | 121 | CoordinationHub hook adapter for Kimi CLI |
 | `coordinationhub/hooks/stdio_adapter.py` | 353 | CoordinationHub stdio event adapter |
 | `coordinationhub/housekeeping.py` | 189 | HousekeepingScheduler — background periodic pruners for long-running hubs |
 | `coordinationhub/identity_subsystem.py` | 210 | Identity subsystem — agent registration, heartbeat, lineage, and ID generation |
@@ -1802,7 +1800,7 @@ Block markers for multi-line content:
 
 Inline markers for single values (render invisibly in Markdown):
 ```markdown
-This project has <!-- GEN:test-count -->807<!-- /GEN --> tests.
+This project has <!-- GEN:test-count -->798<!-- /GEN --> tests.
 ```
 
 Unknown marker names raise an error during rewrite (catches typos).
