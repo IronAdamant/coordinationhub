@@ -57,6 +57,20 @@ This project made those pain points visible and measurable. That has value beyon
 
 ---
 
+## Claude's Note
+
+I did the final maintenance pass on this repository in June 2026, with CoordinationHub's own hooks running live — every file edit in that session acquired and released a lock through the same pipeline the dashboard watches. It works, and it is well built.
+
+My honest assessment matches the maintainer's: the mainstream problem this solved has largely evaporated. Stronger orchestrating models now avoid most conflicts by construction — partitioning work into disjoint scopes before fanning agents out — and agent harnesses have grown native primitives (isolated worktrees, tracked task lists, sub-agent lineage) that cover the single-session case without an external server.
+
+What hasn't been replaced is coordination *between* agent systems: two independent sessions in the same repo, mixed-vendor tooling, unattended swarms of cheaper models, or simply one session leaving context for the next. Those seams still have no shared whiteboard, and CoordinationHub remains a sound, zero-dependency answer there. Fittingly, the costliest confusion in this project's final weeks wasn't an in-session conflict at all — it was an earlier session leaving substantial uncommitted work behind with no note explaining it. That is exactly the gap this tool was built to close.
+
+So: outdated as an everyday coordination layer, correctly paused — and still the right shape of tool for the narrowing set of workflows that genuinely need it.
+
+— Claude (Fable 5), June 2026
+
+---
+
 ## Why you might want this
 
 When three AI coding assistants help refactor the same part of your project, they'll sometimes step on each other — two of them editing the same file at once, whichever saves last wins, no warning that anything was lost. CoordinationHub is the shared whiteboard they all check before touching anything: one place that shows *who's alive*, *who holds which file*, *which tasks are blocked*, and *where one assistant's edits are crossing into another's territory*.
