@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-from . import spawner as _spawner
 from .cli_utils import print_json as _print_json, command as _command
 
 

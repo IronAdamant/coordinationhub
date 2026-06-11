@@ -6,7 +6,8 @@ Zero internal dependencies on other coordinationhub modules.
 from __future__ import annotations
 
 import json
-from typing import Any, Callable
+from collections.abc import Callable
+from typing import Any
 
 
 def update_agent_status_tool(

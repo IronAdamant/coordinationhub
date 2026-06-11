@@ -1,0 +1,558 @@
+{
+  "version": 2,
+  "last_updated": "2026-06-11 16:17:00",
+  "entries": {
+    "coordinationhub/cli_sse.py": {
+      "status": "🟡 Yellow",
+      "last_updated": "2026-06-11 16:07:33",
+      "reason": "mtime changed since last check-changes (Python primary auto-detected)",
+      "freshness_provenance": "upsert:🟡 Yellow (non-freshness path)"
+    },
+    "coordinationhub/lease_subsystem.py": {
+      "status": "🟡 Yellow",
+      "last_updated": "2026-06-11 16:07:33",
+      "reason": "mtime changed since last check-changes (Python primary auto-detected)",
+      "freshness_provenance": "upsert:🟡 Yellow (non-freshness path)"
+    },
+    "coordinationhub/cli_intent.py": {
+      "status": "🟡 Yellow",
+      "last_updated": "2026-06-11 16:07:33",
+      "reason": "mtime changed since last check-changes (Python primary auto-detected)",
+      "freshness_provenance": "upsert:🟡 Yellow (non-freshness path)"
+    },
+    "coordinationhub/cli_tasks.py": {
+      "status": "🟡 Yellow",
+      "last_updated": "2026-06-11 16:07:33",
+      "reason": "mtime changed since last check-changes (Python primary auto-detected)",
+      "freshness_provenance": "upsert:🟡 Yellow (non-freshness path)"
+    },
+    "coordinationhub/tasks.py": {
+      "status": "🟡 Yellow",
+      "last_updated": "2026-06-11 16:07:33",
+      "reason": "mtime changed since last check-changes (Python primary auto-detected)",
+      "freshness_provenance": "upsert:🟡 Yellow (non-freshness path)"
+    },
+    "coordinationhub/identity_subsystem.py": {
+      "status": "🟡 Yellow",
+      "last_updated": "2026-06-11 16:07:33",
+      "reason": "mtime changed since last check-changes (Python primary auto-detected)",
+      "freshness_provenance": "upsert:🟡 Yellow (non-freshness path)"
+    },
+    "coordinationhub/spawner_subsystem.py": {
+      "status": "🟡 Yellow",
+      "last_updated": "2026-06-11 16:07:33",
+      "reason": "mtime changed since last check-changes (Python primary auto-detected)",
+      "freshness_provenance": "upsert:🟡 Yellow (non-freshness path)"
+    },
+    "coordinationhub/cli_locks.py": {
+      "status": "🟡 Yellow",
+      "last_updated": "2026-06-11 16:07:33",
+      "reason": "mtime changed since last check-changes (Python primary auto-detected)",
+      "freshness_provenance": "upsert:🟡 Yellow (non-freshness path)"
+    },
+    "coordinationhub/mcp_stdio.py": {
+      "status": "🟡 Yellow",
+      "last_updated": "2026-06-11 16:07:33",
+      "reason": "mtime changed since last check-changes (Python primary auto-detected)",
+      "freshness_provenance": "upsert:🟡 Yellow (non-freshness path)"
+    },
+    "coordinationhub/context.py": {
+      "status": "🟡 Yellow",
+      "last_updated": "2026-06-11 16:07:33",
+      "reason": "mtime changed since last check-changes (Python primary auto-detected)",
+      "freshness_provenance": "upsert:🟡 Yellow (non-freshness path)"
+    },
+    "coordinationhub/dependency_subsystem.py": {
+      "status": "🟡 Yellow",
+      "last_updated": "2026-06-11 16:07:33",
+      "reason": "mtime changed since last check-changes (Python primary auto-detected)",
+      "freshness_provenance": "upsert:🟡 Yellow (non-freshness path)"
+    },
+    "coordinationhub/schemas/messaging.py": {
+      "status": "🟡 Yellow",
+      "last_updated": "2026-06-11 16:07:33",
+      "reason": "mtime changed since last check-changes (Python primary auto-detected)",
+      "freshness_provenance": "upsert:🟡 Yellow (non-freshness path)"
+    },
+    "coordinationhub/schemas/visibility.py": {
+      "status": "🟡 Yellow",
+      "last_updated": "2026-06-11 16:07:33",
+      "reason": "mtime changed since last check-changes (Python primary auto-detected)",
+      "freshness_provenance": "upsert:🟡 Yellow (non-freshness path)"
+    },
+    "coordinationhub/schemas/intent.py": {
+      "status": "🟡 Yellow",
+      "last_updated": "2026-06-11 16:07:33",
+      "reason": "mtime changed since last check-changes (Python primary auto-detected)",
+      "freshness_provenance": "upsert:🟡 Yellow (non-freshness path)"
+    },
+    "coordinationhub/schemas/tasks.py": {
+      "status": "🟡 Yellow",
+      "last_updated": "2026-06-11 16:07:33",
+      "reason": "mtime changed since last check-changes (Python primary auto-detected)",
+      "freshness_provenance": "upsert:🟡 Yellow (non-freshness path)"
+    },
+    "coordinationhub/schemas/identity.py": {
+      "status": "🟡 Yellow",
+      "last_updated": "2026-06-11 16:07:33",
+      "reason": "mtime changed since last check-changes (Python primary auto-detected)",
+      "freshness_provenance": "upsert:🟡 Yellow (non-freshness path)"
+    },
+    "coordinationhub/schemas/locking.py": {
+      "status": "🟡 Yellow",
+      "last_updated": "2026-06-11 16:07:33",
+      "reason": "mtime changed since last check-changes (Python primary auto-detected)",
+      "freshness_provenance": "upsert:🟡 Yellow (non-freshness path)"
+    },
+    "coordinationhub/schemas/dlq.py": {
+      "status": "🟡 Yellow",
+      "last_updated": "2026-06-11 16:07:33",
+      "reason": "mtime changed since last check-changes (Python primary auto-detected)",
+      "freshness_provenance": "upsert:🟡 Yellow (non-freshness path)"
+    },
+    "coordinationhub/schemas/deps.py": {
+      "status": "🟡 Yellow",
+      "last_updated": "2026-06-11 16:07:33",
+      "reason": "mtime changed since last check-changes (Python primary auto-detected)",
+      "freshness_provenance": "upsert:🟡 Yellow (non-freshness path)"
+    },
+    "coordinationhub/schemas/__init__.py": {
+      "status": "🟡 Yellow",
+      "last_updated": "2026-06-11 16:07:33",
+      "reason": "mtime changed since last check-changes (Python primary auto-detected)",
+      "freshness_provenance": "upsert:🟡 Yellow (non-freshness path)"
+    },
+    "coordinationhub/schemas/coordination.py": {
+      "status": "🟡 Yellow",
+      "last_updated": "2026-06-11 16:07:33",
+      "reason": "mtime changed since last check-changes (Python primary auto-detected)",
+      "freshness_provenance": "upsert:🟡 Yellow (non-freshness path)"
+    },
+    "coordinationhub/schemas/handoffs.py": {
+      "status": "🟡 Yellow",
+      "last_updated": "2026-06-11 16:07:33",
+      "reason": "mtime changed since last check-changes (Python primary auto-detected)",
+      "freshness_provenance": "upsert:🟡 Yellow (non-freshness path)"
+    },
+    "coordinationhub/schemas/spawner.py": {
+      "status": "🟡 Yellow",
+      "last_updated": "2026-06-11 16:07:33",
+      "reason": "mtime changed since last check-changes (Python primary auto-detected)",
+      "freshness_provenance": "upsert:🟡 Yellow (non-freshness path)"
+    },
+    "coordinationhub/schemas/leases.py": {
+      "status": "🟡 Yellow",
+      "last_updated": "2026-06-11 16:07:33",
+      "reason": "mtime changed since last check-changes (Python primary auto-detected)",
+      "freshness_provenance": "upsert:🟡 Yellow (non-freshness path)"
+    },
+    "coordinationhub/schemas/change.py": {
+      "status": "🟡 Yellow",
+      "last_updated": "2026-06-11 16:07:33",
+      "reason": "mtime changed since last check-changes (Python primary auto-detected)",
+      "freshness_provenance": "upsert:🟡 Yellow (non-freshness path)"
+    },
+    "coordinationhub/schemas/audit.py": {
+      "status": "🟡 Yellow",
+      "last_updated": "2026-06-11 16:07:33",
+      "reason": "mtime changed since last check-changes (Python primary auto-detected)",
+      "freshness_provenance": "upsert:🟡 Yellow (non-freshness path)"
+    },
+    "coordinationhub/task_subsystem.py": {
+      "status": "🟡 Yellow",
+      "last_updated": "2026-06-11 16:07:33",
+      "reason": "mtime changed since last check-changes (Python primary auto-detected)",
+      "freshness_provenance": "upsert:🟡 Yellow (non-freshness path)"
+    },
+    "coordinationhub/limits.py": {
+      "status": "🟡 Yellow",
+      "last_updated": "2026-06-11 16:07:33",
+      "reason": "mtime changed since last check-changes (Python primary auto-detected)",
+      "freshness_provenance": "upsert:🟡 Yellow (non-freshness path)"
+    },
+    "coordinationhub/change_subsystem.py": {
+      "status": "🟡 Yellow",
+      "last_updated": "2026-06-11 16:07:33",
+      "reason": "mtime changed since last check-changes (Python primary auto-detected)",
+      "freshness_provenance": "upsert:🟡 Yellow (non-freshness path)"
+    },
+    "coordinationhub/task_failures.py": {
+      "status": "🟡 Yellow",
+      "last_updated": "2026-06-11 16:07:33",
+      "reason": "mtime changed since last check-changes (Python primary auto-detected)",
+      "freshness_provenance": "upsert:🟡 Yellow (non-freshness path)"
+    },
+    "coordinationhub/work_intent.py": {
+      "status": "🟡 Yellow",
+      "last_updated": "2026-06-11 16:07:33",
+      "reason": "mtime changed since last check-changes (Python primary auto-detected)",
+      "freshness_provenance": "upsert:🟡 Yellow (non-freshness path)"
+    },
+    "coordinationhub/_storage.py": {
+      "status": "🟡 Yellow",
+      "last_updated": "2026-06-11 16:07:33",
+      "reason": "mtime changed since last check-changes (Python primary auto-detected)",
+      "freshness_provenance": "upsert:🟡 Yellow (non-freshness path)"
+    },
+    "coordinationhub/pending_tasks.py": {
+      "status": "🟡 Yellow",
+      "last_updated": "2026-06-11 16:07:33",
+      "reason": "mtime changed since last check-changes (Python primary auto-detected)",
+      "freshness_provenance": "upsert:🟡 Yellow (non-freshness path)"
+    },
+    "coordinationhub/cli_vis.py": {
+      "status": "🟡 Yellow",
+      "last_updated": "2026-06-11 16:07:33",
+      "reason": "mtime changed since last check-changes (Python primary auto-detected)",
+      "freshness_provenance": "upsert:🟡 Yellow (non-freshness path)"
+    },
+    "coordinationhub/cli_agents.py": {
+      "status": "🟡 Yellow",
+      "last_updated": "2026-06-11 16:07:33",
+      "reason": "mtime changed since last check-changes (Python primary auto-detected)",
+      "freshness_provenance": "upsert:🟡 Yellow (non-freshness path)"
+    },
+    "coordinationhub/cli_utils.py": {
+      "status": "🟡 Yellow",
+      "last_updated": "2026-06-11 16:07:33",
+      "reason": "mtime changed since last check-changes (Python primary auto-detected)",
+      "freshness_provenance": "upsert:🟡 Yellow (non-freshness path)"
+    },
+    "coordinationhub/mcp_server.py": {
+      "status": "🟡 Yellow",
+      "last_updated": "2026-06-11 16:07:33",
+      "reason": "mtime changed since last check-changes (Python primary auto-detected)",
+      "freshness_provenance": "upsert:🟡 Yellow (non-freshness path)"
+    },
+    "coordinationhub/paths.py": {
+      "status": "🟡 Yellow",
+      "last_updated": "2026-06-11 16:07:33",
+      "reason": "mtime changed since last check-changes (Python primary auto-detected)",
+      "freshness_provenance": "upsert:🟡 Yellow (non-freshness path)"
+    },
+    "coordinationhub/broadcasts.py": {
+      "status": "🟡 Yellow",
+      "last_updated": "2026-06-11 16:07:33",
+      "reason": "mtime changed since last check-changes (Python primary auto-detected)",
+      "freshness_provenance": "upsert:🟡 Yellow (non-freshness path)"
+    },
+    "coordinationhub/dispatch.py": {
+      "status": "🟡 Yellow",
+      "last_updated": "2026-06-11 16:07:33",
+      "reason": "mtime changed since last check-changes (Python primary auto-detected)",
+      "freshness_provenance": "upsert:🟡 Yellow (non-freshness path)"
+    },
+    "coordinationhub/core.py": {
+      "status": "🟡 Yellow",
+      "last_updated": "2026-06-11 16:07:33",
+      "reason": "mtime changed since last check-changes (Python primary auto-detected)",
+      "freshness_provenance": "upsert:🟡 Yellow (non-freshness path)"
+    },
+    "coordinationhub/__init__.py": {
+      "status": "🟡 Yellow",
+      "last_updated": "2026-06-11 16:07:33",
+      "reason": "mtime changed since last check-changes (Python primary auto-detected)",
+      "freshness_provenance": "upsert:🟡 Yellow (non-freshness path)"
+    },
+    "coordinationhub/event_bus.py": {
+      "status": "🟡 Yellow",
+      "last_updated": "2026-06-11 16:07:33",
+      "reason": "mtime changed since last check-changes (Python primary auto-detected)",
+      "freshness_provenance": "upsert:🟡 Yellow (non-freshness path)"
+    },
+    "coordinationhub/housekeeping.py": {
+      "status": "🟡 Yellow",
+      "last_updated": "2026-06-11 16:07:33",
+      "reason": "mtime changed since last check-changes (Python primary auto-detected)",
+      "freshness_provenance": "upsert:🟡 Yellow (non-freshness path)"
+    },
+    "coordinationhub/messages.py": {
+      "status": "🟡 Yellow",
+      "last_updated": "2026-06-11 16:07:33",
+      "reason": "mtime changed since last check-changes (Python primary auto-detected)",
+      "freshness_provenance": "upsert:🟡 Yellow (non-freshness path)"
+    },
+    "coordinationhub/locking_subsystem.py": {
+      "status": "🟡 Yellow",
+      "last_updated": "2026-06-11 16:07:33",
+      "reason": "mtime changed since last check-changes (Python primary auto-detected)",
+      "freshness_provenance": "upsert:🟡 Yellow (non-freshness path)"
+    },
+    "coordinationhub/work_intent_subsystem.py": {
+      "status": "🟡 Yellow",
+      "last_updated": "2026-06-11 16:07:33",
+      "reason": "mtime changed since last check-changes (Python primary auto-detected)",
+      "freshness_provenance": "upsert:🟡 Yellow (non-freshness path)"
+    },
+    "coordinationhub/agent_status.py": {
+      "status": "🟡 Yellow",
+      "last_updated": "2026-06-11 16:07:33",
+      "reason": "mtime changed since last check-changes (Python primary auto-detected)",
+      "freshness_provenance": "upsert:🟡 Yellow (non-freshness path)"
+    },
+    "coordinationhub/hooks/base.py": {
+      "status": "🟡 Yellow",
+      "last_updated": "2026-06-11 16:07:33",
+      "reason": "mtime changed since last check-changes (Python primary auto-detected)",
+      "freshness_provenance": "upsert:🟡 Yellow (non-freshness path)"
+    },
+    "coordinationhub/hooks/__init__.py": {
+      "status": "🟡 Yellow",
+      "last_updated": "2026-06-11 16:07:33",
+      "reason": "mtime changed since last check-changes (Python primary auto-detected)",
+      "freshness_provenance": "upsert:🟡 Yellow (non-freshness path)"
+    },
+    "coordinationhub/hooks/stdio_adapter.py": {
+      "status": "🟡 Yellow",
+      "last_updated": "2026-06-11 16:07:33",
+      "reason": "mtime changed since last check-changes (Python primary auto-detected)",
+      "freshness_provenance": "upsert:🟡 Yellow (non-freshness path)"
+    },
+    "coordinationhub/conflict_log.py": {
+      "status": "🟡 Yellow",
+      "last_updated": "2026-06-11 16:07:33",
+      "reason": "mtime changed since last check-changes (Python primary auto-detected)",
+      "freshness_provenance": "upsert:🟡 Yellow (non-freshness path)"
+    },
+    "coordinationhub/cli_leases.py": {
+      "status": "🟡 Yellow",
+      "last_updated": "2026-06-11 16:07:33",
+      "reason": "mtime changed since last check-changes (Python primary auto-detected)",
+      "freshness_provenance": "upsert:🟡 Yellow (non-freshness path)"
+    },
+    "coordinationhub/notifications.py": {
+      "status": "🟡 Yellow",
+      "last_updated": "2026-06-11 16:07:33",
+      "reason": "mtime changed since last check-changes (Python primary auto-detected)",
+      "freshness_provenance": "upsert:🟡 Yellow (non-freshness path)"
+    },
+    "coordinationhub/handoff_subsystem.py": {
+      "status": "🟡 Yellow",
+      "last_updated": "2026-06-11 16:07:33",
+      "reason": "mtime changed since last check-changes (Python primary auto-detected)",
+      "freshness_provenance": "upsert:🟡 Yellow (non-freshness path)"
+    },
+    "coordinationhub/handoffs.py": {
+      "status": "🟡 Yellow",
+      "last_updated": "2026-06-11 16:07:33",
+      "reason": "mtime changed since last check-changes (Python primary auto-detected)",
+      "freshness_provenance": "upsert:🟡 Yellow (non-freshness path)"
+    },
+    "coordinationhub/spawner.py": {
+      "status": "🟡 Yellow",
+      "last_updated": "2026-06-11 16:07:33",
+      "reason": "mtime changed since last check-changes (Python primary auto-detected)",
+      "freshness_provenance": "upsert:🟡 Yellow (non-freshness path)"
+    },
+    "coordinationhub/validation.py": {
+      "status": "🟡 Yellow",
+      "last_updated": "2026-06-11 16:07:33",
+      "reason": "mtime changed since last check-changes (Python primary auto-detected)",
+      "freshness_provenance": "upsert:🟡 Yellow (non-freshness path)"
+    },
+    "coordinationhub/lock_cache.py": {
+      "status": "🟡 Yellow",
+      "last_updated": "2026-06-11 16:07:33",
+      "reason": "mtime changed since last check-changes (Python primary auto-detected)",
+      "freshness_provenance": "upsert:🟡 Yellow (non-freshness path)"
+    },
+    "coordinationhub/cli_deps.py": {
+      "status": "🟡 Yellow",
+      "last_updated": "2026-06-11 16:07:33",
+      "reason": "mtime changed since last check-changes (Python primary auto-detected)",
+      "freshness_provenance": "upsert:🟡 Yellow (non-freshness path)"
+    },
+    "coordinationhub/leases.py": {
+      "status": "🟡 Yellow",
+      "last_updated": "2026-06-11 16:07:33",
+      "reason": "mtime changed since last check-changes (Python primary auto-detected)",
+      "freshness_provenance": "upsert:🟡 Yellow (non-freshness path)"
+    },
+    "coordinationhub/agent_registry.py": {
+      "status": "🟡 Yellow",
+      "last_updated": "2026-06-11 16:07:33",
+      "reason": "mtime changed since last check-changes (Python primary auto-detected)",
+      "freshness_provenance": "upsert:🟡 Yellow (non-freshness path)"
+    },
+    "coordinationhub/broadcast_subsystem.py": {
+      "status": "🟡 Yellow",
+      "last_updated": "2026-06-11 16:07:33",
+      "reason": "mtime changed since last check-changes (Python primary auto-detected)",
+      "freshness_provenance": "upsert:🟡 Yellow (non-freshness path)"
+    },
+    "coordinationhub/scan.py": {
+      "status": "🟡 Yellow",
+      "last_updated": "2026-06-11 16:07:33",
+      "reason": "mtime changed since last check-changes (Python primary auto-detected)",
+      "freshness_provenance": "upsert:🟡 Yellow (non-freshness path)"
+    },
+    "coordinationhub/__main__.py": {
+      "status": "🟡 Yellow",
+      "last_updated": "2026-06-11 16:07:33",
+      "reason": "mtime changed since last check-changes (Python primary auto-detected)",
+      "freshness_provenance": "upsert:🟡 Yellow (non-freshness path)"
+    },
+    "coordinationhub/db_migrations.py": {
+      "status": "🟡 Yellow",
+      "last_updated": "2026-06-11 16:07:33",
+      "reason": "mtime changed since last check-changes (Python primary auto-detected)",
+      "freshness_provenance": "upsert:🟡 Yellow (non-freshness path)"
+    },
+    "coordinationhub/cli_setup_doctor.py": {
+      "status": "🟡 Yellow",
+      "last_updated": "2026-06-11 16:07:33",
+      "reason": "mtime changed since last check-changes (Python primary auto-detected)",
+      "freshness_provenance": "upsert:🟡 Yellow (non-freshness path)"
+    },
+    "coordinationhub/cli_commands.py": {
+      "status": "🟡 Yellow",
+      "last_updated": "2026-06-11 16:07:33",
+      "reason": "mtime changed since last check-changes (Python primary auto-detected)",
+      "freshness_provenance": "upsert:🟡 Yellow (non-freshness path)"
+    },
+    "coordinationhub/plugins/graph/graphs.py": {
+      "status": "🟡 Yellow",
+      "last_updated": "2026-06-11 16:07:33",
+      "reason": "mtime changed since last check-changes (Python primary auto-detected)",
+      "freshness_provenance": "upsert:🟡 Yellow (non-freshness path)"
+    },
+    "coordinationhub/plugins/graph/__init__.py": {
+      "status": "🟡 Yellow",
+      "last_updated": "2026-06-11 16:07:33",
+      "reason": "mtime changed since last check-changes (Python primary auto-detected)",
+      "freshness_provenance": "upsert:🟡 Yellow (non-freshness path)"
+    },
+    "coordinationhub/plugins/dashboard/dashboard_html.py": {
+      "status": "🟡 Yellow",
+      "last_updated": "2026-06-11 16:07:33",
+      "reason": "mtime changed since last check-changes (Python primary auto-detected)",
+      "freshness_provenance": "upsert:🟡 Yellow (non-freshness path)"
+    },
+    "coordinationhub/plugins/dashboard/dashboard.py": {
+      "status": "🟡 Yellow",
+      "last_updated": "2026-06-11 16:07:33",
+      "reason": "mtime changed since last check-changes (Python primary auto-detected)",
+      "freshness_provenance": "upsert:🟡 Yellow (non-freshness path)"
+    },
+    "coordinationhub/plugins/dashboard/dashboard_css.py": {
+      "status": "🟡 Yellow",
+      "last_updated": "2026-06-11 16:07:33",
+      "reason": "mtime changed since last check-changes (Python primary auto-detected)",
+      "freshness_provenance": "upsert:🟡 Yellow (non-freshness path)"
+    },
+    "coordinationhub/plugins/dashboard/__init__.py": {
+      "status": "🟡 Yellow",
+      "last_updated": "2026-06-11 16:07:33",
+      "reason": "mtime changed since last check-changes (Python primary auto-detected)",
+      "freshness_provenance": "upsert:🟡 Yellow (non-freshness path)"
+    },
+    "coordinationhub/plugins/dashboard/dashboard_js.py": {
+      "status": "🟡 Yellow",
+      "last_updated": "2026-06-11 16:07:33",
+      "reason": "mtime changed since last check-changes (Python primary auto-detected)",
+      "freshness_provenance": "upsert:🟡 Yellow (non-freshness path)"
+    },
+    "coordinationhub/plugins/__init__.py": {
+      "status": "🟡 Yellow",
+      "last_updated": "2026-06-11 16:07:33",
+      "reason": "mtime changed since last check-changes (Python primary auto-detected)",
+      "freshness_provenance": "upsert:🟡 Yellow (non-freshness path)"
+    },
+    "coordinationhub/plugins/assessment/__init__.py": {
+      "status": "🟡 Yellow",
+      "last_updated": "2026-06-11 16:07:33",
+      "reason": "mtime changed since last check-changes (Python primary auto-detected)",
+      "freshness_provenance": "upsert:🟡 Yellow (non-freshness path)"
+    },
+    "coordinationhub/plugins/assessment/assessment.py": {
+      "status": "🟡 Yellow",
+      "last_updated": "2026-06-11 16:07:33",
+      "reason": "mtime changed since last check-changes (Python primary auto-detected)",
+      "freshness_provenance": "upsert:🟡 Yellow (non-freshness path)"
+    },
+    "coordinationhub/plugins/assessment/assessment_scorers.py": {
+      "status": "🟡 Yellow",
+      "last_updated": "2026-06-11 16:07:33",
+      "reason": "mtime changed since last check-changes (Python primary auto-detected)",
+      "freshness_provenance": "upsert:🟡 Yellow (non-freshness path)"
+    },
+    "coordinationhub/plugins/registry.py": {
+      "status": "🟡 Yellow",
+      "last_updated": "2026-06-11 16:07:33",
+      "reason": "mtime changed since last check-changes (Python primary auto-detected)",
+      "freshness_provenance": "upsert:🟡 Yellow (non-freshness path)"
+    },
+    "coordinationhub/cli_spawner.py": {
+      "status": "🟡 Yellow",
+      "last_updated": "2026-06-11 16:16:08",
+      "reason": "Removed vestigial unused module-level import `from . import spawner as _spawner` (dead since T3.19 routed cancel_spawn through engine method)",
+      "freshness_provenance": "upsert:🟡 Yellow (non-freshness path)"
+    },
+    "coordinationhub/lock_ops.py": {
+      "status": "🟡 Yellow",
+      "last_updated": "2026-06-11 16:07:33",
+      "reason": "mtime changed since last check-changes (Python primary auto-detected)",
+      "freshness_provenance": "upsert:🟡 Yellow (non-freshness path)"
+    },
+    "coordinationhub/visibility_subsystem.py": {
+      "status": "🟡 Yellow",
+      "last_updated": "2026-06-11 16:07:33",
+      "reason": "mtime changed since last check-changes (Python primary auto-detected)",
+      "freshness_provenance": "upsert:🟡 Yellow (non-freshness path)"
+    },
+    "coordinationhub/cli.py": {
+      "status": "🟡 Yellow",
+      "last_updated": "2026-06-11 16:07:33",
+      "reason": "mtime changed since last check-changes (Python primary auto-detected)",
+      "freshness_provenance": "upsert:🟡 Yellow (non-freshness path)"
+    },
+    "coordinationhub/cli_parser.py": {
+      "status": "🟡 Yellow",
+      "last_updated": "2026-06-11 16:07:33",
+      "reason": "mtime changed since last check-changes (Python primary auto-detected)",
+      "freshness_provenance": "upsert:🟡 Yellow (non-freshness path)"
+    },
+    "coordinationhub/db.py": {
+      "status": "🟡 Yellow",
+      "last_updated": "2026-06-11 16:07:33",
+      "reason": "mtime changed since last check-changes (Python primary auto-detected)",
+      "freshness_provenance": "upsert:🟡 Yellow (non-freshness path)"
+    },
+    "coordinationhub/db_schemas.py": {
+      "status": "🟡 Yellow",
+      "last_updated": "2026-06-11 16:07:33",
+      "reason": "mtime changed since last check-changes (Python primary auto-detected)",
+      "freshness_provenance": "upsert:🟡 Yellow (non-freshness path)"
+    },
+    "coordinationhub/dependencies.py": {
+      "status": "🟡 Yellow",
+      "last_updated": "2026-06-11 16:07:33",
+      "reason": "mtime changed since last check-changes (Python primary auto-detected)",
+      "freshness_provenance": "upsert:🟡 Yellow (non-freshness path)"
+    },
+    "coordinationhub/cli_setup.py": {
+      "status": "🟡 Yellow",
+      "last_updated": "2026-06-11 16:07:33",
+      "reason": "mtime changed since last check-changes (Python primary auto-detected)",
+      "freshness_provenance": "upsert:🟡 Yellow (non-freshness path)"
+    },
+    "coordinationhub/messaging_subsystem.py": {
+      "status": "🟡 Yellow",
+      "last_updated": "2026-06-11 16:07:33",
+      "reason": "mtime changed since last check-changes (Python primary auto-detected)",
+      "freshness_provenance": "upsert:🟡 Yellow (non-freshness path)"
+    },
+    "coordinationhub/hooks/cursor.py": {
+      "status": "🔴 Red",
+      "last_updated": "2026-06-11 16:16:58",
+      "reason": "DELETED — Cursor hook adapter removed in working tree (uncommitted refactor stripping IDE-specific adapters; spawn-source vocabulary reduced to external/stdio_adapter/cc)",
+      "freshness_provenance": "upsert:🔴 Red (non-freshness path)"
+    },
+    "coordinationhub/hooks/kimi_cli.py": {
+      "status": "🔴 Red",
+      "last_updated": "2026-06-11 16:17:00",
+      "reason": "DELETED — Kimi CLI hook adapter removed in working tree (uncommitted refactor stripping IDE-specific adapters; spawn-source vocabulary reduced to external/stdio_adapter/cc)",
+      "freshness_provenance": "upsert:🔴 Red (non-freshness path)"
+    }
+  }
+}

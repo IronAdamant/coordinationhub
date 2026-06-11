@@ -53,7 +53,8 @@ from __future__ import annotations
 
 import time
 from pathlib import Path
-from typing import Any, Callable
+from collections.abc import Callable
+from typing import Any
 
 from . import agent_registry as _ar
 from . import broadcasts as _bc

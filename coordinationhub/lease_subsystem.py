@@ -15,7 +15,8 @@ Delegates to: leases (leases.py) for lease DB primitives.
 
 from __future__ import annotations
 
-from typing import Any, Callable
+from collections.abc import Callable
+from typing import Any
 
 from . import leases as _leases
 

@@ -54,7 +54,8 @@ locking_subsystem.Locking (for ``release_agent_locks`` in
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Any, Callable
+from collections.abc import Callable
+from typing import Any
 
 from . import agent_registry as _ar
 from . import scan as _scan

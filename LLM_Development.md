@@ -1,11 +1,30 @@
 # LLM_Development.md — CoordinationHub
 
 **Version:** <!-- GEN:version -->0.7.12<!-- /GEN -->
-**Last updated:** 2026-04-27
+**Last updated:** 2026-06-11
 
 ## Change Log
 
 All significant changes to the CoordinationHub project are documented here in reverse chronological order.
+
+---
+
+## 2026-06-11 — Modernization pass + Wikifier bootstrap (no behavioural change)
+
+### Code
+
+- **`typing.Callable` → `collections.abc.Callable`** across 19 package modules and `tests/conftest.py` (also `Sequence`). The `typing` aliases are soft-deprecated per PEP 585; `collections.abc` is the modern import. Pure import-level change, zero runtime difference. Full suite green (782 passed, 16 skipped), including a `-W error::DeprecationWarning` run on Python 3.14.5 that passed clean.
+
+### Packaging / CI
+
+- **PEP 639 license metadata**: `pyproject.toml` now uses `license = "MIT"` + `license-files = ["LICENSE"]` (was the deprecated `license = {text = "MIT"}` table); the `License :: OSI Approved` classifier is dropped per PEP 639; `build-system` floor raised to `setuptools>=77` (required for license expressions). Wheel METADATA verified to emit `License-Expression: MIT`.
+- **`LICENSE` file added** (MIT, was declared in metadata but missing from the repo).
+- **CI test matrix extended** to Python 3.13 and 3.14 in `.github/workflows/test.yml`; trove classifiers for 3.13/3.14 added. `release.yml` left at its deliberate 3.12 build pin (pure wheel — build version is irrelevant).
+
+### Docs / tooling
+
+- **Wikifier fully bootstrapped**: `exclude_patterns.txt` written (was missing — required); per-file wiki entries created for all 90 monitored files under `docs/wiki/` (colliding basenames `handoffs/leases/spawner/tasks/__init__` live next-to-source as `<file>.wiki.md`); health matrix driven to Green; `library.md` dependency map built.
+- `gen_docs.py` regenerated machine-owned sections (LOC tables shifted by the import-line additions).
 
 ---
 
@@ -1690,10 +1709,10 @@ Block markers for multi-line content:
 | `coordinationhub/__main__.py` | 10 | ``python -m coordinationhub`` entry point — delegates to :mod:`cli` |
 | `coordinationhub/_storage.py` | 143 | Storage backend for CoordinationHub — SQLite pool, path resolution, lifecycle |
 | `coordinationhub/agent_registry.py` | 495 | Agent lifecycle: register, heartbeat, deregister, lineage management |
-| `coordinationhub/agent_status.py` | 288 | Agent status and file-map query helpers for CoordinationHub |
-| `coordinationhub/broadcast_subsystem.py` | 259 | Broadcast subsystem — sibling broadcasts, ack tracking, multi-lock wait |
+| `coordinationhub/agent_status.py` | 289 | Agent status and file-map query helpers for CoordinationHub |
+| `coordinationhub/broadcast_subsystem.py` | 260 | Broadcast subsystem — sibling broadcasts, ack tracking, multi-lock wait |
 | `coordinationhub/broadcasts.py` | 147 | Broadcast acknowledgment primitives for CoordinationHub |
-| `coordinationhub/change_subsystem.py` | 219 | Change subsystem — change notifications, file ownership, conflict audit, status |
+| `coordinationhub/change_subsystem.py` | 220 | Change subsystem — change notifications, file ownership, conflict audit, status |
 | `coordinationhub/cli.py` | 102 | CoordinationHub CLI — command-line interface for all coordination tool methods |
 | `coordinationhub/cli_agents.py` | 111 | Agent identity and lifecycle CLI commands |
 | `coordinationhub/cli_commands.py` | 98 | CoordinationHub CLI command handlers |
@@ -1704,40 +1723,40 @@ Block markers for multi-line content:
 | `coordinationhub/cli_parser.py` | 379 | Argument parser for the CoordinationHub CLI |
 | `coordinationhub/cli_setup.py` | 313 | CLI commands for setup and diagnostics: ``init``, ``doctor``, ``watch`` |
 | `coordinationhub/cli_setup_doctor.py` | 148 | Diagnostic checks for ``coordinationhub doctor`` |
-| `coordinationhub/cli_spawner.py` | 121 | CLI commands for HA coordinator spawner — sub-agent registry management |
+| `coordinationhub/cli_spawner.py` | 120 | CLI commands for HA coordinator spawner — sub-agent registry management |
 | `coordinationhub/cli_sse.py` | 56 | CLI commands for SSE dashboard server |
 | `coordinationhub/cli_tasks.py` | 163 | CLI commands for the task registry |
 | `coordinationhub/cli_utils.py` | 51 | Shared CLI helper functions used by all cli_* sub-modules |
 | `coordinationhub/cli_vis.py` | 241 | Change awareness, audit, graph, and assessment CLI commands |
 | `coordinationhub/conflict_log.py` | 43 | Conflict recording and querying for CoordinationHub |
-| `coordinationhub/context.py` | 104 | Context bundle builder for CoordinationHub agent registration responses |
+| `coordinationhub/context.py` | 105 | Context bundle builder for CoordinationHub agent registration responses |
 | `coordinationhub/core.py` | 949 | CoordinationEngine — host class that composes twelve subsystems |
 | `coordinationhub/db.py` | 93 | SQLite connection pool and public re-exports for CoordinationHub |
 | `coordinationhub/db_migrations.py` | 467 | Schema-version tracking, migration functions, and the ``init_schema`` driver |
 | `coordinationhub/db_schemas.py` | 305 | Canonical SQLite schema definitions for CoordinationHub |
 | `coordinationhub/dependencies.py` | 140 | Cross-agent dependency declaration and satisfaction tracking |
-| `coordinationhub/dependency_subsystem.py` | 143 | Dependency subsystem — cross-agent dependency declarations and checks |
+| `coordinationhub/dependency_subsystem.py` | 144 | Dependency subsystem — cross-agent dependency declarations and checks |
 | `coordinationhub/dispatch.py` | 107 | Tool dispatch for CoordinationHub |
-| `coordinationhub/event_bus.py` | 127 | Lightweight thread-safe in-memory pub-sub event bus for CoordinationHub |
-| `coordinationhub/handoff_subsystem.py` | 148 | Handoff subsystem — one-to-many handoff acknowledgment and lifecycle |
+| `coordinationhub/event_bus.py` | 128 | Lightweight thread-safe in-memory pub-sub event bus for CoordinationHub |
+| `coordinationhub/handoff_subsystem.py` | 149 | Handoff subsystem — one-to-many handoff acknowledgment and lifecycle |
 | `coordinationhub/handoffs.py` | 200 | Handoff recording and acknowledgement primitives for CoordinationHub |
 | `coordinationhub/hooks/__init__.py` | 1 | Hooks package — IDE integration via stdin/stdout event protocol |
 | `coordinationhub/hooks/base.py` | 340 | Base hook abstraction for CoordinationHub |
 | `coordinationhub/hooks/cursor.py` | 146 | CoordinationHub hook adapter for Cursor |
 | `coordinationhub/hooks/kimi_cli.py` | 121 | CoordinationHub hook adapter for Kimi CLI |
 | `coordinationhub/hooks/stdio_adapter.py` | 353 | CoordinationHub stdio event adapter |
-| `coordinationhub/housekeeping.py` | 188 | HousekeepingScheduler — background periodic pruners for long-running hubs |
-| `coordinationhub/identity_subsystem.py` | 209 | Identity subsystem — agent registration, heartbeat, lineage, and ID generation |
-| `coordinationhub/lease_subsystem.py` | 167 | Lease subsystem — HA coordinator lease management |
+| `coordinationhub/housekeeping.py` | 189 | HousekeepingScheduler — background periodic pruners for long-running hubs |
+| `coordinationhub/identity_subsystem.py` | 210 | Identity subsystem — agent registration, heartbeat, lineage, and ID generation |
+| `coordinationhub/lease_subsystem.py` | 168 | Lease subsystem — HA coordinator lease management |
 | `coordinationhub/leases.py` | 220 | Zero-deps lease primitives for HA coordinator leadership |
 | `coordinationhub/limits.py` | 40 | String-length caps for user-supplied fields (T6.14) |
 | `coordinationhub/lock_cache.py` | 188 | In-memory lock cache for CoordinationHub |
 | `coordinationhub/lock_ops.py` | 222 | Shared lock primitives used by both local locks and coordination locks |
-| `coordinationhub/locking_subsystem.py` | 463 | Locking subsystem — document lock acquire/release/refresh/list/admin |
+| `coordinationhub/locking_subsystem.py` | 464 | Locking subsystem — document lock acquire/release/refresh/list/admin |
 | `coordinationhub/mcp_server.py` | 578 | HTTP REST admin / dashboard endpoint for CoordinationHub |
 | `coordinationhub/mcp_stdio.py` | 197 | Stdio-based MCP server for CoordinationHub using the ``mcp`` Python package |
 | `coordinationhub/messages.py` | 105 | Inter-agent messaging primitives for CoordinationHub |
-| `coordinationhub/messaging_subsystem.py` | 186 | Messaging subsystem — inter-agent message passing and agent await |
+| `coordinationhub/messaging_subsystem.py` | 187 | Messaging subsystem — inter-agent message passing and agent await |
 | `coordinationhub/notifications.py` | 154 | Change notification storage and retrieval for CoordinationHub |
 | `coordinationhub/paths.py` | 39 | Path normalization and project-root detection utilities |
 | `coordinationhub/pending_tasks.py` | 109 | Pending sub-agent task storage for CoordinationHub |
@@ -1746,14 +1765,14 @@ Block markers for multi-line content:
 | `coordinationhub/plugins/assessment/assessment.py` | 337 | Assessment runner for CoordinationHub coordination test suites |
 | `coordinationhub/plugins/assessment/assessment_scorers.py` | 266 | Assessment metric scorers for CoordinationHub |
 | `coordinationhub/plugins/dashboard/__init__.py` | 15 | Dashboard plugin for CoordinationHub |
-| `coordinationhub/plugins/dashboard/dashboard.py` | 141 | Web dashboard for CoordinationHub — zero external dependencies |
+| `coordinationhub/plugins/dashboard/dashboard.py` | 142 | Web dashboard for CoordinationHub — zero external dependencies |
 | `coordinationhub/plugins/dashboard/dashboard_css.py` | 91 | CSS for the CoordinationHub dashboard |
 | `coordinationhub/plugins/dashboard/dashboard_html.py` | 98 | Self-contained HTML for the CoordinationHub dashboard |
 | `coordinationhub/plugins/dashboard/dashboard_js.py` | 452 | Client-side JavaScript for the CoordinationHub dashboard |
 | `coordinationhub/plugins/graph/__init__.py` | 31 | Graph plugin for CoordinationHub |
 | `coordinationhub/plugins/graph/graphs.py` | 327 | Declarative coordination graph: loader, validator, in-memory representation |
 | `coordinationhub/plugins/registry.py` | 59 | Plugin registry for CoordinationHub |
-| `coordinationhub/scan.py` | 279 | File ownership scan for CoordinationHub |
+| `coordinationhub/scan.py` | 280 | File ownership scan for CoordinationHub |
 | `coordinationhub/schemas/__init__.py` | 58 | Tool schemas for CoordinationHub — all MCP tools |
 | `coordinationhub/schemas/audit.py` | 61 | Audit & Status tool schemas for CoordinationHub |
 | `coordinationhub/schemas/change.py` | 41 | Change Awareness tool schemas for CoordinationHub |
@@ -1770,14 +1789,14 @@ Block markers for multi-line content:
 | `coordinationhub/schemas/tasks.py` | 230 | Task Registry tool schemas for CoordinationHub |
 | `coordinationhub/schemas/visibility.py` | 159 | Graph & Visibility tool schemas for CoordinationHub |
 | `coordinationhub/spawner.py` | 421 | Zero-deps spawner primitives for HA coordinator sub-agent registry |
-| `coordinationhub/spawner_subsystem.py` | 233 | Spawner subsystem — HA coordinator sub-agent spawn management |
+| `coordinationhub/spawner_subsystem.py` | 234 | Spawner subsystem — HA coordinator sub-agent spawn management |
 | `coordinationhub/task_failures.py` | 149 | Task failure tracking and dead letter queue for CoordinationHub |
-| `coordinationhub/task_subsystem.py` | 241 | Task subsystem — shared task registry with hierarchy + dead-letter queue |
+| `coordinationhub/task_subsystem.py` | 242 | Task subsystem — shared task registry with hierarchy + dead-letter queue |
 | `coordinationhub/tasks.py` | 517 | Task registry primitives for CoordinationHub (work board) |
 | `coordinationhub/validation.py` | 160 | Minimal stdlib jsonschema validator for MCP tool arguments |
-| `coordinationhub/visibility_subsystem.py` | 175 | Visibility subsystem — coordination graph, project scan, agent status, assessment |
+| `coordinationhub/visibility_subsystem.py` | 176 | Visibility subsystem — coordination graph, project scan, agent status, assessment |
 | `coordinationhub/work_intent.py` | 139 | Work intent board primitives for CoordinationHub |
-| `coordinationhub/work_intent_subsystem.py` | 92 | WorkIntent subsystem — cooperative work intent board |
+| `coordinationhub/work_intent_subsystem.py` | 93 | WorkIntent subsystem — cooperative work intent board |
 <!-- /GEN -->
 ```
 

@@ -17,10 +17,10 @@ coordinationhub/
   __main__.py           — ``python -m coordinationhub`` entry point — delegates to :mod:`cli` (~10 LOC)
   _storage.py           — Storage backend for CoordinationHub — SQLite pool, path resolution, lifecycle (~143 LOC)
   agent_registry.py     — Agent lifecycle: register, heartbeat, deregister, lineage management (~495 LOC)
-  agent_status.py       — Agent status and file-map query helpers for CoordinationHub (~288 LOC)
-  broadcast_subsystem.py — Broadcast subsystem — sibling broadcasts, ack tracking, multi-lock wait (~259 LOC)
+  agent_status.py       — Agent status and file-map query helpers for CoordinationHub (~289 LOC)
+  broadcast_subsystem.py — Broadcast subsystem — sibling broadcasts, ack tracking, multi-lock wait (~260 LOC)
   broadcasts.py         — Broadcast acknowledgment primitives for CoordinationHub (~147 LOC)
-  change_subsystem.py   — Change subsystem — change notifications, file ownership, conflict audit, status (~219 LOC)
+  change_subsystem.py   — Change subsystem — change notifications, file ownership, conflict audit, status (~220 LOC)
   cli.py                — CoordinationHub CLI — command-line interface for all coordination tool methods (~102 LOC)
   cli_agents.py         — Agent identity and lifecycle CLI commands (~111 LOC)
   cli_commands.py       — CoordinationHub CLI command handlers (~98 LOC)
@@ -31,48 +31,48 @@ coordinationhub/
   cli_parser.py         — Argument parser for the CoordinationHub CLI (~379 LOC)
   cli_setup.py          — CLI commands for setup and diagnostics: ``init``, ``doctor``, ``watch`` (~313 LOC)
   cli_setup_doctor.py   — Diagnostic checks for ``coordinationhub doctor`` (~148 LOC)
-  cli_spawner.py        — CLI commands for HA coordinator spawner — sub-agent registry management (~121 LOC)
+  cli_spawner.py        — CLI commands for HA coordinator spawner — sub-agent registry management (~120 LOC)
   cli_sse.py            — CLI commands for SSE dashboard server (~56 LOC)
   cli_tasks.py          — CLI commands for the task registry (~163 LOC)
   cli_utils.py          — Shared CLI helper functions used by all cli_* sub-modules (~51 LOC)
   cli_vis.py            — Change awareness, audit, graph, and assessment CLI commands (~241 LOC)
   conflict_log.py       — Conflict recording and querying for CoordinationHub (~43 LOC)
-  context.py            — Context bundle builder for CoordinationHub agent registration responses (~104 LOC)
+  context.py            — Context bundle builder for CoordinationHub agent registration responses (~105 LOC)
   core.py               — CoordinationEngine — host class that composes twelve subsystems (~949 LOC)
   db.py                 — SQLite connection pool and public re-exports for CoordinationHub (~93 LOC)
   db_migrations.py      — Schema-version tracking, migration functions, and the ``init_schema`` driver (~467 LOC)
   db_schemas.py         — Canonical SQLite schema definitions for CoordinationHub (~305 LOC)
   dependencies.py       — Cross-agent dependency declaration and satisfaction tracking (~140 LOC)
-  dependency_subsystem.py — Dependency subsystem — cross-agent dependency declarations and checks (~143 LOC)
+  dependency_subsystem.py — Dependency subsystem — cross-agent dependency declarations and checks (~144 LOC)
   dispatch.py           — Tool dispatch for CoordinationHub (~107 LOC)
-  event_bus.py          — Lightweight thread-safe in-memory pub-sub event bus for CoordinationHub (~127 LOC)
-  handoff_subsystem.py  — Handoff subsystem — one-to-many handoff acknowledgment and lifecycle (~148 LOC)
+  event_bus.py          — Lightweight thread-safe in-memory pub-sub event bus for CoordinationHub (~128 LOC)
+  handoff_subsystem.py  — Handoff subsystem — one-to-many handoff acknowledgment and lifecycle (~149 LOC)
   handoffs.py           — Handoff recording and acknowledgement primitives for CoordinationHub (~200 LOC)
-  housekeeping.py       — HousekeepingScheduler — background periodic pruners for long-running hubs (~188 LOC)
-  identity_subsystem.py — Identity subsystem — agent registration, heartbeat, lineage, and ID generation (~209 LOC)
-  lease_subsystem.py    — Lease subsystem — HA coordinator lease management (~167 LOC)
+  housekeeping.py       — HousekeepingScheduler — background periodic pruners for long-running hubs (~189 LOC)
+  identity_subsystem.py — Identity subsystem — agent registration, heartbeat, lineage, and ID generation (~210 LOC)
+  lease_subsystem.py    — Lease subsystem — HA coordinator lease management (~168 LOC)
   leases.py             — Zero-deps lease primitives for HA coordinator leadership (~220 LOC)
   limits.py             — String-length caps for user-supplied fields (T6.14) (~40 LOC)
   lock_cache.py         — In-memory lock cache for CoordinationHub (~188 LOC)
   lock_ops.py           — Shared lock primitives used by both local locks and coordination locks (~222 LOC)
-  locking_subsystem.py  — Locking subsystem — document lock acquire/release/refresh/list/admin (~463 LOC)
+  locking_subsystem.py  — Locking subsystem — document lock acquire/release/refresh/list/admin (~464 LOC)
   mcp_server.py         — HTTP REST admin / dashboard endpoint for CoordinationHub (~578 LOC)
   mcp_stdio.py          — Stdio-based MCP server for CoordinationHub using the ``mcp`` Python package (~197 LOC)
   messages.py           — Inter-agent messaging primitives for CoordinationHub (~105 LOC)
-  messaging_subsystem.py — Messaging subsystem — inter-agent message passing and agent await (~186 LOC)
+  messaging_subsystem.py — Messaging subsystem — inter-agent message passing and agent await (~187 LOC)
   notifications.py      — Change notification storage and retrieval for CoordinationHub (~154 LOC)
   paths.py              — Path normalization and project-root detection utilities (~39 LOC)
   pending_tasks.py      — Pending sub-agent task storage for CoordinationHub (~109 LOC)
-  scan.py               — File ownership scan for CoordinationHub (~279 LOC)
+  scan.py               — File ownership scan for CoordinationHub (~280 LOC)
   spawner.py            — Zero-deps spawner primitives for HA coordinator sub-agent registry (~421 LOC)
-  spawner_subsystem.py  — Spawner subsystem — HA coordinator sub-agent spawn management (~233 LOC)
+  spawner_subsystem.py  — Spawner subsystem — HA coordinator sub-agent spawn management (~234 LOC)
   task_failures.py      — Task failure tracking and dead letter queue for CoordinationHub (~149 LOC)
-  task_subsystem.py     — Task subsystem — shared task registry with hierarchy + dead-letter queue (~241 LOC)
+  task_subsystem.py     — Task subsystem — shared task registry with hierarchy + dead-letter queue (~242 LOC)
   tasks.py              — Task registry primitives for CoordinationHub (work board) (~517 LOC)
   validation.py         — Minimal stdlib jsonschema validator for MCP tool arguments (~160 LOC)
-  visibility_subsystem.py — Visibility subsystem — coordination graph, project scan, agent status, assessment (~175 LOC)
+  visibility_subsystem.py — Visibility subsystem — coordination graph, project scan, agent status, assessment (~176 LOC)
   work_intent.py        — Work intent board primitives for CoordinationHub (~139 LOC)
-  work_intent_subsystem.py — WorkIntent subsystem — cooperative work intent board (~92 LOC)
+  work_intent_subsystem.py — WorkIntent subsystem — cooperative work intent board (~93 LOC)
   hooks/
     __init__.py         — Hooks package — IDE integration via stdin/stdout event protocol (~1 LOC)
     base.py             — Base hook abstraction for CoordinationHub (~340 LOC)
@@ -88,7 +88,7 @@ coordinationhub/
     assessment_scorers.py — Assessment metric scorers for CoordinationHub (~266 LOC)
   plugins/dashboard/
     __init__.py         — Dashboard plugin for CoordinationHub (~15 LOC)
-    dashboard.py        — Web dashboard for CoordinationHub — zero external dependencies (~141 LOC)
+    dashboard.py        — Web dashboard for CoordinationHub — zero external dependencies (~142 LOC)
     dashboard_css.py    — CSS for the CoordinationHub dashboard (~91 LOC)
     dashboard_html.py   — Self-contained HTML for the CoordinationHub dashboard (~98 LOC)
     dashboard_js.py     — Client-side JavaScript for the CoordinationHub dashboard (~452 LOC)
@@ -178,7 +178,7 @@ Today's snapshot:
 | `coordinationhub/tasks.py` | 517 | primitive | OK (≤ 550) |
 | `coordinationhub/agent_registry.py` | 495 | primitive | OK (≤ 550) |
 | `coordinationhub/db_migrations.py` | 467 | migrations | OK (≤ 800) |
-| `coordinationhub/locking_subsystem.py` | 463 | primitive | OK (≤ 550) |
+| `coordinationhub/locking_subsystem.py` | 464 | primitive | OK (≤ 550) |
 | `coordinationhub/plugins/dashboard/dashboard_js.py` | 452 | data | exempt |
 | `coordinationhub/spawner.py` | 421 | primitive | OK (≤ 550) |
 <!-- /GEN -->
@@ -200,7 +200,58 @@ python scripts/gen_docs.py
 When `coverage.json` is missing the table renders a one-line placeholder — `gen_docs.py --check` does not require the dev extra to pass.
 
 <!-- GEN:dispatch-coverage -->
-_No `coverage.json` found. Run `pytest --cov=coordinationhub --cov-report=json --cov-branch` then `python scripts/gen_docs.py` to regenerate this table._
+| Tool | Subsystem method | Line cov | Branch cov |
+|------|------------------|----------|------------|
+| `get_notifications` | `change_subsystem.Change.get_notifications` | 23% | 25% |
+| `wait_for_broadcast_acks` | `broadcast_subsystem.Broadcast.wait_for_broadcast_acks` | 50% | 42% |
+| `list_locks` | `locking_subsystem.Locking.list_locks` | 57% | 50% |
+| `manage_leases` | `lease_subsystem.Lease.manage_leases` | 60% | 58% |
+| `query_tasks` | `task_subsystem.Task.query_tasks` | 67% | 64% |
+| `manage_messages` | `messaging_subsystem.Messaging.manage_messages` | 69% | 71% |
+| `acquire_lock` | `locking_subsystem.Locking.acquire_lock` | 74% | 73% |
+| `admin_locks` | `locking_subsystem.Locking.admin_locks` | 76% | 75% |
+| `wait_for_task` | `task_subsystem.Task.wait_for_task` | 83% | 75% |
+| `await_subagent_registration` | `spawner_subsystem.Spawner.await_subagent_registration` | 87% | 79% |
+| `wait_for_locks` | `broadcast_subsystem.Broadcast.wait_for_locks` | 82% | 80% |
+| `manage_dependencies` | `dependency_subsystem.Dependency.manage_dependencies` | 86% | 83% |
+| `task_failures` | `task_subsystem.Task.task_failures` | 90% | 90% |
+| `broadcast` | `broadcast_subsystem.Broadcast.broadcast` | 97% | 92% |
+| `wait_for_handoff` | `handoff_subsystem.Handoff.wait_for_handoff` | 97% | 92% |
+| `acknowledge_broadcast` | `broadcast_subsystem.Broadcast.acknowledge_broadcast` | 100% | 100% |
+| `acquire_coordinator_lease` | `lease_subsystem.Lease.acquire_coordinator_lease` | 100% | 100% |
+| `assign_task` | `task_subsystem.Task.assign_task` | 100% | 100% |
+| `await_agent` | `messaging_subsystem.Messaging.await_agent` | 100% | 100% |
+| `await_subagent_stopped` | `spawner_subsystem.Spawner.await_subagent_stopped` | 100% | 100% |
+| `create_subtask` | `task_subsystem.Task.create_subtask` | 100% | 100% |
+| `create_task` | `task_subsystem.Task.create_task` | 100% | 100% |
+| `deregister_agent` | `identity_subsystem.Identity.deregister_agent` | 100% | 100% |
+| `get_agent_relations` | `identity_subsystem.Identity.get_agent_relations` | 100% | 100% |
+| `get_agent_status` | `visibility_subsystem.Visibility.get_agent_status` | 100% | 100% |
+| `get_agent_tree` | `visibility_subsystem.Visibility.get_agent_tree` | 100% | 100% |
+| `get_available_tasks` | `task_subsystem.Task.get_available_tasks` | 100% | 100% |
+| `get_conflicts` | `change_subsystem.Change.get_conflicts` | 100% | 100% |
+| `get_contention_hotspots` | `change_subsystem.Change.get_contention_hotspots` | 100% | 100% |
+| `get_file_agent_map` | `visibility_subsystem.Visibility.get_file_agent_map` | 100% | 100% |
+| `get_lock_status` | `locking_subsystem.Locking.get_lock_status` | 100% | 100% |
+| `get_pending_spawns` | `spawner_subsystem.Spawner.get_pending_spawns` | 100% | 100% |
+| `heartbeat` | `identity_subsystem.Identity.heartbeat` | 100% | 100% |
+| `is_subagent_stop_requested` | `spawner_subsystem.Spawner.is_subagent_stop_requested` | 100% | 100% |
+| `list_agents` | `identity_subsystem.Identity.list_agents` | 100% | 100% |
+| `load_coordination_spec` | `visibility_subsystem.Visibility.load_coordination_spec` | 100% | 100% |
+| `manage_work_intents` | `work_intent_subsystem.WorkIntent.manage_work_intents` | 100% | 100% |
+| `notify_change` | `change_subsystem.Change.notify_change` | 100% | 100% |
+| `refresh_lock` | `locking_subsystem.Locking.refresh_lock` | 100% | 100% |
+| `register_agent` | `identity_subsystem.Identity.register_agent` | 100% | 100% |
+| `release_lock` | `locking_subsystem.Locking.release_lock` | 100% | 100% |
+| `report_subagent_spawned` | `spawner_subsystem.Spawner.report_subagent_spawned` | 100% | 100% |
+| `request_subagent_deregistration` | `spawner_subsystem.Spawner.request_subagent_deregistration` | 100% | 100% |
+| `run_assessment` | `visibility_subsystem.Visibility.run_assessment` | 100% | 100% |
+| `scan_project` | `visibility_subsystem.Visibility.scan_project` | 100% | 100% |
+| `send_message` | `messaging_subsystem.Messaging.send_message` | 100% | 100% |
+| `spawn_subagent` | `spawner_subsystem.Spawner.spawn_subagent` | 100% | 100% |
+| `status` | `change_subsystem.Change.status` | 100% | 100% |
+| `update_agent_status` | `visibility_subsystem.Visibility.update_agent_status` | 100% | 100% |
+| `update_task_status` | `task_subsystem.Task.update_task_status` | 100% | 100% |
 <!-- /GEN -->
 
 ## Key Design Decisions

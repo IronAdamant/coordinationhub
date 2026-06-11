@@ -13,7 +13,7 @@ from __future__ import annotations
 import sqlite3
 import threading
 from pathlib import Path
-from typing import Callable
+from collections.abc import Callable
 
 from .db_schemas import _SCHEMAS, _INDEXES
 from .db_migrations import (

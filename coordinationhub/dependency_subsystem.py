@@ -21,7 +21,8 @@ Delegates to: dependencies (dependencies.py) for dependency DB primitives.
 
 from __future__ import annotations
 
-from typing import Any, Callable
+from collections.abc import Callable
+from typing import Any
 
 from . import dependencies as _deps
 

@@ -36,7 +36,8 @@ agent_status (agent_status.py), assessment (plugins/assessment/assessment.py).
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Any, Callable
+from collections.abc import Callable
+from typing import Any
 
 from .plugins.graph import graphs as _g
 from . import scan as _scan

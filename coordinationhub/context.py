@@ -10,7 +10,8 @@ from __future__ import annotations
 import json
 import os
 import time
-from typing import TYPE_CHECKING, Any, Callable
+from collections.abc import Callable
+from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
     from .plugins.graph import graphs as _g

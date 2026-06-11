@@ -24,7 +24,8 @@ Delegates to: messages (messages.py) for message DB primitives.
 from __future__ import annotations
 
 import time as _time
-from typing import Any, Callable
+from collections.abc import Callable
+from typing import Any
 
 from . import messages as _msg
 

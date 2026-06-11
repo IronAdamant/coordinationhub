@@ -5,7 +5,8 @@ from __future__ import annotations
 import threading
 import pytest
 import tempfile
-from typing import Any, Callable, Sequence
+from collections.abc import Callable, Sequence
+from typing import Any
 from coordinationhub.core import CoordinationEngine
 
 

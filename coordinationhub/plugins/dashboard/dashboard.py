@@ -19,7 +19,8 @@ Usage:
 
 from __future__ import annotations
 
-from typing import Any, Callable
+from collections.abc import Callable
+from typing import Any
 
 # Type alias for the connect function passed by callers
 ConnectFn = Callable[[], Any]

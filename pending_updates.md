@@ -1,0 +1,2 @@
+- coordinationhub/hooks/cursor.py: File was deleted. Consider wiki archival. Cursor hook adapter removed in working tree (uncommitted refactor stripping IDE-specific adapters; spawn-source vocabulary reduced to external/stdio_adapter/cc)
+- coordinationhub/hooks/kimi_cli.py: File was deleted. Consider wiki archival. Kimi CLI hook adapter removed in working tree (uncommitted refactor stripping IDE-specific adapters; spawn-source vocabulary reduced to external/stdio_adapter/cc)

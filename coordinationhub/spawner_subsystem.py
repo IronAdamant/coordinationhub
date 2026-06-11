@@ -14,7 +14,8 @@ Delegates to: spawner (spawner.py) for spawn DB primitives.
 from __future__ import annotations
 
 import time
-from typing import Any, Callable
+from collections.abc import Callable
+from typing import Any
 
 from . import spawner as _spawner
 

@@ -25,7 +25,8 @@ from __future__ import annotations
 
 import time
 from pathlib import Path
-from typing import Any, Callable
+from collections.abc import Callable
+from typing import Any
 
 from . import notifications as _cn
 from . import conflict_log as _cl

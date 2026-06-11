@@ -15,7 +15,8 @@ Delegates to: work_intent (work_intent.py) for intent DB primitives.
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Any, Callable
+from collections.abc import Callable
+from typing import Any
 
 from . import work_intent as _wi
 from .paths import normalize_path
