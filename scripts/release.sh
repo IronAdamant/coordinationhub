@@ -84,7 +84,13 @@ else
 fi
 
 # --- 3. Update version ---
-echo "__version__ = \"$VERSION\"" > coordinationhub/__init__.py
+# Replace only the __version__ line; overwriting the whole file would
+# destroy the module docstring, re-exports, and __all__.
+sed -i "s/^__version__ = \".*\"\$/__version__ = \"${VERSION}\"/" coordinationhub/__init__.py
+grep -q "^__version__ = \"${VERSION}\"\$" coordinationhub/__init__.py || {
+  echo -e "${RED}ERROR: failed to update __version__ in coordinationhub/__init__.py${NC}"
+  exit 1
+}
 echo -e "${GREEN}✓ Updated version to $VERSION${NC}"
 
 # --- 4. Regenerate docs ---

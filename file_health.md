@@ -2,7 +2,7 @@
 
 | File | Status | Last Updated | Reason / Intent |
 |------|--------|--------------|-----------------|
-| coordinationhub/__init__.py | 🟢 Green | 2026-06-11 16:17:58 AEST | Wiki entry written at docs/wiki/coordinationhub/__init__.md (2026-06-11 bootstrap); full suite green: 782 passed, 16 skipped on Python 3.14.5, incl. -W error::DeprecationWarning run |
+| coordinationhub/__init__.py | 🟢 Green | 2026-06-11 16:50:53 AEST | Version bump to 0.8.0; wiki entry updated; full suite green pre-release |
 | coordinationhub/__main__.py | 🟢 Green | 2026-06-11 16:18:14 AEST | Wiki entry written at docs/wiki/coordinationhub/__main__.md (2026-06-11 bootstrap); full suite green: 782 passed, 16 skipped on Python 3.14.5, incl. -W error::DeprecationWarning run |
 | coordinationhub/_storage.py | 🟢 Green | 2026-06-11 16:17:50 AEST | Wiki entry written at docs/wiki/coordinationhub/_storage.md (2026-06-11 bootstrap); full suite green: 782 passed, 16 skipped on Python 3.14.5, incl. -W error::DeprecationWarning run |
 | coordinationhub/agent_registry.py | 🟢 Green | 2026-06-11 16:18:12 AEST | Wiki entry written at docs/wiki/coordinationhub/agent_registry.md (2026-06-11 bootstrap); full suite green: 782 passed, 16 skipped on Python 3.14.5, incl. -W error::DeprecationWarning run |

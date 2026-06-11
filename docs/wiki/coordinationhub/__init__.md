@@ -5,7 +5,7 @@ Package root for CoordinationHub — the multi-agent swarm coordination MCP serv
 ## Key Functions / Classes
 - `CoordinationEngine` — re-exported from `core`.
 - `CoordinationHubMCPServer` — re-exported from `mcp_server`.
-- `__version__ = "0.7.12"` — single source of truth for the package version.
+- `__version__` (currently 0.8.0, final release) — single source of truth for the package version; pyproject reads it via `tool.setuptools.dynamic`.
 - `__all__` — exactly the three names above.
 
 ## Design Notes
