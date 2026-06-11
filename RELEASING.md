@@ -17,7 +17,7 @@ This project uses a fully automated, secret-free release pipeline based on Git t
 3. Choose **GitHub**.
 4. Fill in:
    - **Repository**: `IronAdamant/coordinationhub`
-   - **Workflow name**: `publish.yml` (this is the one that actually uploads)
+   - **Workflow name**: `release.yml` (this is the one that actually uploads)
    - **Environment name**: `pypi`
 5. Save.
 
@@ -70,11 +70,16 @@ What happens automatically:
 1. The `release.yml` workflow triggers on the `v*` tag.
 2. It builds the sdist + wheel.
 3. It creates a proper **GitHub Release** (visible on the Releases tab) and attaches the `.tar.gz` + `.whl` as downloadable assets.
-4. Creating the GitHub Release fires the `release: published` event.
-5. The `publish.yml` workflow runs, uses GitHub OIDC to mint a short-lived PyPI token, and uploads to PyPI.
-6. The new version appears on https://pypi.org/project/coordinationhub/ within a few minutes.
+4. The `publish-pypi` job downloads those exact release assets and publishes them with the official `pypa/gh-action-pypi-publish` action (OIDC trusted publishing — the workflow's single, deliberate exception to the zero-third-party-actions rule, pinned to a commit SHA).
+5. The new version appears on https://pypi.org/project/coordinationhub/ within a few minutes.
 
 No `twine` commands, no API tokens, no manual steps after the tag push.
+
+If the PyPI half fails (e.g. a PyPI outage), re-run it later without re-tagging:
+
+```bash
+gh workflow run release.yml --ref main -f tag=v0.8.0
+```
 
 ## Emergency / manual release
 
@@ -97,11 +102,10 @@ But the goal is to never need this.
 
 | Workflow | Trigger | Purpose |
 |----------|---------|---------|
-| `release.yml` | `push: tags: ['v*']` | Builds sdist + wheel using only pre-installed tools, then creates a proper GitHub Release with the artifacts attached as downloadable assets. This is the single source of truth for "a release happened". |
-| `publish.yml` | `release: published` | Receives the OIDC JWT from GitHub, exchanges it at `pypi.org/_/oidc/mint-token` for a short-lived token, then uploads with `twine`. Requires the `pypi` environment. |
-| `test.yml` | `push` / `pull_request` to `main` | Full matrix (3.10–3.12), doc regeneration + auto-commit on main, `--check` on PRs from forks. |
+| `release.yml` | `push: tags: ['v*']` or `workflow_dispatch` (with a `tag` input) | Builds sdist + wheel using only pre-installed tools, creates a proper GitHub Release with the artifacts attached, then publishes those exact assets to PyPI via `pypa/gh-action-pypi-publish` (OIDC trusted publishing). Requires the `pypi` environment. This is the single source of truth for "a release happened". |
+| `test.yml` | `push` / `pull_request` to `main` | Full matrix (3.10–3.14), doc regeneration + auto-commit on main, `--check` on PRs from forks. |
 
-All three workflows follow the project's strict **zero third-party actions** rule — only `git`, `gh`, `python`, `curl`, and runtime-installed `build`/`twine`/`pytest`.
+Both workflows follow the project's **zero third-party actions** rule — only `git`, `gh`, `python`, `curl`, and runtime-installed `build`/`pytest` — with one deliberate, SHA-pinned exception: the official PyPA publish action (maintainer decision, 2026-06-11).
 
 ## How to test the new automation safely
 
@@ -110,7 +114,7 @@ All three workflows follow the project's strict **zero third-party actions** rul
 3. `git tag v0.7.10-rc1 && git push origin v0.7.10-rc1`
 4. Watch the Actions tab — you should see:
    - `release.yml` create the GitHub Release with `.whl` + `.tar.gz` attached.
-   - `publish.yml` run and succeed (it will appear on TestPyPI or real PyPI depending on your Trusted Publisher registration).
+   - the `publish-pypi` job run and succeed (it will appear on TestPyPI or real PyPI depending on your Trusted Publisher registration).
 
 You can delete the release and tag afterward if it was just a test.
 

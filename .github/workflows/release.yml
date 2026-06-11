@@ -4,17 +4,23 @@ on:
   push:
     tags:
       - 'v*'
-  workflow_dispatch:     # Allows manual trigger from GitHub UI
+  workflow_dispatch:     # Manually (re)publish an existing tag, e.g. after a PyPI outage
+    inputs:
+      tag:
+        description: 'Existing release tag to (re)publish (e.g. v0.8.0)'
+        required: true
+        type: string
 
-# Zero third-party actions. Uses only pre-installed tools + build/twine at runtime.
+# Single deliberate exception to the zero-third-party-actions rule (maintainer
+# decision, 2026-06-11): PyPI publishing uses the official pypa/gh-action-pypi-publish,
+# pinned to a commit SHA. The previous hand-rolled curl mint-token + twine step
+# was replaced because the official action is the supported trusted-publishing
+# path. All other steps still use only pre-installed tools.
 #
-# This single workflow now handles the full release:
+# This single workflow handles the full release:
 # 1. Build sdist + wheel
 # 2. Create GitHub Release + attach artifacts
-# 3. Publish to PyPI using OIDC Trusted Publishing (short-lived token, no secrets)
-#
-# This replaces the previous fragile two-workflow pattern (release.yml → publish.yml)
-# that sometimes failed to trigger the PyPI step.
+# 3. Publish those exact artifacts to PyPI via OIDC Trusted Publishing
 
 jobs:
   create-release:
@@ -27,7 +33,7 @@ jobs:
       - name: Checkout at the exact tag
         env:
           REPO: ${{ github.repository }}
-          TAG: ${{ github.ref_name }}
+          TAG: ${{ inputs.tag || github.ref_name }}
         run: |
           set -euxo pipefail
           git init -q
@@ -57,7 +63,7 @@ jobs:
       - name: Create or update GitHub Release + attach artifacts
         env:
           GH_TOKEN: ${{ github.token }}
-          TAG: ${{ github.ref_name }}
+          TAG: ${{ inputs.tag || github.ref_name }}
           REPO: ${{ github.repository }}
         run: |
           set -euo pipefail
@@ -89,58 +95,15 @@ jobs:
       contents: read
 
     steps:
-      - name: Checkout at the exact tag
+      - name: Download the GitHub Release artifacts (exact bytes that were attached)
         env:
+          GH_TOKEN: ${{ github.token }}
           REPO: ${{ github.repository }}
-          TAG: ${{ github.ref_name }}
-        run: |
-          set -euxo pipefail
-          git init -q
-          git config --global --add safe.directory "$PWD"
-          git remote add origin "https://github.com/${REPO}.git"
-          git -c protocol.version=2 fetch --depth=1 origin "refs/tags/${TAG}"
-          git checkout --force FETCH_HEAD
-
-      - name: Select Python 3.12 from tool cache
+          TAG: ${{ inputs.tag || github.ref_name }}
         run: |
           set -euo pipefail
-          PY_DIR=$(ls -d /opt/hostedtoolcache/Python/3.12.*/x64 2>/dev/null | sort -V | tail -1)
-          if [ -z "$PY_DIR" ] || [ ! -x "$PY_DIR/bin/python" ]; then
-            echo "::error::Python 3.12 not found in tool cache"
-            exit 1
-          fi
-          echo "$PY_DIR/bin" >> "$GITHUB_PATH"
-          "$PY_DIR/bin/python" --version
+          gh release download "$TAG" --repo "$REPO" --dir dist
+          ls -lh dist/
 
-      - name: Build package
-        run: |
-          pip install --disable-pip-version-check build
-          python -m build
-
-      - name: Publish to PyPI via OIDC trusted publishing
-        run: |
-          set -euo pipefail
-
-          OIDC_JWT=$(curl -sSL --fail \
-            -H "Authorization: bearer ${ACTIONS_ID_TOKEN_REQUEST_TOKEN}" \
-            "${ACTIONS_ID_TOKEN_REQUEST_URL}&audience=pypi" \
-            | python -c "import sys, json; print(json.load(sys.stdin)['value'])")
-
-          if [ -z "$OIDC_JWT" ]; then
-            echo "::error::Failed to obtain GitHub OIDC JWT"
-            exit 1
-          fi
-
-          PYPI_TOKEN=$(curl -sSL --fail -X POST https://pypi.org/_/oidc/mint-token \
-            -H "Content-Type: application/json" \
-            -d "{\"token\": \"${OIDC_JWT}\"}" \
-            | python -c "import sys, json; print(json.load(sys.stdin)['token'])")
-
-          if [ -z "$PYPI_TOKEN" ]; then
-            echo "::error::Failed to mint PyPI token from OIDC JWT"
-            exit 1
-          fi
-
-          pip install --disable-pip-version-check twine
-          TWINE_USERNAME=__token__ TWINE_PASSWORD="${PYPI_TOKEN}" \
-            python -m twine upload --disable-progress-bar --non-interactive dist/*
+      - name: Publish to PyPI (official PyPA action, OIDC trusted publishing)
+        uses: pypa/gh-action-pypi-publish@cef221092ed1bacb1cc03d23a2d87d1d172e277b  # v1.14.0
