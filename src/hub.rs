@@ -4,15 +4,20 @@ use crate::call::{self, CallError};
 use crate::json::Json;
 use crate::model::State;
 use crate::paths::{detect_project_root, posix};
-use crate::store::Store;
+use crate::store::{FileGuard, Store};
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
+
+struct Inner {
+    state: Option<State>,
+    file: Option<FileGuard>,
+}
 
 pub struct Hub {
     store: Store,
     pub root: PathBuf,
     pub namespace: String,
-    mu: Mutex<()>,
+    inner: Mutex<Inner>,
 }
 
 impl Hub {
@@ -29,7 +34,10 @@ impl Hub {
             store,
             root,
             namespace: namespace.to_string(),
-            mu: Mutex::new(()),
+            inner: Mutex::new(Inner {
+                state: None,
+                file: None,
+            }),
         })
     }
 
@@ -37,18 +45,39 @@ impl Hub {
         &self.store.dir
     }
 
+    fn ensure(&self, inner: &mut Inner) {
+        if inner.file.is_none() {
+            inner.file = Some(self.store.lock());
+            inner.state = Some(self.store.load());
+        }
+    }
+
+    pub fn read<T>(&self, f: impl FnOnce(&State) -> T) -> T {
+        let mut inner = self.inner.lock().unwrap_or_else(|e| e.into_inner());
+        self.ensure(&mut inner);
+        f(inner.state.as_ref().unwrap())
+    }
+
     pub fn transact<T>(&self, f: impl FnOnce(&mut State) -> T) -> T {
-        let _guard = self.mu.lock().unwrap_or_else(|e| e.into_inner());
-        let _file = self.store.lock();
-        let mut state = self.store.load();
-        let out = f(&mut state);
-        let _ = self.store.save(&state);
+        let mut inner = self.inner.lock().unwrap_or_else(|e| e.into_inner());
+        self.ensure(&mut inner);
+        let state = inner.state.as_mut().unwrap();
+        let out = f(state);
+        let _ = self.store.save(state);
         out
     }
 
     pub fn call(&self, name: &str, args: &Json) -> Result<Json, CallError> {
         let root = self.root.clone();
-        self.transact(|st| call::call(st, &root, name, args))
+        let readonly = call::is_read_only(name);
+        let mut inner = self.inner.lock().unwrap_or_else(|e| e.into_inner());
+        self.ensure(&mut inner);
+        let state = inner.state.as_mut().unwrap();
+        let out = call::call(state, &root, name, args);
+        if !readonly {
+            let _ = self.store.save(state);
+        }
+        out
     }
 
     pub fn root_display(&self) -> String {

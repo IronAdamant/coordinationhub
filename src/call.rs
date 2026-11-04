@@ -25,6 +25,30 @@ impl CallError {
     }
 }
 
+pub fn is_read_only(name: &str) -> bool {
+    matches!(
+        name,
+        "list_agents"
+            | "get_agent_relations"
+            | "get_lock_status"
+            | "list_locks"
+            | "get_notifications"
+            | "get_conflicts"
+            | "get_contention_hotspots"
+            | "status"
+            | "get_agent_status"
+            | "get_file_agent_map"
+            | "get_agent_tree"
+            | "query_tasks"
+            | "get_available_tasks"
+            | "get_pending_spawns"
+            | "is_subagent_stop_requested"
+            | "list_work"
+            | "inbox"
+            | "compact_status"
+    )
+}
+
 pub fn unknown_tool(name: &str) -> String {
     let names = all_tool_names();
     let listed = names

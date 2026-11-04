@@ -116,11 +116,11 @@ fn handle(mut stream: TcpStream, hub: &Hub, token: Option<&str>) -> std::io::Res
         ),
         ("GET", "/tools") => write_json(&mut stream, 200, &crate::call::tool_list()),
         ("GET", "/api/dashboard-data") => {
-            let data = hub.transact(|st| dashboard(st));
+            let data = hub.read(dashboard);
             write_json(&mut stream, 200, &data)
         }
         ("GET", "/events") => {
-            let data = hub.transact(|st| dashboard(st));
+            let data = hub.read(dashboard);
             let payload = data.dump();
             let frame = format!("id: 1\ndata: {payload}\n\n");
             let head = format!(
