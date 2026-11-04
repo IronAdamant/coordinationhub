@@ -30,7 +30,7 @@ Still different on purpose (see MIGRATION.md):
 - Server version is this package, not the `mcp` library.
 - Duplicate task ids and validation errors use this program's sentences, not a fake database error and not a fake correlation id.
 
-`cargo test` runs `tests/surface.rs` and `tests/behavior.rs`.
+`cargo test` runs `tests/surface.rs`, `tests/behavior.rs`, and `tests/fresh.rs`. The fresh file uses inputs that are not copied from the verification reports.
 
 The journal file is not compared. See `MIGRATION.md`.
 

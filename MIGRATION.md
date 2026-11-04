@@ -57,11 +57,15 @@ These are the remaining differences. They are not papered over.
 - `initialize` reports this package version (`1.0.0`). Python's stdio server reports the version of the `mcp` library.
 - A duplicate task id returns `task id already exists: ...`. Python's stdio adapter hides the database error behind an internal message and a correlation id. This program does not invent that text.
 - Validation errors from the Rust server start with `Input validation error:`. The wording after that follows this program's checker. It is not a byte-for-byte copy of the `mcp` 1.30 jsonschema sentence.
-- `init` writes a hook command of `coordinationhub hook`, not `python -m coordinationhub.hooks.stdio_adapter`.
-- `doctor` checks the JSONL journal, the hooks file, and that the journal parses. It does not open a SQLite schema version.
-- `watch` prints the agent tree once unless `--follow` is set. Python refreshes until interrupted.
-- `auto-start-dashboard` prints the dashboard address. `--start` runs `serve-sse` in this process.
-- Help text from `--help` is not the argparse transcript. The command names match.
+- Characters above U+FFFF are written as UTF-16 surrogate pairs, which is what Python's JSON encoder does. Control characters below U+0020 are escaped.
+- `GET /events` requires the same bearer token as the other routes and allows four open streams per client address. A fifth receives 429.
+- A `who` area is resolved against the project root. A claim on `kiln` blocks `kiln/brick.rs` and `./kiln`.
+- Assessment with no spec file uses the same implicit graph Python builds from the live agents, so Graph Loaded is True and a quiet session scores 100%. The live trace id is `live_session`.
+- `init` writes the same seven hook events Python writes (SessionStart, UserPromptSubmit, PreToolUse for Write|Edit and Agent, PostToolUse for Write|Edit plus the Stele and Trammel tools, SubagentStart, SubagentStop, SessionEnd), with the same matchers, timeouts, and status messages. The command is this binary plus `hook`, not `python -m coordinationhub.hooks.stdio_adapter`. An earlier build wrote only SessionStart. That was a gap, and it is fixed.
+- `doctor` checks the JSONL journal, the hooks file, and that the journal parses. It does not open a SQLite schema version. `doctor --json` prints `{"checks", "all_ok"}`. After `init`, every check passes.
+- `watch` refreshes until interrupted and prints the summary line (active agents, locks, conflicts). An earlier build printed the tree once. That was a gap, and it is fixed.
+- `auto-start-dashboard` stays quiet. If the port is free it starts `serve-sse` in the background.
+- `--help` lists every command. An earlier build omitted 13 commands that still ran. That was a gap, and it is fixed. The help text is still not the argparse transcript.
 
 ## Config snippets
 

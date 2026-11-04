@@ -198,7 +198,7 @@ fn available_tasks_skip_unassigned_when_agent_is_set() {
         obj(vec![
             ("task_id", json::s("free")),
             ("parent_agent_id", json::s("worker")),
-            ("description", json::s("nobody")),
+            ("description", json::s("orphan-note")),
         ]),
     )
     .unwrap();
@@ -335,7 +335,7 @@ fn who_rejects_overlap_unregistered_and_bad_ttl() {
         obj(vec![
             ("action", json::s("claim")),
             ("agent_id", json::s("owner")),
-            ("area", json::s("src/parser")),
+            ("area", json::s("ember")),
         ]),
     )
     .unwrap();
@@ -346,7 +346,7 @@ fn who_rejects_overlap_unregistered_and_bad_ttl() {
         obj(vec![
             ("action", json::s("claim")),
             ("agent_id", json::s("other")),
-            ("area", json::s("src/parser/lexer.rs")),
+            ("area", json::s("ember/kiln.rs")),
         ]),
     )
     .unwrap();
@@ -356,8 +356,8 @@ fn who_rejects_overlap_unregistered_and_bad_ttl() {
         "who",
         obj(vec![
             ("action", json::s("claim")),
-            ("agent_id", json::s("missing")),
-            ("area", json::s("docs")),
+            ("agent_id", json::s("ghost-agent")),
+            ("area", json::s("notes-bin")),
         ]),
     )
     .unwrap();
@@ -380,8 +380,8 @@ fn who_rejects_overlap_unregistered_and_bad_ttl() {
         obj(vec![
             ("action", json::s("claim")),
             ("agent_id", json::s("owner")),
-            ("area", json::s("letters")),
-            ("ttl", json::s("abc")),
+            ("area", json::s("ttl-word")),
+            ("ttl", json::s("not-a-number")),
         ]),
     );
     let err = text.expect_err("string ttl");
@@ -419,7 +419,7 @@ fn spawn_report_checks_caller_and_registration_wait_sees_it() {
             ("parent_agent_id", json::s("parent")),
             ("child_agent_id", json::s("child")),
             ("subagent_type", json::s("Explore")),
-            ("caller_agent_id", json::s("someone-else")),
+            ("caller_agent_id", json::s("outsider")),
         ]),
     )
     .unwrap();

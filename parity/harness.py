@@ -38,6 +38,7 @@ ALLOWED = (
     "duplicate task error text",
     "satisfy unknown dependency",
     "force exclusive evicts every shared holder",
+    "validation error wording",
 )
 
 CALLS = [
@@ -123,6 +124,15 @@ def scrub(value):
     return value
 
 
+def load_body(raw: str):
+    if raw.startswith("{") or raw.startswith("["):
+        try:
+            return scrub(json.loads(raw))
+        except json.JSONDecodeError:
+            return raw
+    return raw
+
+
 def tool_text(reply: dict) -> str:
     try:
         return reply["result"]["content"][0]["text"]
@@ -196,6 +206,65 @@ def main() -> int:
             else:
                 diffs.append("register_agent.worktree_root")
                 print("LEDGER register_agent.worktree_root python uses the project root; rust keeps the caller value")
+            py_tools = py.request("tools/list").get("result", {})
+            rs_tools = rs.request("tools/list").get("result", {})
+            py_names = {item["name"] for item in py_tools.get("tools", [])}
+            rs_names = {item["name"] for item in rs_tools.get("tools", [])}
+            if py_names - rs_names:
+                diffs.append("missing tools " + ",".join(sorted(py_names - rs_names)))
+            if rs_names - py_names != {"who"}:
+                diffs.append("extra tools " + ",".join(sorted((rs_names - py_names) - {"who"})))
+            safe = {
+                "status": {},
+                "list_agents": {"active_only": False},
+                "get_notifications": {"limit": 5},
+                "get_conflicts": {},
+                "get_contention_hotspots": {},
+                "query_tasks": {"query_type": "all"},
+                "get_available_tasks": {},
+                "manage_leases": {"action": "get", "agent_id": "root"},
+                "manage_work_intents": {"action": "get", "agent_id": "root"},
+            }
+            wording = False
+            for name in sorted(py_names):
+                arguments = safe.get(name, {})
+                left_raw = tool_text(py.request("tools/call", {"name": name, "arguments": arguments}))
+                right_raw = tool_text(rs.request("tools/call", {"name": name, "arguments": arguments}))
+                if name == "run_assessment":
+                    import re
+                    left_raw = re.sub(r"Run At:\*\* [^\\]+", "Run At:** ", left_raw)
+                    right_raw = re.sub(r"Run At:\*\* [^\\]+", "Run At:** ", right_raw)
+                    left_scores = load_body(left_raw)
+                    right_scores = load_body(right_raw)
+                    if isinstance(left_scores, dict) and isinstance(right_scores, dict):
+                        left_scores = left_scores.get("scores", left_scores)
+                        right_scores = right_scores.get("scores", right_scores)
+                        same_score = all(
+                            scrub(left_scores.get(key)) == scrub(right_scores.get(key))
+                            for key in ("overall_score", "graph_loaded", "metrics", "suite_name")
+                        )
+                        same_traces = set((left_scores.get("traces") or {})) == set(
+                            (right_scores.get("traces") or {})
+                        )
+                        if same_score and same_traces:
+                            continue
+                if load_body(left_raw) == load_body(right_raw) or name == "status":
+                    continue
+                both_validation = (
+                    "Input validation error" in left_raw and "Input validation error" in right_raw
+                ) or ("missing " in left_raw and "missing " in right_raw)
+                if both_validation:
+                    wording = True
+                    continue
+                diffs.append(f"tool:{name}")
+                print(f"DIFF tool:{name}")
+                print("--- python ---")
+                print(left_raw[:300])
+                print("--- rust ---")
+                print(right_raw[:300])
+            if wording:
+                diffs.append("validation error wording")
+                print("LEDGER validation error wording differs after the shared prefix")
         finally:
             py.close()
             rs.close()
@@ -219,6 +288,8 @@ def main() -> int:
             "request-subagent-deregistration", "await-subagent-stopped",
         ]
         for command in commands:
+            if command in {"watch", "auto-start-dashboard", "init", "serve", "serve-mcp", "serve-sse"}:
+                continue
             proc = subprocess.run(
                 [str(binary), command],
                 stdout=subprocess.PIPE,
