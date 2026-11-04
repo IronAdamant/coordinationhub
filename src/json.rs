@@ -467,8 +467,14 @@ fn write_string(out: &mut String, text: &str, ascii: bool) {
             '\n' => out.push_str("\\n"),
             '\r' => out.push_str("\\r"),
             '\t' => out.push_str("\\t"),
-            c if ascii && (c as u32) < 0x20 => {
+            c if (c as u32) < 0x20 => {
                 let _ = write!(out, "\\u{:04x}", c as u32);
+            }
+            c if ascii && (c as u32) > 0xFFFF => {
+                let code = (c as u32) - 0x10000;
+                let high = 0xD800 + (code >> 10);
+                let low = 0xDC00 + (code & 0x3FF);
+                let _ = write!(out, "\\u{high:04x}\\u{low:04x}");
             }
             c if ascii && (c as u32) > 0x7f => {
                 let _ = write!(out, "\\u{:04x}", c as u32);

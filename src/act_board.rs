@@ -497,7 +497,7 @@ fn would_cycle(state: &State, task_id: &str, parent_task_id: &str) -> bool {
 }
 
 pub fn available_tasks(state: &State, agent_id: Option<&str>) -> Value {
-    let tasks: Vec<Value> = state
+    let mut tasks: Vec<&Task> = state
         .tasks
         .iter()
         .filter(|task| task.status == "pending")
@@ -513,8 +513,15 @@ pub fn available_tasks(state: &State, agent_id: Option<&str>) -> Value {
                 .map(|id| !agent_blocked(state, id))
                 .unwrap_or(true)
         })
-        .map(task_value)
         .collect();
+    tasks.sort_by(|a, b| {
+        b.priority.cmp(&a.priority).then_with(|| {
+            a.created_at
+                .partial_cmp(&b.created_at)
+                .unwrap_or(std::cmp::Ordering::Equal)
+        })
+    });
+    let tasks: Vec<Value> = tasks.into_iter().map(task_value).collect();
     let count = tasks.len() as i64;
     json::obj(vec![("tasks", json::arr(tasks)), ("count", json::i(count))])
 }
@@ -1054,7 +1061,7 @@ pub fn acquire_lease(state: &mut State, agent_id: &str, ttl: Option<f64>) -> Val
         ("acquired", json::b(true)),
         ("lease_name", json::s(COORDINATOR)),
         ("holder_id", json::s(agent_id)),
-        ("ttl", whole(ttl)),
+        ("ttl", json::f(ttl)),
         ("expires_at", json::f(expires)),
     ])
 }
@@ -1322,6 +1329,7 @@ pub fn cancel_spawn(state: &mut State, spawn_id: &str) -> Value {
     let Some(row) = state.spawns.iter_mut().find(|row| row.id == spawn_id) else {
         return json::obj(vec![
             ("cancelled", json::b(false)),
+            ("not_found", json::b(true)),
             ("error", json::s("not_found")),
             ("spawn_id", json::s(spawn_id)),
         ]);
@@ -1612,7 +1620,8 @@ pub fn record_handoff(
     project_root: Option<&Path>,
 ) -> Value {
     let id = state.next("handoffs");
-    let path = document_path.map(|path| normalize_path(path, project_root));
+    let _ = project_root;
+    let path = document_path.map(|path| path.to_string());
     state.handoffs.push(Handoff {
         id,
         from_agent_id: from.into(),
@@ -1796,11 +1805,19 @@ pub fn finish_handoff(state: &mut State, handoff_id: i64, complete: bool) -> Val
 }
 
 pub fn handoff_rows(state: &State, status: Option<&str>, from: Option<&str>, limit: i64) -> Value {
-    let rows: Vec<Value> = state
+    let mut rows_src: Vec<_> = state
         .handoffs
         .iter()
         .filter(|row| status.map(|s| row.status == s).unwrap_or(true))
         .filter(|row| from.map(|id| row.from_agent_id == id).unwrap_or(true))
+        .collect();
+    rows_src.sort_by(|a, b| {
+        b.created_at
+            .partial_cmp(&a.created_at)
+            .unwrap_or(std::cmp::Ordering::Equal)
+    });
+    let rows: Vec<Value> = rows_src
+        .into_iter()
         .take(limit.max(0) as usize)
         .map(|row| {
             json::obj(vec![

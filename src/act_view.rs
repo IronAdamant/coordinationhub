@@ -800,6 +800,72 @@ pub fn file_map(state: &State, agent_id: Option<&str>) -> Value {
     ])
 }
 
+pub fn implicit_graph(state: &State) -> Graph {
+    let mut agents = vec![GraphAgent {
+        id: "orchestrator".into(),
+        role: "project manager".into(),
+        model: String::new(),
+        responsibilities: vec![
+            "coordinate".into(),
+            "orchestrate".into(),
+            "monitor".into(),
+        ],
+    }];
+    let mut handoffs = Vec::new();
+    let active: Vec<&crate::db::Agent> = state
+        .agents
+        .iter()
+        .filter(|agent| agent.status == "active")
+        .collect();
+    let ids: Vec<&str> = active.iter().map(|agent| agent.agent_id.as_str()).collect();
+    for agent in &active {
+        let Some(parent) = agent.parent_id.as_deref() else {
+            continue;
+        };
+        let role = match agent.agent_id.rsplit_once('.') {
+            Some((_, suffix)) if suffix.chars().all(|ch| ch.is_ascii_digit()) => "worker",
+            Some((_, suffix)) => suffix,
+            None => "worker",
+        };
+        if !agents.iter().any(|row| row.id == agent.agent_id) {
+            agents.push(GraphAgent {
+                id: agent.agent_id.clone(),
+                role: role.into(),
+                model: String::new(),
+                responsibilities: vec!["implement".into(), "write".into(), "code".into()],
+            });
+        }
+        handoffs.push(("orchestrator".into(), agent.agent_id.clone()));
+        if ids.iter().any(|id| *id == parent) {
+            handoffs.push((parent.to_string(), agent.agent_id.clone()));
+        }
+    }
+    let raw_agents = agents.iter().map(|agent| agent.id.clone()).collect();
+    Graph {
+        path: String::new(),
+        agents,
+        handoffs,
+        raw_agents,
+    }
+}
+
+pub fn validate_loaded(graph: Option<&Graph>) -> Value {
+    let Some(graph) = graph else {
+        return json::obj(vec![
+            ("valid", json::b(false)),
+            (
+                "errors",
+                json::arr(vec![json::s("No coordination graph is currently loaded")]),
+            ),
+        ]);
+    };
+    let _ = graph;
+    json::obj(vec![
+        ("valid", json::b(true)),
+        ("errors", json::arr(vec![])),
+    ])
+}
+
 pub fn assess(
     state: &mut State,
     suite_path: Option<&str>,
@@ -956,7 +1022,7 @@ fn live_trace(state: &State) -> Value {
     }
     stamped.sort_by(|a, b| a.0.partial_cmp(&b.0).unwrap_or(std::cmp::Ordering::Equal));
     json::obj(vec![
-        ("trace_id", json::s("live-session")),
+        ("trace_id", json::s("live_session")),
         (
             "events",
             json::arr(stamped.into_iter().map(|(_, event)| event).collect()),
@@ -1795,9 +1861,29 @@ pub fn claim_ownership(state: &mut State, path: &str, agent_id: &str, project_ro
 }
 
 pub fn norm_area(area: &str, project_root: Option<&Path>) -> String {
-    if area.contains('/') || area.contains('\\') || area.ends_with(".py") || area.ends_with(".md") {
-        normalize_path(area, project_root)
+    let root = project_root
+        .map(|path| path.to_path_buf())
+        .or_else(|| {
+            std::env::current_dir()
+                .ok()
+                .and_then(|cwd| util::detect_project_root(&cwd))
+        })
+        .unwrap_or_else(|| PathBuf::from("."));
+    let raw = Path::new(area);
+    let joined = if raw.is_absolute() {
+        raw.to_path_buf()
     } else {
-        area.to_string()
+        root.join(area)
+    };
+    let mut out = PathBuf::new();
+    for component in joined.components() {
+        match component {
+            std::path::Component::CurDir => {}
+            std::path::Component::ParentDir => {
+                out.pop();
+            }
+            other => out.push(other.as_os_str()),
+        }
     }
+    out.to_string_lossy().replace('\\', "/")
 }

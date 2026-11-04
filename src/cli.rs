@@ -85,8 +85,11 @@ const COMMANDS: &[&str] = &[
     "notify-change",
     "get-notifications",
     "get-conflicts",
+    "prune-notifications",
+    "wait-for-notifications",
     "contention-hotspots",
     "load-spec",
+    "validate-spec",
     "scan-project",
     "dashboard",
     "agent-status",
@@ -94,6 +97,7 @@ const COMMANDS: &[&str] = &[
     "assess",
     "doctor",
     "init",
+    "auto-start-dashboard",
     "watch",
     "await-agent",
     "send-message",
@@ -104,20 +108,29 @@ const COMMANDS: &[&str] = &[
     "update-task-status",
     "query-tasks",
     "create-subtask",
+    "retry-task",
+    "dead-letter-queue",
+    "task-failure-history",
+    "wait-for-task",
+    "get-available-tasks",
     "declare-work-intent",
     "get-work-intents",
     "clear-work-intent",
     "declare-dependency",
     "manage-dependencies",
     "satisfy-dependency",
+    "get-all-dependencies",
     "acquire-coordinator-lease",
     "refresh-coordinator-lease",
     "release-coordinator-lease",
     "get-leader",
     "claim-leadership",
+    "leader-status",
+    "ha-dashboard",
     "spawn-subagent",
     "report-subagent-spawned",
     "list-pending-spawns",
+    "cancel-spawn",
     "request-subagent-deregistration",
     "await-subagent-stopped",
     "who",
@@ -171,8 +184,17 @@ fn parse_flags(args: &[String]) -> Flags {
             && !args[index + 1].starts_with('-')
         {
             let key = arg.trim_start_matches('-').replace('-', "_");
-            flags.map.push((key, args[index + 1].clone()));
             index += 1;
+            flags.map.push((key.clone(), args[index].clone()));
+            if matches!(
+                key.as_str(),
+                "handoff_targets" | "extensions" | "depends_on" | "message_ids"
+            ) {
+                while index + 1 < args.len() && !args[index + 1].starts_with('-') {
+                    index += 1;
+                    flags.map.push((key.clone(), args[index].clone()));
+                }
+            }
         } else if arg.starts_with("--") {
             flags
                 .bools
@@ -295,9 +317,15 @@ fn run_tool_command(command: &str, args: &[String]) -> i32 {
             return 2;
         }
     };
-    let (tool, payload, text) = built;
-    if flags.json || text.is_none() {
-        return emit_tool(&flags, &tool, &payload);
+    let (tool, payload, _text) = built;
+    if command == "prune-notifications"
+        && payload.get("prune_max_age_seconds").is_none()
+        && payload.get("prune_max_entries").is_none()
+    {
+        eprintln!(
+            "Error: specify at least one of --max-age or --max-entries.\n       --max-age SECONDS   keep rows newer than N seconds\n       --max-entries N     keep at most N rows (newest wins)"
+        );
+        return 2;
     }
     let mut engine = match Engine::open(
         flags.storage.as_deref(),
@@ -322,24 +350,36 @@ fn run_tool_command(command: &str, args: &[String]) -> i32 {
             ]),
         );
     }
-    match engine.call(&tool, &payload) {
+    let result = if command == "validate-spec" {
+        Ok(crate::act_view::validate_loaded(engine.graph.as_ref()))
+    } else if command == "get-handoffs" {
+        let _ = engine.store.begin();
+        let value = crate::act_board::handoff_rows(
+            &engine.store.state,
+            flag(&flags, "status"),
+            flag(&flags, "from_agent_id"),
+            flag(&flags, "limit")
+                .and_then(|v| v.parse().ok())
+                .unwrap_or(50),
+        );
+        engine.store.end();
+        Ok(value)
+    } else {
+        engine.call_cli(&tool, &payload)
+    };
+    match result {
         Ok(value) => {
-            if command == "heartbeat" {
-                let id = flags.positionals.first().map(|s| s.as_str()).unwrap_or("");
-                let updated = value.get("updated").and_then(Value::as_bool).unwrap_or(false);
-                println!("Heartbeat: {id} — updated: {}", py_bool(updated));
-            } else if command == "deregister" {
-                let id = flags.positionals.first().map(|s| s.as_str()).unwrap_or("");
-                println!("Deregistered: {id}");
-                render_deregister(&value);
-            } else if command == "agent-tree" {
-                if let Some(text) = value.get("text_tree").and_then(Value::as_str) {
-                    println!("{text}");
-                }
-            } else if let Some(render) = text {
-                render(&value);
+            let shown = if command == "list-pending-spawns" {
+                json::obj(vec![("spawns", value)])
+            } else {
+                value
+            };
+            if flags.json {
+                println!("{}", json::dumps_pretty(&shown));
+            } else {
+                crate::cli_text::show(command, &shown, &flags.positionals);
             }
-            0
+            crate::cli_text::exit_code(command, &shown)
         }
         Err(err) => {
             eprintln!("Error: {err}");
@@ -468,6 +508,14 @@ fn command_args(
                     json::s(pos.first().ok_or("document_path required")?),
                 ),
                 ("agent_id", json::s(pos.get(1).ok_or("agent_id required")?)),
+                (
+                    "region_start",
+                    json::opt_i(flag(flags, "region_start").and_then(|v| v.parse().ok())),
+                ),
+                (
+                    "region_end",
+                    json::opt_i(flag(flags, "region_end").and_then(|v| v.parse().ok())),
+                ),
             ]),
             None,
         ),
@@ -536,27 +584,73 @@ fn command_args(
                     "description",
                     json::s(pos.get(2).ok_or("description required")?),
                 ),
-            ]),
-            None,
-        ),
-        "who" => (
-            "who",
-            json::obj(vec![
-                ("action", json::s(flag(flags, "action").unwrap_or("status"))),
                 (
-                    "agent_id",
-                    json::opt_str(
-                        flag(flags, "agent_id").or_else(|| pos.first().map(|s| s.as_str())),
+                    "priority",
+                    json::i(
+                        flag(flags, "priority")
+                            .and_then(|v| v.parse().ok())
+                            .unwrap_or(0),
                     ),
                 ),
                 (
-                    "area",
-                    json::opt_str(flag(flags, "area").or_else(|| pos.get(1).map(|s| s.as_str()))),
+                    "depends_on",
+                    json::arr(
+                        flags
+                            .map
+                            .iter()
+                            .filter(|(key, _)| key == "depends_on")
+                            .map(|(_, value)| json::s(value.clone()))
+                            .collect(),
+                    ),
                 ),
-                ("to_agent_id", json::opt_str(flag(flags, "to_agent_id"))),
             ]),
             None,
         ),
+        "who" => {
+            let verb = flag(flags, "action").map(|s| s.to_string()).or_else(|| {
+                pos.first().and_then(|word| {
+                    matches!(word.as_str(), "status" | "claim" | "release" | "handoff")
+                        .then(|| word.clone())
+                })
+            });
+            let shifted = if verb.is_some() && flag(flags, "action").is_none() && !pos.is_empty()
+            {
+                1
+            } else {
+                0
+            };
+            (
+                "who",
+                json::obj(vec![
+                    (
+                        "action",
+                        json::s(verb.as_deref().unwrap_or("status")),
+                    ),
+                    (
+                        "agent_id",
+                        json::opt_str(
+                            flag(flags, "agent_id")
+                                .or_else(|| pos.get(shifted).map(|s| s.as_str())),
+                        ),
+                    ),
+                    (
+                        "area",
+                        json::opt_str(
+                            flag(flags, "area")
+                                .or_else(|| pos.get(shifted + 1).map(|s| s.as_str())),
+                        ),
+                    ),
+                    (
+                        "to_agent_id",
+                        json::opt_str(
+                            flag(flags, "to_agent_id")
+                                .or_else(|| pos.get(shifted + 2).map(|s| s.as_str())),
+                        ),
+                    ),
+                ]),
+                None,
+            )
+        }
         "agent-tree" => (
             "get_agent_tree",
             json::obj(vec![(
@@ -579,6 +673,14 @@ fn command_args(
                 command,
                 pos,
                 |key| flag(flags, key).map(|s| s.to_string()),
+                |key| {
+                    flags
+                        .map
+                        .iter()
+                        .filter(|(name, _)| name == key)
+                        .map(|(_, value)| value.clone())
+                        .collect()
+                },
                 |key| has(flags, key),
             )
             .map(|found| found.map(|(tool, value)| (tool, value, None)));
@@ -702,13 +804,27 @@ fn run_init(args: &[String]) -> i32 {
     let exe = std::env::current_exe()
         .map(|p| p.display().to_string())
         .unwrap_or_else(|_| "coordinationhub".into());
-    let body = format!("{{\n  \"hooks\": {{\n    \"SessionStart\": [{{\"hooks\": [{{\"command\": \"{exe} hook\"}}]}}]\n  }}\n}}\n");
+    let body = hook_config(&format!("{exe} hook"));
     if let Err(err) = std::fs::write(&hooks, body) {
         eprintln!("Error: {err}");
         return 1;
     }
     println!("Hooks written to {}", hooks.display());
-    println!("\nSetup complete. CoordinationHub is ready.");
+    println!("\nRunning diagnostics...");
+    let checks = doctor_checks(&storage);
+    let mut all_ok = true;
+    for (name, ok, message) in &checks {
+        let icon = if *ok { "OK  " } else { "FAIL" };
+        if !ok {
+            all_ok = false;
+        }
+        println!("  [{icon}] {name}: {message}");
+    }
+    if all_ok {
+        println!("\nSetup complete. CoordinationHub is ready.");
+    } else {
+        println!("\nSetup complete with warnings. Check the failures above.");
+    }
     0
 }
 
@@ -756,30 +872,188 @@ fn run_cancel_spawn(args: &[String]) -> i32 {
 
 fn run_watch(args: &[String]) -> i32 {
     let flags = parse_flags(args);
-    let follow = has(&flags, "follow");
+    let interval: f64 = flag(&flags, "interval")
+        .or_else(|| flag(&flags, "poll_interval"))
+        .and_then(|value| value.parse().ok())
+        .unwrap_or(5.0);
     loop {
-        let code = run_tool_command("agent-tree", args);
-        if !follow || code != 0 {
-            return code;
-        }
-        let seconds: f64 = flag(&flags, "poll_interval")
-            .or_else(|| flag(&flags, "interval"))
-            .and_then(|v| v.parse().ok())
-            .unwrap_or(2.0);
-        std::thread::sleep(std::time::Duration::from_secs_f64(seconds.max(0.2)));
+        print!("\x1b[2J\x1b[H");
+        let _ = run_tool_command("agent-tree", args);
+        let mut engine = match Engine::open(
+            flags.storage.as_deref(),
+            flags.project.as_deref(),
+            &flags.namespace,
+        ) {
+            Ok(engine) => engine,
+            Err(err) => {
+                eprintln!("Error: {err}");
+                return 1;
+            }
+        };
+        let status = engine.call("status", &json::obj(vec![])).unwrap_or(json::obj(vec![]));
+        println!(
+            "\n--- {} active agents | {} locks | {} conflicts | refreshing every {interval}s (Ctrl+C to stop) ---",
+            status.get("active_agents").and_then(Value::as_i64).unwrap_or(0),
+            status.get("active_locks").and_then(Value::as_i64).unwrap_or(0),
+            status.get("recent_conflicts").and_then(Value::as_i64).unwrap_or(0)
+        );
+        std::thread::sleep(std::time::Duration::from_secs_f64(interval.max(0.2)));
     }
 }
 
 fn run_auto_dashboard(args: &[String]) -> i32 {
     let flags = parse_flags(args);
     let host = flag(&flags, "host").unwrap_or("127.0.0.1");
-    let port = flag(&flags, "port").unwrap_or("9898");
-    println!("Dashboard: http://{host}:{port}");
-    if has(&flags, "start") {
-        return run_serve("serve-sse", args);
+    let port: u16 = flag(&flags, "port").and_then(|v| v.parse().ok()).unwrap_or(9898);
+    if std::net::TcpStream::connect_timeout(
+        &std::net::SocketAddr::from((std::net::Ipv4Addr::LOCALHOST, port)),
+        std::time::Duration::from_millis(300),
+    )
+    .is_ok()
+    {
+        return 0;
     }
-    println!("Pass --start to run it in this process.");
+    let exe = std::env::current_exe().unwrap_or_else(|_| PathBuf::from("coordinationhub"));
+    let _ = std::process::Command::new(exe)
+        .args(["serve-sse", "--host", host, "--port", &port.to_string(), "--no-auth"])
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .spawn();
+    let _ = flags;
     0
+}
+
+fn hook_config(command: &str) -> String {
+    let hook = |timeout: i64, status: Option<&str>| {
+        let mut pairs = vec![
+            ("type", json::s("command")),
+            ("command", json::s(command)),
+            ("timeout", json::i(timeout)),
+        ];
+        if let Some(status) = status {
+            pairs.push(("statusMessage", json::s(status)));
+        }
+        json::obj(pairs)
+    };
+    let block = |matcher: &str, timeout: i64, status: Option<&str>| {
+        json::obj(vec![
+            ("matcher", json::s(matcher)),
+            ("hooks", json::arr(vec![hook(timeout, status)])),
+        ])
+    };
+    let body = json::obj(vec![(
+        "hooks",
+        json::obj(vec![
+            (
+                "SessionStart",
+                json::arr(vec![block("", 10, Some("Registering with CoordinationHub"))]),
+            ),
+            (
+                "UserPromptSubmit",
+                json::arr(vec![block("", 5, Some("Stamping current task"))]),
+            ),
+            (
+                "PreToolUse",
+                json::arr(vec![
+                    block("Write|Edit", 5, Some("Acquiring file lock")),
+                    block("Agent", 5, Some("Stashing sub-agent task")),
+                ]),
+            ),
+            (
+                "PostToolUse",
+                json::arr(vec![
+                    block("Write|Edit", 5, None),
+                    block(
+                        "mcp__stele-context__index",
+                        5,
+                        Some("Bridging Stele index to CoordinationHub"),
+                    ),
+                    block(
+                        "mcp__trammel__claim_step",
+                        5,
+                        Some("Syncing Trammel step to CoordinationHub"),
+                    ),
+                ]),
+            ),
+            (
+                "SubagentStart",
+                json::arr(vec![block("", 5, Some("Registering subagent"))]),
+            ),
+            (
+                "SubagentStop",
+                json::arr(vec![block("", 5, None)]),
+            ),
+            (
+                "SessionEnd",
+                json::arr(vec![block("", 10, Some("Releasing CoordinationHub locks"))]),
+            ),
+        ]),
+    )]);
+    json::dumps_pretty(&body) + "\n"
+}
+
+fn doctor_checks(storage: &std::path::Path) -> Vec<(String, bool, String)> {
+    let mut checks = Vec::new();
+    checks.push((
+        "import".into(),
+        true,
+        format!("coordinationhub {} binary", crate::VERSION),
+    ));
+    let home = std::env::var("HOME")
+        .or_else(|_| std::env::var("USERPROFILE"))
+        .unwrap_or_else(|_| ".".into());
+    let hooks = PathBuf::from(&home).join(".coordinationhub").join("hooks.json");
+    let required = [
+        "SessionStart",
+        "UserPromptSubmit",
+        "PreToolUse",
+        "PostToolUse",
+        "SubagentStart",
+        "SubagentStop",
+        "SessionEnd",
+    ];
+    let hooks_text = std::fs::read_to_string(&hooks).unwrap_or_default();
+    let hooks_ok = required.iter().all(|name| hooks_text.contains(name))
+        && hooks_text.contains("coordinationhub");
+    let hooks_msg = if hooks_ok {
+        format!("hooks configured correctly at {}", hooks.display())
+    } else if hooks_text.is_empty() {
+        "no IDE hook config found (run 'coordinationhub init' if using an IDE with hooks)".into()
+    } else {
+        format!("hooks file is missing events at {}", hooks.display())
+    };
+    checks.push(("hooks_config".into(), hooks_ok || hooks_text.is_empty(), hooks_msg));
+    let journal = storage.join("coordination.jsonl");
+    let storage_ok = storage.is_dir() && journal.is_file();
+    checks.push((
+        "storage_dir".into(),
+        storage_ok,
+        if storage_ok {
+            format!("journal exists at {}", journal.display())
+        } else {
+            format!("journal not found: {}", journal.display())
+        },
+    ));
+    let readable = std::fs::read_to_string(&journal)
+        .map(|text| text.lines().all(|line| line.trim().is_empty() || json::parse(line).is_ok()))
+        .unwrap_or(false);
+    checks.push((
+        "schema_version".into(),
+        storage_ok && readable,
+        if storage_ok && readable {
+            "schema is current".into()
+        } else {
+            "journal is missing or unreadable".into()
+        },
+    ));
+    let binary_ok = std::env::current_exe().map(|path| path.is_file()).unwrap_or(true);
+    checks.push((
+        "hook_command".into(),
+        binary_ok,
+        "hook command is the coordinationhub binary".into(),
+    ));
+    checks
 }
 
 fn run_doctor(args: &[String]) -> i32 {
@@ -790,51 +1064,33 @@ fn run_doctor(args: &[String]) -> i32 {
         )
     });
     let storage = crate::db::resolve_storage(flags.storage.as_deref(), root.as_deref());
-    let db = storage.join("coordination.jsonl");
-    let mut failed = false;
-    let mark = |ok: bool| {
-        if ok {
-            "OK  "
-        } else {
-            "FAIL"
-        }
-    };
-    println!("  [{}] binary: coordinationhub {}", mark(true), crate::VERSION);
-    let home = std::env::var("HOME")
-        .or_else(|_| std::env::var("USERPROFILE"))
-        .unwrap_or_else(|_| ".".into());
-    let hooks = PathBuf::from(&home).join(".coordinationhub").join("hooks.json");
-    let hooks_text = std::fs::read_to_string(&hooks).unwrap_or_default();
-    let hooks_ok = ["SessionStart", "PreToolUse", "PostToolUse", "SubagentStart", "SubagentStop", "SessionEnd"]
-        .iter()
-        .all(|name| hooks_text.contains(name))
-        && hooks_text.contains("coordinationhub");
-    if !hooks_ok {
-        failed = true;
+    let checks = doctor_checks(&storage);
+    let all_ok = checks.iter().all(|(_, ok, _)| *ok);
+    if flags.json {
+        let items = checks
+            .iter()
+            .map(|(name, ok, message)| {
+                json::obj(vec![
+                    ("name", json::s(name)),
+                    ("ok", json::b(*ok)),
+                    ("message", json::s(message)),
+                ])
+            })
+            .collect();
+        println!(
+            "{}",
+            json::dumps_pretty(&json::obj(vec![
+                ("checks", json::arr(items)),
+                ("all_ok", json::b(all_ok)),
+            ]))
+        );
+        return if all_ok { 0 } else { 1 };
     }
-    println!("  [{}] hooks: {}", mark(hooks_ok), hooks.display());
-    let dir_ok = storage.is_dir();
-    if !dir_ok {
-        failed = true;
+    for (name, ok, message) in &checks {
+        let icon = if *ok { "OK  " } else { "FAIL" };
+        println!("  [{icon}] {name}: {message}");
     }
-    println!("  [{}] storage dir: {}", mark(dir_ok), storage.display());
-    let db_ok = db.is_file();
-    if !db_ok {
-        failed = true;
-    }
-    println!("  [{}] journal: {}", mark(db_ok), db.display());
-    let readable = std::fs::read_to_string(&db)
-        .map(|text| text.lines().all(|line| line.trim().is_empty() || json::parse(line).is_ok()))
-        .unwrap_or(false);
-    if db_ok && !readable {
-        failed = true;
-    }
-    println!(
-        "  [{}] journal lines: {}",
-        mark(!db_ok || readable),
-        if readable { "readable" } else { "unreadable" }
-    );
-    if failed { 1 } else { 0 }
+    if all_ok { 0 } else { 1 }
 }
 
 fn run_hook(args: &[String]) -> i32 {

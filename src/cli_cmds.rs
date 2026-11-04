@@ -6,6 +6,7 @@ pub fn extra(
     command: &str,
     pos: &[String],
     flag: impl Fn(&str) -> Option<String>,
+    all: impl Fn(&str) -> Vec<String>,
     has: impl Fn(&str) -> bool,
 ) -> Result<Option<(String, Value)>, String> {
     let req = |index: usize, name: &str| -> Result<String, String> {
@@ -55,14 +56,7 @@ pub fn extra(
                 ("require_ack", json::b(has("require_ack"))),
                 (
                     "handoff_targets",
-                    json::arr(
-                        flag("handoff_targets")
-                            .unwrap_or_default()
-                            .split(',')
-                            .filter(|s| !s.is_empty())
-                            .map(|s| json::s(s.trim()))
-                            .collect(),
-                    ),
+                    json::arr(all("handoff_targets").into_iter().map(json::s).collect()),
                 ),
             ]),
         ),
@@ -130,13 +124,19 @@ pub fn extra(
                 ("timeout_s", json::f(num("timeout", 30.0))),
             ]),
         ),
-        "prune-notifications" => (
-            "get_notifications",
-            json::obj(vec![
-                ("prune_max_age_seconds", json::opt_f(flag("max_age_seconds").or(flag("max_age")).and_then(|v| v.parse().ok()))),
-                ("prune_max_entries", json::opt_i(flag("max_entries").and_then(|v| v.parse().ok()))),
-            ]),
-        ),
+        "prune-notifications" => {
+            let mut pairs = Vec::new();
+            if let Some(age) = flag("max_age_seconds")
+                .or_else(|| flag("max_age"))
+                .and_then(|v| v.parse::<f64>().ok())
+            {
+                pairs.push(("prune_max_age_seconds", json::f(age)));
+            }
+            if let Some(entries) = flag("max_entries").and_then(|v| v.parse::<i64>().ok()) {
+                pairs.push(("prune_max_entries", json::i(entries)));
+            }
+            ("get_notifications", json::obj(pairs))
+        }
         "wait-for-notifications" => (
             "get_notifications",
             json::obj(vec![
@@ -164,14 +164,14 @@ pub fn extra(
                 ("worktree_root", json::opt_string(&flag("worktree_root"))),
                 (
                     "extensions",
-                    json::arr(
-                        flag("extensions")
-                            .unwrap_or_default()
-                            .split(',')
-                            .filter(|s| !s.is_empty())
-                            .map(|s| json::s(s.trim()))
-                            .collect(),
-                    ),
+                    {
+                        let items = all("extensions");
+                        if items.is_empty() {
+                            json::null()
+                        } else {
+                            json::arr(items.into_iter().map(json::s).collect())
+                        }
+                    },
                 ),
             ]),
         ),

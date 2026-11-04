@@ -6,8 +6,36 @@ use crate::mcp;
 use std::io::{Read, Write};
 use std::net::{TcpListener, TcpStream};
 use std::path::PathBuf;
-use std::sync::{Arc, Mutex};
+use std::collections::HashMap;
+use std::sync::{Arc, Mutex, OnceLock};
 use std::time::Duration;
+
+fn sse_table() -> &'static Mutex<HashMap<String, i32>> {
+    static TABLE: OnceLock<Mutex<HashMap<String, i32>>> = OnceLock::new();
+    TABLE.get_or_init(|| Mutex::new(HashMap::new()))
+}
+
+fn sse_admit(ip: &str) -> bool {
+    let Ok(mut table) = sse_table().lock() else {
+        return false;
+    };
+    let count = table.entry(ip.to_string()).or_insert(0);
+    if *count >= 4 {
+        return false;
+    }
+    *count += 1;
+    true
+}
+
+fn sse_release(ip: &str) {
+    if let Ok(mut table) = sse_table().lock() {
+        let count = table.entry(ip.to_string()).or_insert(0);
+        *count -= 1;
+        if *count <= 0 {
+            table.remove(ip);
+        }
+    }
+}
 
 const DASHBOARD: &str = include_str!("../assets/dashboard.html");
 const MAX_BODY: usize = 1_000_000;
@@ -77,6 +105,34 @@ fn dispatch_connection(
         }
     }
     if method == "GET" && path == "/events" {
+        if let Some(expected) = &token {
+            let presented = headers.iter().find(|(name, _)| name == "authorization");
+            let ok = presented
+                .map(|(_, value)| {
+                    value
+                        .strip_prefix("Bearer ")
+                        .map(|item| item.trim() == expected)
+                        .unwrap_or(false)
+                })
+                .unwrap_or(false);
+            if !ok {
+                return write_raw(
+                    &mut stream,
+                    401,
+                    "application/json",
+                    b"{\"error\": \"unauthorized\"}",
+                    Some("Bearer realm=\"coordinationhub\""),
+                );
+            }
+        }
+        let ip = stream
+            .peer_addr()
+            .map(|addr| addr.ip().to_string())
+            .unwrap_or_else(|_| "unknown".into());
+        if !sse_admit(&ip) {
+            let body = b"{\"error\": \"too many SSE connections\"}";
+            return write_raw(&mut stream, 429, "application/json", body, None);
+        }
         let last = headers
             .iter()
             .find(|(name, _)| name == "last-event-id")
@@ -87,7 +143,9 @@ fn dispatch_connection(
                         .map(|value| value.to_string())
                 })
             });
-        return serve_events(stream, engine, last.as_deref());
+        let result = serve_events(stream, engine, last.as_deref());
+        sse_release(&ip);
+        return result;
     }
     let mut engine = engine.lock().map_err(|e| e.to_string())?;
     handle_locked(
@@ -306,6 +364,7 @@ fn write_raw(
         401 => "Unauthorized",
         404 => "Not Found",
         413 => "Payload Too Large",
+        429 => "Too Many Requests",
         _ => "Error",
     };
     let extra = www

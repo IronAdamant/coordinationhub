@@ -75,11 +75,6 @@ pub fn local_stamp(epoch: f64) -> String {
 }
 
 pub fn now() -> f64 {
-    if let Ok(raw) = std::env::var("COORDINATIONHUB_NOW") {
-        if let Ok(value) = raw.parse::<f64>() {
-            return value;
-        }
-    }
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .map(|d| d.as_secs_f64())
@@ -87,11 +82,6 @@ pub fn now() -> f64 {
 }
 
 pub fn pid() -> i64 {
-    if let Ok(raw) = std::env::var("COORDINATIONHUB_PID") {
-        if let Ok(value) = raw.parse::<i64>() {
-            return value;
-        }
-    }
     std::process::id() as i64
 }
 

@@ -520,17 +520,154 @@ fn on_session_end(engine: &mut Engine, session: &str) -> Option<Value> {
 
 fn redact(text: &str) -> String {
     let mut out = text.to_string();
-    for (pattern, replacement) in [
-        ("sk-", "[REDACTED_API_KEY]"),
-        ("ghp_", "[REDACTED_GH_PAT]"),
-        ("github_pat_", "[REDACTED_GH_PAT]"),
-        ("AKIA", "[REDACTED_AWS_KEY_ID]"),
-    ] {
-        if out.contains(pattern) {
-            out = out.replace(pattern, replacement);
-        }
+    loop {
+        let Some((start, end, replacement)) = next_secret(&out) else {
+            break;
+        };
+        out.replace_range(start..end, replacement);
     }
     out
+}
+
+fn next_secret(text: &str) -> Option<(usize, usize, &'static str)> {
+    let bytes = text.as_bytes();
+    let mut best: Option<(usize, usize, &'static str)> = None;
+    let consider = |best: &mut Option<(usize, usize, &'static str)>, found: Option<(usize, usize, &'static str)>| {
+        if let Some(found) = found {
+            if best.map(|item| found.0 < item.0).unwrap_or(true) {
+                *best = Some(found);
+            }
+        }
+    };
+    consider(&mut best, find_prefixed(bytes, b"sk-", 16, "[REDACTED_API_KEY]", true));
+    consider(&mut best, find_bearer(bytes));
+    consider(&mut best, find_prefixed(bytes, b"ghp_", 20, "[REDACTED_GH_PAT]", false));
+    consider(&mut best, find_prefixed(bytes, b"github_pat_", 20, "[REDACTED_GH_PAT]", false));
+    consider(&mut best, find_akia(bytes));
+    consider(&mut best, find_email(text));
+    consider(&mut best, find_hex(bytes));
+    best
+}
+
+fn find_prefixed(
+    bytes: &[u8],
+    prefix: &[u8],
+    min_tail: usize,
+    replacement: &'static str,
+    allow_dash: bool,
+) -> Option<(usize, usize, &'static str)> {
+    let mut index = 0;
+    while index + prefix.len() <= bytes.len() {
+        if bytes[index..].starts_with(prefix) {
+            let mut end = index + prefix.len();
+            while end < bytes.len() && token_byte(bytes[end], allow_dash) {
+                end += 1;
+            }
+            if end - (index + prefix.len()) >= min_tail {
+                return Some((index, end, replacement));
+            }
+        }
+        index += 1;
+    }
+    None
+}
+
+fn token_byte(byte: u8, allow_dash: bool) -> bool {
+    byte.is_ascii_alphanumeric() || byte == b'_' || (allow_dash && byte == b'-')
+}
+
+fn find_bearer(bytes: &[u8]) -> Option<(usize, usize, &'static str)> {
+    let lower: Vec<u8> = bytes.iter().map(|b| b.to_ascii_lowercase()).collect();
+    let mut index = 0;
+    while index + 6 <= lower.len() {
+        if lower[index..].starts_with(b"bearer")
+            && index + 6 < lower.len()
+            && lower[index + 6].is_ascii_whitespace()
+        {
+            let mut end = index + 7;
+            while end < bytes.len() && lower[end].is_ascii_whitespace() {
+                end += 1;
+            }
+            let token = end;
+            while end < bytes.len()
+                && (bytes[end].is_ascii_alphanumeric() || matches!(bytes[end], b'.' | b'_' | b'-'))
+            {
+                end += 1;
+            }
+            if end > token {
+                return Some((index, end, "Bearer [REDACTED]"));
+            }
+        }
+        index += 1;
+    }
+    None
+}
+
+fn find_akia(bytes: &[u8]) -> Option<(usize, usize, &'static str)> {
+    let mut index = 0;
+    while index + 20 <= bytes.len() {
+        if bytes[index..].starts_with(b"AKIA") {
+            let tail = &bytes[index + 4..index + 20];
+            if tail.iter().all(|b| b.is_ascii_uppercase() || b.is_ascii_digit()) {
+                return Some((index, index + 20, "[REDACTED_AWS_KEY_ID]"));
+            }
+        }
+        index += 1;
+    }
+    None
+}
+
+fn find_email(text: &str) -> Option<(usize, usize, &'static str)> {
+    let bytes = text.as_bytes();
+    let mut index = 0;
+    while index < bytes.len() {
+        if bytes[index] == b'@' {
+            let mut start = index;
+            while start > 0 && email_local(bytes[start - 1]) {
+                start -= 1;
+            }
+            let mut end = index + 1;
+            let mut dot = false;
+            while end < bytes.len() && email_domain(bytes[end]) {
+                if bytes[end] == b'.' {
+                    dot = true;
+                }
+                end += 1;
+            }
+            if start < index && dot && end - index > 3 {
+                return Some((start, end, "[REDACTED_EMAIL]"));
+            }
+        }
+        index += 1;
+    }
+    None
+}
+
+fn email_local(byte: u8) -> bool {
+    byte.is_ascii_alphanumeric() || matches!(byte, b'.' | b'_' | b'%' | b'+' | b'-')
+}
+
+fn email_domain(byte: u8) -> bool {
+    byte.is_ascii_alphanumeric() || byte == b'.' || byte == b'-'
+}
+
+fn find_hex(bytes: &[u8]) -> Option<(usize, usize, &'static str)> {
+    let mut index = 0;
+    while index < bytes.len() {
+        if bytes[index].is_ascii_hexdigit() && bytes[index].is_ascii_lowercase() || bytes[index].is_ascii_digit() {
+            if index == 0 || !bytes[index - 1].is_ascii_hexdigit() {
+                let mut end = index;
+                while end < bytes.len() && bytes[end].is_ascii_hexdigit() && (bytes[end].is_ascii_lowercase() || bytes[end].is_ascii_digit()) {
+                    end += 1;
+                }
+                if end - index >= 32 && (end == bytes.len() || !bytes[end].is_ascii_hexdigit()) {
+                    return Some((index, end, "[REDACTED_HEX]"));
+                }
+            }
+        }
+        index += 1;
+    }
+    None
 }
 
 fn sha256_hex(text: &str) -> String {

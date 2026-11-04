@@ -55,6 +55,14 @@ impl Engine {
     }
 
     pub fn call(&mut self, tool: &str, args: &Value) -> Result<Value, String> {
+        self.invoke(tool, args, true)
+    }
+
+    pub fn call_cli(&mut self, tool: &str, args: &Value) -> Result<Value, String> {
+        self.invoke(tool, args, false)
+    }
+
+    fn invoke(&mut self, tool: &str, args: &Value, check_schema: bool) -> Result<Value, String> {
         if !matches!(args, Value::Object(_)) && !matches!(args, Value::Null) {
             return Err(format!(
                 "{tool}: value must be of type 'object' (got {})",
@@ -72,7 +80,7 @@ impl Engine {
             }
         } else if !self.schema.tools.iter().any(|(name, _)| name == tool) {
             return Err(validate::unknown_tool(&self.schema, tool));
-        } else {
+        } else if check_schema {
             validate::validate_tool(&self.schema, tool, &args)
                 .map_err(|err| format!("Input validation error: {err}"))?;
         }
@@ -292,20 +300,28 @@ impl Engine {
                 root_ref,
             ),
             "get_notifications" => {
-                if args.get("prune_max_age_seconds").is_some() || args.get("prune_max_entries").is_some()
+                let mut pruned = None;
+                if opt_f_opt(args, "prune_max_age_seconds").is_some()
+                    || opt_i(args, "prune_max_entries").is_some()
                 {
-                    let _ = act_lock::prune_notifications(
+                    pruned = Some(act_lock::prune_notifications(
                         state,
                         opt_f_opt(args, "prune_max_age_seconds"),
                         opt_i(args, "prune_max_entries"),
-                    );
+                    ));
                 }
-                act_lock::notifications(
+                let mut value = act_lock::notifications(
                     state,
                     opt_f_opt(args, "since"),
                     opt_str(args, "exclude_agent"),
                     opt_i(args, "limit").unwrap_or(100),
-                )
+                );
+                if let Some(count) = pruned {
+                    if let Value::Object(pairs) = &mut value {
+                        pairs.push(("pruned".into(), json::i(count)));
+                    }
+                }
+                value
             }
             "get_conflicts" => act_lock::conflicts(
                 state,
@@ -350,13 +366,22 @@ impl Engine {
                 opt_strings(args, "scope"),
             ),
             "get_agent_tree" => act_view::agent_tree(state, opt_str(args, "agent_id")),
-            "run_assessment" => act_view::assess(
-                state,
-                opt_str(args, "suite_path"),
-                opt_str(args, "format").unwrap_or("markdown"),
-                opt_str(args, "graph_agent_id"),
-                graph.as_ref(),
-            ),
+            "run_assessment" => {
+                let implicit;
+                let graph_ref = if let Some(graph) = graph.as_ref() {
+                    graph
+                } else {
+                    implicit = act_view::implicit_graph(state);
+                    &implicit
+                };
+                act_view::assess(
+                    state,
+                    opt_str(args, "suite_path"),
+                    opt_str(args, "format").unwrap_or("markdown"),
+                    opt_str(args, "graph_agent_id"),
+                    Some(graph_ref),
+                )
+            }
             "send_message" => act_board::send_message(
                 state,
                 need_str(args, "from_agent_id")?,
@@ -806,45 +831,23 @@ impl Engine {
         }
         let exclude = opt_str(args, "exclude_agent").map(|s| s.to_string());
         let limit = opt_i(args, "limit").unwrap_or(100);
-        let cursor = self.view(|engine| {
-            engine
-                .store
-                .state
-                .notifications
-                .iter()
-                .map(|row| row.id)
-                .max()
-                .unwrap_or(0)
-        })?;
         let timeout = opt_f(args, "timeout_s", 0.0);
         let poll = opt_f(args, "poll_interval_s", 0.05).max(0.01);
         let started = std::time::Instant::now();
         loop {
             let rows = self.view(|engine| {
-                let mut rows: Vec<_> = engine
+                let newest = engine
                     .store
                     .state
                     .notifications
                     .iter()
-                    .filter(|row| row.id > cursor)
                     .filter(|row| exclude.as_ref().map(|id| row.agent_id != *id).unwrap_or(true))
-                    .collect();
-                rows.sort_by_key(|row| row.id);
-                if limit >= 0 {
-                    rows.truncate(limit as usize);
-                }
-                rows.iter()
-                    .map(|row| {
-                        json::obj(vec![
-                            ("id", json::i(row.id)),
-                            ("document_path", json::s(&row.document_path)),
-                            ("change_type", json::s(&row.change_type)),
-                            ("agent_id", json::s(&row.agent_id)),
-                            ("worktree_root", json::opt_string(&row.worktree_root)),
-                            ("created_at", json::f(row.created_at)),
-                        ])
-                    })
-                    .collect::<Vec<_>>()
+                    .max_by_key(|row| row.id)
+                    .map(|row| row.created_at);
+                let Some(anchor) = newest else {
+                    return Vec::new();
+                };
+                notification_window(&engine.store.state, anchor, exclude.as_deref(), limit)
             })?;
             if !rows.is_empty() {
                 return Ok(json::obj(vec![
@@ -906,21 +909,24 @@ impl Engine {
                 let mut released = Vec::new();
                 let mut waiting = Vec::new();
                 for path in &paths {
-                    let status = act_lock::status(&engine.store.state, path, root.as_deref());
+                    let norm = crate::util::normalize_path(path, root.as_deref());
+                    let status = act_lock::status(&engine.store.state, &norm, root.as_deref());
                     let locked = status.get("locked").and_then(Value::as_bool) == Some(true);
                     let holder = status.get("locked_by").and_then(Value::as_str);
-                    let norm = status
-                        .get("document_path")
-                        .and_then(Value::as_str)
-                        .unwrap_or(path)
-                        .to_string();
                     if !locked || holder == Some(agent.as_str()) {
-                        released.push(json::s(norm));
+                        released.push(norm);
                     } else {
-                        waiting.push(json::s(norm));
+                        waiting.push(norm);
                     }
                 }
-                (released, waiting)
+                released.sort();
+                waiting.sort();
+                released.dedup();
+                waiting.dedup();
+                (
+                    released.into_iter().map(json::s).collect::<Vec<_>>(),
+                    waiting.into_iter().map(json::s).collect::<Vec<_>>(),
+                )
             })?;
             if split.1.is_empty() || !sleep_until(started, timeout, 0.05) {
                 return Ok(json::obj(vec![
@@ -1183,6 +1189,37 @@ fn who_arguments(args: &Value) -> Result<(), String> {
         }
     }
     Ok(())
+}
+
+fn notification_window(
+    state: &crate::db::State,
+    anchor: f64,
+    exclude: Option<&str>,
+    limit: i64,
+) -> Vec<Value> {
+    let since = anchor - 1.0;
+    let mut rows: Vec<_> = state
+        .notifications
+        .iter()
+        .filter(|row| row.created_at > since)
+        .filter(|row| exclude.map(|id| row.agent_id != id).unwrap_or(true))
+        .collect();
+    rows.sort_by(|a, b| b.id.cmp(&a.id));
+    if limit >= 0 {
+        rows.truncate(limit as usize);
+    }
+    rows.iter()
+        .map(|row| {
+            json::obj(vec![
+                ("id", json::i(row.id)),
+                ("document_path", json::s(&row.document_path)),
+                ("change_type", json::s(&row.change_type)),
+                ("agent_id", json::s(&row.agent_id)),
+                ("worktree_root", json::opt_string(&row.worktree_root)),
+                ("created_at", json::f(row.created_at)),
+            ])
+        })
+        .collect()
 }
 
 fn waited(start: std::time::Instant) -> f64 {
