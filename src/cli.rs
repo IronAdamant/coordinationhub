@@ -33,6 +33,9 @@ pub fn main(argv: &[String]) -> i32 {
         "hook" => run_hook(rest),
         "init" => run_init(rest),
         "doctor" => run_doctor(rest),
+        "cancel-spawn" => run_cancel_spawn(rest),
+        "watch" => run_watch(rest),
+        "auto-start-dashboard" => run_auto_dashboard(rest),
         _ => run_tool_command(command, rest),
     }
 }
@@ -706,6 +709,76 @@ fn run_init(args: &[String]) -> i32 {
     }
     println!("Hooks written to {}", hooks.display());
     println!("\nSetup complete. CoordinationHub is ready.");
+    0
+}
+
+fn run_cancel_spawn(args: &[String]) -> i32 {
+    let flags = parse_flags(args);
+    let Some(spawn_id) = flags.positionals.first() else {
+        eprintln!("Error: spawn_id required");
+        return 2;
+    };
+    let mut engine = match Engine::open(
+        flags.storage.as_deref(),
+        flags.project.as_deref(),
+        &flags.namespace,
+    ) {
+        Ok(engine) => engine,
+        Err(err) => {
+            eprintln!("Error: {err}");
+            return 1;
+        }
+    };
+    if engine.store.begin().is_err() {
+        eprintln!("Error: could not open the journal");
+        return 1;
+    }
+    let value = crate::act_board::cancel_spawn(&mut engine.store.state, spawn_id);
+    if engine.store.commit().is_err() {
+        engine.store.end();
+        eprintln!("Error: could not write the journal");
+        return 1;
+    }
+    engine.store.end();
+    if flags.json {
+        println!("{}", json::dumps_pretty(&value));
+    } else if value.get("cancelled").and_then(Value::as_bool) == Some(true) {
+        println!("Spawn cancelled: {spawn_id}");
+    } else {
+        eprintln!(
+            "Cancel failed: {}",
+            value.get("error").and_then(Value::as_str).unwrap_or("unknown")
+        );
+        return 1;
+    }
+    0
+}
+
+fn run_watch(args: &[String]) -> i32 {
+    let flags = parse_flags(args);
+    let follow = has(&flags, "follow");
+    loop {
+        let code = run_tool_command("agent-tree", args);
+        if !follow || code != 0 {
+            return code;
+        }
+        let seconds: f64 = flag(&flags, "poll_interval")
+            .or_else(|| flag(&flags, "interval"))
+            .and_then(|v| v.parse().ok())
+            .unwrap_or(2.0);
+        std::thread::sleep(std::time::Duration::from_secs_f64(seconds.max(0.2)));
+    }
+}
+
+fn run_auto_dashboard(args: &[String]) -> i32 {
+    let flags = parse_flags(args);
+    let host = flag(&flags, "host").unwrap_or("127.0.0.1");
+    let port = flag(&flags, "port").unwrap_or("9898");
+    println!("Dashboard: http://{host}:{port}");
+    if has(&flags, "start") {
+        return run_serve("serve-sse", args);
+    }
+    println!("Pass --start to run it in this process.");
     0
 }
 

@@ -1318,6 +1318,29 @@ pub fn report_spawned(
     ])
 }
 
+pub fn cancel_spawn(state: &mut State, spawn_id: &str) -> Value {
+    let Some(row) = state.spawns.iter_mut().find(|row| row.id == spawn_id) else {
+        return json::obj(vec![
+            ("cancelled", json::b(false)),
+            ("error", json::s("not_found")),
+            ("spawn_id", json::s(spawn_id)),
+        ]);
+    };
+    if row.status != "pending" {
+        return json::obj(vec![
+            ("cancelled", json::b(false)),
+            ("error", json::s("not_pending")),
+            ("spawn_id", json::s(spawn_id)),
+            ("status", json::s(&row.status)),
+        ]);
+    }
+    row.status = "cancelled".into();
+    json::obj(vec![
+        ("cancelled", json::b(true)),
+        ("spawn_id", json::s(spawn_id)),
+    ])
+}
+
 pub fn pending_spawns(state: &State, parent: &str, include_consumed: bool) -> Value {
     let rows: Vec<Value> = state
         .spawns

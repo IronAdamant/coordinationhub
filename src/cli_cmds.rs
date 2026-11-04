@@ -397,10 +397,6 @@ pub fn extra(
                 ("include_consumed", json::b(has("all") || has("include_consumed"))),
             ]),
         ),
-        "cancel-spawn" => (
-            "spawn_subagent",
-            json::obj(vec![("spawn_id", json::s(req(0, "spawn_id")?))]),
-        ),
         "request-subagent-deregistration" => (
             "request_subagent_deregistration",
             json::obj(vec![
