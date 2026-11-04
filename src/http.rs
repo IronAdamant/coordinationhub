@@ -110,6 +110,7 @@ fn serve_events(
     let header = "HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nCache-Control: no-cache\r\nConnection: keep-alive\r\nX-Accel-Buffering: no\r\n\r\n";
     stream.write_all(header.as_bytes()).map_err(|e| e.to_string())?;
     let mut seen = last_id.and_then(|value| value.parse::<u64>().ok()).unwrap_or(0);
+    let mut primed = false;
     let started = std::time::Instant::now();
     loop {
         if started.elapsed() > Duration::from_secs(600) {
@@ -119,12 +120,13 @@ fn serve_events(
             let mut engine = engine.lock().map_err(|e| e.to_string())?;
             (engine.cursor(), json::dumps(&engine.dashboard()))
         };
-        if cursor != seen || seen == 0 {
+        if !primed || cursor != seen {
             let frame = format!("id: {cursor}\ndata: {payload}\n\n");
             if stream.write_all(frame.as_bytes()).is_err() {
                 break;
             }
             seen = cursor;
+            primed = true;
         } else if stream.write_all(b": keepalive\n\n").is_err() {
             break;
         }
