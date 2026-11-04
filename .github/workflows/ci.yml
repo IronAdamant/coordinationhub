@@ -43,7 +43,7 @@ jobs:
         run: |
           set -euo pipefail
           git worktree add /tmp/coordinationhub-python python-legacy
-          python -m pip install -e "/tmp/coordinationhub-python"
+          python -m pip install -e "/tmp/coordinationhub-python" pytest
           python -c "import coordinationhub; assert coordinationhub.__version__ == '0.8.0'"
           python -m pytest /tmp/coordinationhub-python/tests -q --tb=line
 

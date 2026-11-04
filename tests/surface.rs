@@ -460,7 +460,7 @@ fn every_tool_returns_json() {
 
 #[test]
 fn manifest_declares_no_crates() {
-    let text = include_str!("../Cargo.toml");
+    let text = include_str!("../Cargo.toml").replace("\r\n", "\n");
     assert!(text.contains("[dependencies]\n"));
     assert!(!text.lines().any(|line| line.starts_with("serde")
         || line.starts_with("tokio")
