@@ -54,12 +54,13 @@ pub fn local_stamp(epoch: f64) -> String {
             tm_yday: i32,
             tm_isdst: i32,
         }
+        #[link(name = "ucrt")]
         unsafe extern "system" {
-            fn localtime_s(tm: *mut Tm, time: *const i64) -> i32;
+            fn _localtime64_s(tm: *mut Tm, time: *const i64) -> i32;
         }
         let mut tm = unsafe { std::mem::zeroed::<Tm>() };
         unsafe {
-            localtime_s(&mut tm, &secs);
+            _localtime64_s(&mut tm, &secs);
         }
         format!(
             "{:04}-{:02}-{:02} {:02}:{:02}:{:02}",
