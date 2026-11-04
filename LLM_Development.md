@@ -5,6 +5,13 @@
 
 ## Change Log
 
+## 2026-11-04 — Rust 1.0 rewrite
+
+- Python 0.8 kept on branch `python-legacy`.
+- New std-only Rust program: same 50 tools, plus work claims, inbox, and compact status.
+- Parity harness `parity/harness.py` (diff count 0 after normalisation).
+- Benchmarks in BENCHMARKS.md from `parity/bench.py` on this machine. Rust faster on every row.
+
 All significant changes to the CoordinationHub project are documented here in reverse chronological order.
 
 ---

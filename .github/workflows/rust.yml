@@ -1,0 +1,120 @@
+name: Rust
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+# No marketplace actions. Rust is installed with the upstream rustup script.
+jobs:
+  test:
+    name: ${{ matrix.os }} ${{ matrix.target }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            target: x86_64-unknown-linux-gnu
+            test: true
+          - os: ubuntu-latest
+            target: aarch64-unknown-linux-gnu
+            test: false
+            apt: gcc-aarch64-linux-gnu
+            linker: aarch64-linux-gnu-gcc
+          - os: macos-latest
+            target: aarch64-apple-darwin
+            test: true
+          - os: macos-13
+            target: x86_64-apple-darwin
+            test: true
+          - os: windows-latest
+            target: x86_64-pc-windows-msvc
+            test: true
+          - os: windows-latest
+            target: aarch64-pc-windows-msvc
+            test: false
+    steps:
+      - name: Checkout
+        shell: bash
+        run: |
+          set -euxo pipefail
+          git init -q
+          git config --global --add safe.directory "$PWD"
+          git remote add origin "https://github.com/${{ github.repository }}.git"
+          git -c protocol.version=2 fetch --depth=1 origin "${{ github.event.pull_request.head.sha || github.sha }}"
+          git checkout --force FETCH_HEAD
+
+      - name: Install Rust
+        shell: bash
+        run: |
+          set -euxo pipefail
+          if ! command -v rustup >/dev/null 2>&1; then
+            curl --proto '=https' --tlsv1.2 -fsSL https://sh.rustup.rs | sh -s -- -y --default-toolchain 1.83.0
+          fi
+          # shellcheck disable=SC1090
+          source "$HOME/.cargo/env"
+          rustup target add "${{ matrix.target }}"
+          echo "$HOME/.cargo/bin" >> "$GITHUB_PATH"
+
+      - name: Linux aarch64 linker
+        if: matrix.apt != ''
+        run: sudo apt-get update && sudo apt-get install -y ${{ matrix.apt }}
+
+      - name: Test or check
+        shell: bash
+        env:
+          RUSTFLAGS: "-D warnings"
+        run: |
+          set -euxo pipefail
+          source "$HOME/.cargo/env"
+          if [ -n "${{ matrix.linker }}" ]; then
+            export CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER="${{ matrix.linker }}"
+          fi
+          if [ "${{ matrix.test }}" = "true" ]; then
+            cargo test --release --target "${{ matrix.target }}"
+          else
+            cargo check --release --target "${{ matrix.target }}"
+          fi
+
+  parity:
+    name: parity harness
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        shell: bash
+        run: |
+          set -euxo pipefail
+          git init -q
+          git config --global --add safe.directory "$PWD"
+          git remote add origin "https://github.com/${{ github.repository }}.git"
+          git -c protocol.version=2 fetch --depth=1 origin "${{ github.event.pull_request.head.sha || github.sha }}"
+          git fetch --depth=1 origin python-legacy
+          git checkout --force FETCH_HEAD
+
+      - name: Install Rust
+        shell: bash
+        run: |
+          set -euxo pipefail
+          curl --proto '=https' --tlsv1.2 -fsSL https://sh.rustup.rs | sh -s -- -y --default-toolchain 1.83.0
+          source "$HOME/.cargo/env"
+          echo "$HOME/.cargo/bin" >> "$GITHUB_PATH"
+
+      - name: Python legacy tree
+        shell: bash
+        run: |
+          set -euxo pipefail
+          git worktree add --detach /tmp/python-legacy origin/python-legacy
+          echo "COORDINATIONHUB_PYTHON_ROOT=/tmp/python-legacy" >> "$GITHUB_ENV"
+
+      - name: Build
+        shell: bash
+        env:
+          RUSTFLAGS: "-D warnings"
+        run: |
+          source "$HOME/.cargo/env"
+          cargo build --release
+
+      - name: Parity harness
+        shell: bash
+        run: python3 parity/harness.py

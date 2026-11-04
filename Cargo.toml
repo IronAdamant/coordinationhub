@@ -1,0 +1,20 @@
+[package]
+name = "coordinationhub"
+version = "1.0.0"
+edition = "2021"
+rust-version = "1.83"
+description = "Live coordination and work ownership for AI coding agents. Rust, std only."
+license = "MIT"
+publish = false
+
+[dependencies]
+
+[dev-dependencies]
+
+[[bin]]
+name = "coordinationhub"
+path = "src/main.rs"
+
+[[bin]]
+name = "coordinationhub-mcp"
+path = "src/bin/coordinationhub-mcp.rs"

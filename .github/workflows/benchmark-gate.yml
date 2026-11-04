@@ -1,0 +1,49 @@
+name: Benchmark gate
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+jobs:
+  benchmark-gate:
+    name: benchmark-gate
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Checkout
+        shell: bash
+        run: |
+          set -euxo pipefail
+          git init -q
+          git config --global --add safe.directory "$PWD"
+          git remote add origin "https://github.com/${{ github.repository }}.git"
+          git -c protocol.version=2 fetch --depth=1 origin "${{ github.event.pull_request.head.sha || github.sha }}"
+          git fetch --depth=1 origin python-legacy
+          git checkout --force FETCH_HEAD
+
+      - name: Install Rust
+        shell: bash
+        run: |
+          set -euxo pipefail
+          curl --proto '=https' --tlsv1.2 -fsSL https://sh.rustup.rs | sh -s -- -y --default-toolchain 1.83.0
+          source "$HOME/.cargo/env"
+          echo "$HOME/.cargo/bin" >> "$GITHUB_PATH"
+
+      - name: Python legacy tree
+        shell: bash
+        run: |
+          git worktree add --detach /tmp/python-legacy origin/python-legacy
+          echo "COORDINATIONHUB_PYTHON_ROOT=/tmp/python-legacy" >> "$GITHUB_ENV"
+
+      - name: Build
+        shell: bash
+        env:
+          RUSTFLAGS: "-D warnings"
+        run: |
+          source "$HOME/.cargo/env"
+          cargo build --release
+
+      - name: Rust must be faster on every row
+        shell: bash
+        run: python3 parity/bench.py --check

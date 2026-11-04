@@ -1,0 +1,1483 @@
+{
+  "schemas": {
+    "acknowledge_broadcast": {
+      "description": "Acknowledge receipt of a broadcast. Called by recipient agents when they receive a broadcast_ack_request message.",
+      "parameters": {
+        "properties": {
+          "agent_id": {
+            "description": "Agent acknowledging the broadcast",
+            "type": "string"
+          },
+          "broadcast_id": {
+            "description": "ID of the broadcast to acknowledge",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "broadcast_id",
+          "agent_id"
+        ],
+        "type": "object"
+      }
+    },
+    "acquire_coordinator_lease": {
+      "description": "Attempt to acquire the coordinator leadership lease (COORDINATOR_LEADER). If acquired, this agent becomes the active coordinator.",
+      "parameters": {
+        "properties": {
+          "agent_id": {
+            "description": "Agent ID attempting to acquire the lease",
+            "type": "string"
+          },
+          "ttl": {
+            "description": "Lease TTL in seconds (default: 10)",
+            "type": "number"
+          }
+        },
+        "required": [
+          "agent_id"
+        ],
+        "type": "object"
+      }
+    },
+    "acquire_lock": {
+      "description": "Acquire an exclusive or shared lock on a document path or region. Supports region locking: provide region_start/region_end (line numbers) to lock a specific range instead of the whole file. Shared locks allow concurrent access; exclusive locks block all other locks on overlapping regions. If the lock is already held by another agent and not expired, returns conflict info unless force=True (which steals the lock and records a conflict). Use before writing any shared file. When retry=True, uses exponential backoff to wait for lock release.",
+      "parameters": {
+        "properties": {
+          "agent_id": {
+            "description": "Agent requesting the lock",
+            "type": "string"
+          },
+          "backoff_ms": {
+            "default": 100.0,
+            "description": "Starting backoff in milliseconds for retry (default: 100)",
+            "type": "number"
+          },
+          "document_path": {
+            "description": "Path to the document to lock",
+            "type": "string"
+          },
+          "force": {
+            "default": false,
+            "description": "Steal the lock if held by another agent",
+            "type": "boolean"
+          },
+          "lock_type": {
+            "default": "exclusive",
+            "description": "'exclusive' (default) blocks all other locks on overlapping regions. 'shared' allows concurrent shared locks.",
+            "type": "string"
+          },
+          "max_retries": {
+            "default": 5,
+            "description": "Maximum retry attempts when retry=True (default: 5)",
+            "type": "integer"
+          },
+          "region_end": {
+            "description": "End line of the region to lock (omit for whole-file lock)",
+            "type": "integer"
+          },
+          "region_start": {
+            "description": "Start line of the region to lock (omit for whole-file lock)",
+            "type": "integer"
+          },
+          "retry": {
+            "default": false,
+            "description": "Retry with exponential backoff on lock contention (default: False)",
+            "type": "boolean"
+          },
+          "timeout_ms": {
+            "default": 5000.0,
+            "description": "Total timeout in milliseconds for retry (default: 5000)",
+            "type": "number"
+          },
+          "ttl": {
+            "default": 300.0,
+            "description": "Lock time-to-live in seconds (default: 300)",
+            "type": "number"
+          }
+        },
+        "required": [
+          "document_path",
+          "agent_id"
+        ],
+        "type": "object"
+      }
+    },
+    "admin_locks": {
+      "description": "Administrative lock operations. action='release_by_agent' releases all locks for an agent. action='reap_expired' clears expired locks. action='reap_stale' marks stale agents stopped and cleans their locks.",
+      "parameters": {
+        "properties": {
+          "action": {
+            "description": "Administrative action to perform",
+            "enum": [
+              "release_by_agent",
+              "reap_expired",
+              "reap_stale"
+            ],
+            "type": "string"
+          },
+          "agent_id": {
+            "default": null,
+            "description": "Agent whose locks to release (required for release_by_agent)",
+            "type": "string"
+          },
+          "grace_seconds": {
+            "default": 0.0,
+            "description": "Grace period for reap_expired",
+            "type": "number"
+          },
+          "timeout": {
+            "default": 600.0,
+            "description": "Seconds after which an agent is stale (default: 600)",
+            "type": "number"
+          }
+        },
+        "required": [
+          "action"
+        ],
+        "type": "object"
+      }
+    },
+    "assign_task": {
+      "description": "Assign a task to a specific agent.",
+      "parameters": {
+        "properties": {
+          "assigned_agent_id": {
+            "description": "Agent to assign the task to",
+            "type": "string"
+          },
+          "task_id": {
+            "description": "Task to assign",
+            "type": "string"
+          }
+        },
+        "required": [
+          "task_id",
+          "assigned_agent_id"
+        ],
+        "type": "object"
+      }
+    },
+    "await_agent": {
+      "description": "Wait for an agent to complete (deregister) before proceeding. Polls agent status until the agent is stopped or timeout expires. Use this to coordinate sequential dependencies between agents.",
+      "parameters": {
+        "properties": {
+          "agent_id": {
+            "description": "Agent to wait for",
+            "type": "string"
+          },
+          "timeout_s": {
+            "default": 60.0,
+            "description": "Maximum seconds to wait (default: 60)",
+            "type": "number"
+          }
+        },
+        "required": [
+          "agent_id"
+        ],
+        "type": "object"
+      }
+    },
+    "await_subagent_registration": {
+      "description": "Poll until a pending spawn is consumed (sub-agent registered) or timeout. The parent agent calls this after ``spawn_subagent`` to wait for the external spawning system to report that the sub-agent is alive. Returns the consumed spawn record on success, or timed_out:true if the sub-agent did not register within the timeout.",
+      "parameters": {
+        "properties": {
+          "parent_agent_id": {
+            "description": "Parent agent ID that spawned the sub-agent",
+            "type": "string"
+          },
+          "subagent_type": {
+            "default": null,
+            "description": "Wait for a specific sub-agent type (omit to wait for any)",
+            "type": "string"
+          },
+          "timeout": {
+            "default": 300.0,
+            "description": "Timeout in seconds (default: 300)",
+            "type": "number"
+          }
+        },
+        "required": [
+          "parent_agent_id"
+        ],
+        "type": "object"
+      }
+    },
+    "await_subagent_stopped": {
+      "description": "Poll until a child agent is stopped or the timeout is reached. Returns ``stopped: True`` if the child called ``deregister_agent`` within the timeout. Returns ``timed_out: True`` with ``escalate: True`` if the child did not stop in time \u2014 the caller should then call ``deregister_agent`` directly to force cleanup.",
+      "parameters": {
+        "properties": {
+          "child_agent_id": {
+            "description": "Child agent ID to wait for",
+            "type": "string"
+          },
+          "timeout": {
+            "default": 30.0,
+            "description": "Timeout in seconds (default: 30)",
+            "type": "number"
+          }
+        },
+        "required": [
+          "child_agent_id"
+        ],
+        "type": "object"
+      }
+    },
+    "broadcast": {
+      "description": "Announce an intention to all live sibling agents before taking an action. Returns which siblings are live and any lock conflicts. When handoff_targets is provided, performs a formal multi-recipient handoff recorded in the handoffs table. When require_ack is True, creates a trackable broadcast record and sends acknowledgment request messages to each live sibling.",
+      "parameters": {
+        "properties": {
+          "agent_id": {
+            "description": "Agent making the broadcast",
+            "type": "string"
+          },
+          "document_path": {
+            "default": null,
+            "description": "Optional document path to check for lock conflicts",
+            "type": "string"
+          },
+          "handoff_targets": {
+            "default": null,
+            "description": "Explicit list of agent IDs to hand off to. When provided, broadcast becomes a formal multi-recipient handoff recorded in the handoffs table and sends messages to each target.",
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "message": {
+            "default": null,
+            "description": "Optional message payload when require_ack is True",
+            "type": "string"
+          },
+          "require_ack": {
+            "default": false,
+            "description": "If True, require recipients to acknowledge the broadcast via acknowledge_broadcast",
+            "type": "boolean"
+          },
+          "ttl": {
+            "default": 30.0,
+            "description": "Staleness cutoff for sibling detection in seconds (default: 30)",
+            "type": "number"
+          }
+        },
+        "required": [
+          "agent_id"
+        ],
+        "type": "object"
+      }
+    },
+    "create_subtask": {
+      "description": "Create a subtask under an existing parent task. The subtask inherits context from its parent and can be nested further. Use get_task_tree to retrieve the full hierarchy.",
+      "parameters": {
+        "properties": {
+          "depends_on": {
+            "description": "Task IDs that must complete before this subtask starts",
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "description": {
+            "description": "What this subtask involves",
+            "maxLength": 10000,
+            "type": "string"
+          },
+          "parent_agent_id": {
+            "description": "Agent creating this subtask",
+            "type": "string"
+          },
+          "parent_task_id": {
+            "description": "ID of the parent task this subtask belongs to",
+            "type": "string"
+          },
+          "priority": {
+            "default": 0,
+            "description": "Subtask priority (higher values execute first; default 0)",
+            "type": "integer"
+          },
+          "task_id": {
+            "description": "Unique subtask ID (e.g. parent_task_id + '.0')",
+            "type": "string"
+          }
+        },
+        "required": [
+          "task_id",
+          "parent_task_id",
+          "parent_agent_id",
+          "description"
+        ],
+        "type": "object"
+      }
+    },
+    "create_task": {
+      "description": "Create a new task in the shared task registry. The creating agent (parent_agent_id) assigns the task to a child or sibling agent.",
+      "parameters": {
+        "properties": {
+          "depends_on": {
+            "description": "Task IDs that must complete before this one starts",
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "description": {
+            "description": "What this task involves",
+            "maxLength": 10000,
+            "type": "string"
+          },
+          "parent_agent_id": {
+            "description": "Agent creating this task",
+            "minLength": 1,
+            "type": "string"
+          },
+          "priority": {
+            "default": 0,
+            "description": "Task priority (higher values execute first; default 0)",
+            "type": "integer"
+          },
+          "task_id": {
+            "description": "Unique task ID (e.g. hub.12345.0.task.0)",
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "required": [
+          "task_id",
+          "parent_agent_id",
+          "description"
+        ],
+        "type": "object"
+      }
+    },
+    "deregister_agent": {
+      "description": "Deregister an agent, orphan its children to the grandparent, and release all its locks. Use when an agent is done.",
+      "parameters": {
+        "properties": {
+          "agent_id": {
+            "description": "Agent identifier to deregister",
+            "type": "string"
+          }
+        },
+        "required": [
+          "agent_id"
+        ],
+        "type": "object"
+      }
+    },
+    "get_agent_relations": {
+      "description": "Get the ancestor chain and descendants (mode='lineage') or agents that share the same parent (mode='siblings') for a given agent.",
+      "parameters": {
+        "properties": {
+          "agent_id": {
+            "description": "Agent to query",
+            "type": "string"
+          },
+          "mode": {
+            "default": "lineage",
+            "description": "Query mode; default is 'lineage' (ancestor+descendant chain)",
+            "enum": [
+              "lineage",
+              "siblings"
+            ],
+            "type": "string"
+          }
+        },
+        "required": [
+          "agent_id"
+        ],
+        "type": "object"
+      }
+    },
+    "get_agent_status": {
+      "description": "Get full status for a specific agent: current task, responsibilities (from the coordination graph), owned files, lineage, and lock state.",
+      "parameters": {
+        "properties": {
+          "agent_id": {
+            "description": "Agent to query",
+            "type": "string"
+          }
+        },
+        "required": [
+          "agent_id"
+        ],
+        "type": "object"
+      }
+    },
+    "get_agent_tree": {
+      "description": "Get the hierarchical agent tree with live work status. Each node shows the agent's current task, active file locks (with type and region), and boundary crossing warnings when locking files owned by other agents. Use as a shared situational reference \u2014 any agent sees the same live state. If agent_id is omitted, returns the tree rooted at the oldest active root agent.",
+      "parameters": {
+        "properties": {
+          "agent_id": {
+            "default": null,
+            "description": "Root of the tree to query (default: oldest active root agent)",
+            "type": "string"
+          }
+        },
+        "type": "object"
+      }
+    },
+    "get_available_tasks": {
+      "description": "Return tasks whose depends_on are all satisfied (completed) and that are not currently claimed. A task is \"available\" if its status is \"pending\" and all tasks in its depends_on list have status \"completed\". Use this to find work that can be picked up by an idle agent.",
+      "parameters": {
+        "properties": {
+          "agent_id": {
+            "description": "Optional agent ID to filter to tasks assigned to this agent",
+            "type": "string"
+          }
+        },
+        "type": "object"
+      }
+    },
+    "get_conflicts": {
+      "description": "Query the conflict log for lock steals and ownership violations. Useful for post-mortems and debugging agent interactions.",
+      "parameters": {
+        "properties": {
+          "agent_id": {
+            "default": null,
+            "description": "Filter to conflicts involving this agent",
+            "type": "string"
+          },
+          "document_path": {
+            "default": null,
+            "description": "Filter to a specific document path",
+            "type": "string"
+          },
+          "limit": {
+            "default": 20,
+            "description": "Maximum number of conflicts to return",
+            "type": "integer"
+          }
+        },
+        "type": "object"
+      }
+    },
+    "get_contention_hotspots": {
+      "description": "Rank files by lock contention frequency. Returns files ordered by how many lock conflicts they've been involved in, along with the agents involved. Use to identify coordination chokepoints \u2014 files that multiple agents need access to and that cause frequent contention.",
+      "parameters": {
+        "properties": {
+          "limit": {
+            "default": 10,
+            "description": "Maximum number of hotspots to return",
+            "type": "integer"
+          }
+        },
+        "type": "object"
+      }
+    },
+    "get_file_agent_map": {
+      "description": "Get a map of all tracked files to their assigned Agent ID and responsibility summary. Returns the full file_ownership table joined with agent responsibilities.",
+      "parameters": {
+        "properties": {
+          "agent_id": {
+            "default": null,
+            "description": "Filter to files owned by a specific agent",
+            "type": "string"
+          }
+        },
+        "type": "object"
+      }
+    },
+    "get_lock_status": {
+      "description": "Check if a document is currently locked and by whom. Returns all active locks on the path (including region locks). Also cleans up expired locks on read.",
+      "parameters": {
+        "properties": {
+          "document_path": {
+            "description": "Path to the document",
+            "type": "string"
+          }
+        },
+        "required": [
+          "document_path"
+        ],
+        "type": "object"
+      }
+    },
+    "get_notifications": {
+      "description": "Poll for change notifications since a timestamp. If timeout_s > 0, long-polls until new notifications arrive. If prune_max_age_seconds or prune_max_entries is provided, prunes old data first.",
+      "parameters": {
+        "properties": {
+          "agent_id": {
+            "default": null,
+            "description": "Waiter identity when timeout_s > 0",
+            "type": "string"
+          },
+          "exclude_agent": {
+            "default": null,
+            "description": "Agent ID to exclude",
+            "type": "string"
+          },
+          "limit": {
+            "default": 100,
+            "description": "Maximum notifications",
+            "type": "integer"
+          },
+          "poll_interval_s": {
+            "default": 2.0,
+            "description": "Poll interval",
+            "type": "number"
+          },
+          "prune_max_age_seconds": {
+            "default": null,
+            "description": "Prune before returning",
+            "type": "number"
+          },
+          "prune_max_entries": {
+            "default": null,
+            "description": "Prune before returning",
+            "type": "integer"
+          },
+          "since": {
+            "default": null,
+            "description": "Unix timestamp to poll from",
+            "type": "number"
+          },
+          "timeout_s": {
+            "default": 0.0,
+            "description": "Long-poll timeout (0 = immediate)",
+            "type": "number"
+          }
+        },
+        "type": "object"
+      }
+    },
+    "get_pending_spawns": {
+      "description": "Get pending (or all) spawn requests for a parent agent. Returns spawn records with status: pending | registered | expired.",
+      "parameters": {
+        "properties": {
+          "include_consumed": {
+            "default": false,
+            "description": "Include consumed/registered spawns in results",
+            "type": "boolean"
+          },
+          "parent_agent_id": {
+            "description": "Parent agent ID to get pending spawns for",
+            "type": "string"
+          }
+        },
+        "required": [
+          "parent_agent_id"
+        ],
+        "type": "object"
+      }
+    },
+    "heartbeat": {
+      "description": "Send a heartbeat to keep the agent registered and alive. Call at least every 30 seconds.",
+      "parameters": {
+        "properties": {
+          "agent_id": {
+            "description": "Agent identifier",
+            "type": "string"
+          }
+        },
+        "required": [
+          "agent_id"
+        ],
+        "type": "object"
+      }
+    },
+    "is_subagent_stop_requested": {
+      "description": "Check if a stop has been requested for this agent. The agent should call this periodically and deregister if the stop flag is set.",
+      "parameters": {
+        "properties": {
+          "agent_id": {
+            "description": "Agent ID to check stop-request flag for",
+            "type": "string"
+          }
+        },
+        "required": [
+          "agent_id"
+        ],
+        "type": "object"
+      }
+    },
+    "list_agents": {
+      "description": "List all registered agents. Shows active agents by default. Includes heartbeat age so you can detect stale agents.",
+      "parameters": {
+        "properties": {
+          "active_only": {
+            "default": true,
+            "description": "Filter to active (non-stopped) agents only",
+            "type": "boolean"
+          },
+          "stale_timeout": {
+            "default": 600.0,
+            "description": "Seconds after which an agent is considered stale",
+            "minimum": 0,
+            "type": "number"
+          }
+        },
+        "type": "object"
+      }
+    },
+    "list_locks": {
+      "description": "List all active (non-expired) locks. Optionally filter by agent_id. Returns lock details including document path, holder, expiry time, lock type, and region (if region lock). Pass force_refresh=True to re-warm the in-memory cache from SQLite before reading \u2014 useful for recovering from a suspected cache desync.",
+      "parameters": {
+        "properties": {
+          "agent_id": {
+            "description": "Optional agent ID to filter locks by holder",
+            "type": "string"
+          },
+          "force_refresh": {
+            "description": "If true, re-warm the in-memory cache from SQLite before reading. Default false.",
+            "type": "boolean"
+          }
+        },
+        "type": "object"
+      }
+    },
+    "load_coordination_spec": {
+      "description": "Reload the coordination spec from disk. Returns whether a graph was found and loaded, plus the graph's agent list.",
+      "parameters": {
+        "properties": {
+          "path": {
+            "default": null,
+            "description": "Path to coordination_spec.yaml or .json (default: project root)",
+            "type": "string"
+          }
+        },
+        "type": "object"
+      }
+    },
+    "manage_dependencies": {
+      "description": "Unified dependency management. mode='declare' creates a dependency. mode='check'/'blockers'/'assert' queries blockers. mode='satisfy' marks one satisfied. mode='list' lists all. mode='wait' polls until a dep_id is satisfied.",
+      "parameters": {
+        "properties": {
+          "agent_id": {
+            "default": null,
+            "description": "Agent for check/blockers/assert/list",
+            "type": "string"
+          },
+          "condition": {
+            "default": "task_completed",
+            "description": "Condition for declare",
+            "type": "string"
+          },
+          "dep_id": {
+            "default": null,
+            "description": "Required for satisfy/wait",
+            "type": "integer"
+          },
+          "dependent_agent_id": {
+            "default": null,
+            "description": "Required for declare",
+            "type": "string"
+          },
+          "depends_on_agent_id": {
+            "default": null,
+            "description": "Required for declare",
+            "type": "string"
+          },
+          "depends_on_task_id": {
+            "default": null,
+            "description": "Optional for declare",
+            "type": "string"
+          },
+          "mode": {
+            "description": "Action mode",
+            "enum": [
+              "declare",
+              "check",
+              "blockers",
+              "assert",
+              "satisfy",
+              "list",
+              "wait"
+            ],
+            "type": "string"
+          },
+          "poll_interval_s": {
+            "default": 2.0,
+            "description": "Wait poll interval",
+            "type": "number"
+          },
+          "timeout_s": {
+            "default": 60.0,
+            "description": "Wait timeout",
+            "type": "number"
+          }
+        },
+        "required": [
+          "mode"
+        ],
+        "type": "object"
+      }
+    },
+    "manage_leases": {
+      "description": "Unified lease management. action='acquire' | 'refresh' | 'release' | 'get' (returns current leader) | 'claim' (failover claim).",
+      "parameters": {
+        "properties": {
+          "action": {
+            "description": "Lease action",
+            "enum": [
+              "acquire",
+              "refresh",
+              "release",
+              "get",
+              "claim"
+            ],
+            "type": "string"
+          },
+          "agent_id": {
+            "description": "Agent ID",
+            "type": "string"
+          },
+          "ttl": {
+            "description": "TTL for acquire/claim (seconds, default 10 at the engine)",
+            "minimum": 0,
+            "type": "number"
+          }
+        },
+        "required": [
+          "action",
+          "agent_id"
+        ],
+        "type": "object"
+      }
+    },
+    "manage_messages": {
+      "description": "Unified messaging: send | get | mark_read. Use action='get' to retrieve messages.",
+      "parameters": {
+        "oneOf": [
+          {
+            "properties": {
+              "action": {
+                "enum": [
+                  "send"
+                ]
+              }
+            },
+            "required": [
+              "action",
+              "agent_id",
+              "from_agent_id",
+              "to_agent_id",
+              "message_type"
+            ]
+          },
+          {
+            "properties": {
+              "action": {
+                "enum": [
+                  "get"
+                ]
+              }
+            },
+            "required": [
+              "action",
+              "agent_id"
+            ]
+          },
+          {
+            "properties": {
+              "action": {
+                "enum": [
+                  "mark_read"
+                ]
+              }
+            },
+            "required": [
+              "action",
+              "agent_id"
+            ]
+          }
+        ],
+        "properties": {
+          "action": {
+            "description": "Messaging action. 'send' requires from/to/message_type. 'get' and 'mark_read' only need agent_id.",
+            "enum": [
+              "send",
+              "get",
+              "mark_read"
+            ],
+            "type": "string"
+          },
+          "agent_id": {
+            "description": "Recipient agent ID",
+            "minLength": 1,
+            "type": "string"
+          },
+          "caller_agent_id": {
+            "description": "Optional caller assertion (T2.4). For send, must equal from_agent_id; for get/mark_read, must equal agent_id. Blocks cross-agent impersonation / inbox siphoning.",
+            "type": "string"
+          },
+          "from_agent_id": {
+            "description": "Sender (required for send)",
+            "type": "string"
+          },
+          "limit": {
+            "default": 50,
+            "description": "Max messages for get",
+            "minimum": 1,
+            "type": "integer"
+          },
+          "message_ids": {
+            "description": "Specific IDs for mark_read",
+            "items": {
+              "minimum": 1,
+              "type": "integer"
+            },
+            "type": "array"
+          },
+          "message_type": {
+            "description": "Type tag (required for send)",
+            "type": "string"
+          },
+          "payload": {
+            "description": "Optional payload for send",
+            "type": "object"
+          },
+          "since_id": {
+            "description": "Return only messages with id > since_id (cursor for incremental polling, action='get')",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "to_agent_id": {
+            "description": "Recipient (required for send)",
+            "type": "string"
+          },
+          "unread_only": {
+            "default": false,
+            "description": "Only unread messages for get",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "action",
+          "agent_id"
+        ],
+        "type": "object"
+      }
+    },
+    "manage_work_intents": {
+      "description": "Unified work intent management: declare | get | clear.",
+      "parameters": {
+        "oneOf": [
+          {
+            "properties": {
+              "action": {
+                "enum": [
+                  "declare"
+                ]
+              }
+            },
+            "required": [
+              "action",
+              "agent_id",
+              "document_path",
+              "intent"
+            ]
+          },
+          {
+            "properties": {
+              "action": {
+                "enum": [
+                  "get"
+                ]
+              }
+            },
+            "required": [
+              "action",
+              "agent_id"
+            ]
+          },
+          {
+            "properties": {
+              "action": {
+                "enum": [
+                  "clear"
+                ]
+              }
+            },
+            "required": [
+              "action",
+              "agent_id"
+            ]
+          }
+        ],
+        "properties": {
+          "action": {
+            "description": "Intent action. 'declare' requires document_path and intent. 'get' / 'clear' only need agent_id.",
+            "enum": [
+              "declare",
+              "get",
+              "clear"
+            ],
+            "type": "string"
+          },
+          "agent_id": {
+            "description": "Agent ID",
+            "minLength": 1,
+            "type": "string"
+          },
+          "document_path": {
+            "description": "File path the intent targets (required for declare)",
+            "type": "string"
+          },
+          "intent": {
+            "description": "Free-text intent (required for declare)",
+            "maxLength": 1000,
+            "type": "string"
+          },
+          "ttl": {
+            "default": 60.0,
+            "description": "Seconds until intent expires (declare)",
+            "minimum": 0,
+            "type": "number"
+          }
+        },
+        "required": [
+          "action",
+          "agent_id"
+        ],
+        "type": "object"
+      }
+    },
+    "notify_change": {
+      "description": "Record a change event so other agents can poll for it. Call after making a change to a shared document.",
+      "parameters": {
+        "properties": {
+          "agent_id": {
+            "description": "Agent that made the change",
+            "type": "string"
+          },
+          "change_type": {
+            "description": "Type of change (e.g. 'created', 'modified', 'deleted')",
+            "type": "string"
+          },
+          "document_path": {
+            "description": "Path to the changed document",
+            "type": "string"
+          }
+        },
+        "required": [
+          "document_path",
+          "change_type",
+          "agent_id"
+        ],
+        "type": "object"
+      }
+    },
+    "query_tasks": {
+      "description": "Unified task query. query_type='task' fetches one task by ID. query_type='child' fetches tasks created by an agent. query_type='by_agent' fetches tasks assigned to an agent. query_type='all' fetches every task. query_type='subtasks' fetches direct subtasks of a task. query_type='tree' fetches a task and its nested subtasks.",
+      "parameters": {
+        "properties": {
+          "assigned_agent_id": {
+            "description": "Agent ID (required for query_type='by_agent'; omit otherwise)",
+            "type": "string"
+          },
+          "parent_agent_id": {
+            "description": "Agent ID (required for query_type='child'; omit otherwise)",
+            "type": "string"
+          },
+          "parent_task_id": {
+            "description": "Parent task ID (required for query_type='subtasks'; omit otherwise)",
+            "type": "string"
+          },
+          "query_type": {
+            "description": "Type of query to perform",
+            "enum": [
+              "task",
+              "child",
+              "by_agent",
+              "all",
+              "subtasks",
+              "tree"
+            ],
+            "type": "string"
+          },
+          "root_task_id": {
+            "description": "Root task ID (required for query_type='tree'; omit otherwise)",
+            "type": "string"
+          },
+          "task_id": {
+            "description": "Task ID (required for query_type='task'; omit otherwise)",
+            "type": "string"
+          }
+        },
+        "required": [
+          "query_type"
+        ],
+        "type": "object"
+      }
+    },
+    "refresh_lock": {
+      "description": "Extend a lock's TTL without releasing and re-acquiring it. Only the lock owner can refresh. Specify region to refresh a region lock.",
+      "parameters": {
+        "properties": {
+          "agent_id": {
+            "description": "Agent refreshing the lock (must be the owner)",
+            "type": "string"
+          },
+          "document_path": {
+            "description": "Path to the document",
+            "type": "string"
+          },
+          "region_end": {
+            "description": "End line of the region to lock (omit for whole-file lock)",
+            "type": "integer"
+          },
+          "region_start": {
+            "description": "Start line of the region to lock (omit for whole-file lock)",
+            "type": "integer"
+          },
+          "ttl": {
+            "default": 300.0,
+            "description": "New TTL in seconds (default: 300)",
+            "type": "number"
+          }
+        },
+        "required": [
+          "document_path",
+          "agent_id"
+        ],
+        "type": "object"
+      }
+    },
+    "register_agent": {
+      "description": "Register an agent with the coordination hub and receive a context bundle containing sibling agents, active locks, coordination URLs, and (if a coordination graph is loaded) the agent's responsibilities and owned files.",
+      "parameters": {
+        "properties": {
+          "agent_id": {
+            "description": "Unique agent identifier (e.g. hub.12345.0)",
+            "minLength": 1,
+            "type": "string"
+          },
+          "graph_agent_id": {
+            "description": "ID in the coordination graph this agent implements (e.g. 'planner'; omit if not graph-mapped)",
+            "type": "string"
+          },
+          "parent_id": {
+            "description": "Parent agent ID if this is a spawned sub-agent (omit for root agents)",
+            "type": "string"
+          },
+          "worktree_root": {
+            "description": "Worktree root path (omit to inherit project root)",
+            "type": "string"
+          }
+        },
+        "required": [
+          "agent_id"
+        ],
+        "type": "object"
+      }
+    },
+    "release_lock": {
+      "description": "Release a held lock. Only the lock owner can release it. Specify region_start/region_end to release a specific region lock. Omit region params to release a whole-file lock.",
+      "parameters": {
+        "properties": {
+          "agent_id": {
+            "description": "Agent releasing the lock (must be the owner)",
+            "type": "string"
+          },
+          "document_path": {
+            "description": "Path to the document",
+            "type": "string"
+          },
+          "region_end": {
+            "description": "End line of the region to lock (omit for whole-file lock)",
+            "type": "integer"
+          },
+          "region_start": {
+            "description": "Start line of the region to lock (omit for whole-file lock)",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "document_path",
+          "agent_id"
+        ],
+        "type": "object"
+      }
+    },
+    "report_subagent_spawned": {
+      "description": "Report that a sub-agent has been spawned by an external system. Any IDE/CLI (stdio_adapter, etc.) calls this after spawning a sub-agent via its native mechanism. This consumes the pending spawn record created by ``spawn_subagent`` and links it to the actual child agent ID.",
+      "parameters": {
+        "properties": {
+          "caller_agent_id": {
+            "description": "Optional caller assertion (T2.4). When supplied, must equal parent_agent_id \u2014 rejects sibling agents trying to claim another parent's child and hijack the spawner.registered event.",
+            "type": "string"
+          },
+          "child_agent_id": {
+            "description": "Actual agent ID of the spawned sub-agent",
+            "type": "string"
+          },
+          "parent_agent_id": {
+            "description": "Parent agent ID that spawned the sub-agent",
+            "type": "string"
+          },
+          "source": {
+            "default": "external",
+            "description": "Source system that performed the spawn (e.g. 'stdio_adapter')",
+            "type": "string"
+          },
+          "subagent_type": {
+            "default": null,
+            "description": "Type of sub-agent that was spawned",
+            "type": "string"
+          }
+        },
+        "required": [
+          "parent_agent_id",
+          "child_agent_id"
+        ],
+        "type": "object"
+      }
+    },
+    "request_subagent_deregistration": {
+      "description": "Request graceful deregistration of a child agent. Sets ``stop_requested_at`` on the child agent. The child is expected to poll ``is_subagent_stop_requested`` and call ``deregister_agent`` if the stop flag is set. After a timeout, the caller should escalate to ``deregister_agent`` directly. Returns ``requested`` if the stop flag was set, ``not_found`` if the child agent does not exist or is not active.",
+      "parameters": {
+        "properties": {
+          "child_agent_id": {
+            "description": "Child agent ID to request stop for",
+            "type": "string"
+          },
+          "parent_agent_id": {
+            "description": "Parent agent ID making the request",
+            "type": "string"
+          }
+        },
+        "required": [
+          "parent_agent_id",
+          "child_agent_id"
+        ],
+        "type": "object"
+      }
+    },
+    "run_assessment": {
+      "description": "Run an assessment suite or score the current live session. If suite_path is provided, loads the JSON suite file and scores it. If suite_path is omitted, synthesizes a live session trace from DB state (agents, notifications, lineage) \u2014 no hand-authored suite required. Stores results in SQLite and returns a Markdown or JSON report.",
+      "parameters": {
+        "properties": {
+          "format": {
+            "default": "markdown",
+            "description": "Output format: 'markdown' (default) or 'json'",
+            "type": "string"
+          },
+          "graph_agent_id": {
+            "default": null,
+            "description": "Optional: filter traces to those involving this graph agent role",
+            "type": "string"
+          },
+          "scope": {
+            "default": "project",
+            "description": "'project' (default) restricts to the current worktree; 'all' scores every agent in the DB",
+            "type": "string"
+          },
+          "suite_path": {
+            "default": null,
+            "description": "Path to the JSON test suite file (omit for live session scoring)",
+            "type": "string"
+          }
+        },
+        "type": "object"
+      }
+    },
+    "scan_project": {
+      "description": "Perform a file ownership scan of the worktree_root. For every tracked file (.py, .md, .json, .yaml, .txt, .toml), upserts an entry into the file_ownership table. Returns the count of files scanned and owned.",
+      "parameters": {
+        "properties": {
+          "extensions": {
+            "default": null,
+            "description": "File extensions to scan (default: py, md, json, yaml, txt, toml)",
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "worktree_root": {
+            "default": null,
+            "description": "Root directory to scan (default: engine's project root)",
+            "type": "string"
+          }
+        },
+        "type": "object"
+      }
+    },
+    "send_message": {
+      "description": "Send a direct message to another agent. Messages are stored and can be retrieved via manage_messages. Use for query/response patterns between agents.",
+      "parameters": {
+        "properties": {
+          "caller_agent_id": {
+            "description": "Optional caller assertion (T2.4). When supplied, must equal from_agent_id \u2014 rejects impersonation where a compromised caller forges a message 'from' another agent.",
+            "type": "string"
+          },
+          "from_agent_id": {
+            "description": "Agent sending the message",
+            "minLength": 1,
+            "type": "string"
+          },
+          "message_type": {
+            "description": "Type of message (e.g. 'query', 'response', 'notification')",
+            "minLength": 1,
+            "type": "string"
+          },
+          "payload": {
+            "description": "Optional JSON payload. Serialized JSON is truncated to MAX_MESSAGE at the primitive (T6.14) so a bloated payload can't corrupt storage.",
+            "type": "object"
+          },
+          "to_agent_id": {
+            "description": "Agent to receive the message",
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "required": [
+          "from_agent_id",
+          "to_agent_id",
+          "message_type"
+        ],
+        "type": "object"
+      }
+    },
+    "spawn_subagent": {
+      "description": "Register intent to spawn a sub-agent and return its spawn ID. The parent agent calls this before the external system spawns the sub-agent. This creates a pending spawn record that the spawning system will consume when the agent is actually spawned, correlating via ``parent_agent_id``. Returns the spawn ID and pending spawn record.",
+      "parameters": {
+        "properties": {
+          "description": {
+            "default": null,
+            "description": "Description of the sub-agent's task",
+            "type": "string"
+          },
+          "parent_agent_id": {
+            "description": "Parent agent ID that intends to spawn the sub-agent",
+            "type": "string"
+          },
+          "prompt": {
+            "default": null,
+            "description": "Prompt or instructions for the sub-agent",
+            "type": "string"
+          },
+          "source": {
+            "default": "external",
+            "description": "Source system that will perform the spawn (e.g. 'stdio_adapter')",
+            "type": "string"
+          },
+          "subagent_type": {
+            "description": "Type of sub-agent to spawn (e.g. 'Explore', 'Plan', 'general-purpose')",
+            "type": "string"
+          }
+        },
+        "required": [
+          "parent_agent_id",
+          "subagent_type"
+        ],
+        "type": "object"
+      }
+    },
+    "status": {
+      "description": "Get a summary of the coordination system state: registered agents, active locks, pending notifications, conflicts, and whether a coordination graph is loaded.",
+      "parameters": {
+        "properties": {},
+        "type": "object"
+      }
+    },
+    "task_failures": {
+      "description": "Unified dead-letter queue operations. action='retry' resurrects a task. action='list_dead_letter' lists DLQ tasks. action='history' gets failure history for a task.",
+      "parameters": {
+        "properties": {
+          "action": {
+            "description": "DLQ action",
+            "enum": [
+              "retry",
+              "list_dead_letter",
+              "history"
+            ],
+            "type": "string"
+          },
+          "limit": {
+            "default": 50,
+            "description": "Max results for list_dead_letter",
+            "type": "integer"
+          },
+          "task_id": {
+            "default": null,
+            "description": "Required for retry/history",
+            "type": "string"
+          }
+        },
+        "required": [
+          "action"
+        ],
+        "type": "object"
+      }
+    },
+    "update_agent_status": {
+      "description": "Update the current task description and/or declared scope for an agent. Stored in agent_responsibilities for visibility. Scope is a list of path prefixes that define the agent's working domain. If an agent declares a scope, lock acquisitions outside that scope are denied.",
+      "parameters": {
+        "properties": {
+          "agent_id": {
+            "description": "Agent updating its status",
+            "type": "string"
+          },
+          "current_task": {
+            "description": "Human-readable description of what this agent is doing",
+            "type": "string"
+          },
+          "scope": {
+            "description": "List of path prefixes defining the agent's scope (e.g. ['/src/services/', '/src/models/'])",
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "agent_id"
+        ],
+        "type": "object"
+      }
+    },
+    "update_task_status": {
+      "description": "Update a task's status. When a task is completed, include a summary that a parent agent can compress upward in the hierarchy.",
+      "parameters": {
+        "properties": {
+          "blocked_by": {
+            "description": "Task ID that is blocking this task",
+            "type": "string"
+          },
+          "error": {
+            "description": "Error message when marking a task as failed (records to dead letter queue)",
+            "maxLength": 10000,
+            "type": "string"
+          },
+          "status": {
+            "description": "New status for the task",
+            "enum": [
+              "pending",
+              "in_progress",
+              "completed",
+              "blocked",
+              "failed"
+            ],
+            "type": "string"
+          },
+          "summary": {
+            "description": "Completion summary written by the agent (used for compression chains)",
+            "maxLength": 10000,
+            "type": "string"
+          },
+          "task_id": {
+            "description": "Task to update",
+            "type": "string"
+          }
+        },
+        "required": [
+          "task_id",
+          "status"
+        ],
+        "type": "object"
+      }
+    },
+    "wait_for_broadcast_acks": {
+      "description": "Poll until all expected broadcast acknowledgments are received or timeout expires. Use after broadcast with require_ack=True to wait for recipients.",
+      "parameters": {
+        "properties": {
+          "broadcast_id": {
+            "description": "ID of the broadcast to wait for",
+            "type": "integer"
+          },
+          "timeout_s": {
+            "default": 30.0,
+            "description": "Maximum seconds to wait (default: 30)",
+            "type": "number"
+          }
+        },
+        "required": [
+          "broadcast_id"
+        ],
+        "type": "object"
+      }
+    },
+    "wait_for_handoff": {
+      "description": "Unified handoff operation. mode='status' returns the handoff record. mode='ack' acknowledges. mode='complete' marks completed. mode='cancel' cancels. mode='completion' waits for completion.",
+      "parameters": {
+        "properties": {
+          "agent_id": {
+            "default": null,
+            "description": "Required for ack mode",
+            "type": "string"
+          },
+          "handoff_id": {
+            "description": "Handoff ID",
+            "type": "integer"
+          },
+          "mode": {
+            "default": "completion",
+            "description": "Handoff action",
+            "enum": [
+              "status",
+              "ack",
+              "complete",
+              "cancel",
+              "completion"
+            ],
+            "type": "string"
+          },
+          "timeout_s": {
+            "default": 30.0,
+            "description": "Wait timeout",
+            "type": "number"
+          }
+        },
+        "required": [
+          "handoff_id"
+        ],
+        "type": "object"
+      }
+    },
+    "wait_for_locks": {
+      "description": "Poll until all specified locks are released or a timeout expires. Useful for waiting for a parallel agent to finish before proceeding.",
+      "parameters": {
+        "properties": {
+          "agent_id": {
+            "description": "Agent doing the waiting",
+            "type": "string"
+          },
+          "document_paths": {
+            "description": "List of document paths to wait on",
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "timeout_s": {
+            "default": 60.0,
+            "description": "Maximum seconds to wait (default: 60)",
+            "type": "number"
+          }
+        },
+        "required": [
+          "document_paths",
+          "agent_id"
+        ],
+        "type": "object"
+      }
+    },
+    "wait_for_task": {
+      "description": "Poll until a task reaches a terminal state (completed or failed) or the timeout expires. Use this to coordinate sequential dependencies between tasks when depends_on alone is not sufficient (e.g., waiting for a task completed by an external agent or system).",
+      "parameters": {
+        "properties": {
+          "poll_interval_s": {
+            "default": 2.0,
+            "description": "Polling interval in seconds (default: 2)",
+            "minimum": 0,
+            "type": "number"
+          },
+          "task_id": {
+            "description": "Task to wait on",
+            "type": "string"
+          },
+          "timeout_s": {
+            "default": 60.0,
+            "description": "Maximum seconds to wait (default: 60)",
+            "minimum": 0,
+            "type": "number"
+          }
+        },
+        "required": [
+          "task_id"
+        ],
+        "type": "object"
+      }
+    }
+  },
+  "tools_version": "1.0.0"
+}

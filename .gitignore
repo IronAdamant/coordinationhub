@@ -12,6 +12,8 @@ tests/__pycache__/
 *.egg-info/
 dist/
 build/
+target/
+parity/.cache/
 
 # MCP tool data
 .chisel/
@@ -35,3 +37,6 @@ screenshots/pasted*
 screenshots/screencapture*
 screenshots/*.xcf
 screenshots/*.psd
+
+parity/last-report.json
+parity/bench-last.json

@@ -1,9 +1,18 @@
 # Changelog
 
-All notable changes to this project will be documented in this file.
+## [1.0.0] - 2026-11-04
 
-The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
-and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
+Rust rewrite. Standard library only. The Python 0.8 tree stays on `python-legacy`.
+
+### Added
+- `coordinationhub` and `coordinationhub-mcp` binaries
+- Work claims (`claim_work`, `release_work`, `list_work`), `inbox`, and `compact_status`
+- Parity harness (`parity/harness.py`) and benchmark gate (`parity/bench.py`)
+- Release workflow for Linux x64, Linux arm64, macOS x64, macOS arm64, and Windows x64, with SHA256SUMS
+
+### Changed
+- On-disk store is `.coordinationhub/state.json` rather than SQLite. See MIGRATION.md.
+- Stdio MCP server no longer needs the optional Python `mcp` package.
 
 ## [Unreleased]
 
