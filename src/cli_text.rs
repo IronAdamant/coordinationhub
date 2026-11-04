@@ -243,6 +243,113 @@ pub fn show(command: &str, value: &Value, pos: &[String]) {
             );
         }
         "dashboard" => render_dashboard(value),
+        "agent-relations" => {
+            let lineage = value.get("lineage");
+            if let Some(lineage) = lineage {
+                let ancestors = id_list(lineage, "ancestors");
+                let descendants = id_list(lineage, "descendants");
+                println!("Lineage for {id}:");
+                println!(
+                    "  Ancestors: {}",
+                    if ancestors.is_empty() { "(none)" } else { &ancestors }
+                );
+                println!(
+                    "  Descendants: {}",
+                    if descendants.is_empty() {
+                        "(none)"
+                    } else {
+                        &descendants
+                    }
+                );
+            } else if let Some(items) = value.get("siblings").and_then(Value::as_array) {
+                if items.is_empty() {
+                    println!("No siblings for {id}");
+                } else {
+                    println!("{} sibling(s):", items.len());
+                    for item in items {
+                        println!("  {}: {}", text(item, "agent_id"), text(item, "status"));
+                    }
+                }
+            } else {
+                println!("{}", crate::json::dumps_pretty(value));
+            }
+        }
+        "wait-for-locks" => {
+            println!("Released: {}", list_or_none(value, "released"));
+            println!("Timed out: {}", list_or_none(value, "timed_out"));
+        }
+        "wait-for-task" => {
+            if value.get("timed_out").and_then(Value::as_bool) == Some(true) {
+                println!("Timeout waiting for: {id}");
+            } else if text(value, "status") == "failed" {
+                println!("Task failed: {id}");
+            } else {
+                println!("Task completed: {id}");
+            }
+        }
+        "wait-for-handoff" => {
+            if value.get("timed_out").and_then(Value::as_bool) == Some(true) {
+                println!("Timed out waiting for handoff {id}");
+            } else {
+                println!("Handoff {id} completed");
+            }
+        }
+        "retry-task" => {
+            if value.get("retried").and_then(Value::as_bool) == Some(true) {
+                println!("Task resurrected: {id}");
+            } else {
+                println!("Retry failed: {}", text(value, "reason"));
+            }
+        }
+        "dead-letter-queue" => {
+            let items = value
+                .get("dead_letter_tasks")
+                .and_then(Value::as_array)
+                .map(|rows| rows.to_vec())
+                .unwrap_or_default();
+            if items.is_empty() {
+                println!("Dead letter queue is empty");
+            } else {
+                println!("Dead letter queue ({}):", items.len());
+                for item in items {
+                    println!("  {} — failed at {}", text(&item, "task_id"), text(&item, "failed_at"));
+                }
+            }
+        }
+        "acknowledge-broadcast" => {
+            if value.get("acknowledged").and_then(Value::as_bool) == Some(true) {
+                println!("Acknowledged broadcast {id} by {}", pos.get(1).map(|s| s.as_str()).unwrap_or(""));
+            } else {
+                println!("Failed: {}", text(value, "reason"));
+            }
+        }
+        "get-conflicts" => {
+            let items = value.get("conflicts").and_then(Value::as_array);
+            match items {
+                Some(items) if !items.is_empty() => {
+                    println!("{} conflict(s):", items.len());
+                    for item in items {
+                        println!(
+                            "  {} — {} vs {}",
+                            text(item, "document_path"),
+                            text(item, "agent_a"),
+                            text(item, "agent_b")
+                        );
+                    }
+                }
+                _ => println!("No conflicts"),
+            }
+        }
+        "load-spec" => {
+            if value.get("loaded").and_then(Value::as_bool) == Some(true) {
+                println!("Loaded coordination spec");
+            } else {
+                println!("Coordination spec not loaded");
+                if let Some(err) = value.get("error").and_then(Value::as_str) {
+                    println!("  {err}");
+                }
+            }
+        }
         "agent-tree" => {
             if let Some(text) = value.get("text_tree").and_then(Value::as_str) {
                 println!("{text}");
@@ -597,6 +704,41 @@ fn raw(value: &Value, key: &str) -> String {
         .get(key)
         .map(crate::json::dumps)
         .unwrap_or_else(|| "null".into())
+}
+
+fn id_list(value: &Value, key: &str) -> String {
+    value
+        .get(key)
+        .and_then(Value::as_array)
+        .map(|items| {
+            items
+                .iter()
+                .filter_map(|item| {
+                    item.as_str()
+                        .or_else(|| item.get("agent_id").and_then(Value::as_str))
+                })
+                .collect::<Vec<_>>()
+                .join(", ")
+        })
+        .unwrap_or_default()
+}
+
+fn list_or_none(value: &Value, key: &str) -> String {
+    let items = value
+        .get(key)
+        .and_then(Value::as_array)
+        .map(|rows| {
+            rows.iter()
+                .filter_map(Value::as_str)
+                .collect::<Vec<_>>()
+                .join(", ")
+        })
+        .unwrap_or_default();
+    if items.is_empty() {
+        "(none)".into()
+    } else {
+        items
+    }
 }
 
 fn join_strings(value: &Value, key: &str) -> String {
