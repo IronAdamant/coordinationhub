@@ -51,7 +51,7 @@ pub fn create_task(
     priority: i64,
 ) -> Result<Value, String> {
     if state.tasks.iter().any(|task| task.id == task_id) {
-        return Err("UNIQUE constraint failed: tasks.id".into());
+        return Err(format!("task id already exists: {task_id}"));
     }
     let now = util::now();
     let description =
@@ -305,12 +305,15 @@ pub fn query_tasks(
                     json::s("parent_agent_id is required for query_type='child'"),
                 )]);
             };
-            let tasks: Vec<Value> = state
-                .tasks
-                .iter()
-                .filter(|task| task.parent_agent_id == id)
-                .map(task_value)
-                .collect();
+            let tasks: Vec<Value> = ordered(
+                state
+                    .tasks
+                    .iter()
+                    .filter(|task| task.parent_agent_id == id),
+            )
+            .into_iter()
+            .map(task_value)
+            .collect();
             let count = tasks.len() as i64;
             json::obj(vec![("tasks", json::arr(tasks)), ("count", json::i(count))])
         }
@@ -321,17 +324,23 @@ pub fn query_tasks(
                     json::s("assigned_agent_id is required for query_type='by_agent'"),
                 )]);
             };
-            let tasks: Vec<Value> = state
-                .tasks
-                .iter()
-                .filter(|task| task.assigned_agent_id.as_deref() == Some(id))
-                .map(task_value)
-                .collect();
+            let tasks: Vec<Value> = ordered(
+                state
+                    .tasks
+                    .iter()
+                    .filter(|task| task.assigned_agent_id.as_deref() == Some(id)),
+            )
+            .into_iter()
+            .map(task_value)
+            .collect();
             let count = tasks.len() as i64;
             json::obj(vec![("tasks", json::arr(tasks)), ("count", json::i(count))])
         }
         "all" => {
-            let tasks: Vec<Value> = state.tasks.iter().map(task_value).collect();
+            let tasks: Vec<Value> = ordered(state.tasks.iter())
+                .into_iter()
+                .map(task_value)
+                .collect();
             let count = tasks.len() as i64;
             json::obj(vec![("tasks", json::arr(tasks)), ("count", json::i(count))])
         }
@@ -383,6 +392,18 @@ pub fn query_tasks(
             )),
         )]),
     }
+}
+
+fn ordered<'a>(tasks: impl Iterator<Item = &'a Task>) -> Vec<&'a Task> {
+    let mut tasks: Vec<&Task> = tasks.collect();
+    tasks.sort_by(|a, b| {
+        b.priority.cmp(&a.priority).then_with(|| {
+            a.created_at
+                .partial_cmp(&b.created_at)
+                .unwrap_or(std::cmp::Ordering::Equal)
+        })
+    });
+    tasks
 }
 
 fn task_tree(state: &State, root: &str) -> Option<Value> {
@@ -482,10 +503,7 @@ pub fn available_tasks(state: &State, agent_id: Option<&str>) -> Value {
         .filter(|task| task.status == "pending")
         .filter(|task| {
             agent_id
-                .map(|id| {
-                    task.assigned_agent_id.as_deref() == Some(id)
-                        || task.assigned_agent_id.is_none()
-                })
+                .map(|id| task.assigned_agent_id.as_deref() == Some(id))
                 .unwrap_or(true)
         })
         .filter(|task| deps_done(state, task))
@@ -1252,7 +1270,20 @@ pub fn report_spawned(
     kind: Option<&str>,
     child: &str,
     source: &str,
+    caller: Option<&str>,
 ) -> Value {
+    if let Some(caller) = caller {
+        if caller != parent {
+            return json::obj(vec![
+                ("reported", json::b(false)),
+                (
+                    "error",
+                    json::s("caller_agent_id does not match parent_agent_id"),
+                ),
+                ("reason", json::s("caller_mismatch")),
+            ]);
+        }
+    }
     if let Some(row) = state.spawns.iter_mut().find(|row| {
         row.parent_agent_id == parent
             && row.status == "pending"
@@ -1658,8 +1689,49 @@ pub fn ack_handoff(state: &mut State, handoff_id: i64, agent_id: &str) -> Value 
     ])
 }
 
+fn handoff_allowed(current: &str, target: &str) -> bool {
+    matches!(
+        (current, target),
+        ("pending", "partially_acknowledged" | "acknowledged" | "cancelled")
+            | (
+                "partially_acknowledged",
+                "partially_acknowledged" | "acknowledged" | "cancelled"
+            )
+            | ("acknowledged", "completed" | "cancelled")
+    )
+}
+
+pub fn handoff_record(row: &Handoff) -> Value {
+    json::obj(vec![
+        ("id", json::i(row.id)),
+        ("from_agent_id", json::s(&row.from_agent_id)),
+        (
+            "to_agents",
+            json::parse(&row.to_agents).unwrap_or_else(|_| json::arr(vec![])),
+        ),
+        ("document_path", json::opt_string(&row.document_path)),
+        ("handoff_type", json::s(&row.handoff_type)),
+        ("status", json::s(&row.status)),
+        ("created_at", json::f(row.created_at)),
+        (
+            "acknowledged_at",
+            match row.acknowledged_at {
+                Some(n) => json::f(n),
+                None => json::null(),
+            },
+        ),
+        (
+            "completed_at",
+            match row.completed_at {
+                Some(n) => json::f(n),
+                None => json::null(),
+            },
+        ),
+    ])
+}
+
 pub fn finish_handoff(state: &mut State, handoff_id: i64, complete: bool) -> Value {
-    let Some(row) = state.handoffs.iter_mut().find(|row| row.id == handoff_id) else {
+    let Some(pos) = state.handoffs.iter().position(|row| row.id == handoff_id) else {
         return json::obj(vec![
             (
                 if complete { "completed" } else { "cancelled" },
@@ -1669,15 +1741,30 @@ pub fn finish_handoff(state: &mut State, handoff_id: i64, complete: bool) -> Val
             ("handoff_id", json::i(handoff_id)),
         ]);
     };
+    let target = if complete { "completed" } else { "cancelled" };
+    let current = state.handoffs[pos].status.clone();
+    if !handoff_allowed(&current, target) {
+        return json::obj(vec![
+            (
+                if complete { "completed" } else { "cancelled" },
+                json::b(false),
+            ),
+            (
+                "reason",
+                json::s(format!("illegal_transition_from_{current}")),
+            ),
+            ("handoff_id", json::i(handoff_id)),
+        ]);
+    }
     if complete {
-        row.status = "completed".into();
-        row.completed_at = Some(util::now());
+        state.handoffs[pos].status = "completed".into();
+        state.handoffs[pos].completed_at = Some(util::now());
         json::obj(vec![
             ("completed", json::b(true)),
             ("handoff_id", json::i(handoff_id)),
         ])
     } else {
-        row.status = "cancelled".into();
+        state.handoffs[pos].status = "cancelled".into();
         json::obj(vec![
             ("cancelled", json::b(true)),
             ("handoff_id", json::i(handoff_id)),

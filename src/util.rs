@@ -5,6 +5,74 @@ use std::io::Error;
 use std::path::{Component, Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
 
+pub fn local_stamp(epoch: f64) -> String {
+    let secs = epoch as i64;
+    #[cfg(unix)]
+    {
+        #[repr(C)]
+        struct Tm {
+            tm_sec: i32,
+            tm_min: i32,
+            tm_hour: i32,
+            tm_mday: i32,
+            tm_mon: i32,
+            tm_year: i32,
+            tm_wday: i32,
+            tm_yday: i32,
+            tm_isdst: i32,
+            tm_gmtoff: i64,
+            tm_zone: *const i8,
+        }
+        unsafe extern "C" {
+            fn localtime_r(timep: *const i64, result: *mut Tm) -> *mut Tm;
+        }
+        let mut tm = unsafe { std::mem::zeroed::<Tm>() };
+        unsafe {
+            localtime_r(&secs, &mut tm);
+        }
+        return format!(
+            "{:04}-{:02}-{:02} {:02}:{:02}:{:02}",
+            tm.tm_year + 1900,
+            tm.tm_mon + 1,
+            tm.tm_mday,
+            tm.tm_hour,
+            tm.tm_min,
+            tm.tm_sec
+        );
+    }
+    #[cfg(windows)]
+    {
+        #[repr(C)]
+        struct Tm {
+            tm_sec: i32,
+            tm_min: i32,
+            tm_hour: i32,
+            tm_mday: i32,
+            tm_mon: i32,
+            tm_year: i32,
+            tm_wday: i32,
+            tm_yday: i32,
+            tm_isdst: i32,
+        }
+        unsafe extern "system" {
+            fn localtime_s(tm: *mut Tm, time: *const i64) -> i32;
+        }
+        let mut tm = unsafe { std::mem::zeroed::<Tm>() };
+        unsafe {
+            localtime_s(&mut tm, &secs);
+        }
+        format!(
+            "{:04}-{:02}-{:02} {:02}:{:02}:{:02}",
+            tm.tm_year + 1900,
+            tm.tm_mon + 1,
+            tm.tm_mday,
+            tm.tm_hour,
+            tm.tm_min,
+            tm.tm_sec
+        )
+    }
+}
+
 pub fn now() -> f64 {
     if let Ok(raw) = std::env::var("COORDINATIONHUB_NOW") {
         if let Ok(value) = raw.parse::<f64>() {

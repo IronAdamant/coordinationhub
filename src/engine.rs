@@ -67,17 +67,40 @@ impl Engine {
             args.clone()
         };
         if tool == "who" {
-            return Ok(self.who(&args));
-        }
-        if !self.schema.tools.iter().any(|(name, _)| name == tool) {
+            if let Err(err) = who_arguments(&args) {
+                return Err(format!("Input validation error: who: {err}"));
+            }
+        } else if !self.schema.tools.iter().any(|(name, _)| name == tool) {
             return Err(validate::unknown_tool(&self.schema, tool));
+        } else {
+            validate::validate_tool(&self.schema, tool, &args)
+                .map_err(|err| format!("Input validation error: {err}"))?;
         }
-        validate::validate_tool(&self.schema, tool, &args)?;
-        let result = self.dispatch(tool, &args)?;
-        if !read_only(tool, &args) {
+        if tool == "who" {
+            self.store.begin()?;
+            let value = self.who(&args);
             self.store.commit()?;
+            self.store.end();
+            return Ok(value);
         }
-        Ok(result)
+        if blocks(tool, &args) {
+            return self.blocking(tool, &args);
+        }
+        self.store.begin()?;
+        let result = self.dispatch(tool, &args);
+        match result {
+            Ok(value) => {
+                if !read_only(tool, &args) {
+                    self.store.commit()?;
+                }
+                self.store.end();
+                Ok(value)
+            }
+            Err(err) => {
+                self.store.end();
+                Err(err)
+            }
+        }
     }
 
     fn url(&self) -> String {
@@ -88,6 +111,7 @@ impl Engine {
     fn dispatch(&mut self, tool: &str, args: &Value) -> Result<Value, String> {
         let root = self.project_root.clone();
         let graph_loaded = self.graph.is_some();
+        let graph = self.graph.clone();
         let tools = (self.schema.tools.len() + 1) as i64;
         let url = self.url();
         let state = &mut self.store.state;
@@ -160,6 +184,7 @@ impl Engine {
                 opt_i(args, "region_start"),
                 opt_i(args, "region_end"),
                 root_ref,
+                1,
             ),
             "release_lock" => act_lock::release(
                 state,
@@ -250,7 +275,15 @@ impl Engine {
                     ("document_paths", json::string_list(&paths)),
                 ])
             }
-            "await_agent" => await_agent(state, need_str(args, "agent_id")?),
+            "await_agent" => json::obj(vec![
+                ("awaited", json::b(false)),
+                ("agent_id", json::s(need_str(args, "agent_id")?)),
+                ("status", json::s("timeout")),
+                (
+                    "timeout_s",
+                    json::f(opt_f(args, "timeout_s", 60.0)),
+                ),
+            ]),
             "notify_change" => act_lock::notify(
                 state,
                 need_str(args, "document_path")?,
@@ -258,12 +291,22 @@ impl Engine {
                 need_str(args, "agent_id")?,
                 root_ref,
             ),
-            "get_notifications" => act_lock::notifications(
-                state,
-                opt_f_opt(args, "since"),
-                opt_str(args, "exclude_agent"),
-                opt_i(args, "limit").unwrap_or(100),
-            ),
+            "get_notifications" => {
+                if args.get("prune_max_age_seconds").is_some() || args.get("prune_max_entries").is_some()
+                {
+                    let _ = act_lock::prune_notifications(
+                        state,
+                        opt_f_opt(args, "prune_max_age_seconds"),
+                        opt_i(args, "prune_max_entries"),
+                    );
+                }
+                act_lock::notifications(
+                    state,
+                    opt_f_opt(args, "since"),
+                    opt_str(args, "exclude_agent"),
+                    opt_i(args, "limit").unwrap_or(100),
+                )
+            }
             "get_conflicts" => act_lock::conflicts(
                 state,
                 opt_str(args, "document_path"),
@@ -312,7 +355,7 @@ impl Engine {
                 opt_str(args, "suite_path"),
                 opt_str(args, "format").unwrap_or("markdown"),
                 opt_str(args, "graph_agent_id"),
-                graph_loaded,
+                graph.as_ref(),
             ),
             "send_message" => act_board::send_message(
                 state,
@@ -362,11 +405,12 @@ impl Engine {
                 opt_strings(args, "depends_on").as_deref(),
                 opt_i(args, "priority").unwrap_or(0),
             )?,
-            "wait_for_task" => wait_task(
-                state,
-                need_str(args, "task_id")?,
-                opt_f(args, "timeout_s", 60.0),
-            ),
+            "wait_for_task" => json::obj(vec![
+                ("task_id", json::s(need_str(args, "task_id")?)),
+                ("status", json::s("timeout")),
+                ("timed_out", json::b(true)),
+                ("timeout_s", json::f(opt_f(args, "timeout_s", 60.0))),
+            ]),
             "get_available_tasks" => act_board::available_tasks(state, opt_str(args, "agent_id")),
             "task_failures" => act_board::task_failures(
                 state,
@@ -404,6 +448,7 @@ impl Engine {
                 opt_str(args, "subagent_type"),
                 need_str(args, "child_agent_id")?,
                 opt_str(args, "source").unwrap_or("external"),
+                opt_str(args, "caller_agent_id"),
             ),
             "get_pending_spawns" => act_board::pending_spawns(
                 state,
@@ -619,30 +664,24 @@ impl Engine {
             "ack" => act_board::ack_handoff(state, id, need_str(args, "agent_id")?),
             "complete" => act_board::finish_handoff(state, id, true),
             "cancel" => act_board::finish_handoff(state, id, false),
-            "status" | "completion" => {
-                let row = state.handoffs.iter().find(|row| row.id == id);
-                match row {
-                    Some(row) if row.status == "completed" || (mode == "status") => {
-                        json::obj(vec![
-                            ("handoff_id", json::i(id)),
-                            ("status", json::s(&row.status)),
-                            (
-                                "timed_out",
-                                json::b(row.status != "completed" && mode != "status"),
-                            ),
-                        ])
-                    }
-                    Some(row) => json::obj(vec![
-                        ("handoff_id", json::i(id)),
-                        ("status", json::s(&row.status)),
-                        ("timed_out", json::b(true)),
-                    ]),
-                    None => json::obj(vec![
-                        ("handoff_id", json::i(id)),
-                        ("found", json::b(false)),
-                        ("timed_out", json::b(true)),
-                    ]),
-                }
+            "status" => match state.handoffs.iter().find(|row| row.id == id) {
+                Some(row) => act_board::handoff_record(row),
+                None => json::obj(vec![(
+                    "error",
+                    json::s(format!("Handoff {id} not found")),
+                )]),
+            },
+            "completion" => {
+                let done = state
+                    .handoffs
+                    .iter()
+                    .find(|row| row.id == id)
+                    .map(|row| row.status == "completed")
+                    .unwrap_or(false);
+                json::obj(vec![
+                    ("timed_out", json::b(!done)),
+                    ("handoff_id", json::i(id)),
+                ])
             }
             other => json::obj(vec![(
                 "error",
@@ -656,7 +695,7 @@ impl Engine {
         let ttl = opt_f(args, "ttl", 600.0);
         let root = self.project_root.clone();
         let area = opt_str(args, "area").map(|area| act_view::norm_area(area, root.as_deref()));
-        let value = act_view::who(
+        act_view::who(
             &mut self.store.state,
             action,
             opt_str(args, "agent_id"),
@@ -664,13 +703,421 @@ impl Engine {
             opt_str(args, "to_agent_id"),
             ttl,
             opt_str(args, "note"),
-        );
-        let _ = self.store.commit();
+        )
+    }
+
+    pub fn dashboard(&mut self) -> Value {
+        let _ = self.store.begin();
+        let value = act_view::dashboard(&self.store.state);
+        self.store.end();
         value
     }
 
-    pub fn dashboard(&self) -> Value {
-        act_view::dashboard(&self.store.state)
+    pub fn cursor(&mut self) -> u64 {
+        let _ = self.store.begin();
+        let cursor = self.store.event_cursor();
+        self.store.end();
+        cursor
+    }
+
+    fn view<T>(&mut self, body: impl FnOnce(&mut Self) -> T) -> Result<T, String> {
+        self.store.begin()?;
+        let value = body(self);
+        self.store.end();
+        Ok(value)
+    }
+
+    fn edit<T>(&mut self, body: impl FnOnce(&mut Self) -> T) -> Result<T, String> {
+        self.store.begin()?;
+        let value = body(self);
+        self.store.commit()?;
+        self.store.end();
+        Ok(value)
+    }
+
+    fn blocking(&mut self, tool: &str, args: &Value) -> Result<Value, String> {
+        match tool {
+            "acquire_lock" => self.acquire_retry(args),
+            "get_notifications" => self.wait_notifications(args),
+            "wait_for_task" => self.wait_task(args),
+            "wait_for_locks" => self.wait_locks(args),
+            "await_agent" => self.wait_agent(args),
+            "await_subagent_registration" => self.wait_registration(args),
+            "await_subagent_stopped" => self.wait_stopped(args),
+            "wait_for_broadcast_acks" => self.wait_broadcast(args),
+            "wait_for_handoff" => self.wait_handoff_done(args),
+            _ => Err(format!("unsupported wait {tool}")),
+        }
+    }
+
+    fn acquire_retry(&mut self, args: &Value) -> Result<Value, String> {
+        let max_retries = opt_i(args, "max_retries").unwrap_or(5);
+        let mut backoff = opt_f(args, "backoff_ms", 100.0);
+        let timeout_ms = opt_f(args, "timeout_ms", 5000.0);
+        let started = std::time::Instant::now();
+        let mut attempt = 0_i64;
+        loop {
+            let current = attempt + 1;
+            let result = self.edit(|engine| {
+                let root = engine.project_root.clone();
+                act_lock::acquire(
+                    &mut engine.store.state,
+                    need_str(args, "document_path").unwrap_or(""),
+                    need_str(args, "agent_id").unwrap_or(""),
+                    opt_str(args, "lock_type").unwrap_or("exclusive"),
+                    opt_f(args, "ttl", act_lock::default_ttl()),
+                    opt_bool(args, "force", false),
+                    opt_i(args, "region_start"),
+                    opt_i(args, "region_end"),
+                    root.as_deref(),
+                    current,
+                )
+            })?;
+            if result.get("acquired").and_then(Value::as_bool) == Some(true) {
+                return Ok(result);
+            }
+            if attempt < max_retries {
+                let elapsed_ms = started.elapsed().as_secs_f64() * 1000.0;
+                let unit = std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .map(|d| (d.subsec_nanos() % 1000) as f64 / 999.0)
+                    .unwrap_or(0.5);
+                let jitter = backoff * (0.5 + unit);
+                if elapsed_ms + jitter <= timeout_ms {
+                    std::thread::sleep(std::time::Duration::from_secs_f64(jitter / 1000.0));
+                    backoff *= 2.0;
+                    attempt += 1;
+                    continue;
+                }
+            }
+            return Ok(result);
+        }
+    }
+
+    fn wait_notifications(&mut self, args: &Value) -> Result<Value, String> {
+        if args.get("prune_max_age_seconds").is_some() || args.get("prune_max_entries").is_some() {
+            self.edit(|engine| {
+                act_lock::prune_notifications(
+                    &mut engine.store.state,
+                    opt_f_opt(args, "prune_max_age_seconds"),
+                    opt_i(args, "prune_max_entries"),
+                )
+            })?;
+        }
+        let exclude = opt_str(args, "exclude_agent").map(|s| s.to_string());
+        let limit = opt_i(args, "limit").unwrap_or(100);
+        let cursor = self.view(|engine| {
+            engine
+                .store
+                .state
+                .notifications
+                .iter()
+                .map(|row| row.id)
+                .max()
+                .unwrap_or(0)
+        })?;
+        let timeout = opt_f(args, "timeout_s", 0.0);
+        let poll = opt_f(args, "poll_interval_s", 0.05).max(0.01);
+        let started = std::time::Instant::now();
+        loop {
+            let rows = self.view(|engine| {
+                let mut rows: Vec<_> = engine
+                    .store
+                    .state
+                    .notifications
+                    .iter()
+                    .filter(|row| row.id > cursor)
+                    .filter(|row| exclude.as_ref().map(|id| row.agent_id != *id).unwrap_or(true))
+                    .collect();
+                rows.sort_by_key(|row| row.id);
+                if limit >= 0 {
+                    rows.truncate(limit as usize);
+                }
+                rows.iter()
+                    .map(|row| {
+                        json::obj(vec![
+                            ("id", json::i(row.id)),
+                            ("document_path", json::s(&row.document_path)),
+                            ("change_type", json::s(&row.change_type)),
+                            ("agent_id", json::s(&row.agent_id)),
+                            ("worktree_root", json::opt_string(&row.worktree_root)),
+                            ("created_at", json::f(row.created_at)),
+                        ])
+                    })
+                    .collect::<Vec<_>>()
+            })?;
+            if !rows.is_empty() {
+                return Ok(json::obj(vec![
+                    ("notifications", json::arr(rows)),
+                    ("timed_out", json::b(false)),
+                ]));
+            }
+            if !sleep_until(started, timeout, poll) {
+                return Ok(json::obj(vec![
+                    ("notifications", json::arr(vec![])),
+                    ("timed_out", json::b(true)),
+                ]));
+            }
+        }
+    }
+
+    fn wait_task(&mut self, args: &Value) -> Result<Value, String> {
+        let task_id = need_str(args, "task_id")?.to_string();
+        let timeout = opt_f(args, "timeout_s", 60.0);
+        let poll = opt_f(args, "poll_interval_s", 0.05).max(0.01);
+        let started = std::time::Instant::now();
+        loop {
+            let status = self.view(|engine| {
+                engine
+                    .store
+                    .state
+                    .tasks
+                    .iter()
+                    .find(|task| task.id == task_id)
+                    .map(|task| task.status.clone())
+            })?;
+            if matches!(status.as_deref(), Some("completed") | Some("failed")) {
+                return Ok(json::obj(vec![
+                    ("task_id", json::s(&task_id)),
+                    ("status", json::s(status.unwrap_or_default())),
+                    ("timed_out", json::b(false)),
+                    ("waited_s", json::f(waited(started))),
+                ]));
+            }
+            if !sleep_until(started, timeout, poll) {
+                return Ok(json::obj(vec![
+                    ("task_id", json::s(task_id)),
+                    ("status", json::s("timeout")),
+                    ("timed_out", json::b(true)),
+                    ("timeout_s", json::f(timeout)),
+                ]));
+            }
+        }
+    }
+
+    fn wait_locks(&mut self, args: &Value) -> Result<Value, String> {
+        let agent = need_str(args, "agent_id")?.to_string();
+        let paths = opt_strings(args, "document_paths").unwrap_or_default();
+        let timeout = opt_f(args, "timeout_s", 30.0);
+        let started = std::time::Instant::now();
+        loop {
+            let split = self.view(|engine| {
+                let root = engine.project_root.clone();
+                let mut released = Vec::new();
+                let mut waiting = Vec::new();
+                for path in &paths {
+                    let status = act_lock::status(&engine.store.state, path, root.as_deref());
+                    let locked = status.get("locked").and_then(Value::as_bool) == Some(true);
+                    let holder = status.get("locked_by").and_then(Value::as_str);
+                    let norm = status
+                        .get("document_path")
+                        .and_then(Value::as_str)
+                        .unwrap_or(path)
+                        .to_string();
+                    if !locked || holder == Some(agent.as_str()) {
+                        released.push(json::s(norm));
+                    } else {
+                        waiting.push(json::s(norm));
+                    }
+                }
+                (released, waiting)
+            })?;
+            if split.1.is_empty() || !sleep_until(started, timeout, 0.05) {
+                return Ok(json::obj(vec![
+                    ("released", json::arr(split.0)),
+                    ("timed_out", json::arr(split.1)),
+                ]));
+            }
+        }
+    }
+
+    fn wait_agent(&mut self, args: &Value) -> Result<Value, String> {
+        let agent_id = need_str(args, "agent_id")?.to_string();
+        let timeout = opt_f(args, "timeout_s", 60.0);
+        let started = std::time::Instant::now();
+        loop {
+            let status = self.view(|engine| match engine.store.state.agent(&agent_id) {
+                None => Some("not_found".to_string()),
+                Some(agent) if agent.status == "stopped" => Some("stopped".to_string()),
+                Some(_) => None,
+            })?;
+            if let Some(status) = status {
+                return Ok(json::obj(vec![
+                    ("awaited", json::b(true)),
+                    ("agent_id", json::s(&agent_id)),
+                    ("status", json::s(status)),
+                    ("waited_s", json::f(waited(started))),
+                ]));
+            }
+            if !sleep_until(started, timeout, 0.05) {
+                return Ok(json::obj(vec![
+                    ("awaited", json::b(false)),
+                    ("agent_id", json::s(agent_id)),
+                    ("status", json::s("timeout")),
+                    ("timeout_s", json::f(timeout)),
+                ]));
+            }
+        }
+    }
+
+    fn wait_registration(&mut self, args: &Value) -> Result<Value, String> {
+        let parent = need_str(args, "parent_agent_id")?.to_string();
+        let kind = opt_str(args, "subagent_type").map(|s| s.to_string());
+        let timeout = opt_f_opt(args, "timeout").unwrap_or(300.0);
+        let started = std::time::Instant::now();
+        loop {
+            let found = self.view(|engine| {
+                engine
+                    .store
+                    .state
+                    .spawns
+                    .iter()
+                    .find(|row| {
+                        row.parent_agent_id == parent
+                            && row.status == "registered"
+                            && kind
+                                .as_ref()
+                                .map(|k| row.subagent_type.as_deref() == Some(k))
+                                .unwrap_or(true)
+                    })
+                    .map(|row| {
+                        json::obj(vec![
+                            ("task_id", json::s(&row.id)),
+                            ("scope_id", json::s(&row.parent_agent_id)),
+                            ("subagent_type", json::opt_string(&row.subagent_type)),
+                            ("description", json::opt_string(&row.description)),
+                            ("prompt", json::opt_string(&row.prompt)),
+                            ("created_at", json::f(row.created_at)),
+                            (
+                                "consumed_at",
+                                match row.consumed_at {
+                                    Some(n) => json::f(n),
+                                    None => json::null(),
+                                },
+                            ),
+                            ("status", json::s(&row.status)),
+                            ("source", json::s(&row.source)),
+                        ])
+                    })
+            })?;
+            if let Some(spawn) = found {
+                return Ok(json::obj(vec![
+                    ("registered", json::b(true)),
+                    ("spawn", spawn),
+                ]));
+            }
+            if !sleep_until(started, timeout, 0.05) {
+                return Ok(json::obj(vec![
+                    ("timed_out", json::b(true)),
+                    ("timeout", json::f(timeout)),
+                    ("parent_agent_id", json::s(parent)),
+                    ("subagent_type", json::opt_string(&kind)),
+                ]));
+            }
+        }
+    }
+
+    fn wait_stopped(&mut self, args: &Value) -> Result<Value, String> {
+        let child = need_str(args, "child_agent_id")?.to_string();
+        let timeout = opt_f_opt(args, "timeout").unwrap_or(30.0);
+        let started = std::time::Instant::now();
+        loop {
+            let stopped = self.view(|engine| {
+                engine
+                    .store
+                    .state
+                    .agent(&child)
+                    .map(|agent| agent.status == "stopped")
+                    .unwrap_or(true)
+            })?;
+            if stopped {
+                return Ok(json::obj(vec![
+                    ("stopped", json::b(true)),
+                    ("child_agent_id", json::s(&child)),
+                ]));
+            }
+            if !sleep_until(started, timeout, 0.05) {
+                return Ok(json::obj(vec![
+                    ("timed_out", json::b(true)),
+                    ("child_agent_id", json::s(child)),
+                    ("timeout", json::f(timeout)),
+                    ("escalate", json::b(true)),
+                ]));
+            }
+        }
+    }
+
+    fn wait_broadcast(&mut self, args: &Value) -> Result<Value, String> {
+        let id = need_i(args, "broadcast_id")?;
+        let timeout = opt_f(args, "timeout_s", 30.0);
+        let started = std::time::Instant::now();
+        loop {
+            let status = self.view(|engine| act_board::broadcast_status(&engine.store.state, id))?;
+            if status.get("found").and_then(Value::as_bool) != Some(true) {
+                return Ok(json::obj(vec![
+                    ("timed_out", json::b(true)),
+                    ("reason", json::s("not_found")),
+                ]));
+            }
+            let expires = status.get("expires_at").and_then(Value::as_f64).unwrap_or(0.0);
+            let acked = status
+                .get("acknowledged_by")
+                .cloned()
+                .unwrap_or(json::arr(vec![]));
+            if expires < util::now() {
+                return Ok(json::obj(vec![
+                    ("timed_out", json::b(true)),
+                    ("reason", json::s("expired")),
+                    ("acknowledged_by", acked),
+                ]));
+            }
+            let expected = status
+                .get("expected_count")
+                .and_then(Value::as_i64)
+                .unwrap_or(0);
+            if expected <= 0 {
+                return Ok(json::obj(vec![
+                    ("timed_out", json::b(false)),
+                    ("acknowledged_by", acked),
+                ]));
+            }
+            let count = acked.as_array().map(|items| items.len() as i64).unwrap_or(0);
+            if count >= expected || !sleep_until(started, timeout, 0.05) {
+                let pending = status
+                    .get("pending_acks")
+                    .cloned()
+                    .unwrap_or(json::arr(vec![]));
+                return Ok(json::obj(vec![
+                    ("timed_out", json::b(count < expected)),
+                    ("acknowledged_by", acked),
+                    ("pending_acks", pending),
+                ]));
+            }
+        }
+    }
+
+    fn wait_handoff_done(&mut self, args: &Value) -> Result<Value, String> {
+        let id = need_i(args, "handoff_id")?;
+        let timeout = opt_f(args, "timeout_s", 30.0);
+        let started = std::time::Instant::now();
+        loop {
+            let done = self.view(|engine| {
+                engine
+                    .store
+                    .state
+                    .handoffs
+                    .iter()
+                    .find(|row| row.id == id)
+                    .map(|row| row.status == "completed")
+                    .unwrap_or(false)
+            })?;
+            if done || !sleep_until(started, timeout, 0.05) {
+                return Ok(json::obj(vec![
+                    ("timed_out", json::b(!done)),
+                    ("handoff_id", json::i(id)),
+                ]));
+            }
+        }
     }
 }
 
@@ -680,7 +1127,6 @@ fn read_only(tool: &str, args: &Value) -> bool {
         | "get_agent_relations"
         | "get_lock_status"
         | "list_locks"
-        | "get_notifications"
         | "get_conflicts"
         | "get_contention_hotspots"
         | "status"
@@ -691,13 +1137,12 @@ fn read_only(tool: &str, args: &Value) -> bool {
         | "get_available_tasks"
         | "get_pending_spawns"
         | "is_subagent_stop_requested"
-        | "run_assessment"
-        | "wait_for_task"
-        | "wait_for_broadcast_acks"
-        | "wait_for_locks"
-        | "await_agent"
-        | "await_subagent_registration"
-        | "await_subagent_stopped" => true,
+        | "run_assessment" => true,
+        "get_notifications" => {
+            args.get("prune_max_age_seconds").is_none()
+                && args.get("prune_max_entries").is_none()
+                && opt_f(args, "timeout_s", 0.0) <= 0.0
+        }
         "manage_messages" => args.get("action").and_then(Value::as_str) == Some("get"),
         "manage_work_intents" => args.get("action").and_then(Value::as_str) == Some("get"),
         "manage_dependencies" => matches!(
@@ -712,47 +1157,50 @@ fn read_only(tool: &str, args: &Value) -> bool {
     }
 }
 
-fn await_agent(state: &crate::db::State, agent_id: &str) -> Value {
-    match state.agent(agent_id) {
-        None => json::obj(vec![
-            ("awaited", json::b(true)),
-            ("agent_id", json::s(agent_id)),
-            ("status", json::s("not_found")),
-            ("waited_s", json::f(0.0)),
-        ]),
-        Some(agent) if agent.status == "stopped" => json::obj(vec![
-            ("awaited", json::b(true)),
-            ("agent_id", json::s(agent_id)),
-            ("status", json::s("stopped")),
-            ("waited_s", json::f(0.0)),
-        ]),
-        Some(_) => json::obj(vec![
-            ("awaited", json::b(false)),
-            ("agent_id", json::s(agent_id)),
-            ("status", json::s("active")),
-            ("timed_out", json::b(true)),
-            ("waited_s", json::f(0.0)),
-        ]),
+fn blocks(tool: &str, args: &Value) -> bool {
+    match tool {
+        "acquire_lock" => opt_bool(args, "retry", false),
+        "get_notifications" => opt_f(args, "timeout_s", 0.0) > 0.0,
+        "wait_for_task" | "wait_for_locks" | "await_agent" | "await_subagent_registration"
+        | "await_subagent_stopped" | "wait_for_broadcast_acks" => true,
+        "wait_for_handoff" => opt_str(args, "mode").unwrap_or("completion") == "completion",
+        _ => false,
     }
 }
 
-fn wait_task(state: &crate::db::State, task_id: &str, timeout_s: f64) -> Value {
-    if let Some(task) = state.tasks.iter().find(|task| task.id == task_id) {
-        if task.status == "completed" || task.status == "failed" {
-            return json::obj(vec![
-                ("task_id", json::s(task_id)),
-                ("status", json::s(&task.status)),
-                ("timed_out", json::b(false)),
-                ("waited_s", json::f(0.0)),
-            ]);
+fn who_arguments(args: &Value) -> Result<(), String> {
+    if let Some(ttl) = args.get("ttl") {
+        if !matches!(ttl, Value::Null) {
+            let Some(number) = ttl.as_f64() else {
+                return Err(format!(
+                    "ttl must be of type 'number' (got '{}')",
+                    ttl.py_type_name()
+                ));
+            };
+            if number < 0.0 {
+                return Err(format!("{number} is less than the minimum of 0"));
+            }
         }
     }
-    json::obj(vec![
-        ("task_id", json::s(task_id)),
-        ("status", json::s("timeout")),
-        ("timed_out", json::b(true)),
-        ("timeout_s", json::f(timeout_s)),
-    ])
+    Ok(())
+}
+
+fn waited(start: std::time::Instant) -> f64 {
+    start.elapsed().as_secs_f64()
+}
+
+fn sleep_until(start: std::time::Instant, timeout: f64, poll: f64) -> bool {
+    let limit = std::time::Duration::from_secs_f64(timeout.max(0.0));
+    let elapsed = start.elapsed();
+    if elapsed >= limit {
+        return false;
+    }
+    let left = (limit - elapsed).as_secs_f64();
+    let slice = poll.min(left).max(0.0);
+    if slice > 0.0 {
+        std::thread::sleep(std::time::Duration::from_secs_f64(slice));
+    }
+    start.elapsed() < limit
 }
 
 fn need_str<'a>(args: &'a Value, key: &str) -> Result<&'a str, String> {

@@ -75,6 +75,7 @@ pub fn acquire(
     region_start: Option<i64>,
     region_end: Option<i64>,
     project_root: Option<&Path>,
+    attempt: i64,
 ) -> Value {
     let norm = normalize_path(document_path, project_root);
     let worktree = project_root.map(|p| util::path_str(p));
@@ -97,7 +98,7 @@ pub fn acquire(
             ("expires_at", json::f(now + ttl)),
             ("region_start", json::opt_i(region_start)),
             ("region_end", json::opt_i(region_end)),
-            ("attempts", json::i(1)),
+            ("attempts", json::i(attempt)),
         ]);
     }
     let conflicts: Vec<Lock> = state
@@ -143,7 +144,7 @@ pub fn acquire(
             ("expires_at", json::f(first.locked_at + first.lock_ttl)),
             ("worktree", json::opt_string(&first.worktree_root)),
             ("conflicts", json::arr(listed)),
-            ("attempt", json::i(1)),
+            ("attempt", json::i(attempt)),
         ]);
     }
     if !conflicts.is_empty() && force {
@@ -166,7 +167,7 @@ pub fn acquire(
             ("acquired", json::b(false)),
             ("error", json::s("scope_violation")),
             ("scope_violation", scope_hit),
-            ("attempts", json::i(1)),
+            ("attempts", json::i(attempt)),
         ]);
     }
     let id = state.next("locks");
@@ -189,7 +190,7 @@ pub fn acquire(
         ("expires_at", json::f(now + ttl)),
         ("region_start", json::opt_i(region_start)),
         ("region_end", json::opt_i(region_end)),
-        ("attempts", json::i(1)),
+        ("attempts", json::i(attempt)),
     ];
     if let Some(warning) = ownership_warning(state, &norm, agent_id, project_root) {
         result.push(("ownership_warning", warning));
@@ -559,6 +560,37 @@ pub fn notify(
     record_notification(state, &norm, change_type, agent_id, worktree)
 }
 
+pub fn prune_notifications(state: &mut State, max_age: Option<f64>, max_entries: Option<i64>) -> i64 {
+    let now = util::now();
+    let before = state.notifications.len();
+    if let Some(age) = max_age {
+        let cutoff = now - age;
+        state.notifications.retain(|row| row.created_at >= cutoff);
+    }
+    if let Some(max_entries) = max_entries {
+        if max_entries >= 0 && state.notifications.len() as i64 > max_entries {
+            let mut order: Vec<usize> = (0..state.notifications.len()).collect();
+            order.sort_by(|&a, &b| {
+                state.notifications[a]
+                    .created_at
+                    .partial_cmp(&state.notifications[b].created_at)
+                    .unwrap_or(std::cmp::Ordering::Equal)
+                    .then(state.notifications[a].id.cmp(&state.notifications[b].id))
+            });
+            let excess = state.notifications.len() - max_entries as usize;
+            let drop_ids: Vec<i64> = order
+                .into_iter()
+                .take(excess)
+                .map(|index| state.notifications[index].id)
+                .collect();
+            state
+                .notifications
+                .retain(|row| !drop_ids.contains(&row.id));
+        }
+    }
+    (before - state.notifications.len()) as i64
+}
+
 pub fn notifications(
     state: &State,
     since: Option<f64>,
@@ -572,7 +604,9 @@ pub fn notifications(
         .filter(|row| exclude.map(|id| row.agent_id != id).unwrap_or(true))
         .collect();
     rows.sort_by(|a, b| b.id.cmp(&a.id));
-    rows.truncate(limit.max(0) as usize);
+    if limit >= 0 {
+        rows.truncate(limit as usize);
+    }
     let items = rows
         .into_iter()
         .map(|row| {

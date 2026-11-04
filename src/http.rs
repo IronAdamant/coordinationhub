@@ -6,6 +6,8 @@ use crate::mcp;
 use std::io::{Read, Write};
 use std::net::{TcpListener, TcpStream};
 use std::path::PathBuf;
+use std::sync::{Arc, Mutex};
+use std::time::Duration;
 
 const DASHBOARD: &str = include_str!("../assets/dashboard.html");
 const MAX_BODY: usize = 1_000_000;
@@ -34,29 +36,37 @@ pub fn serve(
     } else {
         println!("  Auth: DISABLED (local-trust mode)");
     }
-    let engine = std::sync::Mutex::new(engine);
+    let engine = Arc::new(Mutex::new(engine));
+    crate::house::spawn(engine.clone());
     for stream in listener.incoming() {
         let Ok(stream) = stream else { continue };
         let token = token.clone();
-        let mut engine = engine.lock().map_err(|e| e.to_string())?;
-        let _ = handle(stream, &mut engine, token.as_deref());
+        let engine = engine.clone();
+        std::thread::spawn(move || {
+            let _ = dispatch_connection(stream, engine, token);
+        });
     }
     Ok(())
 }
 
-fn handle(mut stream: TcpStream, engine: &mut Engine, token: Option<&str>) -> Result<(), String> {
+fn dispatch_connection(
+    mut stream: TcpStream,
+    engine: Arc<Mutex<Engine>>,
+    token: Option<String>,
+) -> Result<(), String> {
+    let _ = stream.set_read_timeout(Some(Duration::from_secs(30)));
     let mut buf = vec![0_u8; 64 * 1024];
     let n = stream.read(&mut buf).map_err(|e| e.to_string())?;
     if n == 0 {
         return Ok(());
     }
-    let text = String::from_utf8_lossy(&buf[..n]);
+    let text = String::from_utf8_lossy(&buf[..n]).to_string();
     let mut lines = text.split("\r\n");
     let request = lines.next().unwrap_or("");
     let mut parts = request.split_whitespace();
     let method = parts.next().unwrap_or("");
-    let path = parts.next().unwrap_or("/");
-    let path = path.split('?').next().unwrap_or(path);
+    let raw_path = parts.next().unwrap_or("/");
+    let (path, query) = raw_path.split_once('?').unwrap_or((raw_path, ""));
     let mut headers = Vec::new();
     for line in lines.by_ref() {
         if line.is_empty() {
@@ -66,6 +76,75 @@ fn handle(mut stream: TcpStream, engine: &mut Engine, token: Option<&str>) -> Re
             headers.push((name.trim().to_ascii_lowercase(), value.trim().to_string()));
         }
     }
+    if method == "GET" && path == "/events" {
+        let last = headers
+            .iter()
+            .find(|(name, _)| name == "last-event-id")
+            .map(|(_, value)| value.clone())
+            .or_else(|| {
+                query.split('&').find_map(|pair| {
+                    pair.strip_prefix("last-event-id=")
+                        .map(|value| value.to_string())
+                })
+            });
+        return serve_events(stream, engine, last.as_deref());
+    }
+    let mut engine = engine.lock().map_err(|e| e.to_string())?;
+    handle_locked(
+        &mut stream,
+        &mut engine,
+        token.as_deref(),
+        method,
+        path,
+        &headers,
+        &text,
+    )
+}
+
+fn serve_events(
+    mut stream: TcpStream,
+    engine: Arc<Mutex<Engine>>,
+    last_id: Option<&str>,
+) -> Result<(), String> {
+    let _ = stream.set_write_timeout(Some(Duration::from_secs(10)));
+    let header = "HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nCache-Control: no-cache\r\nConnection: keep-alive\r\nX-Accel-Buffering: no\r\n\r\n";
+    stream.write_all(header.as_bytes()).map_err(|e| e.to_string())?;
+    let mut seen = last_id.and_then(|value| value.parse::<u64>().ok()).unwrap_or(0);
+    let started = std::time::Instant::now();
+    loop {
+        if started.elapsed() > Duration::from_secs(600) {
+            break;
+        }
+        let (cursor, payload) = {
+            let mut engine = engine.lock().map_err(|e| e.to_string())?;
+            (engine.cursor(), json::dumps(&engine.dashboard()))
+        };
+        if cursor != seen || seen == 0 {
+            let frame = format!("id: {cursor}\ndata: {payload}\n\n");
+            if stream.write_all(frame.as_bytes()).is_err() {
+                break;
+            }
+            seen = cursor;
+        } else if stream.write_all(b": keepalive\n\n").is_err() {
+            break;
+        }
+        if stream.flush().is_err() {
+            break;
+        }
+        std::thread::sleep(Duration::from_millis(200));
+    }
+    Ok(())
+}
+
+fn handle_locked(
+    stream: &mut TcpStream,
+    engine: &mut Engine,
+    token: Option<&str>,
+    method: &str,
+    path: &str,
+    headers: &[(String, String)],
+    text: &str,
+) -> Result<(), String> {
     let header = |name: &str| {
         headers
             .iter()
@@ -85,7 +164,7 @@ fn handle(mut stream: TcpStream, engine: &mut Engine, token: Option<&str>) -> Re
                 .unwrap_or(false);
             if !ok {
                 return write_raw(
-                    &mut stream,
+                    stream,
                     401,
                     "application/json",
                     b"{\"error\": \"unauthorized\"}",
@@ -104,33 +183,22 @@ fn handle(mut stream: TcpStream, engine: &mut Engine, token: Option<&str>) -> Re
         } else {
             format!("{meta}{DASHBOARD}")
         };
-        return write_html(&mut stream, html.as_bytes());
+        return write_html(stream, html.as_bytes());
     }
     if method == "GET" && path == "/health" {
         let body = json::dumps(&json::obj(vec![
             ("status", json::s("ok")),
             ("tools_version", json::s(&engine.schema.tools_version)),
         ]));
-        return write_json(&mut stream, 200, body.as_bytes());
+        return write_json(stream, 200, body.as_bytes());
     }
     if method == "GET" && path == "/tools" {
         let body = json::dumps(&mcp::schemas_for_http(engine));
-        return write_json(&mut stream, 200, body.as_bytes());
+        return write_json(stream, 200, body.as_bytes());
     }
     if method == "GET" && path == "/api/dashboard-data" {
         let body = json::dumps(&engine.dashboard());
-        return write_json(&mut stream, 200, body.as_bytes());
-    }
-    if method == "GET" && path == "/events" {
-        let payload = json::dumps(&engine.dashboard());
-        let event = format!("event: dashboard\ndata: {payload}\n\n");
-        let header = format!(
-            "HTTP/1.0 200 OK\r\nContent-Type: text/event-stream\r\nCache-Control: no-cache\r\nConnection: close\r\nContent-Length: {}\r\n\r\n",
-            event.len()
-        );
-        stream.write_all(header.as_bytes()).ok();
-        stream.write_all(event.as_bytes()).ok();
-        return Ok(());
+        return write_json(stream, 200, body.as_bytes());
     }
     if method == "POST" && path == "/call" {
         let len = header("content-length")
@@ -138,7 +206,7 @@ fn handle(mut stream: TcpStream, engine: &mut Engine, token: Option<&str>) -> Re
             .unwrap_or(0);
         if len > MAX_BODY {
             let body = format!("{{\"error\": \"Request body exceeds {MAX_BODY} bytes\"}}");
-            return write_json(&mut stream, 413, body.as_bytes());
+            return write_json(stream, 413, body.as_bytes());
         }
         let already = text.split("\r\n\r\n").nth(1).unwrap_or("").as_bytes();
         let mut body = already.to_vec();
@@ -159,13 +227,13 @@ fn handle(mut stream: TcpStream, engine: &mut Engine, token: Option<&str>) -> Re
                 json::parse(std::str::from_utf8(&body).unwrap_or("")).unwrap_or(Value::Null)
             }
             _ => {
-                return write_json(&mut stream, 400, b"{\"error\": \"Invalid JSON\"}");
+                return write_json(stream, 400, b"{\"error\": \"Invalid JSON\"}");
             }
         };
         let tool = parsed.get("tool").and_then(Value::as_str).unwrap_or("");
         if tool.is_empty() {
             return write_json(
-                &mut stream,
+                stream,
                 400,
                 b"{\"error\": \"Missing 'tool' field in request body\"}",
             );
@@ -176,7 +244,7 @@ fn handle(mut stream: TcpStream, engine: &mut Engine, token: Option<&str>) -> Re
             .unwrap_or(Value::Object(vec![]));
         if !matches!(arguments, Value::Object(_)) {
             return write_json(
-                &mut stream,
+                stream,
                 400,
                 b"{\"error\": \"'arguments' must be a JSON object\"}",
             );
@@ -184,7 +252,7 @@ fn handle(mut stream: TcpStream, engine: &mut Engine, token: Option<&str>) -> Re
         match engine.call(tool, &arguments) {
             Ok(value) => {
                 let body = json::dumps(&json::obj(vec![("result", value)]));
-                write_json(&mut stream, 200, body.as_bytes())
+                write_json(stream, 200, body.as_bytes())
             }
             Err(err) if err.starts_with("Unknown tool:") || err.contains(": ") => {
                 let status = if err.starts_with("Unknown tool:") {
@@ -193,11 +261,11 @@ fn handle(mut stream: TcpStream, engine: &mut Engine, token: Option<&str>) -> Re
                     400
                 };
                 let body = json::dumps(&json::obj(vec![("error", json::s(err))]));
-                write_json(&mut stream, status, body.as_bytes())
+                write_json(stream, status, body.as_bytes())
             }
             Err(err) => {
                 let body = json::dumps(&json::obj(vec![("error", json::s(err))]));
-                write_json(&mut stream, 400, body.as_bytes())
+                write_json(stream, 400, body.as_bytes())
             }
         }
     } else {
@@ -205,7 +273,7 @@ fn handle(mut stream: TcpStream, engine: &mut Engine, token: Option<&str>) -> Re
             "error",
             json::s(format!("Unknown endpoint: {path}")),
         )]));
-        write_json(&mut stream, 404, body.as_bytes())
+        write_json(stream, 404, body.as_bytes())
     }
 }
 

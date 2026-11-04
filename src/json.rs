@@ -116,6 +116,13 @@ pub fn opt_string(v: &Option<String>) -> Value {
         None => null(),
     }
 }
+pub fn opt_f(v: Option<f64>) -> Value {
+    match v {
+        Some(n) => f(n),
+        None => null(),
+    }
+}
+
 pub fn opt_i(v: Option<i64>) -> Value {
     match v {
         Some(n) => i(n),
@@ -256,23 +263,56 @@ impl<'a> Parser<'a> {
                         b'r' => out.push('\r'),
                         b't' => out.push('\t'),
                         b'u' => {
-                            if self.index + 4 > self.bytes.len() {
-                                return Err("short unicode escape".into());
+                            let mut code = self.read_hex4()?;
+                            if (0xD800..=0xDBFF).contains(&code)
+                                && self.bytes.get(self.index) == Some(&b'\\')
+                                && self.bytes.get(self.index + 1) == Some(&b'u')
+                            {
+                                self.index += 2;
+                                let low = self.read_hex4()?;
+                                if (0xDC00..=0xDFFF).contains(&low) {
+                                    code = 0x10000 + (((code - 0xD800) << 10) | (low - 0xDC00));
+                                } else {
+                                    return Err("invalid unicode scalar".into());
+                                }
                             }
-                            let hex = std::str::from_utf8(&self.bytes[self.index..self.index + 4])
-                                .map_err(|_| "bad unicode escape".to_string())?;
-                            let code = u32::from_str_radix(hex, 16)
-                                .map_err(|_| "bad unicode escape".to_string())?;
-                            self.index += 4;
                             out.push(char::from_u32(code).ok_or("invalid unicode scalar")?);
                         }
                         _ => return Err("unknown string escape".into()),
                     }
                 }
-                _ => out.push(byte as char),
+                byte if byte < 0x80 => out.push(byte as char),
+                byte => {
+                    let width = match byte {
+                        0xC2..=0xDF => 2,
+                        0xE0..=0xEF => 3,
+                        0xF0..=0xF4 => 4,
+                        _ => return Err("invalid utf-8 in string".into()),
+                    };
+                    let start = self.index - 1;
+                    if start + width > self.bytes.len() {
+                        return Err("invalid utf-8 in string".into());
+                    }
+                    let slice = &self.bytes[start..start + width];
+                    let text = std::str::from_utf8(slice)
+                        .map_err(|_| "invalid utf-8 in string".to_string())?;
+                    out.push_str(text);
+                    self.index = start + width;
+                }
             }
         }
         Err("unterminated string".into())
+    }
+
+    fn read_hex4(&mut self) -> Result<u32, String> {
+        if self.index + 4 > self.bytes.len() {
+            return Err("short unicode escape".into());
+        }
+        let hex = std::str::from_utf8(&self.bytes[self.index..self.index + 4])
+            .map_err(|_| "bad unicode escape".to_string())?;
+        let code = u32::from_str_radix(hex, 16).map_err(|_| "bad unicode escape".to_string())?;
+        self.index += 4;
+        Ok(code)
     }
 
     fn parse_number(&mut self) -> Result<Value, String> {

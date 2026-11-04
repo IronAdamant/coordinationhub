@@ -56,20 +56,56 @@ pub fn validate_tool(schema: &Schema, tool: &str, args: &Value) -> Result<(), St
     validate(args, params, "").map_err(|err| format!("{tool}: {err}"))
 }
 
+fn merged_enum(errors: &[String]) -> Option<String> {
+    let mut values = Vec::new();
+    let mut path = None;
+    let mut got = None;
+    for err in errors {
+        let Some(rest) = err.split(" must be one of ").nth(1) else {
+            return None;
+        };
+        let (list, sample) = rest.split_once(" (got ")?;
+        let field = err.split(" must be one of ").next()?.trim();
+        if path.get_or_insert(field.to_string()) != field {
+            return None;
+        }
+        let sample = sample.trim_end_matches(')');
+        if got.get_or_insert(sample.to_string()) != sample {
+            return None;
+        }
+        let inner = list.trim().trim_start_matches('[').trim_end_matches(']');
+        for item in inner.split(',') {
+            let item = item.trim();
+            if !item.is_empty() && !values.iter().any(|seen: &String| seen == item) {
+                values.push(item.to_string());
+            }
+        }
+    }
+    Some(format!(
+        "{} must be one of [{}] (got {})",
+        path?,
+        values.join(", "),
+        got?
+    ))
+}
+
 pub fn validate(value: &Value, schema: &Value, path: &str) -> Result<(), String> {
     if let Some(Value::Array(branches)) = schema.get("oneOf") {
         let mut matches = 0;
-        let mut last = None;
+        let mut errors = Vec::new();
         for branch in branches {
             match validate(value, branch, path) {
                 Ok(()) => matches += 1,
-                Err(err) => last = Some(err),
+                Err(err) => errors.push(err),
             }
         }
         if matches != 1 {
             if matches == 0 {
-                if let Some(err) = last {
+                if let Some(err) = merged_enum(&errors) {
                     return Err(err);
+                }
+                if let Some(err) = errors.last() {
+                    return Err(err.clone());
                 }
             }
             let where_ = if path.is_empty() { "value" } else { path };

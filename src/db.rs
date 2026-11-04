@@ -314,8 +314,8 @@ pub struct Store {
     pub path: PathBuf,
     pub state: State,
     digests: Digests,
-    file: std::fs::File,
-    _lock: FileLock,
+    offset: u64,
+    lock: Option<FileLock>,
 }
 
 #[derive(Default)]
@@ -351,40 +351,110 @@ impl Store {
         let path = dir.join("coordination.jsonl");
         let lock =
             FileLock::exclusive(&dir.join("coordination.lock")).map_err(|e| e.to_string())?;
-        let state = if path.is_file() {
-            replay(&path)?
-        } else {
-            State::default()
-        };
-        let file = std::fs::OpenOptions::new()
-            .create(true)
-            .append(true)
-            .open(&path)
-            .map_err(|e| e.to_string())?;
+        let (state, offset) = load_journal(&path)?;
+        drop(lock);
         let mut store = Self {
             path,
             state,
             digests: Digests::default(),
-            file,
-            _lock: lock,
+            offset,
+            lock: None,
         };
         store.remember();
         Ok(store)
     }
 
-    pub fn commit(&mut self) -> Result<(), String> {
-        let lines = self.changed_lines();
-        if lines.is_empty() {
+    pub fn begin(&mut self) -> Result<(), String> {
+        if self.lock.is_some() {
             return Ok(());
         }
-        use std::io::Write;
-        for line in &lines {
-            self.file
-                .write_all(line.as_bytes())
-                .map_err(|e| e.to_string())?;
-            self.file.write_all(b"\n").map_err(|e| e.to_string())?;
+        let lock_path = self
+            .path
+            .parent()
+            .unwrap_or_else(|| Path::new("."))
+            .join("coordination.lock");
+        let lock = FileLock::exclusive(&lock_path).map_err(|e| e.to_string())?;
+        self.lock = Some(lock);
+        let dirty = !self.changed_lines().is_empty();
+        let applied = self.catch_up()?;
+        if applied && !dirty {
+            self.remember();
         }
-        self.file.flush().map_err(|e| e.to_string())?;
+        Ok(())
+    }
+
+    pub fn end(&mut self) {
+        self.lock = None;
+    }
+
+    pub fn event_cursor(&self) -> u64 {
+        self.offset
+    }
+
+    fn catch_up(&mut self) -> Result<bool, String> {
+        if !self.path.is_file() {
+            return Ok(false);
+        }
+        let len = std::fs::metadata(&self.path)
+            .map_err(|e| e.to_string())?
+            .len();
+        if len < self.offset {
+            let (state, offset) = load_journal(&self.path)?;
+            self.state = state;
+            self.offset = offset;
+            return Ok(true);
+        }
+        if len == self.offset {
+            return Ok(false);
+        }
+        use std::io::{Read, Seek, SeekFrom};
+        let mut file = std::fs::File::open(&self.path).map_err(|e| e.to_string())?;
+        file.seek(SeekFrom::Start(self.offset))
+            .map_err(|e| e.to_string())?;
+        let mut buf = String::new();
+        file.read_to_string(&mut buf).map_err(|e| e.to_string())?;
+        let mut consumed = 0usize;
+        for line in buf.split_inclusive('\n') {
+            if !line.ends_with('\n') {
+                break;
+            }
+            consumed += line.len();
+            let trimmed = line.trim();
+            if trimmed.is_empty() {
+                continue;
+            }
+            let value = json::parse(trimmed)?;
+            apply_line(&mut self.state, &value)?;
+        }
+        self.offset += consumed as u64;
+        Ok(consumed > 0)
+    }
+
+    pub fn commit(&mut self) -> Result<(), String> {
+        let held = self.lock.is_some();
+        if !held {
+            self.begin()?;
+        }
+        let lines = self.changed_lines();
+        if !lines.is_empty() {
+            use std::io::Write;
+            let mut file = std::fs::OpenOptions::new()
+                .create(true)
+                .append(true)
+                .open(&self.path)
+                .map_err(|e| e.to_string())?;
+            for line in &lines {
+                file.write_all(line.as_bytes()).map_err(|e| e.to_string())?;
+                file.write_all(b"\n").map_err(|e| e.to_string())?;
+            }
+            file.flush().map_err(|e| e.to_string())?;
+            self.offset = std::fs::metadata(&self.path)
+                .map_err(|e| e.to_string())?
+                .len();
+        }
+        if !held {
+            self.end();
+        }
         Ok(())
     }
 
@@ -998,6 +1068,20 @@ fn hash_ids(ids: &Ids) -> u64 {
         ids.claims as u64,
         ids.claim_events as u64,
     ])
+}
+
+fn load_journal(path: &Path) -> Result<(State, u64), String> {
+    if !path.is_file() {
+        std::fs::OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(path)
+            .map_err(|e| e.to_string())?;
+        return Ok((State::default(), 0));
+    }
+    let state = replay(path)?;
+    let offset = std::fs::metadata(path).map_err(|e| e.to_string())?.len();
+    Ok((state, offset))
 }
 
 fn replay(path: &Path) -> Result<State, String> {

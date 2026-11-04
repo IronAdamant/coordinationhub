@@ -11,7 +11,12 @@ pub fn serve(
     project: Option<PathBuf>,
     namespace: &str,
 ) -> Result<(), String> {
-    let mut engine = Engine::open(storage.as_deref(), project.as_deref(), namespace)?;
+    let engine = std::sync::Arc::new(std::sync::Mutex::new(Engine::open(
+        storage.as_deref(),
+        project.as_deref(),
+        namespace,
+    )?));
+    crate::house::spawn(engine.clone());
     let stdin = io::stdin();
     let mut reader = stdin.lock();
     let mut stdout = io::stdout();
@@ -37,7 +42,10 @@ pub fn serve(
         let response = match method {
             "initialize" => Some(ok(id, initialize())),
             "notifications/initialized" | "initialized" => None,
-            "tools/list" => Some(ok(id, tools_list(&engine))),
+            "tools/list" => {
+                let engine = engine.lock().map_err(|err| err.to_string())?;
+                Some(ok(id, tools_list(&engine)))
+            }
             "tools/call" => {
                 let params = parsed
                     .get("params")
@@ -48,6 +56,7 @@ pub fn serve(
                     .get("arguments")
                     .cloned()
                     .unwrap_or(Value::Object(vec![]));
+                let mut engine = engine.lock().map_err(|err| err.to_string())?;
                 Some(ok(id, call_result(&mut engine, name, &arguments)))
             }
             "ping" => Some(ok(id, Value::Object(vec![]))),
@@ -131,7 +140,14 @@ fn who_tool() -> Value {
 fn call_result(engine: &mut Engine, name: &str, arguments: &Value) -> Value {
     match engine.call(name, arguments) {
         Ok(value) => content(&json::dumps_pretty(&value), false),
-        Err(err) => content(&format!("Error: {err}"), true),
+        Err(err) => {
+            let text = if err.starts_with("Input validation error:") {
+                err
+            } else {
+                format!("Error: {err}")
+            };
+            content(&text, true)
+        }
     }
 }
 

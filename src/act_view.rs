@@ -805,8 +805,9 @@ pub fn assess(
     suite_path: Option<&str>,
     format: &str,
     graph_agent_id: Option<&str>,
-    _graph_loaded: bool,
+    graph: Option<&Graph>,
 ) -> Value {
+    let graph_loaded = graph.is_some();
     let suite = if let Some(path) = suite_path {
         if !Path::new(path).is_file() {
             return json::obj(vec![(
@@ -827,24 +828,7 @@ pub fn assess(
             }
         }
     } else {
-        let events: Vec<Value> = state
-            .agents
-            .iter()
-            .map(|agent| {
-                let mut pairs = vec![
-                    ("type".to_string(), json::s("register")),
-                    ("agent_id".to_string(), json::s(&agent.agent_id)),
-                ];
-                if let Some(parent) = &agent.parent_id {
-                    pairs.push(("parent_id".into(), json::s(parent.clone())));
-                }
-                Value::Object(pairs)
-            })
-            .collect();
-        let trace = json::obj(vec![
-            ("trace_id", json::s("live_session")),
-            ("events", json::arr(events)),
-        ]);
+        let trace = live_trace(state);
         json::obj(vec![
             ("name", json::s("live_session")),
             ("traces", json::arr(vec![trace])),
@@ -863,42 +847,44 @@ pub fn assess(
         "spawn_propagation",
         "leader_stability",
     ];
-    let score = json::f(1.0);
-    let averages = json::obj(
-        metrics
-            .iter()
-            .map(|metric| (*metric, score.clone()))
-            .collect(),
-    );
     let traces = suite
         .get("traces")
         .and_then(Value::as_array)
         .map(|items| items.to_vec())
         .unwrap_or_default();
     let mut trace_scores = Vec::new();
+    let mut totals = [0.0_f64; 6];
     for trace in &traces {
         let id = trace
             .get("trace_id")
             .and_then(Value::as_str)
             .unwrap_or("unknown")
             .to_string();
-        trace_scores.push((
-            id,
-            json::obj(
-                metrics
-                    .iter()
-                    .map(|metric| (*metric, score.clone()))
-                    .collect(),
-            ),
-        ));
+        let scores = score_trace(trace, graph);
+        for (index, metric) in metrics.iter().enumerate() {
+            totals[index] += scores
+                .get(*metric)
+                .and_then(Value::as_f64)
+                .unwrap_or(0.0);
+        }
+        trace_scores.push((id, scores));
     }
+    let divisor = traces.len().max(1) as f64;
+    let averages = json::obj(
+        metrics
+            .iter()
+            .enumerate()
+            .map(|(index, metric)| (*metric, json::f(totals[index] / divisor)))
+            .collect(),
+    );
+    let overall = totals.iter().sum::<f64>() / (divisor * metrics.len() as f64);
     let result = json::obj(vec![
         ("suite_name", json::s(name)),
         ("run_at", json::f(util::now())),
         ("metrics", averages),
-        ("overall_score", score),
+        ("overall_score", json::f(overall)),
         ("traces", Value::Object(trace_scores)),
-        ("graph_loaded", json::b(true)),
+        ("graph_loaded", json::b(graph_loaded)),
         ("graph_agent_id_filter", json::opt_str(graph_agent_id)),
         ("suggested_refinements", json::arr(vec![])),
         (
@@ -915,6 +901,367 @@ pub fn assess(
     }
 }
 
+fn live_trace(state: &State) -> Value {
+    let mut stamped: Vec<(f64, Value)> = Vec::new();
+    for agent in &state.agents {
+        let mut pairs = vec![
+            ("type".to_string(), json::s("register")),
+            ("agent_id".to_string(), json::s(&agent.agent_id)),
+        ];
+        if let Some(row) = state
+            .responsibilities
+            .iter()
+            .find(|row| row.agent_id == agent.agent_id)
+        {
+            if let Some(graph_id) = &row.graph_agent_id {
+                pairs.push(("graph_id".into(), json::s(graph_id.clone())));
+            }
+        }
+        if let Some(parent) = &agent.parent_id {
+            pairs.push(("parent_id".into(), json::s(parent.clone())));
+        }
+        stamped.push((agent.started_at, Value::Object(pairs)));
+    }
+    for note in state
+        .notifications
+        .iter()
+        .filter(|row| row.change_type == "modified")
+    {
+        let path = json::s(&note.document_path);
+        let agent = json::s(&note.agent_id);
+        stamped.push((
+            note.created_at - 1e-6,
+            json::obj(vec![
+                ("type", json::s("lock")),
+                ("path", path.clone()),
+                ("agent_id", agent.clone()),
+            ]),
+        ));
+        stamped.push((
+            note.created_at,
+            json::obj(vec![
+                ("type", json::s("modified")),
+                ("path", path.clone()),
+                ("agent_id", agent.clone()),
+            ]),
+        ));
+        stamped.push((
+            note.created_at + 1e-6,
+            json::obj(vec![
+                ("type", json::s("unlock")),
+                ("path", path),
+                ("agent_id", agent),
+            ]),
+        ));
+    }
+    stamped.sort_by(|a, b| a.0.partial_cmp(&b.0).unwrap_or(std::cmp::Ordering::Equal));
+    json::obj(vec![
+        ("trace_id", json::s("live-session")),
+        (
+            "events",
+            json::arr(stamped.into_iter().map(|(_, event)| event).collect()),
+        ),
+    ])
+}
+
+fn event_matches(event_type: &str, responsibilities: &[String]) -> bool {
+    const GROUPS: &[(&[&str], &[&str])] = &[
+        (
+            &["file_scan", "modified", "write"],
+            &[
+                "write", "edit", "modify", "implement", "develop", "build", "author", "produce",
+                "create", "code", "fix",
+            ],
+        ),
+        (
+            &["acquire_lock", "release_lock", "refresh_lock"],
+            &["coordinate", "lock", "manage", "orchestrate", "synchronize"],
+        ),
+        (
+            &["get_notifications", "prune_notifications"],
+            &["notify", "coordinate", "monitor", "track", "observe"],
+        ),
+        (
+            &["read", "search", "explore"],
+            &[
+                "read", "review", "explore", "research", "investigate", "analyze", "examine",
+                "inspect", "quality",
+            ],
+        ),
+        (
+            &["test", "run_tests"],
+            &["test", "verify", "validate", "quality", "qa", "check", "assert", "ensure"],
+        ),
+        (
+            &["plan", "decompose"],
+            &[
+                "plan", "decompose", "design", "architect", "organize", "prioritize", "schedule",
+                "scope",
+            ],
+        ),
+        (
+            &["deploy", "release", "publish"],
+            &["deploy", "release", "publish", "ship", "deliver", "pipeline"],
+        ),
+    ];
+    for (types, keywords) in GROUPS {
+        if types.contains(&event_type) {
+            for resp in responsibilities {
+                let lower = resp.to_ascii_lowercase();
+                if keywords.iter().any(|word| lower.contains(word)) {
+                    return true;
+                }
+            }
+            return false;
+        }
+    }
+    let tokens: Vec<String> = event_type
+        .to_ascii_lowercase()
+        .replace('_', " ")
+        .split_whitespace()
+        .map(|s| s.to_string())
+        .collect();
+    responsibilities.iter().any(|resp| {
+        resp.to_ascii_lowercase()
+            .split_whitespace()
+            .any(|word| tokens.iter().any(|token| token == word))
+    })
+}
+
+fn score_trace(trace: &Value, graph: Option<&Graph>) -> Value {
+    let events = trace.get("events").and_then(Value::as_array);
+    let empty = Vec::new();
+    let events = events.unwrap_or(&empty);
+    let mut agent_graph: Vec<(String, String)> = Vec::new();
+    let mut agent_parent: Vec<(String, String)> = Vec::new();
+    for event in events {
+        if event.get("type").and_then(Value::as_str) == Some("register") {
+            if let Some(id) = event.get("agent_id").and_then(Value::as_str) {
+                agent_graph.push((
+                    id.into(),
+                    event
+                        .get("graph_id")
+                        .and_then(Value::as_str)
+                        .unwrap_or("")
+                        .into(),
+                ));
+                agent_parent.push((
+                    id.into(),
+                    event
+                        .get("parent_id")
+                        .and_then(Value::as_str)
+                        .unwrap_or("")
+                        .into(),
+                ));
+            }
+        }
+    }
+    let lookup = |table: &[(String, String)], key: &str| -> String {
+        table
+            .iter()
+            .find(|(id, _)| id == key)
+            .map(|(_, value)| value.clone())
+            .unwrap_or_default()
+    };
+    let resp_of = |gid: &str| -> Vec<String> {
+        graph
+            .and_then(|graph| graph.agents.iter().find(|agent| agent.id == gid))
+            .map(|agent| agent.responsibilities.clone())
+            .unwrap_or_default()
+    };
+    const PRIMITIVES: &[&str] = &[
+        "lock",
+        "unlock",
+        "notify_change",
+        "register",
+        "handoff",
+        "heartbeat",
+        "acquire_lock",
+        "release_lock",
+        "refresh_lock",
+        "get_notifications",
+        "prune_notifications",
+    ];
+    let role = if events.is_empty() {
+        1.0
+    } else {
+        let mut violations = 0.0;
+        let mut scored = 0.0;
+        for event in events {
+            let kind = event.get("type").and_then(Value::as_str).unwrap_or("");
+            if PRIMITIVES.contains(&kind) {
+                continue;
+            }
+            let aid = event.get("agent_id").and_then(Value::as_str).unwrap_or("");
+            let responsibilities = resp_of(&lookup(&agent_graph, aid));
+            if responsibilities.is_empty() {
+                continue;
+            }
+            scored += 1.0;
+            if !event_matches(kind, &responsibilities) {
+                violations += 1.0;
+            }
+        }
+        if scored == 0.0 {
+            1.0
+        } else {
+            (1.0_f64 - violations / scored).max(0.0)
+        }
+    };
+    let handoff = if graph.is_none() {
+        0.0
+    } else if events.is_empty() {
+        1.0
+    } else {
+        let hands: Vec<&Value> = events
+            .iter()
+            .filter(|event| event.get("type").and_then(Value::as_str) == Some("handoff"))
+            .collect();
+        if hands.is_empty() {
+            1.0
+        } else {
+            let mut score = 0.0;
+            for event in hands.iter() {
+                let from = event.get("from").and_then(Value::as_str).unwrap_or("");
+                let to = event.get("to").and_then(Value::as_str).unwrap_or("");
+                if !graph
+                    .unwrap()
+                    .handoffs
+                    .iter()
+                    .any(|(left, right)| left == from && right == to)
+                {
+                    continue;
+                }
+                let condition = event.get("condition").and_then(Value::as_str).unwrap_or("");
+                if !condition.is_empty() && condition != "always" && condition != "true" {
+                    score += 1.0;
+                } else if condition == "always" || condition == "true" {
+                    score += 0.75;
+                } else {
+                    score += 1.0;
+                }
+            }
+            (score / hands.len() as f64).min(1.0)
+        }
+    };
+    let outcome = if events.is_empty() {
+        1.0
+    } else {
+        let mut locked: Vec<(String, bool)> = Vec::new();
+        let mut checks: Vec<bool> = Vec::new();
+        for event in events {
+            let kind = event.get("type").and_then(Value::as_str).unwrap_or("");
+            let path = event
+                .get("path")
+                .and_then(Value::as_str)
+                .unwrap_or("")
+                .to_string();
+            if kind == "lock" {
+                locked.push((path, false));
+            } else if kind == "write" || kind == "modified" {
+                if let Some(row) = locked.iter_mut().rev().find(|(name, _)| name == &path) {
+                    row.1 = true;
+                } else if !path.is_empty() {
+                    checks.push(false);
+                }
+            } else if kind == "unlock" {
+                if let Some(index) = locked.iter().rposition(|(name, _)| name == &path) {
+                    checks.push(locked[index].1);
+                    locked.remove(index);
+                } else if !path.is_empty() {
+                    checks.push(false);
+                }
+            }
+        }
+        if checks.is_empty() {
+            1.0
+        } else {
+            checks.iter().filter(|item| **item).count() as f64 / checks.len() as f64
+        }
+    };
+    let protocol = if events.is_empty() {
+        1.0
+    } else {
+        let mut violations = 0.0;
+        let mut scored = 0.0;
+        for event in events {
+            let kind = event.get("type").and_then(Value::as_str).unwrap_or("");
+            if PRIMITIVES.contains(&kind) {
+                continue;
+            }
+            let aid = event.get("agent_id").and_then(Value::as_str).unwrap_or("");
+            let responsibilities = resp_of(&lookup(&agent_graph, aid));
+            scored += 1.0;
+            if !responsibilities.is_empty() && !event_matches(kind, &responsibilities) {
+                violations += 1.0;
+            }
+        }
+        if scored == 0.0 {
+            1.0
+        } else {
+            (1.0_f64 - violations / scored).max(0.0)
+        }
+    };
+    let spawn = if events.is_empty() {
+        1.0
+    } else {
+        let mut violations = 0.0;
+        let mut scored = 0.0;
+        for event in events {
+            let kind = event.get("type").and_then(Value::as_str).unwrap_or("");
+            if PRIMITIVES.contains(&kind) {
+                continue;
+            }
+            let aid = event.get("agent_id").and_then(Value::as_str).unwrap_or("");
+            let mut responsibilities = resp_of(&lookup(&agent_graph, aid));
+            let parent = lookup(&agent_parent, aid);
+            if !parent.is_empty() {
+                responsibilities.extend(resp_of(&lookup(&agent_graph, &parent)));
+            }
+            if responsibilities.is_empty() {
+                continue;
+            }
+            scored += 1.0;
+            if !event_matches(kind, &responsibilities) {
+                violations += 1.0;
+            }
+        }
+        if scored == 0.0 {
+            1.0
+        } else {
+            (1.0_f64 - violations / scored).max(0.0)
+        }
+    };
+    let markers = ["transfer", "leaseExpired", "leadershipClaimed"];
+    let leader = if events.is_empty() {
+        1.0
+    } else {
+        let count = events
+            .iter()
+            .filter(|event| {
+                event
+                    .get("type")
+                    .and_then(Value::as_str)
+                    .map(|kind| markers.contains(&kind))
+                    .unwrap_or(false)
+            })
+            .count();
+        if count == 0 {
+            1.0
+        } else {
+            (1.0 - count as f64 * 0.25).max(0.0)
+        }
+    };
+    json::obj(vec![
+        ("role_stability", json::f(role)),
+        ("handoff_latency", json::f(handoff)),
+        ("outcome_verifiability", json::f(outcome)),
+        ("protocol_adherence", json::f(protocol)),
+        ("spawn_propagation", json::f(spawn)),
+        ("leader_stability", json::f(leader)),
+    ])
+}
+
 fn format_report(result: &Value) -> String {
     let name = result
         .get("suite_name")
@@ -924,16 +1271,21 @@ fn format_report(result: &Value) -> String {
         .get("overall_score")
         .and_then(Value::as_f64)
         .unwrap_or(0.0);
-    let loaded = result
+    let loaded = if result
         .get("graph_loaded")
         .and_then(Value::as_bool)
-        .unwrap_or(false);
+        .unwrap_or(false)
+    {
+        "True"
+    } else {
+        "False"
+    };
     let run_at = result.get("run_at").and_then(Value::as_f64).unwrap_or(0.0);
-    let stamp = format_local(run_at);
+    let stamp = util::local_stamp(run_at);
     let mut lines = vec![
         format!("# Assessment Report: {name}"),
         String::new(),
-        format!("**Overall Score:** {overall:.2}%").replace(".00%", ".00%"),
+        format!("**Overall Score:** {:.2}%", overall * 100.0),
         format!("**Graph Loaded:** {loaded}"),
         format!("**Run At:** {stamp}"),
     ];
@@ -952,35 +1304,23 @@ fn format_report(result: &Value) -> String {
         }
     }
     lines.push(String::new());
-    // Python's `{:.2%}` multiplies by 100. The overall line above used the raw fraction
-    // with a percent sign, which is wrong. Rebuild the overall line.
-    lines[2] = format!("**Overall Score:** {:.2}%", overall * 100.0);
+    if let Some(Value::Object(traces)) = result.get("traces") {
+        if !traces.is_empty() {
+            lines.push("## Per-Trace Breakdown".into());
+            lines.push(String::new());
+            for (trace_id, scores) in traces {
+                lines.push(format!("### {trace_id}"));
+                if let Value::Object(pairs) = scores {
+                    for (metric, score) in pairs {
+                        let n = score.as_f64().unwrap_or(0.0);
+                        lines.push(format!("- {metric}: {:.2}%", n * 100.0));
+                    }
+                }
+                lines.push(String::new());
+            }
+        }
+    }
     lines.join("\n")
-}
-
-fn format_local(epoch: f64) -> String {
-    let secs = epoch as i64;
-    let days = secs.div_euclid(86_400);
-    let tod = secs.rem_euclid(86_400);
-    let hour = tod / 3600;
-    let min = (tod % 3600) / 60;
-    let sec = tod % 60;
-    let (year, month, day) = civil_from_days(days);
-    format!("{year:04}-{month:02}-{day:02} {hour:02}:{min:02}:{sec:02}")
-}
-
-fn civil_from_days(days: i64) -> (i64, u32, u32) {
-    let z = days + 719_468;
-    let era = if z >= 0 { z } else { z - 146_096 } / 146_097;
-    let doe = (z - era * 146_097) as u64;
-    let yoe = (doe - doe / 1460 + doe / 36524 - doe / 146_096) / 365;
-    let y = yoe as i64 + era * 400;
-    let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
-    let mp = (5 * doy + 2) / 153;
-    let d = doy - (153 * mp + 2) / 5 + 1;
-    let m = if mp < 10 { mp + 3 } else { mp - 9 };
-    let y = if m <= 2 { y + 1 } else { y };
-    (y, m as u32, d as u32)
 }
 
 pub fn who(
@@ -1003,8 +1343,15 @@ pub fn who(
                     ("error", json::s("agent_id and area are required")),
                 ]);
             };
+            if !agent_live(state, agent_id, now) {
+                return json::obj(vec![
+                    ("claimed", json::b(false)),
+                    ("error", json::s("agent is not registered")),
+                    ("agent_id", json::s(agent_id)),
+                ]);
+            }
             if let Some(existing) = state.claims.iter().find(|claim| {
-                claim.area == area && claim.agent_id != agent_id && claim.expires_at > now
+                claim.agent_id != agent_id && claim.expires_at > now && areas_overlap(&claim.area, area)
             }) {
                 return json::obj(vec![
                     ("claimed", json::b(false)),
@@ -1073,6 +1420,12 @@ pub fn who(
                     ),
                 ]);
             };
+            if !agent_live(state, agent_id, now) || !agent_live(state, to_agent, now) {
+                return json::obj(vec![
+                    ("handed_off", json::b(false)),
+                    ("error", json::s("agent is not registered")),
+                ]);
+            }
             let Some(pos) = state.claims.iter().position(|claim| {
                 claim.area == area && claim.agent_id == agent_id && claim.expires_at > now
             }) else {
@@ -1099,17 +1452,36 @@ pub fn who(
     }
 }
 
+fn agent_live(state: &State, agent_id: &str, now: f64) -> bool {
+    let stale = util::env_f64("COORDINATIONHUB_AGENTS_STALE_TIMEOUT_S", 600.0);
+    match state.agent(agent_id) {
+        Some(agent) if agent.status == "active" => now - agent.last_heartbeat <= stale,
+        _ => false,
+    }
+}
+
+fn areas_overlap(left: &str, right: &str) -> bool {
+    if left == right {
+        return true;
+    }
+    let pathish = |value: &str| value.contains('/') || value.contains('\\');
+    if !pathish(left) || !pathish(right) {
+        return false;
+    }
+    let left = left.trim_end_matches(['/', '\\']);
+    let right = right.trim_end_matches(['/', '\\']);
+    left == right
+        || left.starts_with(&format!("{right}/"))
+        || right.starts_with(&format!("{left}/"))
+        || left.starts_with(&format!("{right}\\"))
+        || right.starts_with(&format!("{left}\\"))
+}
+
 fn expire_claims(state: &mut State, now: f64) {
     let dead: Vec<Claim> = state
         .claims
         .iter()
-        .filter(|claim| {
-            claim.expires_at <= now
-                || state
-                    .agent(&claim.agent_id)
-                    .map(|agent| agent.status != "active")
-                    .unwrap_or(true)
-        })
+        .filter(|claim| claim.expires_at <= now || !agent_live(state, &claim.agent_id, now))
         .cloned()
         .collect();
     for claim in dead {
@@ -1257,9 +1629,21 @@ pub fn dashboard(state: &State) -> Value {
                         json::obj(vec![
                             ("id", json::s(&task.id)),
                             ("parent_agent_id", json::s(&task.parent_agent_id)),
+                            ("parent_task_id", json::opt_string(&task.parent_task_id)),
+                            ("assigned_agent_id", json::opt_string(&task.assigned_agent_id)),
                             ("description", json::s(&task.description)),
                             ("status", json::s(&task.status)),
+                            (
+                                "depends_on",
+                                json::parse(&task.depends_on)
+                                    .unwrap_or_else(|_| json::arr(vec![])),
+                            ),
+                            ("blocked_by", json::opt_string(&task.blocked_by)),
+                            ("summary", json::opt_string(&task.summary)),
                             ("priority", json::i(task.priority)),
+                            ("error", json::opt_string(&task.error)),
+                            ("created_at", json::f(task.created_at)),
+                            ("updated_at", json::f(task.updated_at)),
                         ])
                     })
                     .collect(),
@@ -1290,11 +1674,22 @@ pub fn dashboard(state: &State) -> Value {
                     .locks
                     .iter()
                     .map(|lock| {
+                        let owner = state
+                            .ownership
+                            .iter()
+                            .find(|row| row.document_path == lock.document_path)
+                            .map(|row| row.assigned_agent_id.clone());
                         json::obj(vec![
                             ("id", json::i(lock.id)),
                             ("document_path", json::s(&lock.document_path)),
                             ("locked_by", json::s(&lock.locked_by)),
+                            ("locked_at", json::f(lock.locked_at)),
+                            ("lock_ttl", json::f(lock.lock_ttl)),
                             ("lock_type", json::s(&lock.lock_type)),
+                            ("region_start", json::opt_i(lock.region_start)),
+                            ("region_end", json::opt_i(lock.region_end)),
+                            ("worktree_root", json::opt_string(&lock.worktree_root)),
+                            ("owner_agent_id", json::opt_string(&owner)),
                         ])
                     })
                     .collect(),
@@ -1316,7 +1711,87 @@ pub fn dashboard(state: &State) -> Value {
                     .collect(),
             ),
         ),
+        (
+            "handoffs",
+            json::arr(
+                state
+                    .handoffs
+                    .iter()
+                    .rev()
+                    .take(100)
+                    .map(|row| {
+                        json::obj(vec![
+                            ("id", json::i(row.id)),
+                            ("from_agent_id", json::s(&row.from_agent_id)),
+                            (
+                                "to_agents",
+                                json::parse(&row.to_agents).unwrap_or_else(|_| json::arr(vec![])),
+                            ),
+                            ("document_path", json::opt_string(&row.document_path)),
+                            ("handoff_type", json::s(&row.handoff_type)),
+                            ("status", json::s(&row.status)),
+                            ("created_at", json::f(row.created_at)),
+                            (
+                                "acknowledged_at",
+                                match row.acknowledged_at {
+                                    Some(n) => json::f(n),
+                                    None => json::null(),
+                                },
+                            ),
+                            (
+                                "completed_at",
+                                match row.completed_at {
+                                    Some(n) => json::f(n),
+                                    None => json::null(),
+                                },
+                            ),
+                        ])
+                    })
+                    .collect(),
+            ),
+        ),
+        (
+            "dependencies",
+            json::arr(
+                state
+                    .dependencies
+                    .iter()
+                    .map(|row| {
+                        json::obj(vec![
+                            ("id", json::i(row.id)),
+                            ("dependent_agent_id", json::s(&row.dependent_agent_id)),
+                            ("depends_on_agent_id", json::s(&row.depends_on_agent_id)),
+                            (
+                                "depends_on_task_id",
+                                json::opt_string(&row.depends_on_task_id),
+                            ),
+                            ("condition", json::s(&row.condition)),
+                            ("satisfied", json::b(row.satisfied != 0)),
+                            ("created_at", json::f(row.created_at)),
+                        ])
+                    })
+                    .collect(),
+            ),
+        ),
     ])
+}
+
+pub fn claim_ownership(state: &mut State, path: &str, agent_id: &str, project_root: Option<&Path>) {
+    let norm = normalize_path(path, project_root);
+    if state
+        .ownership
+        .iter()
+        .any(|row| row.document_path == norm)
+    {
+        return;
+    }
+    state.ownership.push(Ownership {
+        document_path: norm,
+        assigned_agent_id: agent_id.into(),
+        assigned_at: util::now(),
+        last_claimed_by: Some(agent_id.into()),
+        task_description: None,
+    });
 }
 
 pub fn norm_area(area: &str, project_root: Option<&Path>) -> String {

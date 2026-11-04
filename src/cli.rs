@@ -307,9 +307,33 @@ fn run_tool_command(command: &str, args: &[String]) -> i32 {
             return 1;
         }
     };
+    if command == "list-agents" || command == "dashboard" {
+        let timeout = flag(&flags, "stale_timeout")
+            .and_then(|v| v.parse().ok())
+            .unwrap_or(600.0);
+        let _ = engine.call(
+            "admin_locks",
+            &json::obj(vec![
+                ("action", json::s("reap_stale")),
+                ("timeout", json::f(timeout)),
+            ]),
+        );
+    }
     match engine.call(&tool, &payload) {
         Ok(value) => {
-            if let Some(render) = text {
+            if command == "heartbeat" {
+                let id = flags.positionals.first().map(|s| s.as_str()).unwrap_or("");
+                let updated = value.get("updated").and_then(Value::as_bool).unwrap_or(false);
+                println!("Heartbeat: {id} — updated: {}", py_bool(updated));
+            } else if command == "deregister" {
+                let id = flags.positionals.first().map(|s| s.as_str()).unwrap_or("");
+                println!("Deregistered: {id}");
+                render_deregister(&value);
+            } else if command == "agent-tree" {
+                if let Some(text) = value.get("text_tree").and_then(Value::as_str) {
+                    println!("{text}");
+                }
+            } else if let Some(render) = text {
                 render(&value);
             }
             0
@@ -397,6 +421,39 @@ fn command_args(
                     ),
                 ),
                 ("force", json::b(has(flags, "force"))),
+                ("retry", json::b(has(flags, "retry"))),
+                (
+                    "max_retries",
+                    json::i(
+                        flag(flags, "max_retries")
+                            .and_then(|v| v.parse().ok())
+                            .unwrap_or(5),
+                    ),
+                ),
+                (
+                    "backoff_ms",
+                    json::f(
+                        flag(flags, "backoff_ms")
+                            .and_then(|v| v.parse().ok())
+                            .unwrap_or(100.0),
+                    ),
+                ),
+                (
+                    "timeout_ms",
+                    json::f(
+                        flag(flags, "timeout_ms")
+                            .and_then(|v| v.parse().ok())
+                            .unwrap_or(5000.0),
+                    ),
+                ),
+                (
+                    "region_start",
+                    json::opt_i(flag(flags, "region_start").and_then(|v| v.parse().ok())),
+                ),
+                (
+                    "region_end",
+                    json::opt_i(flag(flags, "region_end").and_then(|v| v.parse().ok())),
+                ),
             ]),
             None,
         ),
@@ -514,7 +571,15 @@ fn command_args(
             None,
         ),
         "dashboard" => ("status", json::obj(vec![]), None),
-        _ => return Ok(None),
+        _ => {
+            return crate::cli_cmds::extra(
+                command,
+                pos,
+                |key| flag(flags, key).map(|s| s.to_string()),
+                |key| has(flags, key),
+            )
+            .map(|found| found.map(|(tool, value)| (tool, value, None)));
+        }
     };
     Ok(Some((pair.0.to_string(), pair.1, pair.2)))
 }
@@ -523,14 +588,17 @@ fn render_status(value: &Value) {
     println!("CoordinationHub Status");
     if let Value::Object(pairs) = value {
         for (key, item) in pairs {
-            let label = key.replace('_', " ");
-            let label = {
-                let mut chars = label.chars();
-                match chars.next() {
-                    Some(first) => first.to_uppercase().collect::<String>() + chars.as_str(),
-                    None => String::new(),
-                }
-            };
+            let label = key
+                .split('_')
+                .map(|word| {
+                    let mut chars = word.chars();
+                    match chars.next() {
+                        Some(first) => first.to_uppercase().collect::<String>() + chars.as_str(),
+                        None => String::new(),
+                    }
+                })
+                .collect::<Vec<_>>()
+                .join(" ");
             println!("  {label}: {}", json::dumps(item));
         }
     }
@@ -551,12 +619,34 @@ fn render_register(value: &Value) {
     );
 }
 
+fn py_bool(value: bool) -> &'static str {
+    if value {
+        "True"
+    } else {
+        "False"
+    }
+}
+
 fn render_heartbeat(value: &Value) {
-    let _ = value;
+    let updated = value.get("updated").and_then(Value::as_bool).unwrap_or(false);
+    println!("Heartbeat: updated: {}", py_bool(updated));
 }
 
 fn render_deregister(value: &Value) {
-    let _ = value;
+    println!(
+        "  Children orphaned: {}",
+        value
+            .get("children_orphaned")
+            .and_then(Value::as_i64)
+            .unwrap_or(0)
+    );
+    println!(
+        "  Locks released: {}",
+        value
+            .get("locks_released")
+            .and_then(Value::as_i64)
+            .unwrap_or(0)
+    );
 }
 
 fn render_agents(value: &Value) {
@@ -628,42 +718,73 @@ fn run_doctor(args: &[String]) -> i32 {
     });
     let storage = crate::db::resolve_storage(flags.storage.as_deref(), root.as_deref());
     let db = storage.join("coordination.jsonl");
-    let ok_bin = true;
-    let ok_db = db.is_file();
-    println!(
-        "  [{}] binary: coordinationhub {}",
-        if ok_bin { "OK  " } else { "FAIL" },
-        crate::VERSION
-    );
-    println!(
-        "  [{}] storage: {}",
-        if ok_db { "OK  " } else { "FAIL" },
-        db.display()
-    );
-    if ok_db {
-        0
-    } else {
-        1
+    let mut failed = false;
+    let mark = |ok: bool| {
+        if ok {
+            "OK  "
+        } else {
+            "FAIL"
+        }
+    };
+    println!("  [{}] binary: coordinationhub {}", mark(true), crate::VERSION);
+    let home = std::env::var("HOME")
+        .or_else(|_| std::env::var("USERPROFILE"))
+        .unwrap_or_else(|_| ".".into());
+    let hooks = PathBuf::from(&home).join(".coordinationhub").join("hooks.json");
+    let hooks_text = std::fs::read_to_string(&hooks).unwrap_or_default();
+    let hooks_ok = ["SessionStart", "PreToolUse", "PostToolUse", "SubagentStart", "SubagentStop", "SessionEnd"]
+        .iter()
+        .all(|name| hooks_text.contains(name))
+        && hooks_text.contains("coordinationhub");
+    if !hooks_ok {
+        failed = true;
     }
+    println!("  [{}] hooks: {}", mark(hooks_ok), hooks.display());
+    let dir_ok = storage.is_dir();
+    if !dir_ok {
+        failed = true;
+    }
+    println!("  [{}] storage dir: {}", mark(dir_ok), storage.display());
+    let db_ok = db.is_file();
+    if !db_ok {
+        failed = true;
+    }
+    println!("  [{}] journal: {}", mark(db_ok), db.display());
+    let readable = std::fs::read_to_string(&db)
+        .map(|text| text.lines().all(|line| line.trim().is_empty() || json::parse(line).is_ok()))
+        .unwrap_or(false);
+    if db_ok && !readable {
+        failed = true;
+    }
+    println!(
+        "  [{}] journal lines: {}",
+        mark(!db_ok || readable),
+        if readable { "readable" } else { "unreadable" }
+    );
+    if failed { 1 } else { 0 }
 }
 
 fn run_hook(args: &[String]) -> i32 {
+    let flags = parse_flags(args);
     let mut input = String::new();
     use std::io::Read;
     let _ = std::io::stdin().read_to_string(&mut input);
     let event = json::parse(&input).unwrap_or(Value::Object(vec![]));
-    let name = event
-        .get("hook_event_name")
+    let cwd = event
+        .get("cwd")
         .and_then(Value::as_str)
-        .unwrap_or("");
-    println!(
-        "{}",
-        json::dumps(&json::obj(vec![
-            ("hook", json::s(name)),
-            ("ok", json::b(true))
-        ]))
-    );
-    let _ = args;
+        .map(PathBuf::from)
+        .or(flags.project.clone());
+    let mut engine = match Engine::open(flags.storage.as_deref(), cwd.as_deref(), &flags.namespace) {
+        Ok(engine) => engine,
+        Err(err) => {
+            eprintln!("[CoordinationHub] hook error: {err}");
+            return 0;
+        }
+    };
+    if let Some(result) = crate::hooks::handle(&mut engine, &event) {
+        println!("{}", json::dumps(&result));
+    }
     0
 }
 
