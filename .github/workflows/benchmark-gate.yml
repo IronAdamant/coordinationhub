@@ -19,15 +19,24 @@ jobs:
           git config --global --add safe.directory "$PWD"
           git remote add origin "https://github.com/${{ github.repository }}.git"
           git -c protocol.version=2 fetch --depth=1 origin "${{ github.event.pull_request.head.sha || github.sha }}"
-          git fetch --depth=1 origin python-legacy
           git checkout --force FETCH_HEAD
+          git fetch --depth=1 origin python-legacy
 
       - name: Install Rust
         shell: bash
         run: |
           set -euxo pipefail
-          curl --proto '=https' --tlsv1.2 -fsSL https://sh.rustup.rs | sh -s -- -y --default-toolchain 1.83.0
-          source "$HOME/.cargo/env"
+          if command -v rustup >/dev/null 2>&1; then
+            echo "using existing rustup"
+          else
+            curl --proto '=https' --tlsv1.2 -fsSL https://sh.rustup.rs | sh -s -- -y --default-toolchain 1.83.0
+          fi
+          if [ -f "$HOME/.cargo/env" ]; then
+            . "$HOME/.cargo/env" || true
+          fi
+          export PATH="$HOME/.cargo/bin:$PATH"
+          rustup toolchain install 1.83.0 --profile minimal
+          rustup default 1.83.0
           echo "$HOME/.cargo/bin" >> "$GITHUB_PATH"
 
       - name: Python legacy tree
@@ -41,7 +50,10 @@ jobs:
         env:
           RUSTFLAGS: "-D warnings"
         run: |
-          source "$HOME/.cargo/env"
+          if [ -f "$HOME/.cargo/env" ]; then
+            . "$HOME/.cargo/env" || true
+          fi
+          export PATH="$HOME/.cargo/bin:$PATH"
           cargo build --release
 
       - name: Rust must be faster on every row
