@@ -1,0 +1,29 @@
+name: Benchmark gate
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+jobs:
+  benchmark-gate:
+    name: benchmark-gate
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: dtolnay/rust-toolchain@1.83.0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Fetch the Python tree
+        run: git fetch origin python-legacy:python-legacy
+      - name: Build
+        run: cargo build --locked --release
+      - name: Rust must beat Python on every row
+        env:
+          COORDINATIONHUB_BENCH_LOOPS: "200"
+          COORDINATIONHUB_BENCH_RUNS: "3"
+        run: python3 parity/bench.py target/release/coordinationhub

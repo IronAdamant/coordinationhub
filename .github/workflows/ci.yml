@@ -1,0 +1,66 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  test:
+    name: test (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, ubuntu-24.04-arm, macos-latest, macos-13, windows-latest, windows-11-arm]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@1.83.0
+      - name: Test
+        run: cargo test --locked --release
+      - name: No crate dependencies
+        if: runner.os == 'Linux' && runner.arch == 'X64'
+        shell: bash
+        run: python3 scripts/check_zero_deps.py
+      - name: No leftover markers
+        if: runner.os == 'Linux' && runner.arch == 'X64'
+        shell: bash
+        run: python3 scripts/check_no_todos.py
+
+  python-legacy:
+    name: python-legacy still runs
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Fetch the Python tree
+        run: git fetch origin python-legacy:python-legacy
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install and import
+        run: |
+          set -euo pipefail
+          git worktree add /tmp/coordinationhub-python python-legacy
+          python -m pip install -e "/tmp/coordinationhub-python"
+          python -c "import coordinationhub; assert coordinationhub.__version__ == '0.8.0'"
+          python -m pytest /tmp/coordinationhub-python/tests -q --tb=line
+
+  parity:
+    name: parity harness
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: dtolnay/rust-toolchain@1.83.0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Fetch the Python tree
+        run: git fetch origin python-legacy:python-legacy
+      - name: Build
+        run: cargo build --locked --release
+      - name: Compare
+        run: python3 parity/harness.py target/release/coordinationhub

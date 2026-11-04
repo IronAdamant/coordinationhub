@@ -7,6 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.0.0] - 2026-11-04
+
+Rust rewrite of the Python 0.8.0 program. The Python tree remains on `python-legacy`.
+
+### Added
+- Stdio MCP server, HTTP dashboard server, and CLI, with no Cargo crates
+- Parity harness (`parity/harness.py`) and benchmark gate (`parity/bench.py`)
+- `who` for a compact picture plus claim, handoff, and release of a work area
+- Release workflow that builds linux x64, linux arm64, macOS x64, macOS arm64, and Windows x64, with `SHA256SUMS`
+
+### Changed
+- On-disk state is `coordination.jsonl` instead of `coordination.db`. See `MIGRATION.md`.
+
 ## [0.8.0] - 2026-06-11
 
 **Final release.** Development is paused — see the README retrospective.

@@ -1,5 +1,15 @@
 # LLM_Development.md — CoordinationHub
 
+## 2026-11-04 — Rust rewrite
+
+- Kept Python 0.8.0 on `python-legacy` before editing.
+- Replaced the runtime with a std-only Rust binary: MCP, CLI, HTTP dashboard, append-only journal.
+- Parity harness diffs 0 against the legacy tree, with the normalisers in `PARITY.md`.
+- Added `who` (claim, handoff, release, compact status). Relatum and stele-context stay the document and the code map.
+- Benchmarks in `BENCHMARKS.md` are from `parity/bench.py` on this VM. Rust was faster on every row.
+
+
+
 **Version:** <!-- GEN:version -->0.8.0<!-- /GEN -->
 **Last updated:** 2026-06-11
 
