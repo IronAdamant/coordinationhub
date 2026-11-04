@@ -62,5 +62,7 @@ jobs:
         run: git fetch origin python-legacy:python-legacy
       - name: Build
         run: cargo build --locked --release
+      - name: Install the stdio package Python 0.8.0 needs
+        run: python -m pip install "mcp==1.30.0"
       - name: Compare
         run: python3 parity/harness.py target/release/coordinationhub

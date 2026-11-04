@@ -1,12 +1,17 @@
 # LLM_Development.md — CoordinationHub
 
+## 2026-11-04 — Verification fixes
+
+- The frozen-clock harness result is withdrawn. The harness now drives unmodified Python 0.8.0 and Rust over stdio with a live clock.
+- The store lock is per call. Wait tools sleep. Handoffs, spawns, notifications, tasks, UTF-8, assessment, the dashboard stream, the hook, doctor, and the CLI commands follow the Python shapes except the differences listed in `MIGRATION.md`.
+- `tests/behavior.rs` covers sharing, waits, handoffs, unicode, and `who`.
+- Benchmarks in `BENCHMARKS.md` are stdio medians from this machine. Rust was faster on every row.
+
 ## 2026-11-04 — Rust rewrite
 
 - Kept Python 0.8.0 on `python-legacy` before editing.
 - Replaced the runtime with a std-only Rust binary: MCP, CLI, HTTP dashboard, append-only journal.
-- Parity harness diffs 0 against the legacy tree, with the normalisers in `PARITY.md`.
 - Added `who` (claim, handoff, release, compact status). Relatum and stele-context stay the document and the code map.
-- Benchmarks in `BENCHMARKS.md` are from `parity/bench.py` on this VM. Rust was faster on every row.
 
 
 

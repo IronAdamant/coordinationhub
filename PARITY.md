@@ -1,18 +1,38 @@
 # Parity with Python 0.8.0
 
-The harness is `parity/harness.py`. It loads Python from the `python-legacy` branch and the Rust binary from `target/release/coordinationhub`. Both sides see the same tool name and the same JSON arguments, with the clock fixed at 1700000000 and the PID fixed at 4242.
+The harness is `parity/harness.py`. It starts unmodified Python 0.8.0 (`python-legacy`, stdio, `mcp==1.30.0`) and the Rust binary. Both use the real clock. Time fields and pids are omitted from the compare because two processes do not share one timestamp. Nothing else is rewritten. `status.tools` is left at 51 on the Rust side and recorded in the ledger.
 
-Latest run on this branch: `diffs 0` (exit 0).
+The earlier harness froze `time.time`, `os.getpid`, and every timeout at 0, and it rewrote `status.tools` to 50. That run is withdrawn. It is not a result.
 
-The compare sorts agent rows by `agent_id` when every row has a heartbeat, sorts conflict rows by `id`, and rewrites `status.tools` to 50. Those three normalisers are deliberate:
+## Ledger
 
-- SQLite does not define order when every heartbeat is the same instant. One Python query returned newest-first and the next oldest-first.
-- Conflict rows with the same timestamp came back in either id order.
-- `who` makes the Rust tool count 51. The field is the only numeric change in `status`.
+Fixed in this branch, and covered by `tests/behavior.rs` plus the stdio harness:
+
+- Several processes share one journal. The lock is per call.
+- Wait tools sleep and return real `waited_s` values and the Python reply shapes.
+- `await_subagent_registration` waits for a reported spawn. `caller_agent_id` must match the parent.
+- A partly acknowledged handoff cannot be completed. Status returns the handoff row.
+- Lock retry, notification pruning, `limit` of -1, available-task filtering, and task query order.
+- UTF-8 agent ids and the em dashes in tool descriptions.
+- Assessment report: per-trace section, True/False, local time, keyword scores.
+- Dashboard rows for handoffs, dependencies, locks, and tasks. `GET /events` stays open.
+- The CLI commands from the Python tree, including heartbeat and deregister text.
+- The hook registers, locks, notifies, and correlates sub-agents.
+- Housekeeping on long-running servers, and `doctor` checks the journal and hooks.
+- `who` rejects overlapping paths, unregistered agents, a lapsed heartbeat, and a bad `ttl`.
+
+Still different on purpose (see MIGRATION.md):
+
+- 51 tools, because of `who`.
+- Unknown dependency satisfaction is `not_found`.
+- Caller `worktree_root` is stored.
+- A forced exclusive lock evicts every shared holder.
+- Server version is this package, not the `mcp` library.
+- Duplicate task ids and validation errors use this program's sentences, not a fake database error and not a fake correlation id.
+
+`cargo test` runs `tests/surface.rs` and `tests/behavior.rs`.
 
 The journal file is not compared. See `MIGRATION.md`.
-
-`cargo test --release` runs `tests/surface.rs`, which calls all 50 Python tools and `who`.
 
 ## Tools (50) plus who
 
