@@ -1,5 +1,11 @@
 # LLM_Development.md — CoordinationHub
 
+## 2026-11-05 — Fourth verification
+
+- Coordination events follow the 0.8.0 publish sites, so prune counts match. A subtask does not emit `task.created`.
+- Descendant rows are appended instead of rewritten, and a clean read does not hash the whole store. A 450-deep chain and the status calls after it are faster than Python.
+- Per-command help is the argparse text, unknown flags exit 2, and a negative flag value is kept.
+
 ## 2026-11-05 — Third verification
 
 - Notification waits use the moment the wait opened, so a stale row does not count as new.

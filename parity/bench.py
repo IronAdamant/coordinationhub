@@ -133,7 +133,19 @@ def main() -> int:
             for _ in range(20):
                 server.call("tools/call", {"name": "get_agent_tree", "arguments": {}})
 
+        def status_450(server: Server) -> None:
+            server.call("initialize", {"protocolVersion": "2024-11-05", "capabilities": {}, "clientInfo": {"name": "bench", "version": "0"}})
+            server.call("tools/call", {"name": "register_agent", "arguments": {"agent_id": "p0"}})
+            parent = "p0"
+            for n in range(1, 450):
+                agent = f"p{n}"
+                server.call("tools/call", {"name": "register_agent", "arguments": {"agent_id": agent, "parent_id": parent}})
+                parent = agent
+            for _ in range(450):
+                server.call("tools/call", {"name": "status", "arguments": {}})
+
         measure("startup_and_status", startup)
+        measure("status_450", status_450)
         measure(f"register_x{LOOPS}", registers)
         measure(f"lock_x{LOOPS}", locks)
         measure(f"tree_x20_after_{LOOPS}", tree)

@@ -27,7 +27,7 @@ TIME_FIELDS = {
     "run_at", "assigned_at", "declared_at", "updated_at", "spawned_at",
     "acknowledged_at", "completed_at", "satisfied_at", "first_attempt_at",
     "last_attempt_at", "dead_letter_at", "acquired_at", "consumed_at", "read_at",
-    "waited_s",
+    "waited_s", "pid",
 }
 # Ledger of differences this harness is allowed to see. Each entry is a
 # substring of the DIFF title. Add one only when MIGRATION.md explains it.
@@ -35,10 +35,8 @@ ALLOWED = (
     "initialize.serverInfo.version",
     "status.tools",
     "register_agent.worktree_root",
-    "duplicate task error text",
     "satisfy unknown dependency",
     "force exclusive evicts every shared holder",
-    "validation error wording",
 )
 
 CALLS = [
@@ -112,6 +110,23 @@ class Stdio:
         self.proc.wait(timeout=5)
 
 
+def mask_time_literals(text: str) -> str:
+    """Keep each time literal's type, and hide the reading itself.
+
+    Two processes do not share a clock. ``1`` and ``1.0`` stay different.
+    """
+    import re
+
+    pattern = r'"(' + "|".join(sorted(TIME_FIELDS)) + r')"\s*:\s*(-?\d+(?:\.\d+)?(?:[eE][+-]?\d+)?)'
+
+    def repl(match: re.Match[str]) -> str:
+        literal = match.group(2)
+        kind = "float" if any(ch in literal for ch in ".eE") else "int"
+        return f'"{match.group(1)}":<{kind}>'
+
+    return re.sub(pattern, repl, text)
+
+
 def scrub(value):
     if isinstance(value, dict):
         return {
@@ -182,21 +197,21 @@ def main() -> int:
                 title = f"{index}:{name}"
                 if name == "register_agent" and "worktree_root" in args:
                     title = "register_agent.worktree_root"
-                left_body = scrub(json.loads(tool_text(left))) if tool_text(left).startswith("{") else tool_text(left)
-                right_body = scrub(json.loads(tool_text(right))) if tool_text(right).startswith("{") else tool_text(right)
-                if name == "status" and isinstance(left_body, dict) and isinstance(right_body, dict):
-                    if left_body.get("tools") != right_body.get("tools"):
+                left_raw = tool_text(left)
+                right_raw = tool_text(right)
+                if name == "status":
+                    if '"tools": 50' in left_raw and '"tools": 51' in right_raw:
                         diffs.append("status.tools")
                         print("LEDGER status.tools rust counts who, so the number is 51")
-                    left_body.pop("tools", None)
-                    right_body.pop("tools", None)
-                if left_body != right_body:
+                        left_raw = left_raw.replace('"tools": 50', '"tools": 0')
+                        right_raw = right_raw.replace('"tools": 51', '"tools": 0')
+                if mask_time_literals(left_raw) != mask_time_literals(right_raw):
                     diffs.append(title)
                     print(f"DIFF {title}")
                     print("--- python ---")
-                    print(json.dumps(left_body, ensure_ascii=False)[:800])
+                    print(left_raw[:800])
                     print("--- rust ---")
-                    print(json.dumps(right_body, ensure_ascii=False)[:800])
+                    print(right_raw[:800])
             # Custom worktree is a documented difference. Call it on its own.
             custom = {"agent_id": "rooted", "worktree_root": str(Path(tmp) / "custom")}
             left = json.loads(tool_text(py.request("tools/call", {"name": "register_agent", "arguments": custom})))
@@ -226,7 +241,6 @@ def main() -> int:
                 "manage_work_intents": {"action": "get", "agent_id": "root"},
                 "run_assessment": {"format": "json", "graph_agent_id": "role-not-in-this-hub"},
             }
-            wording = False
             for name in sorted(py_names):
                 arguments = safe.get(name, {})
                 left_raw = tool_text(py.request("tools/call", {"name": name, "arguments": arguments}))
@@ -235,18 +249,11 @@ def main() -> int:
                     import re
                     left_raw = re.sub(r"Run At:\*\* [^\\]+", "Run At:** ", left_raw)
                     right_raw = re.sub(r"Run At:\*\* [^\\]+", "Run At:** ", right_raw)
-                left_body = load_body(left_raw)
-                right_body = load_body(right_raw)
-                if name == "status" and isinstance(left_body, dict) and isinstance(right_body, dict):
-                    left_body.pop("tools", None)
-                    right_body.pop("tools", None)
-                if left_body == right_body:
-                    continue
-                both_validation = (
-                    "Input validation error" in left_raw and "Input validation error" in right_raw
-                )
-                if both_validation:
-                    wording = True
+                if name == "status":
+                    if '"tools": 50' in left_raw and '"tools": 51' in right_raw:
+                        left_raw = left_raw.replace('"tools": 50', '"tools": 0')
+                        right_raw = right_raw.replace('"tools": 51', '"tools": 0')
+                if mask_time_literals(left_raw) == mask_time_literals(right_raw):
                     continue
                 diffs.append(f"tool:{name}")
                 print(f"DIFF tool:{name}")
@@ -254,9 +261,6 @@ def main() -> int:
                 print(left_raw[:300])
                 print("--- rust ---")
                 print(right_raw[:300])
-            if wording:
-                diffs.append("validation error wording")
-                print("LEDGER validation error wording differs after the shared prefix")
         finally:
             py.close()
             rs.close()
@@ -316,6 +320,38 @@ def main() -> int:
                 print((py_proc.stdout + py_proc.stderr)[:300])
                 print("--- rust ---")
                 print((rs_proc.stdout + rs_proc.stderr)[:300])
+
+        help_proc_py = subprocess.run(
+            [sys.executable, "-m", "coordinationhub", "acquire-lock", "--help"],
+            env=env, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
+        )
+        help_proc_rs = subprocess.run(
+            [str(binary), "acquire-lock", "--help"],
+            env=env, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
+        )
+        if help_proc_py.stdout != help_proc_rs.stdout or help_proc_py.returncode != help_proc_rs.returncode:
+            diffs.append("cli help acquire-lock")
+            print("DIFF cli help acquire-lock")
+        unknown_py = subprocess.run(
+            [sys.executable, "-m", "coordinationhub", "heartbeat", "ada", "--nope"],
+            env=env, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
+        )
+        unknown_rs = subprocess.run(
+            [str(binary), "heartbeat", "ada", "--nope"],
+            env=env, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
+        )
+        if unknown_py.returncode != unknown_rs.returncode or unknown_py.stderr != unknown_rs.stderr:
+            diffs.append("cli unknown flag")
+            print("DIFF cli unknown flag")
+            print(unknown_py.stderr[:200])
+            print(unknown_rs.stderr[:200])
+        json_py = run_side("py", ["cancel-spawn", "missing-row", "--json"], Path(tmp) / "json-py")
+        json_rs = run_side("rs", ["cancel-spawn", "missing-row", "--json"], Path(tmp) / "json-rs")
+        if json_py.returncode != json_rs.returncode or json_py.stdout != json_rs.stdout:
+            diffs.append("cli cancel-spawn json")
+            print("DIFF cli cancel-spawn json", json_py.returncode, json_rs.returncode)
+            print(json_py.stdout[:200])
+            print(json_rs.stdout[:200])
         unexpected = [item for item in diffs if not any(token in item for token in ALLOWED)]
         print(f"ledger {len(diffs)} difference(s), {len(unexpected)} unexpected")
         for item in diffs:
