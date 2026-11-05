@@ -474,10 +474,14 @@ impl Store {
                 .append(true)
                 .open(&self.path)
                 .map_err(|e| e.to_string())?;
+            // One write per commit: fewer system calls, and the call's lines
+            // land together.
+            let mut batch = String::with_capacity(lines.iter().map(|line| line.len() + 1).sum());
             for line in &lines {
-                file.write_all(line.as_bytes()).map_err(|e| e.to_string())?;
-                file.write_all(b"\n").map_err(|e| e.to_string())?;
+                batch.push_str(line);
+                batch.push('\n');
             }
+            file.write_all(batch.as_bytes()).map_err(|e| e.to_string())?;
             file.flush().map_err(|e| e.to_string())?;
             self.offset = std::fs::metadata(&self.path)
                 .map_err(|e| e.to_string())?
