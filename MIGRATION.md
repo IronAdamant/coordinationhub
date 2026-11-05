@@ -24,7 +24,7 @@ The store is `coordination.jsonl` plus `coordination.lock`, in the directory whe
 - **Satisfying an unknown dependency** (`manage_dependencies` mode `satisfy`, or `satisfy-dependency`) returns `not_found`. 0.8.0 reported it satisfied and recorded an event.
 - **`register_agent` reply.** Its `worktree_root` is the value the caller passed. 0.8.0 replies with the project root. Both store the caller's value.
 - **Forced exclusive lock** removes every conflicting holder, including shared holders. 0.8.0 removed one row and could leave an exclusive lock beside a shared one.
-- **`initialize`** reports this package's version (`1.1.0`). 0.8.0 reports the `mcp` library's version.
+- **`initialize`** reports this package's version (the one `coordinationhub --version` prints). 0.8.0 reports the `mcp` library's version.
 - **Validation wording.** Schema errors start with `Input validation error:` as in 0.8.0; the sentence after it is this program's (for example `limit must be >= 1 (got -1)` where 0.8.0 says `-1 is less than the minimum of 1`).
 - **Housekeeping.** `serve` and `serve-mcp` reap stale agents, expired locks and lapsed claims in the background unless `COORDINATIONHUB_HOUSEKEEPING=0`. 0.8.0 does it only when the variable is `1`.
 - **Hook command.** `init` writes the same seven hook events, matchers, timeouts and status messages, with the command `<this binary> hook` instead of `python -m coordinationhub.hooks.stdio_adapter`, and prints `Hook command:` where 0.8.0 printed `Python interpreter:`. `--auto-dashboard` prints the dashboard command with this binary.
@@ -43,6 +43,7 @@ The store is `coordination.jsonl` plus `coordination.lock`, in the directory whe
   - `task-failure-history` prints `attempt N at <time>: <error>`; 0.8.0 printed `?: <error>`.
   - `report-subagent-spawned` prints `Description: (none)` when there is none; 0.8.0 printed `None`.
   - `get-conflicts`, `get-available-tasks`, `query-tasks`, `get-leader`, `leader-status` and `list-pending-spawns` print their rows. 0.8.0 printed the header and exited 1 with `Error: '<field>'` whenever there was a row. `query-tasks task`, `subtasks` and `tree` print the task(s); 0.8.0 printed `No tasks found`.
+- **An expired coordinator lease has no holder** (1.1.1). Once its `expires_at` has passed, `manage_leases` `get`, `get-leader`, `leader-status` and `ha-dashboard` report no leader, and `refresh` by the old holder is refused with `Lease expired at <time>; call acquire_coordinator_lease to take it again` (CLI exit 4). 0.8.0's `get_lease_holder` documents that an expired lease reads as unheld, but its query never checked the expiry, so a lapsed leader was shown indefinitely and its refresh revived the lease. Acquire and claim treated an expired lease as free in both versions. Releasing your own expired lease still succeeds.
 - **`doctor`, `init` and `auto-start-dashboard` honour `--storage-dir` and `--project-root`.** 0.8.0 accepted the flags and ignored them (it used the current directory's git project or `~/.coordinationhub`).
 
 ### Added at the owner's request
