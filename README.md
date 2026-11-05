@@ -75,6 +75,34 @@ Measured on 5 November 2026 on a Windows 11 desktop: unmodified Python 0.8.0 (CP
 | lock x100 | 1.8191 | 0.1246 |
 | get_agent_tree x20 after 100 agents | 3.2875 | 0.2107 |
 
+## Tool groups
+
+The MCP server exposes 51 tools in seven groups. An agent that only needs part of them can switch the rest off in the client's `env` block; the CLI is not affected. `locks`, `tasks` and `messages` are the names the IronAdamant tools share for overlapping features, so one word means the same thing in every tool.
+
+| Group | Tools | Overlaps with |
+| --- | --- | --- |
+| `core` (always on) | `register_agent`, `heartbeat`, `deregister_agent`, `list_agents`, `status` | |
+| `locks` | `acquire_lock`, `release_lock`, `refresh_lock`, `get_lock_status`, `list_locks`, `admin_locks`, `wait_for_locks`, `get_conflicts`, `get_contention_hotspots`, `manage_work_intents`, `acquire_coordinator_lease`, `manage_leases`, `who` | Chisel locks, Trammel step claims |
+| `tasks` | `create_task`, `create_subtask`, `assign_task`, `update_task_status`, `query_tasks`, `get_available_tasks`, `wait_for_task`, `task_failures`, `manage_dependencies` | Trammel plans |
+| `messages` | `send_message`, `manage_messages`, `broadcast`, `acknowledge_broadcast`, `wait_for_broadcast_acks`, `wait_for_handoff`, `notify_change`, `get_notifications` | |
+| `spawn` | `spawn_subagent`, `report_subagent_spawned`, `get_pending_spawns`, `await_subagent_registration`, `request_subagent_deregistration`, `is_subagent_stop_requested`, `await_subagent_stopped`, `await_agent` | |
+| `agents` | `get_agent_relations`, `get_agent_tree`, `get_agent_status`, `update_agent_status`, `get_file_agent_map` | |
+| `diagnostics` | `scan_project`, `load_coordination_spec`, `run_assessment` | |
+
+- `COORDINATIONHUB_TOOLS`: comma-separated groups and/or tool names to expose (plus `core`); `all` is accepted.
+- `COORDINATIONHUB_DISABLE`: groups and/or tool names to hide, applied after `COORDINATIONHUB_TOOLS`.
+- Case and spaces are ignored. An unknown name stops the server with one line on stderr and exit code 2, so the client shows it failed. Calling a hidden tool returns an error that names the variable and what to change. With neither variable set, nothing changes.
+
+```json
+"env": {"COORDINATIONHUB_DISABLE": "spawn,diagnostics"}
+```
+
+A lean set for agents that coordinate files, tasks and messages (22 tools, about half the schema text: 17.6 KB of `tools/list` instead of 36.6 KB):
+
+```json
+"env": {"COORDINATIONHUB_TOOLS": "acquire_lock,release_lock,list_locks,who,acquire_coordinator_lease,manage_leases,create_task,assign_task,update_task_status,get_available_tasks,query_tasks,wait_for_task,send_message,manage_messages,get_notifications,broadcast,wait_for_handoff"}
+```
+
 ## Develop
 
 ```bash

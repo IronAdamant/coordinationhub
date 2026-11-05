@@ -45,6 +45,10 @@ The store is `coordination.jsonl` plus `coordination.lock`, in the directory whe
   - `get-conflicts`, `get-available-tasks`, `query-tasks`, `get-leader`, `leader-status` and `list-pending-spawns` print their rows. 0.8.0 printed the header and exited 1 with `Error: '<field>'` whenever there was a row. `query-tasks task`, `subtasks` and `tree` print the task(s); 0.8.0 printed `No tasks found`.
 - **`doctor`, `init` and `auto-start-dashboard` honour `--storage-dir` and `--project-root`.** 0.8.0 accepted the flags and ignored them (it used the current directory's git project or `~/.coordinationhub`).
 
+### Added at the owner's request
+
+- **Tool groups.** `COORDINATIONHUB_TOOLS` and `COORDINATIONHUB_DISABLE` hide MCP tools by group or name (see the README). With neither set, `initialize` and `tools/list` are unchanged. When set, `initialize` carries a one-line `instructions` naming the groups that are on, and the `status` tool reports `tool_groups` and counts only the exposed tools.
+
 ### Platform and layout
 
 - **Help layout.** `--help`, usage lines and argparse errors are laid out the way Python 3.12's argparse does, at any `COLUMNS` or terminal width. Python 3.13's argparse prints a few lines differently (an option with two names shows the metavar once; a `nargs='+'` positional wraps differently) and quotes the choices in `invalid choice` errors.

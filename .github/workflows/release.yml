@@ -34,6 +34,15 @@ jobs:
             asset: coordinationhub-windows-x64
     steps:
       - uses: actions/checkout@v4
+      - name: The tag must match the Cargo.toml version
+        shell: bash
+        run: |
+          set -euo pipefail
+          version="$(grep -m1 '^version = ' Cargo.toml | cut -d'"' -f2)"
+          if [ "v${version}" != "${GITHUB_REF_NAME}" ]; then
+            echo "tag ${GITHUB_REF_NAME} does not match Cargo.toml version ${version}"
+            exit 1
+          fi
       - uses: dtolnay/rust-toolchain@1.83.0
         with:
           targets: ${{ matrix.target }}
