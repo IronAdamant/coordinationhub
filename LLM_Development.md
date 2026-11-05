@@ -1,5 +1,14 @@
 # LLM_Development.md — CoordinationHub
 
+## 2026-11-05 — 1.1.0 agent improvements
+
+- `assign_task` checks the holder and writes in one call under the journal lock: a second agent is refused with the holder, status and next step (`unassigned_only`, ask, or `force`). 16 CLI processes claiming one task have exactly one winner.
+- `acknowledge_handoff`, `complete_handoff`, `cancel_handoff` (messages group, 54 tools); refusals explain the state. The `wait_for_handoff` modes are unchanged.
+- MCP replies are compact JSON with UTF-8 text (`json::dumps_tight`): 9,934 to about 7,605 reply bytes on the 39-call multi-agent run. The parity harness compares by value.
+- `--version` / `-V` as argparse's version action; goldens recaptured from the 0.8.0 parser with the flags declared by argparse itself.
+- `manage_leases get` needs no `agent_id`; `get_available_tasks unassigned_only`; unknown tools get close matches, not the whole list.
+- Release workflow: `gh release --repo` (the job has no checkout), upload `--clobber` when the release exists.
+
 ## 2026-11-05 — Fifth verification
 
 - The command line runs a port of CPython 3.12 argparse over tables taken from the 0.8.0 parser: unique long-flag prefixes, choices and int/float errors naming the value, `expected one argument` for a dash-led value, every stray value in `unrecognized arguments`, and help wrapped to `COLUMNS` (19,000 help texts across 250 widths match Python 3.12).

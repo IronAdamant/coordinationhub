@@ -13,6 +13,8 @@ use crate::cli_catalog;
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum Kind {
     Help,
+    /// argparse's `action='version'`: print `prog version` and exit 0.
+    Version,
     Store,
     StoreTrue,
 }
@@ -113,6 +115,7 @@ struct OptionTuple {
 
 enum Stop {
     Help,
+    Version,
     Error(String),
     Exit(Exit),
 }
@@ -144,6 +147,13 @@ pub fn parse(argv: &[String]) -> Result<Parsed, Exit> {
             return Err(Exit {
                 code: 0,
                 stdout: format_top_help(),
+                stderr: String::new(),
+            })
+        }
+        Err(Stop::Version) => {
+            return Err(Exit {
+                code: 0,
+                stdout: format!("{} {}\n", cli_catalog::PROG, crate::VERSION),
                 stderr: String::new(),
             })
         }
@@ -559,6 +569,7 @@ impl Parser {
                 stdout: sub.help_text(),
                 stderr: String::new(),
             })),
+            Err(Stop::Version) => Err(Stop::Version),
             Err(Stop::Error(message)) => Err(Stop::Exit(sub.error(&message))),
             Err(Stop::Exit(exit)) => Err(Stop::Exit(exit)),
         }
@@ -575,6 +586,7 @@ impl Parser {
         let values = get_values(arg, strings).map_err(Stop::Error)?;
         match arg.kind {
             Kind::Help => Err(Stop::Help),
+            Kind::Version => Err(Stop::Version),
             Kind::StoreTrue => {
                 if !state.bools.contains(&arg.dest) {
                     state.bools.push(arg.dest);

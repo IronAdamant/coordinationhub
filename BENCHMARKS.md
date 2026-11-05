@@ -36,4 +36,15 @@ The workload the fourth and fifth reviews used: one server, 450 agents, then eac
 
 Rust was faster on every row of both tables. On Linux the fifth review measured the same workload with Rust ahead on every row as well (writes about 1 ms each); Windows file operations make every write slower on both sides.
 
+## Reply size (1.1.0)
+
+`cargo test --release --test multi_agent -- --nocapture` prints the reply bytes of its 39 calls (a planner and two workers on one store). Measured on the same Windows machine on 5 November 2026:
+
+| Build | Reply text bytes, 39 calls | `tools/list` bytes, all groups |
+| --- | ---: | ---: |
+| 1.0.0 (indented JSON, `\uXXXX` escapes) | 9,934 | 36,593 |
+| 1.1.0 (compact JSON, UTF-8 text) | about 7,605 | 38,146 |
+
+Replies are 23% smaller. `tools/list` is sent once per session and grew by the three handoff tool schemas; the lean set in the README is 18.9 KB.
+
 Do not copy these numbers onto another machine and call them current. Re-run the commands.

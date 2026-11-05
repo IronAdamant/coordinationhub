@@ -13,6 +13,11 @@
 //!
 //! Python writes CRLF and the ANSI code page to pipes on Windows; the
 //! Python child runs with PYTHONUTF8=1 and line endings are normalised.
+//!
+//! Since 1.1.0 the Rust MCP replies are compact JSON. They are compared by
+//! value: each Rust reply that parses is re-serialised with the 0.8.0
+//! layout (indent 2, ASCII escapes) before the text comparison, and one
+//! check confirms the Rust text itself is compact.
 
 use coordinationhub::json::{self, Value};
 use std::io::{BufRead, BufReader, Write};
@@ -42,7 +47,45 @@ const ALLOWED: &[&str] = &[
     "readable output fix",
     "doctor",
     "help layout of Python 3.13",
+    "compact MCP replies",
+    "explicit handoff tools",
+    "assign_task refuses a held task",
+    "lease get without agent_id",
+    "version flag and assign-task --force",
 ];
+
+/// Tools in the Rust tools/list that 0.8.0 does not have.
+const RUST_ONLY_TOOLS: &[&str] = &["who", "acknowledge_handoff", "complete_handoff", "cancel_handoff"];
+
+/// The Rust `status.tools` count: 0.8.0's 50 plus RUST_ONLY_TOOLS.
+const RUST_TOOLS: usize = 54;
+
+/// The 1.1.0 parser additions, removed from Rust CLI output before it is
+/// compared with 0.8.0's: `-V/--version` at the top and `assign-task --force`.
+/// Returns the text and whether anything was removed.
+fn without_new_flags(text: &str) -> (String, bool) {
+    // acquire-lock has a --force of its own; only assign-task's is new.
+    let assign = text.contains("coordinationhub assign-task");
+    let mut out = String::new();
+    for line in text.split_inclusive('\n') {
+        let trimmed = line.trim();
+        if trimmed.starts_with("-V, --version ")
+            || (assign && (trimmed == "[--force]" || trimmed.starts_with("--force ")))
+        {
+            continue;
+        }
+        let line = line.replacen("coordinationhub [-h] [-V]", "coordinationhub [-h]", 1);
+        out.push_str(&if assign { line.replacen(" [--force]", "", 1) } else { line });
+    }
+    let changed = out != text;
+    (out, changed)
+}
+
+fn strip_new_flags(out: &(i32, String, String)) -> ((i32, String, String), bool) {
+    let (stdout, a) = without_new_flags(&out.1);
+    let (stderr, b) = without_new_flags(&out.2);
+    ((out.0, stdout, stderr), a || b)
+}
 
 // ------------------------------------------------------------------
 // Ledger
@@ -226,6 +269,16 @@ fn tool_text(reply: &Value) -> String {
         .and_then(Value::as_str)
         .map(str::to_string)
         .unwrap_or_else(|| json::dumps(reply))
+}
+
+/// The Rust reply text in the 0.8.0 layout: compact JSON is parsed and
+/// written again with indent 2, so the comparison is by value.
+fn rust_text(reply: &Value) -> String {
+    let text = tool_text(reply);
+    match json::parse(&text) {
+        Ok(value) if text.starts_with('{') || text.starts_with('[') => json::dumps_pretty(&value),
+        _ => text,
+    }
 }
 
 fn is_error(reply: &Value) -> bool {
@@ -472,19 +525,36 @@ fn harness_checks(sides: &Sides, ledger: &mut Ledger) {
     }
     let mut py = sides.server(Side::Python, &py_store, &project);
     let mut rs = sides.server(Side::Rust, &rs_store, &project);
+    let rust_count = format!("\"tools\": {RUST_TOOLS}");
+    let mut pretty = 0;
+    let mut compact = 0;
     for (index, (name, args)) in base_calls().into_iter().enumerate() {
         let left = tool_text(&py.call(name, args.clone()));
-        let right = tool_text(&rs.call(name, args));
+        let right_reply = rs.call(name, args);
+        let raw = tool_text(&right_reply);
+        if json::parse(&raw).is_ok() {
+            if raw.contains('\n') || raw.contains("\": ") {
+                pretty += 1;
+            } else {
+                compact += 1;
+            }
+        }
+        let right = rust_text(&right_reply);
         let title = format!("{}:{name}", index + 1);
         let (mut left, mut right) = (left, right);
-        if name == "status" && left.contains("\"tools\": 50") && right.contains("\"tools\": 51") {
-            ledger.note("status.tools", "rust counts who, so the number is 51");
+        if name == "status" && left.contains("\"tools\": 50") && right.contains(&rust_count) {
+            ledger.note("status.tools", "rust also counts who and the three handoff tools");
             left = left.replace("\"tools\": 50", "\"tools\": 0");
-            right = right.replace("\"tools\": 51", "\"tools\": 0");
+            right = right.replace(&rust_count, "\"tools\": 0");
         }
         if mask_time_literals(&left) != mask_time_literals(&right) {
             ledger.diff(&title, &left, &right);
         }
+    }
+    if pretty > 0 || compact == 0 {
+        ledger.items.push(format!("rust MCP replies are not compact JSON ({pretty} indented, {compact} compact)"));
+    } else {
+        ledger.note("compact MCP replies", "rust sends JSON without indentation; compared by value");
     }
     let custom = obj(vec![
         ("agent_id", s("rooted")),
@@ -515,9 +585,17 @@ fn harness_checks(sides: &Sides, ledger: &mut Ledger) {
     if !missing.is_empty() {
         ledger.items.push(format!("missing tools {missing:?}"));
     }
-    let extra: Vec<&String> = rs_names.iter().filter(|n| !py_names.contains(n) && *n != "who").collect();
+    let extra: Vec<&String> = rs_names
+        .iter()
+        .filter(|n| !py_names.contains(n) && !RUST_ONLY_TOOLS.contains(&n.as_str()))
+        .collect();
     if !extra.is_empty() {
         ledger.items.push(format!("extra tools {extra:?}"));
+    }
+    if RUST_ONLY_TOOLS.iter().all(|tool| rs_names.iter().any(|n| n == tool)) {
+        ledger.note("explicit handoff tools", "acknowledge_handoff, complete_handoff and cancel_handoff are listed");
+    } else {
+        ledger.items.push(format!("rust tools/list lacks one of {RUST_ONLY_TOOLS:?}"));
     }
     let safe = |name: &str| -> Value {
         match name {
@@ -534,7 +612,7 @@ fn harness_checks(sides: &Sides, ledger: &mut Ledger) {
     sorted.sort();
     for name in sorted {
         let mut left = tool_text(&py.call(&name, safe(&name)));
-        let mut right = tool_text(&rs.call(&name, safe(&name)));
+        let mut right = rust_text(&rs.call(&name, safe(&name)));
         if name == "run_assessment" {
             for text in [&mut left, &mut right] {
                 if let Some(at) = text.find("Run At:** ") {
@@ -545,7 +623,7 @@ fn harness_checks(sides: &Sides, ledger: &mut Ledger) {
         }
         if name == "status" {
             left = left.replace("\"tools\": 50", "\"tools\": 0");
-            right = right.replace("\"tools\": 51", "\"tools\": 0");
+            right = right.replace(&rust_count, "\"tools\": 0");
         }
         if mask_time_literals(&left) != mask_time_literals(&right) {
             ledger.diff(&format!("tool:{name}"), &left, &right);
@@ -590,7 +668,10 @@ fn harness_checks(sides: &Sides, ledger: &mut Ledger) {
     }
     let unknown: Vec<String> = vec!["heartbeat".into(), "ada".into(), "--nope".into()];
     let left = sides.cli(Side::Python, &unknown, None, &sides.tmp);
-    let right = sides.cli(Side::Rust, &unknown, None, &sides.tmp);
+    let (right, stripped) = strip_new_flags(&sides.cli(Side::Rust, &unknown, None, &sides.tmp));
+    if stripped {
+        ledger.note("version flag and assign-task --force (cli unknown flag)", "usage lists the 1.1.0 flags");
+    }
     if left.0 != right.0 || left.2 != right.2 {
         if layout_only(&left, &right, sides.py_minor) {
             ledger.note("help layout of Python 3.13: cli unknown flag", "usage wraps differently outside 3.12");
@@ -665,6 +746,19 @@ fn mcp_scenarios(sides: &Sides, ledger: &mut Ledger) {
                 ("manage_leases", obj(vec![("action", s("release")), ("agent_id", s("lyre_9"))])),
                 ("acquire_coordinator_lease", obj(vec![("agent_id", s("bugle")), ("ttl", json::f(2.5))])),
                 ("manage_leases", obj(vec![("action", s("claim")), ("agent_id", s("lyre_9")), ("ttl", json::i(13))])),
+                ("manage_leases", obj(vec![("action", s("get"))])),
+            ],
+        ),
+        (
+            "claims",
+            vec![
+                reg("fife"), reg("harp"),
+                ("create_task", obj(vec![("task_id", s("SOLO-1")), ("parent_agent_id", s("fife")), ("description", s("cadenza"))])),
+                ("assign_task", obj(vec![("task_id", s("SOLO-1")), ("assigned_agent_id", s("fife"))])),
+                ("assign_task", obj(vec![("task_id", s("SOLO-1")), ("assigned_agent_id", s("fife"))])),
+                // Documented: Rust refuses, 0.8.0 reassigns. Last, so the
+                // states do not diverge before a later compare.
+                ("assign_task", obj(vec![("task_id", s("SOLO-1")), ("assigned_agent_id", s("harp"))])),
             ],
         ),
         (
@@ -674,6 +768,11 @@ fn mcp_scenarios(sides: &Sides, ledger: &mut Ledger) {
                 ("register_agent", obj(vec![("agent_id", s("zither-\u{fc}")), ("parent_id", s("gong"))])),
                 ("send_message", obj(vec![("from_agent_id", s("gong")), ("to_agent_id", s("zither-\u{fc}")), ("message_type", s("strum")), ("payload", json::arr(vec![json::i(1), s("two"), Value::Null]))])),
                 ("broadcast", obj(vec![("agent_id", s("gong")), ("message", s("hold")), ("handoff_targets", json::arr(vec![s("zither-\u{fc}")])), ("document_path", s("score/aria.md"))])),
+                // The explicit tools against 0.8.0's wait_for_handoff modes.
+                ("acknowledge_handoff", obj(vec![("handoff_id", json::i(1)), ("agent_id", s("zither-\u{fc}"))])),
+                ("complete_handoff", obj(vec![("handoff_id", json::i(1))])),
+                ("broadcast", obj(vec![("agent_id", s("gong")), ("handoff_targets", json::arr(vec![s("zither-\u{fc}")]))])),
+                ("cancel_handoff", obj(vec![("handoff_id", json::i(2))])),
                 ("manage_messages", obj(vec![("action", s("get")), ("agent_id", s("zither-\u{fc}"))])),
                 ("manage_messages", obj(vec![("action", s("get")), ("agent_id", s("zither-\u{fc}")), ("limit", json::i(-1))])),
                 ("get_notifications", obj(vec![("agent_id", s("zither-\u{fc}")), ("timeout_s", json::i(-1))])),
@@ -711,6 +810,18 @@ fn mcp_scenarios(sides: &Sides, ledger: &mut Ledger) {
                 rust_prefix: "Input validation error: ",
                 python_prefix: "Input validation error: ",
             }),
+            "assign_task" if args.get("assigned_agent_id").and_then(Value::as_str) == Some("harp") => Some(Documented {
+                title: "assign_task refuses a held task",
+                rust_error: false,
+                rust_prefix: "{\n  \"assigned\": false,\n  \"reason\": \"already_assigned\",\n  \"task_id\": \"SOLO-1\",\n  \"assigned_agent_id\": \"fife\"",
+                python_prefix: "{\n  \"assigned\": true",
+            }),
+            "manage_leases" if args.get("agent_id").is_none() => Some(Documented {
+                title: "lease get without agent_id",
+                rust_error: false,
+                rust_prefix: "{\n  \"leader\": {",
+                python_prefix: "Input validation error: ",
+            }),
             _ => None,
         }
     };
@@ -724,10 +835,26 @@ fn mcp_scenarios(sides: &Sides, ledger: &mut Ledger) {
         let mut py = sides.server(Side::Python, &py_store, &project);
         let mut rs = sides.server(Side::Rust, &rs_store, &rs_project);
         for (index, (tool, args)) in steps.into_iter().enumerate() {
-            let left_reply = py.call(tool, args.clone());
+            // 0.8.0 reaches the explicit handoff tools as wait_for_handoff modes.
+            let (py_tool, py_args) = match tool {
+                "acknowledge_handoff" | "complete_handoff" | "cancel_handoff" => {
+                    let mode = match tool {
+                        "acknowledge_handoff" => "ack",
+                        "complete_handoff" => "complete",
+                        _ => "cancel",
+                    };
+                    let mut with_mode = args.clone();
+                    if let Value::Object(pairs) = &mut with_mode {
+                        pairs.push(("mode".into(), s(mode)));
+                    }
+                    ("wait_for_handoff", with_mode)
+                }
+                _ => (tool, args.clone()),
+            };
+            let left_reply = py.call(py_tool, py_args);
             let right_reply = rs.call(tool, args.clone());
             let left = mask_time_literals(&tool_text(&left_reply)).replace("\\\\", "/");
-            let right = mask_time_literals(&tool_text(&right_reply)).replace("\\\\", "/");
+            let right = mask_time_literals(&rust_text(&right_reply)).replace("\\\\", "/");
             let left = normalise(&left, &[(&project, "<PROJ>"), (&py_store, "<STORE>")]);
             let right = normalise(&right, &[(&rs_project, "<PROJ>"), (&rs_store, "<STORE>")]);
             let title = format!("mcp {name} {index}:{tool}");
@@ -812,7 +939,10 @@ fn cli_sequence(sides: &Sides, ledger: &mut Ledger) {
             let title = format!("cli {mode} `{line}`");
             if line == "status" || line.starts_with("list-agents") {
                 left.1 = left.1.replace("\"tools\": 50", "\"tools\": 0").replace("Tools: 50", "Tools: 0");
-                right.1 = right.1.replace("\"tools\": 51", "\"tools\": 0").replace("Tools: 51", "Tools: 0");
+                right.1 = right
+                    .1
+                    .replace(&format!("\"tools\": {RUST_TOOLS}"), "\"tools\": 0")
+                    .replace(&format!("Tools: {RUST_TOOLS}"), "Tools: 0");
             }
             if left == right {
                 continue;
@@ -857,7 +987,10 @@ fn argparse_cases(sides: &Sides, ledger: &mut Ledger) {
     for case in cases {
         let args = words(case);
         let left = sides.cli(Side::Python, &args, None, &sides.tmp);
-        let right = sides.cli(Side::Rust, &args, None, &sides.tmp);
+        let (right, stripped) = strip_new_flags(&sides.cli(Side::Rust, &args, None, &sides.tmp));
+        if stripped {
+            ledger.note(&format!("version flag and assign-task --force (`{case}`)"), "usage lists the 1.1.0 flags");
+        }
         if left != right {
             if sides.py_minor != 12 && left.2.contains("invalid choice") && right.2.contains("invalid choice") {
                 ledger.note(&format!("help layout of Python 3.13: `{case}`"), "3.13 quotes choices");
@@ -879,11 +1012,14 @@ fn argparse_cases(sides: &Sides, ledger: &mut Ledger) {
         }
         args.push("--help".into());
         let left = sides.cli(Side::Python, &args, None, &sides.tmp);
-        let right = sides.cli(Side::Rust, &args, None, &sides.tmp);
+        let (right, stripped) = strip_new_flags(&sides.cli(Side::Rust, &args, None, &sides.tmp));
+        let title = format!("help {}", command.unwrap_or("(top)"));
+        if stripped {
+            ledger.note(&format!("version flag and assign-task --force ({title})"), "help lists the 1.1.0 flags");
+        }
         if left == right {
             continue;
         }
-        let title = format!("help {}", command.unwrap_or("(top)"));
         if sides.py_minor != 12 {
             // Another argparse lays the text out differently; every option
             // Python shows must still be in the Rust help.

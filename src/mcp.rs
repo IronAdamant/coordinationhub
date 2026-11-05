@@ -207,7 +207,7 @@ fn with_groups(result: Value, surface: &Surface) -> Value {
     if !surface.warnings().is_empty() {
         pairs.push(("tool_groups_warning".into(), json::s(surface.warnings().join("\n"))));
     }
-    content(&json::dumps_pretty(&Value::Object(pairs)), is_error)
+    content(&json::dumps_tight(&Value::Object(pairs)), is_error)
 }
 
 fn tool_entry(name: &str, schema: &Value) -> Value {
@@ -250,7 +250,8 @@ fn who_tool() -> Value {
 
 fn call_result(engine: &mut Engine, name: &str, arguments: &Value) -> Value {
     match engine.call(name, arguments) {
-        Ok(value) => content(&json::dumps_pretty(&value), false),
+        // Compact JSON: agents parse it, and indentation only costs tokens.
+        Ok(value) => content(&json::dumps_tight(&value), false),
         Err(err) if err.starts_with("Input validation error:") => content(&err, true),
         Err(err) => content(&format!("Error: {err}"), true),
     }

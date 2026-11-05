@@ -1,5 +1,5 @@
 {
-  "tools_version": "1.0.0",
+  "tools_version": "1.1.0",
   "tools": {
     "register_agent": {
       "description": "Register an agent with the coordination hub and receive a context bundle containing sibling agents, active locks, coordination URLs, and (if a coordination graph is loaded) the agent's responsibilities and owned files.",
@@ -859,7 +859,7 @@
       }
     },
     "assign_task": {
-      "description": "Assign a task to a specific agent.",
+      "description": "Assign a task to an agent (an agent assigns itself to claim it). Refused when the task is already assigned to another agent: the reply names the holder and status. Pass force=true to reassign on purpose. Assigning to the current assignee succeeds.",
       "parameters": {
         "type": "object",
         "properties": {
@@ -870,6 +870,11 @@
           "assigned_agent_id": {
             "type": "string",
             "description": "Agent to assign the task to"
+          },
+          "force": {
+            "type": "boolean",
+            "default": false,
+            "description": "Reassign even if another agent holds the task"
           }
         },
         "required": [
@@ -1040,6 +1045,11 @@
           "agent_id": {
             "type": "string",
             "description": "Optional agent ID to filter to tasks assigned to this agent"
+          },
+          "unassigned_only": {
+            "type": "boolean",
+            "default": false,
+            "description": "Only tasks nobody is assigned to: what an idle agent can claim"
           }
         }
       }
@@ -1129,7 +1139,7 @@
       }
     },
     "wait_for_handoff": {
-      "description": "Unified handoff operation. mode='status' returns the handoff record. mode='ack' acknowledges. mode='complete' marks completed. mode='cancel' cancels. mode='completion' waits for completion.",
+      "description": "Wait until a handoff is completed (mode='completion', the default) or read its record (mode='status'). To act on a handoff use acknowledge_handoff, complete_handoff or cancel_handoff; the older modes 'ack', 'complete' and 'cancel' still work here.",
       "parameters": {
         "type": "object",
         "properties": {
@@ -1158,6 +1168,56 @@
             ],
             "default": "completion",
             "description": "Handoff action"
+          }
+        },
+        "required": [
+          "handoff_id"
+        ]
+      }
+    },
+    "acknowledge_handoff": {
+      "description": "Acknowledge a handoff addressed to you. The handoff can be completed once every recipient has acknowledged it.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "handoff_id": {
+            "type": "integer",
+            "description": "Handoff ID (from broadcast with handoff_targets, or the handoff message payload)"
+          },
+          "agent_id": {
+            "type": "string",
+            "description": "Recipient acknowledging the handoff"
+          }
+        },
+        "required": [
+          "handoff_id",
+          "agent_id"
+        ]
+      }
+    },
+    "complete_handoff": {
+      "description": "Mark a handoff completed. Refused until every recipient has acknowledged it.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "handoff_id": {
+            "type": "integer",
+            "description": "Handoff ID"
+          }
+        },
+        "required": [
+          "handoff_id"
+        ]
+      }
+    },
+    "cancel_handoff": {
+      "description": "Cancel a handoff that is no longer needed.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "handoff_id": {
+            "type": "integer",
+            "description": "Handoff ID"
           }
         },
         "required": [
@@ -1279,7 +1339,7 @@
       }
     },
     "manage_leases": {
-      "description": "Unified lease management. action='acquire' | 'refresh' | 'release' | 'get' (returns current leader) | 'claim' (failover claim).",
+      "description": "Unified lease management. action='acquire' | 'refresh' | 'release' | 'get' (returns current leader; agent_id not needed) | 'claim' (failover claim). agent_id is required for every action but 'get'.",
       "parameters": {
         "type": "object",
         "properties": {
@@ -1305,8 +1365,7 @@
           }
         },
         "required": [
-          "action",
-          "agent_id"
+          "action"
         ]
       }
     },
@@ -1740,7 +1799,8 @@
       "method": "assign_task",
       "args": [
         "task_id",
-        "assigned_agent_id"
+        "assigned_agent_id",
+        "force"
       ]
     },
     "update_task_status": {
@@ -1786,7 +1846,8 @@
     "get_available_tasks": {
       "method": "get_available_tasks",
       "args": [
-        "agent_id"
+        "agent_id",
+        "unassigned_only"
       ]
     },
     "task_failures": {
@@ -1814,6 +1875,25 @@
         "timeout_s",
         "agent_id",
         "mode"
+      ]
+    },
+    "acknowledge_handoff": {
+      "method": "acknowledge_handoff",
+      "args": [
+        "handoff_id",
+        "agent_id"
+      ]
+    },
+    "complete_handoff": {
+      "method": "complete_handoff",
+      "args": [
+        "handoff_id"
+      ]
+    },
+    "cancel_handoff": {
+      "method": "cancel_handoff",
+      "args": [
+        "handoff_id"
       ]
     },
     "manage_dependencies": {

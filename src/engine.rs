@@ -441,6 +441,7 @@ impl Engine {
                 state,
                 need_str(args, "task_id")?,
                 need_str(args, "assigned_agent_id")?,
+                opt_bool(args, "force", false),
             ),
             "update_task_status" => act_board::update_task(
                 state,
@@ -474,7 +475,11 @@ impl Engine {
                 ("timed_out", json::b(true)),
                 ("timeout_s", json::f(opt_f(args, "timeout_s", 60.0))),
             ]),
-            "get_available_tasks" => act_board::available_tasks(state, opt_str(args, "agent_id")),
+            "get_available_tasks" => act_board::available_tasks(
+                state,
+                opt_str(args, "agent_id"),
+                opt_bool(args, "unassigned_only", false),
+            ),
             "task_failures" => act_board::task_failures(
                 state,
                 need_str(args, "action")?,
@@ -483,6 +488,17 @@ impl Engine {
             ),
             "manage_work_intents" => self.manage_intents(args)?,
             "wait_for_handoff" => self.wait_handoff(args)?,
+            "acknowledge_handoff" => {
+                let id = need_i(args, "handoff_id")?;
+                let agent = need_str(args, "agent_id")?;
+                let reply = act_board::ack_handoff(state, id, agent);
+                act_board::explain_handoff(state, id, Some(agent), reply)
+            }
+            "complete_handoff" | "cancel_handoff" => {
+                let id = need_i(args, "handoff_id")?;
+                let reply = act_board::finish_handoff(state, id, tool == "complete_handoff");
+                act_board::explain_handoff(state, id, None, reply)
+            }
             "manage_dependencies" => act_board::manage_deps(
                 state,
                 need_str(args, "mode")?,
@@ -709,6 +725,11 @@ impl Engine {
 
     fn manage_leases(&mut self, args: &Value) -> Result<Value, String> {
         let action = need_str(args, "action")?;
+        if action != "get" && action != "leader" && opt_str(args, "agent_id").is_none() {
+            return Err(format!(
+                "agent_id is required for action '{action}'; pass the agent acting on the lease"
+            ));
+        }
         let state = &mut self.store.state;
         Ok(match action {
             "acquire" => {

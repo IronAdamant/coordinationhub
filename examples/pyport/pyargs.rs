@@ -293,6 +293,10 @@ impl Parser {
         for (arg, values) in taken {
             match arg.kind {
                 Kind::Help => return Err(Stop::Help),
+                // The ported doc tools declare no version flag.
+                Kind::Version => {
+                    return Err(Stop::Error(format!("argument {}: not supported", action_name(arg))))
+                }
                 Kind::StoreTrue => {
                     if !parsed.flags.contains(&arg.dest) {
                         parsed.flags.push(arg.dest);

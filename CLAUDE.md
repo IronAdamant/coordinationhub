@@ -29,14 +29,15 @@ cargo run --release --example update_dispatch_floor -- --root <python tree>  # e
 - `src/act_*.rs`: tool behaviour (identity, locks, board: tasks/messages/handoffs/leases/spawns, views: status, scan, assessment).
 - `src/mcp.rs` (stdio JSON-RPC), `src/http.rs` (dashboard, `/call`, SSE), `src/hooks.rs` (`coordinationhub hook`).
 - `src/cli.rs`, `src/cli_cmds.rs`, `src/cli_text.rs`: CLI dispatch, argument mapping, readable output.
-- `src/argparse.rs` + `src/cli_catalog.rs`: a port of CPython 3.12 argparse over tables introspected from the 0.8.0 parser (prefixes, choices, int/float errors, help wrapped to `COLUMNS`). Regenerate the catalog from the 0.8.0 parser rather than hand-editing it.
+- `src/argparse.rs` + `src/cli_catalog.rs`: a port of CPython 3.12 argparse over tables introspected from the 0.8.0 parser (prefixes, choices, int/float errors, help wrapped to `COLUMNS`). Regenerate the catalog from the 0.8.0 parser rather than hand-editing it; the only hand-written rows are the 1.1.0 additions (`-V/--version`, `assign-task --force`), marked in the file.
 - `src/validate.rs`: tool argument checks against `assets/tools.json`.
 
 ## Rules
 
 - Match 0.8.0's function: every tool, command, flag and reply shape. Where 0.8.0 had a bug, return the working result and list it in `MIGRATION.md`. `MIGRATION.md` lists every deliberate difference and nothing else; `examples/parity.rs` allows only those (its `ALLOWED` list).
 - Errors must say what is wrong, which field, what is expected and what to do next.
-- Write the code first, then a test for it (`tests/round5.rs` style); goldens in `tests/argparse_goldens.rs` come from unmodified 0.8.0 on Python 3.12.
+- Write the code first, then a test for it (`tests/round5.rs`, `tests/agent_improvements.rs` style); goldens in `tests/argparse_goldens.rs` come from unmodified 0.8.0 on Python 3.12, with the 1.1.0 flags declared on that parser by argparse's own `version` and `store_true` actions.
+- MCP tool replies are compact JSON (`json::dumps_tight`); the parity harness compares them with 0.8.0 by value.
 - Rust must stay faster than Python on every benchmark row (`benchmark-gate` in CI).
 - Keep Rust 1.83 compatibility (`rust-toolchain.toml`).
 - Add an entry at the top of `LLM_Development.md` for significant changes.

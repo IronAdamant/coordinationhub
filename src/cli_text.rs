@@ -138,10 +138,14 @@ pub fn show(command: &str, value: &Value, pos: &[String], kv: &[(String, String)
                 pos.get(1).map(|s| s.as_str()).unwrap_or("")
             );
         }
-        "assign-task" => println!(
-            "Task assigned: {id} → {}",
-            pos.get(1).map(|s| s.as_str()).unwrap_or("")
-        ),
+        "assign-task" => match value.get("reason").and_then(Value::as_str) {
+            Some("already_assigned") => println!("Assignment refused: {}", py_get(value, "error", "")),
+            Some("task_not_found") => println!("Task not found: {id}"),
+            _ => println!(
+                "Task assigned: {id} → {}",
+                pos.get(1).map(|s| s.as_str()).unwrap_or("")
+            ),
+        },
         "update-task-status" => {
             println!(
                 "Task updated: {id} → {}",
@@ -677,6 +681,11 @@ fn py_field(value: &Value, key: &str, missing: &str) -> String {
 
 pub fn exit_code(command: &str, value: &Value) -> i32 {
     match command {
+        "assign-task" => match value.get("reason").and_then(Value::as_str) {
+            Some("already_assigned") => 4,
+            Some("task_not_found") => 3,
+            _ => 0,
+        },
         "acquire-lock" => {
             if value.get("acquired").and_then(Value::as_bool) == Some(true) {
                 0

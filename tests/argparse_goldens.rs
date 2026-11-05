@@ -1,7 +1,10 @@
 //! Argparse parity: exact stdout, stderr and exit code captured from
 //! unmodified coordinationhub 0.8.0 on Python 3.12 (COLUMNS unset unless
 //! named, stdout not a terminal). Each case runs in a fresh store after
-//! `register viola` and `register lute --parent-id viola`.
+//! `register viola` and `register lute --parent-id viola`. The 1.1.0
+//! additions (`-V/--version`, `assign-task --force`) were captured from the
+//! same parser with them declared by argparse's own `version` and
+//! `store_true` actions (scratch wrapper around 0.8.0 `create_parser`).
 
 mod common;
 
@@ -19,7 +22,7 @@ const CASES: &[Case] = &[
         columns: None,
         rc: 2,
         stdout: r#""#,
-        stderr: r#"usage: coordinationhub [-h]
+        stderr: r#"usage: coordinationhub [-h] [-V]
                        {serve,serve-mcp,serve-sse,status,register,heartbeat,deregister,list-agents,agent-relations,acquire-lock,release-lock,refresh-lock,lock-status,list-locks,admin-locks,broadcast,acknowledge-broadcast,wait-for-broadcast-acks,acknowledge-handoff,complete-handoff,cancel-handoff,get-handoffs,wait-for-handoff,wait-for-locks,notify-change,get-notifications,prune-notifications,wait-for-notifications,get-conflicts,contention-hotspots,load-spec,validate-spec,scan-project,dashboard,agent-status,agent-tree,assess,doctor,init,auto-start-dashboard,watch,await-agent,send-message,get-messages,mark-messages-read,create-task,assign-task,update-task-status,query-tasks,create-subtask,retry-task,dead-letter-queue,task-failure-history,wait-for-task,get-available-tasks,declare-work-intent,get-work-intents,clear-work-intent,declare-dependency,manage-dependencies,satisfy-dependency,get-all-dependencies,acquire-coordinator-lease,refresh-coordinator-lease,release-coordinator-lease,get-leader,claim-leadership,leader-status,ha-dashboard,spawn-subagent,report-subagent-spawned,list-pending-spawns,cancel-spawn,request-subagent-deregistration,await-subagent-stopped}
                        ...
 coordinationhub: error: unrecognized arguments: --agent-id viola/x
@@ -129,7 +132,7 @@ coordinationhub register: error: the following arguments are required: agent_id
         columns: None,
         rc: 2,
         stdout: r#""#,
-        stderr: r#"usage: coordinationhub [-h]
+        stderr: r#"usage: coordinationhub [-h] [-V]
                        {serve,serve-mcp,serve-sse,status,register,heartbeat,deregister,list-agents,agent-relations,acquire-lock,release-lock,refresh-lock,lock-status,list-locks,admin-locks,broadcast,acknowledge-broadcast,wait-for-broadcast-acks,acknowledge-handoff,complete-handoff,cancel-handoff,get-handoffs,wait-for-handoff,wait-for-locks,notify-change,get-notifications,prune-notifications,wait-for-notifications,get-conflicts,contention-hotspots,load-spec,validate-spec,scan-project,dashboard,agent-status,agent-tree,assess,doctor,init,auto-start-dashboard,watch,await-agent,send-message,get-messages,mark-messages-read,create-task,assign-task,update-task-status,query-tasks,create-subtask,retry-task,dead-letter-queue,task-failure-history,wait-for-task,get-available-tasks,declare-work-intent,get-work-intents,clear-work-intent,declare-dependency,manage-dependencies,satisfy-dependency,get-all-dependencies,acquire-coordinator-lease,refresh-coordinator-lease,release-coordinator-lease,get-leader,claim-leadership,leader-status,ha-dashboard,spawn-subagent,report-subagent-spawned,list-pending-spawns,cancel-spawn,request-subagent-deregistration,await-subagent-stopped}
                        ...
 coordinationhub: error: unrecognized arguments: -j
@@ -140,7 +143,7 @@ coordinationhub: error: unrecognized arguments: -j
         columns: None,
         rc: 2,
         stdout: r#""#,
-        stderr: r#"usage: coordinationhub [-h]
+        stderr: r#"usage: coordinationhub [-h] [-V]
                        {serve,serve-mcp,serve-sse,status,register,heartbeat,deregister,list-agents,agent-relations,acquire-lock,release-lock,refresh-lock,lock-status,list-locks,admin-locks,broadcast,acknowledge-broadcast,wait-for-broadcast-acks,acknowledge-handoff,complete-handoff,cancel-handoff,get-handoffs,wait-for-handoff,wait-for-locks,notify-change,get-notifications,prune-notifications,wait-for-notifications,get-conflicts,contention-hotspots,load-spec,validate-spec,scan-project,dashboard,agent-status,agent-tree,assess,doctor,init,auto-start-dashboard,watch,await-agent,send-message,get-messages,mark-messages-read,create-task,assign-task,update-task-status,query-tasks,create-subtask,retry-task,dead-letter-queue,task-failure-history,wait-for-task,get-available-tasks,declare-work-intent,get-work-intents,clear-work-intent,declare-dependency,manage-dependencies,satisfy-dependency,get-all-dependencies,acquire-coordinator-lease,refresh-coordinator-lease,release-coordinator-lease,get-leader,claim-leadership,leader-status,ha-dashboard,spawn-subagent,report-subagent-spawned,list-pending-spawns,cancel-spawn,request-subagent-deregistration,await-subagent-stopped}
                        ...
 coordinationhub: error: unrecognized arguments: --wobble
@@ -151,7 +154,7 @@ coordinationhub: error: unrecognized arguments: --wobble
         columns: None,
         rc: 2,
         stdout: r#""#,
-        stderr: r#"usage: coordinationhub [-h]
+        stderr: r#"usage: coordinationhub [-h] [-V]
                        {serve,serve-mcp,serve-sse,status,register,heartbeat,deregister,list-agents,agent-relations,acquire-lock,release-lock,refresh-lock,lock-status,list-locks,admin-locks,broadcast,acknowledge-broadcast,wait-for-broadcast-acks,acknowledge-handoff,complete-handoff,cancel-handoff,get-handoffs,wait-for-handoff,wait-for-locks,notify-change,get-notifications,prune-notifications,wait-for-notifications,get-conflicts,contention-hotspots,load-spec,validate-spec,scan-project,dashboard,agent-status,agent-tree,assess,doctor,init,auto-start-dashboard,watch,await-agent,send-message,get-messages,mark-messages-read,create-task,assign-task,update-task-status,query-tasks,create-subtask,retry-task,dead-letter-queue,task-failure-history,wait-for-task,get-available-tasks,declare-work-intent,get-work-intents,clear-work-intent,declare-dependency,manage-dependencies,satisfy-dependency,get-all-dependencies,acquire-coordinator-lease,refresh-coordinator-lease,release-coordinator-lease,get-leader,claim-leadership,leader-status,ha-dashboard,spawn-subagent,report-subagent-spawned,list-pending-spawns,cancel-spawn,request-subagent-deregistration,await-subagent-stopped}
                        ...
 coordinationhub: error: unrecognized arguments: -x
@@ -162,7 +165,7 @@ coordinationhub: error: unrecognized arguments: -x
         columns: None,
         rc: 2,
         stdout: r#""#,
-        stderr: r#"usage: coordinationhub [-h]
+        stderr: r#"usage: coordinationhub [-h] [-V]
                        {serve,serve-mcp,serve-sse,status,register,heartbeat,deregister,list-agents,agent-relations,acquire-lock,release-lock,refresh-lock,lock-status,list-locks,admin-locks,broadcast,acknowledge-broadcast,wait-for-broadcast-acks,acknowledge-handoff,complete-handoff,cancel-handoff,get-handoffs,wait-for-handoff,wait-for-locks,notify-change,get-notifications,prune-notifications,wait-for-notifications,get-conflicts,contention-hotspots,load-spec,validate-spec,scan-project,dashboard,agent-status,agent-tree,assess,doctor,init,auto-start-dashboard,watch,await-agent,send-message,get-messages,mark-messages-read,create-task,assign-task,update-task-status,query-tasks,create-subtask,retry-task,dead-letter-queue,task-failure-history,wait-for-task,get-available-tasks,declare-work-intent,get-work-intents,clear-work-intent,declare-dependency,manage-dependencies,satisfy-dependency,get-all-dependencies,acquire-coordinator-lease,refresh-coordinator-lease,release-coordinator-lease,get-leader,claim-leadership,leader-status,ha-dashboard,spawn-subagent,report-subagent-spawned,list-pending-spawns,cancel-spawn,request-subagent-deregistration,await-subagent-stopped}
                        ...
 coordinationhub: error: unrecognized arguments: extra-pos
@@ -245,7 +248,7 @@ coordinationhub satisfy-dependency: error: argument dep_id: invalid int value: '
         columns: None,
         rc: 2,
         stdout: r#""#,
-        stderr: r#"usage: coordinationhub [-h]
+        stderr: r#"usage: coordinationhub [-h] [-V]
                        {serve,serve-mcp,serve-sse,status,register,heartbeat,deregister,list-agents,agent-relations,acquire-lock,release-lock,refresh-lock,lock-status,list-locks,admin-locks,broadcast,acknowledge-broadcast,wait-for-broadcast-acks,acknowledge-handoff,complete-handoff,cancel-handoff,get-handoffs,wait-for-handoff,wait-for-locks,notify-change,get-notifications,prune-notifications,wait-for-notifications,get-conflicts,contention-hotspots,load-spec,validate-spec,scan-project,dashboard,agent-status,agent-tree,assess,doctor,init,auto-start-dashboard,watch,await-agent,send-message,get-messages,mark-messages-read,create-task,assign-task,update-task-status,query-tasks,create-subtask,retry-task,dead-letter-queue,task-failure-history,wait-for-task,get-available-tasks,declare-work-intent,get-work-intents,clear-work-intent,declare-dependency,manage-dependencies,satisfy-dependency,get-all-dependencies,acquire-coordinator-lease,refresh-coordinator-lease,release-coordinator-lease,get-leader,claim-leadership,leader-status,ha-dashboard,spawn-subagent,report-subagent-spawned,list-pending-spawns,cancel-spawn,request-subagent-deregistration,await-subagent-stopped}
                        ...
 coordinationhub: error: argument command: invalid choice: 'bogus-command' (choose from serve, serve-mcp, serve-sse, status, register, heartbeat, deregister, list-agents, agent-relations, acquire-lock, release-lock, refresh-lock, lock-status, list-locks, admin-locks, broadcast, acknowledge-broadcast, wait-for-broadcast-acks, acknowledge-handoff, complete-handoff, cancel-handoff, get-handoffs, wait-for-handoff, wait-for-locks, notify-change, get-notifications, prune-notifications, wait-for-notifications, get-conflicts, contention-hotspots, load-spec, validate-spec, scan-project, dashboard, agent-status, agent-tree, assess, doctor, init, auto-start-dashboard, watch, await-agent, send-message, get-messages, mark-messages-read, create-task, assign-task, update-task-status, query-tasks, create-subtask, retry-task, dead-letter-queue, task-failure-history, wait-for-task, get-available-tasks, declare-work-intent, get-work-intents, clear-work-intent, declare-dependency, manage-dependencies, satisfy-dependency, get-all-dependencies, acquire-coordinator-lease, refresh-coordinator-lease, release-coordinator-lease, get-leader, claim-leadership, leader-status, ha-dashboard, spawn-subagent, report-subagent-spawned, list-pending-spawns, cancel-spawn, request-subagent-deregistration, await-subagent-stopped)
@@ -383,7 +386,7 @@ options:
         args: r#"--help"#,
         columns: None,
         rc: 0,
-        stdout: r#"usage: coordinationhub [-h]
+        stdout: r#"usage: coordinationhub [-h] [-V]
                        {serve,serve-mcp,serve-sse,status,register,heartbeat,deregister,list-agents,agent-relations,acquire-lock,release-lock,refresh-lock,lock-status,list-locks,admin-locks,broadcast,acknowledge-broadcast,wait-for-broadcast-acks,acknowledge-handoff,complete-handoff,cancel-handoff,get-handoffs,wait-for-handoff,wait-for-locks,notify-change,get-notifications,prune-notifications,wait-for-notifications,get-conflicts,contention-hotspots,load-spec,validate-spec,scan-project,dashboard,agent-status,agent-tree,assess,doctor,init,auto-start-dashboard,watch,await-agent,send-message,get-messages,mark-messages-read,create-task,assign-task,update-task-status,query-tasks,create-subtask,retry-task,dead-letter-queue,task-failure-history,wait-for-task,get-available-tasks,declare-work-intent,get-work-intents,clear-work-intent,declare-dependency,manage-dependencies,satisfy-dependency,get-all-dependencies,acquire-coordinator-lease,refresh-coordinator-lease,release-coordinator-lease,get-leader,claim-leadership,leader-status,ha-dashboard,spawn-subagent,report-subagent-spawned,list-pending-spawns,cancel-spawn,request-subagent-deregistration,await-subagent-stopped}
                        ...
 
@@ -494,6 +497,7 @@ positional arguments:
 
 options:
   -h, --help            show this help message and exit
+  -V, --version         show program's version number and exit
 "#,
         stderr: r#""#,
     },
@@ -501,7 +505,7 @@ options:
         args: r#"--help"#,
         columns: Some("60"),
         rc: 0,
-        stdout: r#"usage: coordinationhub [-h]
+        stdout: r#"usage: coordinationhub [-h] [-V]
                        {serve,serve-mcp,serve-sse,status,register,heartbeat,deregister,list-agents,agent-relations,acquire-lock,release-lock,refresh-lock,lock-status,list-locks,admin-locks,broadcast,acknowledge-broadcast,wait-for-broadcast-acks,acknowledge-handoff,complete-handoff,cancel-handoff,get-handoffs,wait-for-handoff,wait-for-locks,notify-change,get-notifications,prune-notifications,wait-for-notifications,get-conflicts,contention-hotspots,load-spec,validate-spec,scan-project,dashboard,agent-status,agent-tree,assess,doctor,init,auto-start-dashboard,watch,await-agent,send-message,get-messages,mark-messages-read,create-task,assign-task,update-task-status,query-tasks,create-subtask,retry-task,dead-letter-queue,task-failure-history,wait-for-task,get-available-tasks,declare-work-intent,get-work-intents,clear-work-intent,declare-dependency,manage-dependencies,satisfy-dependency,get-all-dependencies,acquire-coordinator-lease,refresh-coordinator-lease,release-coordinator-lease,get-leader,claim-leadership,leader-status,ha-dashboard,spawn-subagent,report-subagent-spawned,list-pending-spawns,cancel-spawn,request-subagent-deregistration,await-subagent-stopped}
                        ...
 
@@ -637,8 +641,92 @@ positional arguments:
 
 options:
   -h, --help            show this help message and exit
+  -V, --version         show program's version number and
+                        exit
 "#,
         stderr: r#""#,
+    },
+    Case {
+        args: r#"--version"#,
+        columns: None,
+        rc: 0,
+        stdout: r#"coordinationhub 1.1.0
+"#,
+        stderr: r#""#,
+    },
+    Case {
+        args: r#"-V"#,
+        columns: None,
+        rc: 0,
+        stdout: r#"coordinationhub 1.1.0
+"#,
+        stderr: r#""#,
+    },
+    Case {
+        args: r#"--vers"#,
+        columns: None,
+        rc: 0,
+        stdout: r#"coordinationhub 1.1.0
+"#,
+        stderr: r#""#,
+    },
+    Case {
+        args: r#"-V status"#,
+        columns: None,
+        rc: 0,
+        stdout: r#"coordinationhub 1.1.0
+"#,
+        stderr: r#""#,
+    },
+    Case {
+        args: r#"status -V"#,
+        columns: None,
+        rc: 2,
+        stdout: r#""#,
+        stderr: r#"usage: coordinationhub [-h] [-V]
+                       {serve,serve-mcp,serve-sse,status,register,heartbeat,deregister,list-agents,agent-relations,acquire-lock,release-lock,refresh-lock,lock-status,list-locks,admin-locks,broadcast,acknowledge-broadcast,wait-for-broadcast-acks,acknowledge-handoff,complete-handoff,cancel-handoff,get-handoffs,wait-for-handoff,wait-for-locks,notify-change,get-notifications,prune-notifications,wait-for-notifications,get-conflicts,contention-hotspots,load-spec,validate-spec,scan-project,dashboard,agent-status,agent-tree,assess,doctor,init,auto-start-dashboard,watch,await-agent,send-message,get-messages,mark-messages-read,create-task,assign-task,update-task-status,query-tasks,create-subtask,retry-task,dead-letter-queue,task-failure-history,wait-for-task,get-available-tasks,declare-work-intent,get-work-intents,clear-work-intent,declare-dependency,manage-dependencies,satisfy-dependency,get-all-dependencies,acquire-coordinator-lease,refresh-coordinator-lease,release-coordinator-lease,get-leader,claim-leadership,leader-status,ha-dashboard,spawn-subagent,report-subagent-spawned,list-pending-spawns,cancel-spawn,request-subagent-deregistration,await-subagent-stopped}
+                       ...
+coordinationhub: error: unrecognized arguments: -V
+"#,
+    },
+    Case {
+        args: r#"assign-task --help"#,
+        columns: None,
+        rc: 0,
+        stdout: r#"usage: coordinationhub assign-task [-h] [--storage-dir STORAGE_DIR]
+                                   [--project-root PROJECT_ROOT]
+                                   [--namespace NAMESPACE] [-j] [--replica]
+                                   [--force]
+                                   task_id assigned_agent_id
+
+positional arguments:
+  task_id               Task to assign
+  assigned_agent_id     Agent to assign the task to
+
+options:
+  -h, --help            show this help message and exit
+  --storage-dir STORAGE_DIR
+  --project-root PROJECT_ROOT
+  --namespace NAMESPACE
+  -j, --json            Emit structured JSON output instead of text
+  --replica             Use read-replica mode (direct WAL read, no writer
+                        round-trip)
+  --force               Reassign even if another agent holds the task
+"#,
+        stderr: r#""#,
+    },
+    Case {
+        args: r#"assign-task t1 --force"#,
+        columns: None,
+        rc: 2,
+        stdout: r#""#,
+        stderr: r#"usage: coordinationhub assign-task [-h] [--storage-dir STORAGE_DIR]
+                                   [--project-root PROJECT_ROOT]
+                                   [--namespace NAMESPACE] [-j] [--replica]
+                                   [--force]
+                                   task_id assigned_agent_id
+coordinationhub assign-task: error: the following arguments are required: assigned_agent_id
+"#,
     },
 ];
 

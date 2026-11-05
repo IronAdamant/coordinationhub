@@ -359,6 +359,43 @@ pub fn dumps(value: &Value) -> String {
     out
 }
 
+/// JSON with no spaces after separators and non-ASCII text left as UTF-8
+/// (the frame around it is still ASCII): the smallest text for a reply.
+pub fn dumps_tight(value: &Value) -> String {
+    let mut out = String::new();
+    write_tight(&mut out, value);
+    out
+}
+
+fn write_tight(out: &mut String, value: &Value) {
+    match value {
+        Value::Array(items) => {
+            out.push('[');
+            for (idx, item) in items.iter().enumerate() {
+                if idx > 0 {
+                    out.push(',');
+                }
+                write_tight(out, item);
+            }
+            out.push(']');
+        }
+        Value::Object(pairs) => {
+            out.push('{');
+            for (idx, (key, item)) in pairs.iter().enumerate() {
+                if idx > 0 {
+                    out.push(',');
+                }
+                write_string(out, key, false);
+                out.push(':');
+                write_tight(out, item);
+            }
+            out.push('}');
+        }
+        Value::String(text) => write_string(out, text, false),
+        other => write_compact(out, other),
+    }
+}
+
 pub fn dumps_pretty(value: &Value) -> String {
     let mut out = String::new();
     write_pretty(&mut out, value, 0);

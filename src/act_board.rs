@@ -84,7 +84,7 @@ pub fn create_task(
     ]))
 }
 
-pub fn assign_task(state: &mut State, task_id: &str, assigned: &str) -> Value {
+pub fn assign_task(state: &mut State, task_id: &str, assigned: &str, force: bool) -> Value {
     let Some(pos) = state.tasks.iter().position(|task| task.id == task_id) else {
         state.record_event(
             "task.assigned",
@@ -100,6 +100,24 @@ pub fn assign_task(state: &mut State, task_id: &str, assigned: &str) -> Value {
         ]);
     };
     let prior = state.tasks[pos].assigned_agent_id.clone();
+    // The check and the write happen under the journal lock, so two agents
+    // claiming at once cannot both succeed: the second sees the first.
+    if let Some(holder) = prior.as_deref().filter(|holder| *holder != assigned && !force) {
+        let status = state.tasks[pos].status.clone();
+        return json::obj(vec![
+            ("assigned", json::b(false)),
+            ("reason", json::s("already_assigned")),
+            ("task_id", json::s(task_id)),
+            ("assigned_agent_id", json::s(holder)),
+            ("status", json::s(&status)),
+            (
+                "error",
+                json::s(format!(
+                    "task {task_id} is already assigned to {holder} (status {status}); pick another task (get_available_tasks with unassigned_only=true), ask {holder}, or pass force=true to reassign"
+                )),
+            ),
+        ]);
+    }
     let description = state.tasks[pos].description.clone();
     let now = util::now();
     state.tasks[pos].assigned_agent_id = Some(assigned.into());
@@ -530,11 +548,12 @@ fn would_cycle(state: &State, task_id: &str, parent_task_id: &str) -> bool {
     false
 }
 
-pub fn available_tasks(state: &State, agent_id: Option<&str>) -> Value {
+pub fn available_tasks(state: &State, agent_id: Option<&str>, unassigned_only: bool) -> Value {
     let mut tasks: Vec<&Task> = state
         .tasks
         .iter()
         .filter(|task| task.status == "pending")
+        .filter(|task| !unassigned_only || task.assigned_agent_id.is_none())
         .filter(|task| {
             agent_id
                 .map(|id| task.assigned_agent_id.as_deref() == Some(id))
@@ -1891,6 +1910,56 @@ pub fn ack_handoff(state: &mut State, handoff_id: i64, agent_id: &str) -> Value 
         ("acks", json::i(acks)),
         ("expected", json::i(expected)),
     ])
+}
+
+/// For the explicit handoff tools: adds an `error` sentence to a refused
+/// reply saying what state the handoff is in and what to do next. The older
+/// `wait_for_handoff` modes keep the 0.8.0 reply without it.
+pub fn explain_handoff(state: &State, handoff_id: i64, agent_id: Option<&str>, reply: Value) -> Value {
+    let Some(reason) = reply.get("reason").and_then(Value::as_str) else {
+        return reply;
+    };
+    let row = state.handoffs.iter().find(|row| row.id == handoff_id);
+    let text = match row {
+        None => format!(
+            "handoff {handoff_id} not found; use the handoff_id that broadcast with handoff_targets returned"
+        ),
+        Some(row) if reason == "not_recipient" => format!(
+            "{} is not a recipient of handoff {handoff_id}; its recipients are {}",
+            agent_id.unwrap_or(""),
+            json::parse(&row.to_agents)
+                .ok()
+                .and_then(|v| {
+                    v.as_array().map(|items| {
+                        items.iter().filter_map(Value::as_str).collect::<Vec<_>>().join(", ")
+                    })
+                })
+                .unwrap_or_default()
+        ),
+        Some(row) if row.status == "completed" || row.status == "cancelled" => {
+            format!("handoff {handoff_id} is already {}; nothing more to do", row.status)
+        }
+        Some(row) => {
+            let acks = state
+                .handoff_acks
+                .iter()
+                .filter(|ack| ack.handoff_id == handoff_id)
+                .count();
+            let expected = json::parse(&row.to_agents)
+                .ok()
+                .and_then(|v| v.as_array().map(|items| items.len()))
+                .unwrap_or(0);
+            format!(
+                "handoff {handoff_id} is {}: {acks} of {expected} recipients have acknowledged; each recipient calls acknowledge_handoff before complete_handoff",
+                row.status
+            )
+        }
+    };
+    let mut reply = reply;
+    if let Value::Object(pairs) = &mut reply {
+        pairs.push(("error".into(), json::s(text)));
+    }
+    reply
 }
 
 fn handoff_allowed(current: &str, target: &str) -> bool {
