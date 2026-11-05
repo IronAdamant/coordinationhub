@@ -14,7 +14,7 @@ pub fn load_schema() -> Schema {
     let tools_version = value
         .get("tools_version")
         .and_then(Value::as_str)
-        .unwrap_or("1.0.0")
+        .unwrap_or("1.1.0")
         .to_string();
     let mut tools = Vec::new();
     if let Some(Value::Object(pairs)) = value.get("tools") {
@@ -264,12 +264,52 @@ fn type_ok(value: &Value, spec: &Value) -> bool {
     }
 }
 
+/// Names the unknown tool and up to three close matches instead of listing
+/// every tool: `tools/list` already has the list, and the full list cost an
+/// agent over a kilobyte per mistyped name.
 pub fn unknown_tool(schema: &Schema, name: &str) -> String {
-    let mut names: Vec<String> = schema.tools.iter().map(|(n, _)| n.clone()).collect();
-    names.sort();
+    let wanted = name.trim().to_ascii_lowercase().replace('-', "_");
+    let mut close: Vec<(usize, &str)> = schema
+        .tools
+        .iter()
+        .map(|(tool, _)| tool.as_str())
+        .chain(std::iter::once("who"))
+        .filter_map(|tool| {
+            let distance = edit_distance(&wanted, tool);
+            let near = distance <= (wanted.len().max(tool.len()) / 3).max(2);
+            let part = wanted.len() >= 4 && (tool.contains(wanted.as_str()) || wanted.contains(tool));
+            let word = wanted
+                .split('_')
+                .filter(|word| word.len() >= 4)
+                .any(|word| tool.split('_').any(|other| other == word));
+            (near || part || word).then_some((distance, tool))
+        })
+        .collect();
+    close.sort();
+    close.truncate(3);
+    let hint = if close.is_empty() {
+        String::new()
+    } else {
+        let names: Vec<String> = close.iter().map(|(_, tool)| format!("'{tool}'")).collect();
+        format!("Did you mean {}? ", names.join(", "))
+    };
     format!(
-        "Unknown tool: {}. Available: {}",
-        json::py_repr(&json::s(name)),
-        json::py_repr(&json::string_list(&names))
+        "Unknown tool: {}. {hint}tools/list names every tool this server offers.",
+        json::py_repr(&json::s(name))
     )
+}
+
+fn edit_distance(left: &str, right: &str) -> usize {
+    let right: Vec<char> = right.chars().collect();
+    let mut row: Vec<usize> = (0..=right.len()).collect();
+    for (i, a) in left.chars().enumerate() {
+        let mut diagonal = row[0];
+        row[0] = i + 1;
+        for (j, b) in right.iter().enumerate() {
+            let above = row[j + 1];
+            row[j + 1] = (above + 1).min(row[j] + 1).min(diagonal + usize::from(a != *b));
+            diagonal = above;
+        }
+    }
+    row[right.len()]
 }

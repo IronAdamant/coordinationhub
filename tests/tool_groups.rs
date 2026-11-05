@@ -5,6 +5,9 @@ use coordinationhub::json::{self, Value};
 use std::io::Write;
 use std::process::{Command, Output, Stdio};
 
+/// The 50 tools of 0.8.0, `who`, and the three handoff tools added in 1.1.0.
+const TOTAL: usize = 54;
+
 /// Run `serve-mcp` with the given switches; send initialize, tools/list and
 /// the given tool calls; return every reply line.
 fn session(env: &[(&str, &str)], calls: &[(&str, Value)]) -> (Output, Vec<Value>) {
@@ -114,7 +117,7 @@ fn groups_cover_every_tool_once() {
     let (_, replies) = session(&[], &[]);
     let listed = sorted(names(&replies));
     let grouped: Vec<String> = GROUPS.iter().flat_map(|(_, tools)| tools.iter().map(|t| t.to_string())).collect();
-    assert_eq!(grouped.len(), 51);
+    assert_eq!(grouped.len(), TOTAL);
     assert_eq!(sorted(grouped), listed);
 }
 
@@ -122,7 +125,7 @@ fn groups_cover_every_tool_once() {
 fn default_listing_is_unchanged() {
     let (_, plain) = session(&[], &[]);
     let (_, blank) = session(&[("COORDINATIONHUB_TOOLS", "  "), ("COORDINATIONHUB_DISABLE", "")], &[]);
-    assert_eq!(names(&plain).len(), 51);
+    assert_eq!(names(&plain).len(), TOTAL);
     assert_eq!(names(&plain).last().map(String::as_str), Some("who"));
     assert_eq!(plain[0].get("result").unwrap().get("instructions"), None);
     // Blank switches count as unset: same bytes.
@@ -143,17 +146,17 @@ fn tools_allowlist_by_group_and_by_name() {
     want.push("send_message".into());
     assert_eq!(sorted(names(&replies)), sorted(want));
     let (_, replies) = session(&[("COORDINATIONHUB_TOOLS", "all")], &[]);
-    assert_eq!(names(&replies).len(), 51);
+    assert_eq!(names(&replies).len(), TOTAL);
 }
 
 #[test]
 fn disable_by_group_and_by_name_after_the_allowlist() {
     let (_, replies) = session(&[("COORDINATIONHUB_DISABLE", "spawn,diagnostics")], &[]);
     let listed = names(&replies);
-    assert_eq!(listed.len(), 51 - group("spawn").len() - group("diagnostics").len());
+    assert_eq!(listed.len(), TOTAL - group("spawn").len() - group("diagnostics").len());
     assert!(!listed.iter().any(|name| group("spawn").contains(name)));
     let (_, replies) = session(&[("COORDINATIONHUB_DISABLE", "who")], &[]);
-    assert_eq!(names(&replies).len(), 50);
+    assert_eq!(names(&replies).len(), TOTAL - 1);
     assert!(!names(&replies).contains(&"who".to_string()));
     let (_, replies) = session(
         &[("COORDINATIONHUB_TOOLS", "locks,tasks"), ("COORDINATIONHUB_DISABLE", "who,tasks")],
@@ -312,7 +315,7 @@ fn file_mistakes_are_warnings_not_failures() {
     assert_eq!(out.status.code(), Some(0));
     // The good line applies; the two bad lines are skipped.
     let listed = names(&replies);
-    assert_eq!(listed.len(), 51 - group("spawn").len());
+    assert_eq!(listed.len(), TOTAL - group("spawn").len());
     let instructions = replies[0].get("result").unwrap().get("instructions").and_then(Value::as_str).unwrap();
     let lines: Vec<&str> = instructions.lines().collect();
     assert_eq!(lines.len(), 3);
@@ -380,23 +383,23 @@ fn editing_the_block_mid_session_updates_the_list() {
     let init = send(r#"{"jsonrpc":"2.0","id":1,"method":"initialize","params":{}}"#);
     let caps = init[0].get("result").unwrap().get("capabilities").unwrap();
     assert_eq!(caps.get("tools").and_then(|t| t.get("listChanged")), Some(&Value::Bool(true)));
-    assert_eq!(count(&send(list)[0]), Some(51));
+    assert_eq!(count(&send(list)[0]), Some(TOTAL));
     // The agent adds a block: the next request is preceded by the notification.
     std::fs::write(project.join("AGENTS.md"), "```agent-tools\ncoordinationhub: disable spawn\n```\n").unwrap();
     let replies = send(list);
     assert_eq!(replies.len(), 2);
     assert_eq!(replies[0].get("method").and_then(Value::as_str), Some("notifications/tools/list_changed"));
-    assert_eq!(count(&replies[1]), Some(51 - group("spawn").len()));
+    assert_eq!(count(&replies[1]), Some(TOTAL - group("spawn").len()));
     // An edit that leaves the same tools on sends no notification.
     std::fs::write(project.join("AGENTS.md"), "```agent-tools\n# still no spawning here\ncoordinationhub: disable spawn\n```\n").unwrap();
     let replies = send(list);
     assert_eq!(replies.len(), 1);
-    assert_eq!(count(&replies[0]), Some(51 - group("spawn").len()));
+    assert_eq!(count(&replies[0]), Some(TOTAL - group("spawn").len()));
     // Removing the file restores the defaults, with a notification.
     std::fs::remove_file(project.join("AGENTS.md")).unwrap();
     let replies = send(list);
     assert_eq!(replies.len(), 2);
-    assert_eq!(count(&replies[1]), Some(51));
+    assert_eq!(count(&replies[1]), Some(TOTAL));
     drop(stdin);
     let _ = child.wait();
 }
@@ -410,7 +413,7 @@ fn this_repos_agents_md_examples_switch_nothing() {
     assert!(agent_tools_block(&text).is_none());
     let surface = Surface::resolve(&EnvSwitches::parse(None, None).unwrap(), Some(&text));
     assert!(!surface.configured());
-    assert_eq!(surface.exposed(), 51);
+    assert_eq!(surface.exposed(), TOTAL);
     // The server run on this repo lists every tool and adds no instructions.
     let base = scratch();
     let mut child = Command::new(env!("CARGO_BIN_EXE_coordinationhub"))
@@ -436,5 +439,5 @@ fn this_repos_agents_md_examples_switch_nothing() {
     let out = child.wait_with_output().unwrap();
     let replies: Vec<Value> = String::from_utf8_lossy(&out.stdout).lines().map(|line| json::parse(line).unwrap()).collect();
     assert_eq!(replies[0].get("result").unwrap().get("instructions"), None);
-    assert_eq!(names(&replies).len(), 51);
+    assert_eq!(names(&replies).len(), TOTAL);
 }

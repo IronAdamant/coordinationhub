@@ -226,6 +226,7 @@ pub fn extra(
             json::obj(vec![
                 ("task_id", json::s(req(0, "task_id")?)),
                 ("assigned_agent_id", json::s(req(1, "assigned_agent_id")?)),
+                ("force", json::b(has("force"))),
             ]),
         ),
         "update-task-status" => (
