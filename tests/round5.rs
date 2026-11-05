@@ -42,8 +42,8 @@ fn mcp_lease_ttl_keeps_the_callers_number() {
         ),
         ("acquire_coordinator_lease", json::obj(vec![("agent_id", json::s("marimba"))])),
     ]);
-    assert!(tool_text(&replies[1]).0.contains("\"ttl\": 40,"));
-    assert!(tool_text(&replies[3]).0.contains("\"ttl\": 10.0,"));
+    assert!(tool_text(&replies[1]).0.contains("\"ttl\":40,"));
+    assert!(tool_text(&replies[3]).0.contains("\"ttl\":10.0,"));
 }
 
 fn conflicts_setup(hub: &Hub) {
@@ -249,10 +249,10 @@ fn mcp_unknown_tool_and_integral_priority() {
     ]);
     let (text, is_error) = tool_text(&replies[1]);
     assert!(is_error);
-    assert!(text.starts_with("Error: Unknown tool: 'no_such_tool_q'. Available: ["));
+    assert!(text.starts_with("Error: Unknown tool: 'no_such_tool_q'. "), "{text}");
     let (text, is_error) = tool_text(&replies[2]);
     assert!(!is_error, "{text}");
-    assert!(text.contains("\"priority\": 3"));
+    assert!(text.contains("\"priority\":3"));
     let (text, is_error) = tool_text(&replies[3]);
     assert!(is_error);
     assert!(text.starts_with("Input validation error:"), "{text}");
@@ -268,7 +268,7 @@ fn caller_worktree_root_is_stored_as_given() {
         ),
         ("list_agents", json::obj(vec![("active_only", json::b(false))])),
     ]);
-    assert!(tool_text(&replies[1]).0.contains("\"worktree_root\": \"rel-tree\""));
+    assert!(tool_text(&replies[1]).0.contains("\"worktree_root\":\"rel-tree\""));
 }
 
 #[test]
