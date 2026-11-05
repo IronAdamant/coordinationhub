@@ -452,7 +452,10 @@ fn walk_files(dir: &Path, skip: &[&str], exts: &[String], depth: i64, out: &mut 
     entries.sort_by_key(|e| e.file_name());
     for entry in entries {
         let name = entry.file_name().to_string_lossy().to_string();
-        if skip.iter().any(|part| *part == name) || name.ends_with(".egg-info") {
+        if name.starts_with('.')
+            || skip.iter().any(|part| *part == name)
+            || name.ends_with(".egg-info")
+        {
             continue;
         }
         let path = entry.path();
@@ -913,11 +916,25 @@ pub fn assess(
         "spawn_propagation",
         "leader_stability",
     ];
-    let traces = suite
+    let mut traces = suite
         .get("traces")
         .and_then(Value::as_array)
         .map(|items| items.to_vec())
         .unwrap_or_default();
+    if let Some(filter) = graph_agent_id {
+        traces.retain(|trace| {
+            trace
+                .get("events")
+                .and_then(Value::as_array)
+                .map(|events| {
+                    events.iter().any(|event| {
+                        event.get("type").and_then(Value::as_str) == Some("register")
+                            && event.get("graph_id").and_then(Value::as_str) == Some(filter)
+                    })
+                })
+                .unwrap_or(false)
+        });
+    }
     let mut trace_scores = Vec::new();
     let mut totals = [0.0_f64; 6];
     for trace in &traces {
@@ -935,15 +952,23 @@ pub fn assess(
         }
         trace_scores.push((id, scores));
     }
-    let divisor = traces.len().max(1) as f64;
-    let averages = json::obj(
-        metrics
-            .iter()
-            .enumerate()
-            .map(|(index, metric)| (*metric, json::f(totals[index] / divisor)))
-            .collect(),
-    );
-    let overall = totals.iter().sum::<f64>() / (divisor * metrics.len() as f64);
+    let averages = if traces.is_empty() {
+        json::obj(metrics.iter().map(|metric| (*metric, json::f(0.0))).collect())
+    } else {
+        let divisor = traces.len() as f64;
+        json::obj(
+            metrics
+                .iter()
+                .enumerate()
+                .map(|(index, metric)| (*metric, json::f(totals[index] / divisor)))
+                .collect(),
+        )
+    };
+    let overall = if traces.is_empty() {
+        0.0
+    } else {
+        totals.iter().sum::<f64>() / (traces.len() as f64 * metrics.len() as f64)
+    };
     let result = json::obj(vec![
         ("suite_name", json::s(name)),
         ("run_at", json::f(util::now())),

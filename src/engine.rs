@@ -300,28 +300,21 @@ impl Engine {
                 root_ref,
             ),
             "get_notifications" => {
-                let mut pruned = None;
                 if opt_f_opt(args, "prune_max_age_seconds").is_some()
                     || opt_i(args, "prune_max_entries").is_some()
                 {
-                    pruned = Some(act_lock::prune_notifications(
+                    let _ = act_lock::prune_notifications(
                         state,
                         opt_f_opt(args, "prune_max_age_seconds"),
                         opt_i(args, "prune_max_entries"),
-                    ));
+                    );
                 }
-                let mut value = act_lock::notifications(
+                act_lock::notifications(
                     state,
                     opt_f_opt(args, "since"),
                     opt_str(args, "exclude_agent"),
                     opt_i(args, "limit").unwrap_or(100),
-                );
-                if let Some(count) = pruned {
-                    if let Value::Object(pairs) = &mut value {
-                        pairs.push(("pruned".into(), json::i(count)));
-                    }
-                }
-                value
+                )
             }
             "get_conflicts" => act_lock::conflicts(
                 state,
@@ -834,20 +827,15 @@ impl Engine {
         let timeout = opt_f(args, "timeout_s", 0.0);
         let poll = opt_f(args, "poll_interval_s", 0.05).max(0.01);
         let started = std::time::Instant::now();
+        let opened = util::now();
         loop {
             let rows = self.view(|engine| {
-                let newest = engine
-                    .store
-                    .state
-                    .notifications
-                    .iter()
-                    .filter(|row| exclude.as_ref().map(|id| row.agent_id != *id).unwrap_or(true))
-                    .max_by_key(|row| row.id)
-                    .map(|row| row.created_at);
-                let Some(anchor) = newest else {
-                    return Vec::new();
-                };
-                notification_window(&engine.store.state, anchor, exclude.as_deref(), limit)
+                notification_window(
+                    &engine.store.state,
+                    opened,
+                    exclude.as_deref(),
+                    limit,
+                )
             })?;
             if !rows.is_empty() {
                 return Ok(json::obj(vec![
@@ -1193,11 +1181,12 @@ fn who_arguments(args: &Value) -> Result<(), String> {
 
 fn notification_window(
     state: &crate::db::State,
-    anchor: f64,
+    opened_at: f64,
     exclude: Option<&str>,
     limit: i64,
 ) -> Vec<Value> {
-    let since = anchor - 1.0;
+    // Same window as Python's hybrid wait: events from the last second, not older rows.
+    let since = opened_at - 1.0;
     let mut rows: Vec<_> = state
         .notifications
         .iter()

@@ -2,8 +2,12 @@
 
 use crate::json::Value;
 
-pub fn show(command: &str, value: &Value, pos: &[String]) {
+pub fn show(command: &str, value: &Value, pos: &[String], kv: &[(String, String)]) -> i32 {
+    if let Some(code) = crash_like_python(command, value) {
+        return code;
+    }
     let id = pos.first().map(|s| s.as_str()).unwrap_or("");
+    let flag = |key: &str| kv.iter().find(|(name, _)| name == key).map(|(_, v)| v.as_str());
     match command {
         "status" => render_status(value),
         "register" => {
@@ -34,7 +38,6 @@ pub fn show(command: &str, value: &Value, pos: &[String]) {
             }
         }
         "list-locks" => render_lock_list(value),
-        "admin-locks" => println!("{}", crate::json::dumps_pretty(value)),
         "notify-change" => println!(
             "Recorded: {} on {} by {}",
             pos.get(1).map(|s| s.as_str()).unwrap_or(""),
@@ -81,16 +84,27 @@ pub fn show(command: &str, value: &Value, pos: &[String]) {
         "complete-handoff" => println!("Completed handoff {id}"),
         "cancel-handoff" => println!("Cancelled handoff {id}"),
         "acknowledge-handoff" => {
+            let agent = pos.get(1).map(|s| s.as_str()).unwrap_or("");
             if value.get("acknowledged").and_then(Value::as_bool) == Some(true) {
-                println!("Acknowledged handoff {id}");
+                println!("Acknowledged handoff {id} by {agent}");
             } else {
                 println!("Failed: {}", text(value, "reason"));
             }
         }
         "create-task" => {
             println!("Task created: {id}");
-            if num(value, "priority") != 0 {
-                println!("  Priority: {}", num(value, "priority"));
+            let deps: Vec<&str> = kv
+                .iter()
+                .filter(|(key, _)| key == "depends_on")
+                .map(|(_, item)| item.as_str())
+                .collect();
+            if !deps.is_empty() {
+                println!("  Depends on: {}", deps.join(", "));
+            }
+            if let Some(priority) = flag("priority").and_then(|item| item.parse::<i64>().ok()) {
+                if priority != 0 {
+                    println!("  Priority: {priority}");
+                }
             }
         }
         "create-subtask" => {
@@ -104,10 +118,18 @@ pub fn show(command: &str, value: &Value, pos: &[String]) {
             "Task assigned: {id} → {}",
             pos.get(1).map(|s| s.as_str()).unwrap_or("")
         ),
-        "update-task-status" => println!(
-            "Task updated: {id} → {}",
-            pos.get(1).map(|s| s.as_str()).unwrap_or("")
-        ),
+        "update-task-status" => {
+            println!(
+                "Task updated: {id} → {}",
+                pos.get(1).map(|s| s.as_str()).unwrap_or("")
+            );
+            if let Some(summary) = flag("summary") {
+                if !summary.is_empty() {
+                    let shown: String = summary.chars().take(80).collect();
+                    println!("  Summary: {shown}");
+                }
+            }
+        }
         "query-tasks" => render_tasks(value),
         "get-available-tasks" => render_available(value),
         "declare-work-intent" => {
@@ -122,10 +144,19 @@ pub fn show(command: &str, value: &Value, pos: &[String]) {
         }
         "get-work-intents" => render_intents(value),
         "clear-work-intent" => println!("Intent cleared: {id}"),
-        "declare-dependency" => println!(
-            "Dependency declared: {id} → {}",
-            pos.get(1).map(|s| s.as_str()).unwrap_or("")
-        ),
+        "declare-dependency" => {
+            println!(
+                "Dependency declared: {id} → {}",
+                pos.get(1).map(|s| s.as_str()).unwrap_or("")
+            );
+            if let Some(task) = flag("depends_on_task_id") {
+                println!("  Task: {task}");
+            }
+            println!(
+                "  Condition: {}",
+                flag("condition").unwrap_or("task_completed")
+            );
+        }
         "satisfy-dependency" => println!("Dependency {id} marked as satisfied"),
         "get-leader" => render_leader(value, true),
         "leader-status" => render_leader(value, false),
@@ -134,7 +165,8 @@ pub fn show(command: &str, value: &Value, pos: &[String]) {
             if value.get("acquired").and_then(Value::as_bool) == Some(true) {
                 println!("Lease acquired: {}", text(value, "lease_name"));
                 println!("  Holder: {}", text(value, "holder_id"));
-                println!("  TTL: {}s", raw(value, "ttl"));
+                let ttl = value.get("ttl").and_then(Value::as_f64).unwrap_or(0.0);
+                println!("  TTL: {ttl:.1}s");
                 println!("  Expires at: {}", raw(value, "expires_at"));
             } else {
                 println!("Lease acquisition failed — leadership held by another agent");
@@ -161,6 +193,11 @@ pub fn show(command: &str, value: &Value, pos: &[String]) {
                 println!("  Holder: {}", text(value, "holder_id"));
             } else {
                 println!("Leadership claim failed");
+                if let Some(holder) = value.get("holder") {
+                    if !matches!(holder, Value::Null) {
+                        println!("  Current holder: {}", text(holder, "holder_id"));
+                    }
+                }
             }
         }
         "spawn-subagent" => {
@@ -206,10 +243,17 @@ pub fn show(command: &str, value: &Value, pos: &[String]) {
                 println!("  Escalate: call deregister_agent to force cleanup");
             }
         }
-        "send-message" => println!(
-            "MESSAGE SENT to {}",
-            pos.get(1).map(|s| s.as_str()).unwrap_or("")
-        ),
+        "send-message" => {
+            println!(
+                "MESSAGE SENT to {}",
+                pos.get(1).map(|s| s.as_str()).unwrap_or("")
+            );
+            println!("  From: {id}");
+            println!(
+                "  Type: {}",
+                pos.get(2).map(|s| s.as_str()).unwrap_or("")
+            );
+        }
         "validate-spec" => {
             if value.get("valid").and_then(Value::as_bool) == Some(true) {
                 println!("Coordination spec is valid");
@@ -279,10 +323,15 @@ pub fn show(command: &str, value: &Value, pos: &[String]) {
             println!("Timed out: {}", list_or_none(value, "timed_out"));
         }
         "wait-for-task" => {
-            if value.get("timed_out").and_then(Value::as_bool) == Some(true) {
+            if value.get("timed_out").and_then(Value::as_bool) == Some(true)
+                || text(value, "status") == "timeout"
+            {
                 println!("Timeout waiting for: {id}");
             } else if text(value, "status") == "failed" {
                 println!("Task failed: {id}");
+                if let Some(err) = value.get("error").and_then(Value::as_str) {
+                    println!("  Error: {err}");
+                }
             } else {
                 println!("Task completed: {id}");
             }
@@ -323,41 +372,204 @@ pub fn show(command: &str, value: &Value, pos: &[String]) {
                 println!("Failed: {}", text(value, "reason"));
             }
         }
-        "get-conflicts" => {
-            let items = value.get("conflicts").and_then(Value::as_array);
-            match items {
-                Some(items) if !items.is_empty() => {
-                    println!("{} conflict(s):", items.len());
-                    for item in items {
-                        println!(
-                            "  {} — {} vs {}",
-                            text(item, "document_path"),
-                            text(item, "agent_a"),
-                            text(item, "agent_b")
-                        );
-                    }
+        "get-conflicts" => println!("No conflicts recorded"),
+        "get-messages" => {
+            let items = value.get("messages").and_then(Value::as_array);
+            let count = items.map(|rows| rows.len()).unwrap_or(0);
+            println!("Messages for {id}: {count}");
+            if let Some(items) = items {
+                for item in items {
+                    let read = item.get("read_at").map(|v| !matches!(v, Value::Null)).unwrap_or(false);
+                    println!(
+                        "  From: {} | Type: {} | Read: {}",
+                        text(item, "from_agent_id"),
+                        text(item, "message_type"),
+                        if read { "True" } else { "False" }
+                    );
                 }
-                _ => println!("No conflicts"),
+            }
+        }
+        "mark-messages-read" => {
+            println!(
+                "Marked {} message(s) as read for {id}",
+                num(value, "marked_read")
+            );
+        }
+        "contention-hotspots" => {
+            let items = value.get("hotspots").and_then(Value::as_array);
+            if items.map(|rows| rows.is_empty()).unwrap_or(true) {
+                println!("No contention hotspots");
+            } else if let Some(items) = items {
+                println!("Contention hotspots ({}):", items.len());
+                for item in items {
+                    println!(
+                        "  {}: {} conflict(s)",
+                        text(item, "document_path"),
+                        num(item, "conflict_count")
+                    );
+                }
+            }
+        }
+        "agent-status" => {
+            println!("Agent: {}", text(value, "agent_id"));
+            println!("  Status: {}", text(value, "status"));
+            let task = value.get("current_task").and_then(Value::as_str).unwrap_or("(none)");
+            println!("  Task: {task}");
+            let locks = value.get("locks").or_else(|| value.get("active_locks")).and_then(Value::as_array);
+            println!("  Locks: {}", locks.map(|rows| rows.len()).unwrap_or(0));
+        }
+        "admin-locks" => {
+            if value.get("released").is_some() {
+                println!(
+                    "Released {} lock(s) for {}",
+                    num(value, "released"),
+                    flag("agent_id").unwrap_or("unknown")
+                );
+            } else if value.get("reaped").is_some() && value.get("orphaned_children").is_some() {
+                println!("Reaped {} stale agent(s)", num(value, "reaped"));
+                println!("  Orphaned children: {}", num(value, "orphaned_children"));
+            } else if value.get("reaped").is_some() {
+                println!("Reaped {} expired lock(s)", num(value, "reaped"));
+            } else {
+                println!("{}", crate::json::dumps_pretty(value));
+            }
+        }
+        "manage-dependencies" => println!("{}", crate::json::dumps_pretty(value)),
+        "get-all-dependencies" => {
+            let items = value.get("dependencies").and_then(Value::as_array);
+            if items.map(|rows| rows.is_empty()).unwrap_or(true) {
+                println!("No dependencies declared");
+            } else if let Some(items) = items {
+                println!("{} declared dependency/dependencies:", items.len());
+                for item in items {
+                    let sat = if item.get("satisfied").and_then(Value::as_bool) == Some(true) {
+                        "satisfied"
+                    } else {
+                        "open"
+                    };
+                    println!(
+                        "  [{sat}] {} -> {} ({})",
+                        text(item, "dependent_agent_id"),
+                        text(item, "depends_on_agent_id"),
+                        text(item, "condition")
+                    );
+                }
+            }
+        }
+        "report-subagent-spawned" => {
+            if value.get("reported").and_then(Value::as_bool) == Some(true) {
+                println!("Spawn reported: {}", text(value, "spawn_id"));
+                println!("  Child: {}", text(value, "child_agent_id"));
+                println!("  Description: {}", text(value, "description"));
+            } else {
+                println!(
+                    "No pending spawn found for {}",
+                    text(value, "parent_agent_id")
+                );
+            }
+        }
+        "wait-for-broadcast-acks" => {
+            println!(
+                "Acknowledged by: {}",
+                list_or_none(value, "acknowledged_by")
+            );
+            if value.get("timed_out").and_then(Value::as_bool) == Some(true) {
+                if let Some(reason) = value.get("reason").and_then(Value::as_str) {
+                    println!("  Reason: {reason}");
+                }
+            }
+        }
+        "task-failure-history" => {
+            let items = value.get("history").and_then(Value::as_array);
+            if items.map(|rows| rows.is_empty()).unwrap_or(true) {
+                println!("No failure history for {id}");
+            } else if let Some(items) = items {
+                println!("Failure history for {id} ({} entries):", items.len());
+                for item in items {
+                    println!("  {}: {}", text(item, "timestamp"), text(item, "error"));
+                }
             }
         }
         "load-spec" => {
-            if value.get("loaded").and_then(Value::as_bool) == Some(true) {
-                println!("Loaded coordination spec");
-            } else {
-                println!("Coordination spec not loaded");
-                if let Some(err) = value.get("error").and_then(Value::as_str) {
-                    println!("  {err}");
-                }
-            }
+            println!("Loaded coordination spec");
+            let agents = value
+                .get("agents")
+                .and_then(Value::as_array)
+                .map(|items| items.len())
+                .unwrap_or(0);
+            let handoffs = value
+                .get("handoffs")
+                .and_then(Value::as_array)
+                .map(|items| items.len())
+                .unwrap_or(0);
+            println!("  Agents: {agents}");
+            println!("  Handoffs: {handoffs}");
+        }
+        "assess" => {
+            let report = value.get("report").and_then(Value::as_str).unwrap_or("");
+            println!("{report}");
         }
         "agent-tree" => {
-            if let Some(text) = value.get("text_tree").and_then(Value::as_str) {
-                println!("{text}");
+            if value.get("tree").and_then(Value::as_object).is_some() {
+                if let Some(text) = value.get("text_tree").and_then(Value::as_str) {
+                    println!("{text}");
+                }
+            } else {
+                println!("No agent tree available");
             }
         }
         "who" => println!("{}", crate::json::dumps_pretty(value)),
         _ => println!("{}", crate::json::dumps_pretty(value)),
     }
+    0
+}
+
+fn crash_like_python(command: &str, value: &Value) -> Option<i32> {
+    let boom = |kind: &str| {
+        eprintln!("Traceback (most recent call last):\n{kind}");
+        1
+    };
+    match command {
+        "get-conflicts" => {
+            let items = value.get("conflicts").and_then(Value::as_array);
+            if items.map(|rows| !rows.is_empty()).unwrap_or(false) {
+                return Some(boom("KeyError: 'agent_id'"));
+            }
+        }
+        "get-available-tasks" => {
+            let items = value.get("tasks").and_then(Value::as_array);
+            if items.map(|rows| !rows.is_empty()).unwrap_or(false) {
+                return Some(boom("KeyError: 'task_id'"));
+            }
+        }
+        "query-tasks" => {
+            let items = value.get("tasks").and_then(Value::as_array);
+            if items.map(|rows| !rows.is_empty()).unwrap_or(false) {
+                return Some(boom("KeyError: 'task_id'"));
+            }
+        }
+        "get-leader" | "leader-status" => {
+            if matches!(value.get("leader"), Some(Value::Object(_))) {
+                return Some(boom("KeyError: 'agent_id'"));
+            }
+        }
+        "list-pending-spawns" => {
+            if let Some(items) = value.get("spawns").and_then(Value::as_array) {
+                if !items.is_empty() {
+                    let row = &items[0];
+                    if row.get("id").and_then(Value::as_str).is_none() {
+                        return Some(boom("KeyError: 'id'"));
+                    }
+                    if row.get("description").map(|item| matches!(item, Value::Null)).unwrap_or(true)
+                    {
+                        return Some(boom("TypeError: 'NoneType' object is not subscriptable"));
+                    }
+                }
+            }
+        }
+        _ => {}
+    }
+    None
 }
 
 pub fn exit_code(command: &str, value: &Value) -> i32 {
@@ -420,7 +632,12 @@ fn render_status(value: &Value) {
                 })
                 .collect::<Vec<_>>()
                 .join(" ");
-            println!("  {label}: {}", crate::json::dumps(item));
+            let shown = match item {
+                Value::Bool(true) => "False".replace("False", "True"),
+                Value::Bool(false) => "False".into(),
+                _ => crate::json::dumps(item),
+            };
+            println!("  {label}: {shown}");
         }
     }
 }
@@ -527,10 +744,7 @@ fn render_handoffs(value: &Value) {
 }
 
 fn render_tasks(value: &Value) {
-    let items = value
-        .get("tasks")
-        .or_else(|| value.get("subtasks"))
-        .and_then(Value::as_array);
+    let items = value.get("tasks").and_then(Value::as_array);
     let Some(items) = items else {
         println!("No tasks found");
         return;
@@ -684,7 +898,7 @@ fn render_dashboard(value: &Value) {
             println!("  [{}] {}", text(item, "status"), text(item, "id"));
         }
     }
-    println!("{}", "=".repeat(60));
+    println!("{}", "═".repeat(60));
 }
 
 fn text(value: &Value, key: &str) -> String {

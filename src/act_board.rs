@@ -1061,7 +1061,7 @@ pub fn acquire_lease(state: &mut State, agent_id: &str, ttl: Option<f64>) -> Val
         ("acquired", json::b(true)),
         ("lease_name", json::s(COORDINATOR)),
         ("holder_id", json::s(agent_id)),
-        ("ttl", json::f(ttl)),
+        ("ttl", whole(ttl)),
         ("expires_at", json::f(expires)),
     ])
 }
@@ -1127,7 +1127,7 @@ pub fn release_lease_tool(state: &mut State, agent_id: &str) -> Value {
 }
 
 pub fn leader(state: &State) -> Value {
-    match live_lease(state) {
+    match any_lease(state) {
         Some(lease) => json::obj(vec![("leader", lease_value(lease))]),
         None => json::obj(vec![("leader", json::null())]),
     }
@@ -1139,6 +1139,13 @@ fn live_lease(state: &State) -> Option<&crate::db::Lease> {
         .leases
         .iter()
         .find(|lease| lease.lease_name == COORDINATOR && lease.expires_at > now)
+}
+
+fn any_lease(state: &State) -> Option<&crate::db::Lease> {
+    state
+        .leases
+        .iter()
+        .find(|lease| lease.lease_name == COORDINATOR)
 }
 
 fn lease_value(lease: &crate::db::Lease) -> Value {
@@ -1328,18 +1335,16 @@ pub fn report_spawned(
 pub fn cancel_spawn(state: &mut State, spawn_id: &str) -> Value {
     let Some(row) = state.spawns.iter_mut().find(|row| row.id == spawn_id) else {
         return json::obj(vec![
-            ("cancelled", json::b(false)),
             ("not_found", json::b(true)),
-            ("error", json::s("not_found")),
             ("spawn_id", json::s(spawn_id)),
         ]);
     };
     if row.status != "pending" {
+        let status = row.status.clone();
         return json::obj(vec![
-            ("cancelled", json::b(false)),
-            ("error", json::s("not_pending")),
+            ("not_found", json::b(true)),
             ("spawn_id", json::s(spawn_id)),
-            ("status", json::s(&row.status)),
+            ("status", json::s(status)),
         ]);
     }
     row.status = "cancelled".into();

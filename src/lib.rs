@@ -5,6 +5,7 @@ pub mod act_identity;
 pub mod act_lock;
 pub mod act_view;
 pub mod cli;
+pub mod cli_help;
 pub mod cli_cmds;
 pub mod cli_text;
 pub mod db;

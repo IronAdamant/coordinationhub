@@ -676,7 +676,7 @@ pub fn hotspots(state: &State, limit: i64) -> Value {
             paths.push(row.document_path.clone());
         }
     }
-    let mut ranked: Vec<(String, i64, Vec<String>)> = paths
+    let mut ranked: Vec<(String, i64, Vec<String>, i64)> = paths
         .into_iter()
         .map(|path| {
             let rows: Vec<&Conflict> = state
@@ -693,16 +693,16 @@ pub fn hotspots(state: &State, limit: i64) -> Value {
                     agents.push(row.agent_b.clone());
                 }
             }
-            agents.sort();
+            let first_id = rows.iter().map(|row| row.id).min().unwrap_or(0);
             let count = rows.len() as i64;
-            (path, count, agents)
+            (path, count, agents, first_id)
         })
         .collect();
-    ranked.sort_by(|a, b| b.1.cmp(&a.1));
+    ranked.sort_by(|a, b| b.1.cmp(&a.1).then(a.3.cmp(&b.3)));
     ranked.truncate(limit.max(0) as usize);
     let items = ranked
         .into_iter()
-        .map(|(path, count, agents)| {
+        .map(|(path, count, agents, _)| {
             json::obj(vec![
                 ("document_path", json::s(path)),
                 ("conflict_count", json::i(count)),

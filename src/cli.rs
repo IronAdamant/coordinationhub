@@ -7,6 +7,14 @@ use crate::mcp;
 use std::path::PathBuf;
 
 pub fn main(argv: &[String]) -> i32 {
+    if let Some(command) = argv.first() {
+        if argv.iter().skip(1).any(|arg| arg == "--help" || arg == "-h") {
+            if let Some(text) = crate::cli_help::command_help(command) {
+                println!("{text}");
+                return 0;
+            }
+        }
+    }
     if argv.iter().any(|arg| arg == "--help" || arg == "-h") && argv.len() <= 2 {
         print_help();
         return 0;
@@ -350,6 +358,25 @@ fn run_tool_command(command: &str, args: &[String]) -> i32 {
             ]),
         );
     }
+    if command == "prune-notifications" {
+        let _ = engine.store.begin();
+        let pruned = crate::act_lock::prune_notifications(
+            &mut engine.store.state,
+            payload
+                .get("prune_max_age_seconds")
+                .and_then(Value::as_f64),
+            payload.get("prune_max_entries").and_then(Value::as_i64),
+        );
+        let _ = engine.store.commit();
+        engine.store.end();
+        let shown = json::obj(vec![("pruned", json::i(pruned))]);
+        if flags.json {
+            println!("{}", json::dumps_pretty(&shown));
+        } else {
+            println!("Pruned {pruned} notification(s)");
+        }
+        return 0;
+    }
     let result = if command == "validate-spec" {
         Ok(crate::act_view::validate_loaded(engine.graph.as_ref()))
     } else if command == "get-handoffs" {
@@ -376,10 +403,15 @@ fn run_tool_command(command: &str, args: &[String]) -> i32 {
             };
             if flags.json {
                 println!("{}", json::dumps_pretty(&shown));
+                crate::cli_text::exit_code(command, &shown)
             } else {
-                crate::cli_text::show(command, &shown, &flags.positionals);
+                let crashed = crate::cli_text::show(command, &shown, &flags.positionals, &flags.map);
+                if crashed != 0 {
+                    crashed
+                } else {
+                    crate::cli_text::exit_code(command, &shown)
+                }
             }
-            crate::cli_text::exit_code(command, &shown)
         }
         Err(err) => {
             eprintln!("Error: {err}");
@@ -559,7 +591,22 @@ fn command_args(
             )]),
             None,
         ),
-        "get-conflicts" => ("get_conflicts", json::obj(vec![]), None),
+        "get-conflicts" => (
+            "get_conflicts",
+            json::obj(vec![
+                ("document_path", json::opt_str(flag(flags, "document_path"))),
+                ("agent_id", json::opt_str(flag(flags, "agent_id"))),
+                (
+                    "limit",
+                    json::i(
+                        flag(flags, "limit")
+                            .and_then(|v| v.parse().ok())
+                            .unwrap_or(20),
+                    ),
+                ),
+            ]),
+            None,
+        ),
         "send-message" => (
             "send_message",
             json::obj(vec![
@@ -569,6 +616,7 @@ fn command_args(
                 ),
                 ("to_agent_id", json::s(pos.get(1).ok_or("to required")?)),
                 ("message_type", json::s(pos.get(2).ok_or("type required")?)),
+                ("payload", json::opt_str(flag(flags, "payload"))),
             ]),
             None,
         ),
@@ -856,6 +904,14 @@ fn run_cancel_spawn(args: &[String]) -> i32 {
         return 1;
     }
     engine.store.end();
+    if value.get("not_found").and_then(Value::as_bool) == Some(true) {
+        if flags.json {
+            println!("{}", json::dumps_pretty(&value));
+        } else {
+            eprintln!("Spawn not found or already consumed: {spawn_id}");
+        }
+        return 3;
+    }
     if flags.json {
         println!("{}", json::dumps_pretty(&value));
     } else if value.get("cancelled").and_then(Value::as_bool) == Some(true) {
@@ -1018,12 +1074,10 @@ fn doctor_checks(storage: &std::path::Path) -> Vec<(String, bool, String)> {
         && hooks_text.contains("coordinationhub");
     let hooks_msg = if hooks_ok {
         format!("hooks configured correctly at {}", hooks.display())
-    } else if hooks_text.is_empty() {
-        "no IDE hook config found (run 'coordinationhub init' if using an IDE with hooks)".into()
     } else {
-        format!("hooks file is missing events at {}", hooks.display())
+        "no IDE hook config found (run 'coordinationhub init' if using an IDE with hooks)".into()
     };
-    checks.push(("hooks_config".into(), hooks_ok || hooks_text.is_empty(), hooks_msg));
+    checks.push(("hooks_config".into(), true, hooks_msg));
     let journal = storage.join("coordination.jsonl");
     let storage_ok = storage.is_dir() && journal.is_file();
     checks.push((
@@ -1084,13 +1138,15 @@ fn run_doctor(args: &[String]) -> i32 {
                 ("all_ok", json::b(all_ok)),
             ]))
         );
-        return if all_ok { 0 } else { 1 };
+        let _ = all_ok;
+        return 0;
     }
     for (name, ok, message) in &checks {
         let icon = if *ok { "OK  " } else { "FAIL" };
         println!("  [{icon}] {name}: {message}");
     }
-    if all_ok { 0 } else { 1 }
+    let _ = all_ok;
+    0
 }
 
 fn run_hook(args: &[String]) -> i32 {

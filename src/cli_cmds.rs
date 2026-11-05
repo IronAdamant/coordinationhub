@@ -206,14 +206,18 @@ pub fn extra(
                 ("agent_id", json::s(req(0, "agent_id")?)),
                 (
                     "message_ids",
-                    json::arr(
-                        flag("message_ids")
-                            .unwrap_or_default()
-                            .split(',')
-                            .filter_map(|s| s.parse::<i64>().ok())
+                    {
+                        let ids: Vec<Value> = all("message_ids")
+                            .into_iter()
+                            .filter_map(|item| item.parse::<i64>().ok())
                             .map(json::i)
-                            .collect(),
-                    ),
+                            .collect();
+                        if ids.is_empty() {
+                            json::null()
+                        } else {
+                            json::arr(ids)
+                        }
+                    },
                 ),
             ]),
         ),
