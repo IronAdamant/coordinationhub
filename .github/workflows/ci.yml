@@ -18,6 +18,9 @@ jobs:
       - uses: dtolnay/rust-toolchain@1.83.0
       - name: Test
         run: cargo test --locked --release
+      - name: Multi-agent workflow timings
+        if: runner.os == 'Linux' && runner.arch == 'X64'
+        run: cargo test --locked --release --test multi_agent -- --nocapture
       - name: Build the examples (harness, bench, checks)
         run: cargo build --locked --release --examples
       - name: No crate dependencies
