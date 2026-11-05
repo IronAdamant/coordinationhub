@@ -38,8 +38,58 @@ fn sse_release(ip: &str) {
 }
 
 const DASHBOARD: &str = include_str!("../assets/dashboard.html");
+
+/// Wait up to five seconds for `/health`, then hand the dashboard URL to
+/// the desktop's opener. Failures are silent, as in 0.8.0.
+fn open_dashboard(host: &str, port: u16) {
+    use std::io::{Read, Write};
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+    while std::time::Instant::now() < deadline {
+        let up = std::net::TcpStream::connect((host, port))
+            .and_then(|mut stream| {
+                stream.set_read_timeout(Some(std::time::Duration::from_millis(300)))?;
+                write!(stream, "GET /health HTTP/1.0\r\nHost: {host}\r\n\r\n")?;
+                let mut head = [0_u8; 12];
+                stream.read_exact(&mut head)?;
+                Ok(head.ends_with(b"200"))
+            })
+            .unwrap_or(false);
+        if up {
+            break;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(100));
+    }
+    let url = format!("http://{host}:{port}/");
+    let mut command = if cfg!(windows) {
+        let mut cmd = std::process::Command::new("cmd");
+        cmd.args(["/C", "start", "", &url]);
+        cmd
+    } else if cfg!(target_os = "macos") {
+        let mut cmd = std::process::Command::new("open");
+        cmd.arg(&url);
+        cmd
+    } else {
+        let mut cmd = std::process::Command::new("xdg-open");
+        cmd.arg(&url);
+        cmd
+    };
+    let _ = command
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .spawn();
+}
 const MAX_BODY: usize = 1_000_000;
 
+/// `serve` prints the API banner. `serve-sse` prints the dashboard banner
+/// and, unless `--no-browser`, opens the dashboard once `/health` answers.
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub enum Banner {
+    Api,
+    Dashboard { open_browser: bool },
+}
+
+#[allow(clippy::too_many_arguments)]
 pub fn serve(
     storage: Option<PathBuf>,
     project: Option<PathBuf>,
@@ -48,6 +98,7 @@ pub fn serve(
     port: u16,
     auth_token: Option<String>,
     no_auth: bool,
+    banner: Banner,
 ) -> Result<(), String> {
     let engine = Engine::open(storage.as_deref(), project.as_deref(), namespace)?;
     let token = if no_auth {
@@ -56,13 +107,33 @@ pub fn serve(
         Some(auth_token.unwrap_or_else(random_token))
     };
     let listener = TcpListener::bind((host, port)).map_err(|e| e.to_string())?;
-    let bound = listener.local_addr().map_err(|e| e.to_string())?;
-    println!("Starting CoordinationHub HTTP server on http://{bound}");
-    if let Some(token) = &token {
-        println!("  Auth token: {token}");
-        println!("  Use: Authorization: Bearer {token}");
-    } else {
-        println!("  Auth: DISABLED (local-trust mode)");
+    let port = listener.local_addr().map(|addr| addr.port()).unwrap_or(port);
+    match banner {
+        Banner::Api => {
+            println!("Starting CoordinationHub HTTP server on http://{host}:{port}");
+            if let Some(token) = &token {
+                println!("  Auth token: {token}");
+                println!("  Use: Authorization: Bearer {token}");
+            } else {
+                println!("  Auth: DISABLED (local-trust mode)");
+            }
+        }
+        Banner::Dashboard { open_browser } => {
+            if let Some(token) = &token {
+                println!("Auth token: {token}");
+                println!("  Use: Authorization: Bearer {token}");
+            } else {
+                println!("Auth: DISABLED (local-trust mode)");
+            }
+            if open_browser {
+                let host = host.to_string();
+                std::thread::spawn(move || open_dashboard(&host, port));
+            }
+            println!("Starting SSE dashboard server on {host}:{port}");
+            println!("Dashboard: http://{host}:{port}/");
+            println!("SSE stream: http://{host}:{port}/events");
+            println!("Press Ctrl+C to stop");
+        }
     }
     let engine = Arc::new(Mutex::new(engine));
     crate::house::spawn(engine.clone());

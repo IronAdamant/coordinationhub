@@ -7,134 +7,36 @@ use crate::mcp;
 use std::path::PathBuf;
 
 pub fn main(argv: &[String]) -> i32 {
-    if let Some(command) = argv.first() {
-        if argv.iter().skip(1).any(|arg| arg == "--help" || arg == "-h") {
-            if let Some(text) = crate::cli_help::command_help(command) {
-                print!("{text}");
-                return 0;
-            }
-        }
+    // `hook` is this program's IDE hook entry point (see MIGRATION.md).
+    if argv.first().map(String::as_str) == Some("hook") {
+        return run_hook(hook_flags(&argv[1..]));
     }
-    if argv.iter().any(|arg| arg == "--help" || arg == "-h") && argv.len() <= 2 {
-        print_help();
+    let parsed = match crate::argparse::parse(argv) {
+        Ok(parsed) => parsed,
+        Err(exit) => {
+            print!("{}", exit.stdout);
+            eprint!("{}", exit.stderr);
+            return exit.code;
+        }
+    };
+    let Some(command) = parsed.command else {
+        print!("{}", crate::argparse::format_top_help());
         return 0;
-    }
-    if argv.is_empty() {
-        print_help();
-        return 0;
-    }
-    let command = argv[0].as_str();
-    let rest = &argv[1..];
-    match command {
-        "help" | "--help" | "-h" => {
-            print_help();
-            0
-        }
-        "version" | "--version" => {
-            println!("{}", crate::VERSION);
-            0
-        }
-        "serve-mcp" => run_serve_mcp(rest),
-        "serve" | "serve-sse" => run_serve(command, rest),
-        "call" => run_call(rest),
-        "bench" => run_bench(rest),
-        "hook" => run_hook(rest),
-        "init" => run_init(rest),
-        "doctor" => run_doctor(rest),
-        "cancel-spawn" => run_cancel_spawn(rest),
-        "watch" => run_watch(rest),
-        "auto-start-dashboard" => run_auto_dashboard(rest),
-        _ => run_tool_command(command, rest),
+    };
+    let flags = Flags::from_parsed(&parsed);
+    match command.name {
+        "serve-mcp" => run_serve_mcp(flags),
+        "serve" | "serve-sse" => run_serve(command.name, flags),
+        "init" => run_init(flags),
+        "doctor" => run_doctor(flags),
+        "cancel-spawn" => run_cancel_spawn(flags),
+        "watch" => run_watch(flags),
+        "auto-start-dashboard" => run_auto_dashboard(flags),
+        name => run_tool_command(name, flags),
     }
 }
 
-fn print_help() {
-    print!("{}", crate::cli_catalog::MAIN_HELP);
-}
-
-#[allow(dead_code)]
-const COMMANDS: &[&str] = &[
-    "serve",
-    "serve-mcp",
-    "serve-sse",
-    "status",
-    "register",
-    "heartbeat",
-    "deregister",
-    "list-agents",
-    "agent-relations",
-    "acquire-lock",
-    "release-lock",
-    "refresh-lock",
-    "lock-status",
-    "list-locks",
-    "admin-locks",
-    "broadcast",
-    "acknowledge-broadcast",
-    "wait-for-broadcast-acks",
-    "acknowledge-handoff",
-    "complete-handoff",
-    "cancel-handoff",
-    "get-handoffs",
-    "wait-for-handoff",
-    "wait-for-locks",
-    "notify-change",
-    "get-notifications",
-    "get-conflicts",
-    "prune-notifications",
-    "wait-for-notifications",
-    "contention-hotspots",
-    "load-spec",
-    "validate-spec",
-    "scan-project",
-    "dashboard",
-    "agent-status",
-    "agent-tree",
-    "assess",
-    "doctor",
-    "init",
-    "auto-start-dashboard",
-    "watch",
-    "await-agent",
-    "send-message",
-    "get-messages",
-    "mark-messages-read",
-    "create-task",
-    "assign-task",
-    "update-task-status",
-    "query-tasks",
-    "create-subtask",
-    "retry-task",
-    "dead-letter-queue",
-    "task-failure-history",
-    "wait-for-task",
-    "get-available-tasks",
-    "declare-work-intent",
-    "get-work-intents",
-    "clear-work-intent",
-    "declare-dependency",
-    "manage-dependencies",
-    "satisfy-dependency",
-    "get-all-dependencies",
-    "acquire-coordinator-lease",
-    "refresh-coordinator-lease",
-    "release-coordinator-lease",
-    "get-leader",
-    "claim-leadership",
-    "leader-status",
-    "ha-dashboard",
-    "spawn-subagent",
-    "report-subagent-spawned",
-    "list-pending-spawns",
-    "cancel-spawn",
-    "request-subagent-deregistration",
-    "await-subagent-stopped",
-    "who",
-    "call",
-    "bench",
-    "hook",
-];
-
+#[derive(Clone)]
 struct Flags {
     storage: Option<PathBuf>,
     project: Option<PathBuf>,
@@ -145,161 +47,78 @@ struct Flags {
     bools: Vec<String>,
 }
 
-fn parse_flags(command: &str, args: &[String]) -> Result<Flags, String> {
+impl Flags {
+    fn from_parsed(parsed: &crate::argparse::Parsed) -> Flags {
+        let mut flags = Flags {
+            storage: parsed.value("storage_dir").map(PathBuf::from),
+            project: parsed.value("project_root").map(PathBuf::from),
+            namespace: parsed.value("namespace").unwrap_or("hub").to_string(),
+            json: parsed.flag("json_output"),
+            positionals: parsed.positionals.clone(),
+            map: Vec::new(),
+            bools: Vec::new(),
+        };
+        let args = parsed.command.map(|cmd| cmd.args).unwrap_or(&[]);
+        let aliases = |dest: &str| -> Vec<String> {
+            let mut keys = vec![dest.to_string()];
+            if let Some(arg) = args.iter().find(|arg| arg.dest == dest) {
+                for name in arg.flags {
+                    let key = name.trim_start_matches('-').replace('-', "_");
+                    if !keys.contains(&key) {
+                        keys.push(key);
+                    }
+                }
+            }
+            keys
+        };
+        for (dest, values) in &parsed.values {
+            for key in aliases(dest) {
+                for value in values {
+                    flags.map.push((key.clone(), value.clone()));
+                }
+            }
+        }
+        for dest in &parsed.bools {
+            flags.bools.extend(aliases(dest));
+        }
+        flags
+    }
+}
+
+/// The hook reads its event from stdin; it only takes the storage flags.
+fn hook_flags(args: &[String]) -> Flags {
     let mut flags = Flags {
         storage: None,
         project: None,
-        namespace: std::env::var("COORDINATIONHUB_NAMESPACE").unwrap_or_else(|_| "hub".into()),
+        namespace: "hub".into(),
         json: false,
         positionals: Vec::new(),
         map: Vec::new(),
         bools: Vec::new(),
     };
-    let Some(spec) = crate::cli_catalog::command(command) else {
-        permissive_flags(&mut flags, args);
-        return Ok(flags);
-    };
-    let mut unknown = Vec::new();
     let mut index = 0;
     while index < args.len() {
-        let arg = &args[index];
-        if let Some((name, inline)) = arg.split_once('=') {
-            if let Some(opt) = spec.options.iter().find(|opt| opt.names.contains(&name)) {
-                if !opt.takes_value {
-                    unknown.push(arg.clone());
-                } else {
-                    remember(&mut flags, opt.dest, name, inline);
+        let value = args.get(index + 1).cloned();
+        match args[index].as_str() {
+            "--storage-dir" => {
+                flags.storage = value.map(PathBuf::from);
+                index += 1;
+            }
+            "--project-root" => {
+                flags.project = value.map(PathBuf::from);
+                index += 1;
+            }
+            "--namespace" => {
+                if let Some(value) = value {
+                    flags.namespace = value;
                 }
                 index += 1;
-                continue;
             }
-        }
-        if arg.starts_with('-') && arg != "-" {
-            if let Some(opt) = spec.options.iter().find(|opt| opt.names.iter().any(|n| *n == arg)) {
-                if opt.takes_value {
-                    if index + 1 >= args.len() {
-                        unknown.push(arg.clone());
-                        index += 1;
-                        continue;
-                    }
-                    index += 1;
-                    remember(&mut flags, opt.dest, arg, &args[index]);
-                    if opt.repeat {
-                        while index + 1 < args.len() && !args[index + 1].starts_with('-') {
-                            index += 1;
-                            remember(&mut flags, opt.dest, arg, &args[index]);
-                        }
-                    }
-                } else {
-                    remember_bool(&mut flags, opt.dest, arg);
-                }
-            } else {
-                unknown.push(arg.clone());
-                if index + 1 < args.len() && args[index + 1].starts_with('-') && !is_number(&args[index + 1]) {
-                    // a following flag is parsed on the next loop
-                } else if index + 1 < args.len() && !spec.options.iter().any(|opt| opt.names.iter().any(|n| *n == args[index + 1].as_str())) {
-                    // argparse reports the value of an unknown option too when it is not itself a flag
-                    if args[index + 1].starts_with('-') || spec.options.iter().all(|opt| !opt.names.iter().any(|n| *n == args[index + 1].as_str())) {
-                        // leave it; the next iteration classifies it
-                    }
-                }
-            }
-            index += 1;
-            continue;
-        }
-        flags.positionals.push(arg.clone());
-        index += 1;
-    }
-    if !unknown.is_empty() {
-        return Err(format!(
-            "{}coordinationhub: error: unrecognized arguments: {}\n",
-            crate::cli_catalog::MAIN_USAGE,
-            unknown.join(" ")
-        ));
-    }
-    if flags.positionals.len() > spec.max_positionals {
-        let extra = flags.positionals[spec.max_positionals..].join(" ");
-        return Err(format!(
-            "{}coordinationhub: error: unrecognized arguments: {extra}\n",
-            crate::cli_catalog::MAIN_USAGE
-        ));
-    }
-    if flags.positionals.len() < spec.required.len() {
-        let missing = spec.required[flags.positionals.len()..].join(", ");
-        return Err(format!(
-            "{}coordinationhub {command}: error: the following arguments are required: {missing}\n",
-            spec.usage
-        ));
-    }
-    Ok(flags)
-}
-
-fn is_number(text: &str) -> bool {
-    let rest = text.strip_prefix('-').unwrap_or(text);
-    !rest.is_empty() && rest.chars().all(|ch| ch.is_ascii_digit() || ch == '.')
-}
-
-fn remember(flags: &mut Flags, dest: &str, name: &str, value: &str) {
-    let key = name.trim_start_matches('-').replace('-', "_");
-    if dest == "storage_dir" {
-        flags.storage = Some(PathBuf::from(value));
-    } else if dest == "project_root" {
-        flags.project = Some(PathBuf::from(value));
-    } else if dest == "namespace" {
-        flags.namespace = value.to_string();
-    }
-    flags.map.push((dest.to_string(), value.to_string()));
-    if key != dest {
-        flags.map.push((key, value.to_string()));
-    }
-}
-
-fn remember_bool(flags: &mut Flags, dest: &str, name: &str) {
-    if dest == "json_output" || name == "--json" || name == "-j" {
-        flags.json = true;
-    }
-    flags.bools.push(dest.to_string());
-    let key = name.trim_start_matches('-').replace('-', "_");
-    if key != dest {
-        flags.bools.push(key);
-    }
-}
-
-fn permissive_flags(flags: &mut Flags, args: &[String]) {
-    let mut index = 0;
-    while index < args.len() {
-        let arg = &args[index];
-        if arg == "--json" || arg == "-j" {
-            flags.json = true;
-        } else if arg == "--storage-dir" {
-            index += 1;
-            flags.storage = args.get(index).map(PathBuf::from);
-        } else if arg == "--project-root" {
-            index += 1;
-            flags.project = args.get(index).map(PathBuf::from);
-        } else if arg == "--namespace" {
-            index += 1;
-            if let Some(value) = args.get(index) {
-                flags.namespace = value.clone();
-            }
-        } else if arg.starts_with("--") && index + 1 < args.len() && !args[index + 1].starts_with('-') {
-            let key = arg.trim_start_matches('-').replace('-', "_");
-            index += 1;
-            flags.map.push((key, args[index].clone()));
-        } else if arg.starts_with("--") {
-            flags.bools.push(arg.trim_start_matches('-').replace('-', "_"));
-        } else {
-            flags.positionals.push(arg.clone());
+            _ => {}
         }
         index += 1;
     }
-}
-
-fn flags_or_exit(command: &str, args: &[String]) -> Result<Flags, i32> {
-    parse_flags(command, args).map_err(|err| {
-        eprint!("{err}");
-        2
-    })
+    flags
 }
 
 fn flag<'a>(flags: &'a Flags, key: &str) -> Option<&'a str> {
@@ -314,11 +133,7 @@ fn has(flags: &Flags, key: &str) -> bool {
     flags.bools.iter().any(|item| item == key)
 }
 
-fn run_serve_mcp(args: &[String]) -> i32 {
-    let flags = match flags_or_exit("serve-mcp", args) {
-        Ok(flags) => flags,
-        Err(code) => return code,
-    };
+fn run_serve_mcp(flags: Flags) -> i32 {
     match mcp::serve(flags.storage, flags.project, &flags.namespace) {
         Ok(()) => 0,
         Err(err) => {
@@ -328,11 +143,7 @@ fn run_serve_mcp(args: &[String]) -> i32 {
     }
 }
 
-fn run_serve(command: &str, args: &[String]) -> i32 {
-    let flags = match flags_or_exit(command, args) {
-        Ok(flags) => flags,
-        Err(code) => return code,
-    };
+fn run_serve(command: &str, flags: Flags) -> i32 {
     let port = flag(&flags, "port")
         .and_then(|v| v.parse().ok())
         .unwrap_or(if command == "serve-sse" { 9898 } else { 9877 });
@@ -340,6 +151,13 @@ fn run_serve(command: &str, args: &[String]) -> i32 {
     let no_auth = has(&flags, "no_auth");
     let token = flag(&flags, "auth_token").map(|s| s.to_string());
     let namespace = flags.namespace.clone();
+    let banner = if command == "serve-sse" {
+        http::Banner::Dashboard {
+            open_browser: !has(&flags, "no_browser"),
+        }
+    } else {
+        http::Banner::Api
+    };
     match http::serve(
         flags.storage,
         flags.project,
@@ -348,6 +166,7 @@ fn run_serve(command: &str, args: &[String]) -> i32 {
         port,
         token,
         no_auth,
+        banner,
     ) {
         Ok(()) => 0,
         Err(err) => {
@@ -357,62 +176,7 @@ fn run_serve(command: &str, args: &[String]) -> i32 {
     }
 }
 
-fn run_call(args: &[String]) -> i32 {
-    let flags = match flags_or_exit("call", args) {
-        Ok(flags) => flags,
-        Err(code) => return code,
-    };
-    let Some(tool) = flags.positionals.first() else {
-        eprintln!("Error: usage: coordinationhub call <tool> --args JSON");
-        return 1;
-    };
-    let raw = flag(&flags, "args").unwrap_or("{}");
-    let parsed = match json::parse(raw) {
-        Ok(value) => value,
-        Err(err) => {
-            eprintln!("Error: {err}");
-            return 1;
-        }
-    };
-    emit_tool(&flags, tool, &parsed)
-}
-
-fn emit_tool(flags: &Flags, tool: &str, args: &Value) -> i32 {
-    let mut engine = match Engine::open(
-        flags.storage.as_deref(),
-        flags.project.as_deref(),
-        &flags.namespace,
-    ) {
-        Ok(engine) => engine,
-        Err(err) => {
-            eprintln!("Error: {err}");
-            return 1;
-        }
-    };
-    match engine.call(tool, args) {
-        Ok(value) => {
-            println!("{}", json::dumps_pretty(&value));
-            0
-        }
-        Err(err) => {
-            if flags.json {
-                println!(
-                    "{}",
-                    json::dumps_pretty(&json::obj(vec![("error", json::s(err))]))
-                );
-            } else {
-                eprintln!("Error: {err}");
-            }
-            1
-        }
-    }
-}
-
-fn run_tool_command(command: &str, args: &[String]) -> i32 {
-    let flags = match flags_or_exit(command, args) {
-        Ok(flags) => flags,
-        Err(code) => return code,
-    };
+fn run_tool_command(command: &str, flags: Flags) -> i32 {
     let built = match command_args(command, &flags) {
         Ok(Some(pair)) => pair,
         Ok(None) => {
@@ -476,7 +240,17 @@ fn run_tool_command(command: &str, args: &[String]) -> i32 {
         }
         return 0;
     }
-    let result = if command == "validate-spec" {
+    let wait_expired = command == "wait-for-notifications"
+        && payload.get("timeout_s").and_then(Value::as_f64).unwrap_or(30.0)
+            <= crate::engine::HYBRID_BUS_WAIT_S;
+    let result = if wait_expired {
+        // The command always waits. A timeout inside the event-bus window
+        // (including a negative one) has expired before the journal is read.
+        Ok(json::obj(vec![
+            ("notifications", json::arr(vec![])),
+            ("timed_out", json::b(true)),
+        ]))
+    } else if command == "validate-spec" {
         Ok(crate::act_view::validate_loaded(engine.graph.as_ref()))
     } else if command == "get-handoffs" {
         let _ = engine.store.begin();
@@ -513,7 +287,12 @@ fn run_tool_command(command: &str, args: &[String]) -> i32 {
             }
         }
         Err(err) => {
-            eprintln!("Error: {err}");
+            // As in 0.8.0's cli.main: JSON callers get the error on stdout.
+            if flags.json {
+                println!("{}", json::dumps_pretty(&json::obj(vec![("error", json::s(err))])));
+            } else {
+                eprintln!("Error: {err}");
+            }
             1
         }
     }
@@ -757,51 +536,6 @@ fn command_args(
             ]),
             None,
         ),
-        "who" => {
-            let verb = flag(flags, "action").map(|s| s.to_string()).or_else(|| {
-                pos.first().and_then(|word| {
-                    matches!(word.as_str(), "status" | "claim" | "release" | "handoff")
-                        .then(|| word.clone())
-                })
-            });
-            let shifted = if verb.is_some() && flag(flags, "action").is_none() && !pos.is_empty()
-            {
-                1
-            } else {
-                0
-            };
-            (
-                "who",
-                json::obj(vec![
-                    (
-                        "action",
-                        json::s(verb.as_deref().unwrap_or("status")),
-                    ),
-                    (
-                        "agent_id",
-                        json::opt_str(
-                            flag(flags, "agent_id")
-                                .or_else(|| pos.get(shifted).map(|s| s.as_str())),
-                        ),
-                    ),
-                    (
-                        "area",
-                        json::opt_str(
-                            flag(flags, "area")
-                                .or_else(|| pos.get(shifted + 1).map(|s| s.as_str())),
-                        ),
-                    ),
-                    (
-                        "to_agent_id",
-                        json::opt_str(
-                            flag(flags, "to_agent_id")
-                                .or_else(|| pos.get(shifted + 2).map(|s| s.as_str())),
-                        ),
-                    ),
-                ]),
-                None,
-            )
-        }
         "agent-tree" => (
             "get_agent_tree",
             json::obj(vec![(
@@ -925,11 +659,7 @@ fn render_agents(value: &Value) {
     }
 }
 
-fn run_init(args: &[String]) -> i32 {
-    let flags = match flags_or_exit("init", args) {
-        Ok(flags) => flags,
-        Err(code) => return code,
-    };
+fn run_init(flags: Flags) -> i32 {
     let root = flags.project.clone().or_else(|| {
         crate::util::detect_project_root(
             &std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")),
@@ -940,39 +670,58 @@ fn run_init(args: &[String]) -> i32 {
         eprintln!("Error: {err}");
         return 1;
     }
+    if root.is_some() || flags.storage.is_some() {
+        println!("Storage directory: {}", storage.display());
+    } else {
+        println!("Storage directory: {} (no git project detected)", storage.display());
+    }
     if Engine::open(Some(&storage), root.as_deref(), &flags.namespace).is_err() {
-        eprintln!("Error: could not initialise storage");
+        eprintln!("Error: could not initialise storage at {}", storage.display());
         return 1;
     }
-    println!("Storage directory: {}", storage.display());
     println!("Database initialized.");
-    let home = std::env::var("HOME")
-        .or_else(|_| std::env::var("USERPROFILE"))
-        .unwrap_or_else(|_| ".".into());
-    let hooks = PathBuf::from(home)
-        .join(".coordinationhub")
-        .join("hooks.json");
+    let hooks = crate::util::home_dir().join(".coordinationhub").join("hooks.json");
     if let Some(parent) = hooks.parent() {
         let _ = std::fs::create_dir_all(parent);
     }
     let exe = std::env::current_exe()
         .map(|p| p.display().to_string())
         .unwrap_or_else(|_| "coordinationhub".into());
-    let body = hook_config(&format!("{exe} hook"));
-    if let Err(err) = std::fs::write(&hooks, body) {
+    let command = format!("{exe} hook");
+    if let Err(err) = std::fs::write(&hooks, hook_config(&command)) {
         eprintln!("Error: {err}");
         return 1;
     }
     println!("Hooks written to {}", hooks.display());
+    println!("  Hook command: {command}");
     println!("\nRunning diagnostics...");
     let checks = doctor_checks(&storage);
-    let mut all_ok = true;
+    let all_ok = checks.iter().all(|(_, ok, _)| *ok);
     for (name, ok, message) in &checks {
-        let icon = if *ok { "OK  " } else { "FAIL" };
-        if !ok {
-            all_ok = false;
+        println!("  [{}] {name}: {message}", if *ok { "OK  " } else { "FAIL" });
+    }
+    if has(&flags, "auto_dashboard") {
+        println!("\nNote: --auto-dashboard is deprecated (Claude Code integration removed).");
+        println!("  The dashboard can still be started manually with:");
+        println!("    {exe} serve-sse --host 127.0.0.1 --port 9898");
+    }
+    if has(&flags, "monitor_skill") {
+        let dir = crate::util::home_dir()
+            .join(".coordinationhub")
+            .join("skills")
+            .join("coordinationhub-monitor");
+        let target = dir.join("SKILL.md");
+        let text = MONITOR_SKILL.replace("\r\n", "\n");
+        if let Err(err) = std::fs::create_dir_all(&dir).and_then(|_| std::fs::write(&target, text)) {
+            eprintln!("Error: {err}");
+            return 1;
         }
-        println!("  [{icon}] {name}: {message}");
+        println!("\nMonitor skill installed.");
+        println!("  Location: {}", target.display());
+        println!("  Invoke by asking an LLM to 'watch the swarm' or 'monitor the agents'.");
+        println!("  The skill instructs the LLM to poll http://127.0.0.1:9898/api/dashboard-data");
+        println!("  every 30 s and surface boundary crossings, blocked tasks, and stale agents.");
+        println!("  Install path is vendor-neutral; copy into your IDE's skills directory if needed.");
     }
     if all_ok {
         println!("\nSetup complete. CoordinationHub is ready.");
@@ -982,11 +731,10 @@ fn run_init(args: &[String]) -> i32 {
     0
 }
 
-fn run_cancel_spawn(args: &[String]) -> i32 {
-    let flags = match flags_or_exit("cancel-spawn", args) {
-        Ok(flags) => flags,
-        Err(code) => return code,
-    };
+/// The coordinationhub-monitor skill text shipped with 0.8.0.
+const MONITOR_SKILL: &str = include_str!("../assets/monitor_skill.md");
+
+fn run_cancel_spawn(flags: Flags) -> i32 {
     let Some(spawn_id) = flags.positionals.first() else {
         eprintln!("Error: spawn_id required");
         return 2;
@@ -1035,18 +783,14 @@ fn run_cancel_spawn(args: &[String]) -> i32 {
     0
 }
 
-fn run_watch(args: &[String]) -> i32 {
-    let flags = match flags_or_exit("watch", args) {
-        Ok(flags) => flags,
-        Err(code) => return code,
-    };
+fn run_watch(flags: Flags) -> i32 {
     let interval: f64 = flag(&flags, "interval")
         .or_else(|| flag(&flags, "poll_interval"))
         .and_then(|value| value.parse().ok())
         .unwrap_or(5.0);
     loop {
         print!("\x1b[2J\x1b[H");
-        let _ = run_tool_command("agent-tree", args);
+        let _ = run_tool_command("agent-tree", flags.clone());
         let mut engine = match Engine::open(
             flags.storage.as_deref(),
             flags.project.as_deref(),
@@ -1069,29 +813,52 @@ fn run_watch(args: &[String]) -> i32 {
     }
 }
 
-fn run_auto_dashboard(args: &[String]) -> i32 {
-    let flags = match flags_or_exit("auto-start-dashboard", args) {
-        Ok(flags) => flags,
-        Err(code) => return code,
-    };
+fn run_auto_dashboard(flags: Flags) -> i32 {
+    // 0.8.0: exit quietly when host:port answers; otherwise start
+    // `serve-sse --no-browser` detached, logging to
+    // ~/.coordinationhub/dashboard.log. Auth stays on.
+    use std::net::ToSocketAddrs;
     let host = flag(&flags, "host").unwrap_or("127.0.0.1");
     let port: u16 = flag(&flags, "port").and_then(|v| v.parse().ok()).unwrap_or(9898);
-    if std::net::TcpStream::connect_timeout(
-        &std::net::SocketAddr::from((std::net::Ipv4Addr::LOCALHOST, port)),
-        std::time::Duration::from_millis(300),
-    )
-    .is_ok()
-    {
+    let reachable = (host, port)
+        .to_socket_addrs()
+        .map(|addrs| {
+            addrs.into_iter().any(|addr| {
+                std::net::TcpStream::connect_timeout(&addr, std::time::Duration::from_millis(300)).is_ok()
+            })
+        })
+        .unwrap_or(false);
+    if reachable {
         return 0;
     }
+    let log_dir = crate::util::home_dir().join(".coordinationhub");
+    if std::fs::create_dir_all(&log_dir).is_err() {
+        return 0;
+    }
+    let Ok(log) = std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(log_dir.join("dashboard.log"))
+    else {
+        return 0;
+    };
+    let Ok(log_err) = log.try_clone() else {
+        return 0;
+    };
     let exe = std::env::current_exe().unwrap_or_else(|_| PathBuf::from("coordinationhub"));
-    let _ = std::process::Command::new(exe)
-        .args(["serve-sse", "--host", host, "--port", &port.to_string(), "--no-auth"])
+    let mut command = std::process::Command::new(exe);
+    command.args(["serve-sse", "--no-browser", "--host", host, "--port", &port.to_string()]);
+    if let Some(dir) = &flags.storage {
+        command.arg("--storage-dir").arg(dir);
+    }
+    if let Some(dir) = &flags.project {
+        command.arg("--project-root").arg(dir);
+    }
+    let _ = command
         .stdin(std::process::Stdio::null())
-        .stdout(std::process::Stdio::null())
-        .stderr(std::process::Stdio::null())
+        .stdout(log)
+        .stderr(log_err)
         .spawn();
-    let _ = flags;
     0
 }
 
@@ -1164,17 +931,13 @@ fn hook_config(command: &str) -> String {
     json::dumps_pretty(&body) + "\n"
 }
 
-fn doctor_checks(storage: &std::path::Path) -> Vec<(String, bool, String)> {
-    let mut checks = Vec::new();
-    checks.push((
-        "import".into(),
-        true,
-        format!("coordinationhub {} binary", crate::VERSION),
-    ));
-    let home = std::env::var("HOME")
-        .or_else(|_| std::env::var("USERPROFILE"))
-        .unwrap_or_else(|_| ".".into());
-    let hooks = PathBuf::from(&home).join(".coordinationhub").join("hooks.json");
+/// 0.8.0's `_check_hooks_config`: the neutral hooks file, then Claude
+/// Code's settings, each needing all seven events and a coordinationhub
+/// command.
+fn hooks_config_check() -> (bool, String) {
+    let home = crate::util::home_dir();
+    let neutral = home.join(".coordinationhub").join("hooks.json");
+    let claude = home.join(".claude").join("settings.json");
     let required = [
         "SessionStart",
         "UserPromptSubmit",
@@ -1184,38 +947,78 @@ fn doctor_checks(storage: &std::path::Path) -> Vec<(String, bool, String)> {
         "SubagentStop",
         "SessionEnd",
     ];
-    let hooks_text = std::fs::read_to_string(&hooks).unwrap_or_default();
-    let hooks_ok = required.iter().all(|name| hooks_text.contains(name))
-        && hooks_text.contains("coordinationhub");
-    let hooks_msg = if hooks_ok {
-        format!("hooks configured correctly at {}", hooks.display())
-    } else {
-        "no IDE hook config found (run 'coordinationhub init' if using an IDE with hooks)".into()
-    };
-    checks.push(("hooks_config".into(), true, hooks_msg));
+    for path in [&neutral, &claude] {
+        let Ok(text) = std::fs::read_to_string(path) else {
+            continue;
+        };
+        let Ok(settings) = json::parse(&text) else {
+            continue;
+        };
+        let Some(Value::Object(hooks)) = settings.get("hooks") else {
+            continue;
+        };
+        if hooks.is_empty() || !required.iter().all(|name| hooks.iter().any(|(key, _)| key == name)) {
+            continue;
+        }
+        let mentions = hooks.iter().any(|(_, matchers)| {
+            matchers.as_array().unwrap_or(&[]).iter().any(|block| {
+                block
+                    .get("hooks")
+                    .and_then(Value::as_array)
+                    .unwrap_or(&[])
+                    .iter()
+                    .any(|hook| {
+                        hook.get("command")
+                            .and_then(Value::as_str)
+                            .is_some_and(|cmd| cmd.contains("coordinationhub"))
+                    })
+            })
+        });
+        if mentions {
+            return (true, format!("hooks configured correctly at {}", path.display()));
+        }
+    }
+    (
+        true,
+        "no IDE hook config found (run 'coordinationhub init' if using an IDE with hooks)".into(),
+    )
+}
+
+fn doctor_checks(storage: &std::path::Path) -> Vec<(String, bool, String)> {
+    let mut checks = Vec::new();
+    checks.push((
+        "import".into(),
+        true,
+        format!("coordinationhub {} binary", crate::VERSION),
+    ));
+    let (hooks_ok, hooks_msg) = hooks_config_check();
+    checks.push(("hooks_config".into(), hooks_ok, hooks_msg));
     let journal = storage.join("coordination.jsonl");
-    let storage_ok = storage.is_dir() && journal.is_file();
-    checks.push((
-        "storage_dir".into(),
-        storage_ok,
-        if storage_ok {
-            format!("journal exists at {}", journal.display())
-        } else {
-            format!("journal not found: {}", journal.display())
-        },
-    ));
-    let readable = std::fs::read_to_string(&journal)
-        .map(|text| text.lines().all(|line| line.trim().is_empty() || json::parse(line).is_ok()))
-        .unwrap_or(false);
-    checks.push((
-        "schema_version".into(),
-        storage_ok && readable,
-        if storage_ok && readable {
-            "schema is current".into()
-        } else {
-            "journal is missing or unreadable".into()
-        },
-    ));
+    let (storage_ok, storage_msg) = if !storage.is_dir() {
+        (false, format!("storage directory not found: {}", storage.display()))
+    } else if !journal.is_file() {
+        (false, format!("journal not found: {} (run 'coordinationhub init')", journal.display()))
+    } else {
+        (true, format!("journal exists at {}", journal.display()))
+    };
+    checks.push(("storage_dir".into(), storage_ok, storage_msg));
+    let schema = if !journal.is_file() {
+        (false, "journal not found (run a session first or use 'init')".to_string())
+    } else {
+        match std::fs::read_to_string(&journal) {
+            Err(err) => (false, format!("journal unreadable: {err}")),
+            Ok(text) => match text
+                .lines()
+                .enumerate()
+                .filter(|(_, line)| !line.trim().is_empty())
+                .find_map(|(index, line)| json::parse(line).err().map(|err| (index + 1, err)))
+            {
+                Some((line, err)) => (false, format!("journal line {line} does not parse: {err}")),
+                None => (true, "journal parses; schema is current".to_string()),
+            },
+        }
+    };
+    checks.push(("schema_version".into(), schema.0, schema.1));
     let binary_ok = std::env::current_exe().map(|path| path.is_file()).unwrap_or(true);
     checks.push((
         "hook_command".into(),
@@ -1225,11 +1028,7 @@ fn doctor_checks(storage: &std::path::Path) -> Vec<(String, bool, String)> {
     checks
 }
 
-fn run_doctor(args: &[String]) -> i32 {
-    let flags = match flags_or_exit("doctor", args) {
-        Ok(flags) => flags,
-        Err(code) => return code,
-    };
+fn run_doctor(flags: Flags) -> i32 {
     let root = flags.project.clone().or_else(|| {
         crate::util::detect_project_root(
             &std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")),
@@ -1256,22 +1055,20 @@ fn run_doctor(args: &[String]) -> i32 {
                 ("all_ok", json::b(all_ok)),
             ]))
         );
-        let _ = all_ok;
         return 0;
     }
     for (name, ok, message) in &checks {
-        let icon = if *ok { "OK  " } else { "FAIL" };
-        println!("  [{icon}] {name}: {message}");
+        println!("  [{}] {name}: {message}", if *ok { "OK  " } else { "FAIL" });
     }
-    let _ = all_ok;
+    if all_ok {
+        println!("\nAll checks passed.");
+    } else {
+        println!("\nSome checks failed. Run 'coordinationhub init' to fix setup issues.");
+    }
     0
 }
 
-fn run_hook(args: &[String]) -> i32 {
-    let flags = match flags_or_exit("hook", args) {
-        Ok(flags) => flags,
-        Err(code) => return code,
-    };
+fn run_hook(flags: Flags) -> i32 {
     let mut input = String::new();
     use std::io::Read;
     let _ = std::io::stdin().read_to_string(&mut input);
@@ -1292,172 +1089,4 @@ fn run_hook(args: &[String]) -> i32 {
         println!("{}", json::dumps(&result));
     }
     0
-}
-
-fn run_bench(args: &[String]) -> i32 {
-    let flags = match flags_or_exit("bench", args) {
-        Ok(flags) => flags,
-        Err(code) => return code,
-    };
-    let loops = flag(&flags, "loops")
-        .and_then(|v| v.parse().ok())
-        .unwrap_or(200_i64);
-    let dir = flags
-        .storage
-        .clone()
-        .unwrap_or_else(|| std::env::temp_dir().join(format!("chub-bench-{}", std::process::id())));
-    let _ = std::fs::remove_dir_all(&dir);
-    let mut engine = match Engine::open(Some(&dir), flags.project.as_deref(), &flags.namespace) {
-        Ok(engine) => engine,
-        Err(err) => {
-            eprintln!("Error: {err}");
-            return 1;
-        }
-    };
-    let rows = [
-        ("register", bench_register(&mut engine, loops)),
-        ("lock_acquire_release", bench_locks(&mut engine, loops)),
-        ("contended_locks", bench_contended(&mut engine)),
-        ("notification_fanout", bench_notes(&mut engine, loops)),
-        ("status", bench_status(&mut engine, loops)),
-        ("many_agent_scale", bench_scale(&mut engine)),
-    ];
-    let mut items = Vec::new();
-    for (name, seconds) in rows {
-        items.push(json::obj(vec![
-            ("name", json::s(name)),
-            ("seconds", json::f(seconds)),
-        ]));
-    }
-    println!(
-        "{}",
-        json::dumps_pretty(&json::obj(vec![("rows", json::arr(items))]))
-    );
-    let _ = std::fs::remove_dir_all(&dir);
-    0
-}
-
-fn bench_register(engine: &mut Engine, loops: i64) -> f64 {
-    let start = std::time::Instant::now();
-    for n in 0..loops {
-        let _ = engine.call(
-            "register_agent",
-            &json::obj(vec![("agent_id", json::s(format!("bench.{n}")))]),
-        );
-    }
-    start.elapsed().as_secs_f64()
-}
-
-fn bench_locks(engine: &mut Engine, loops: i64) -> f64 {
-    let _ = engine.call(
-        "register_agent",
-        &json::obj(vec![("agent_id", json::s("lock-agent"))]),
-    );
-    let start = std::time::Instant::now();
-    for n in 0..loops {
-        let path = format!("file-{n}.txt");
-        let _ = engine.call(
-            "acquire_lock",
-            &json::obj(vec![
-                ("document_path", json::s(&path)),
-                ("agent_id", json::s("lock-agent")),
-            ]),
-        );
-        let _ = engine.call(
-            "release_lock",
-            &json::obj(vec![
-                ("document_path", json::s(path)),
-                ("agent_id", json::s("lock-agent")),
-            ]),
-        );
-    }
-    start.elapsed().as_secs_f64()
-}
-
-fn bench_notes(engine: &mut Engine, loops: i64) -> f64 {
-    let _ = engine.call(
-        "register_agent",
-        &json::obj(vec![("agent_id", json::s("note-agent"))]),
-    );
-    let start = std::time::Instant::now();
-    for n in 0..loops {
-        let _ = engine.call(
-            "notify_change",
-            &json::obj(vec![
-                ("document_path", json::s(format!("n-{n}"))),
-                ("change_type", json::s("modified")),
-                ("agent_id", json::s("note-agent")),
-            ]),
-        );
-    }
-    let _ = engine.call(
-        "get_notifications",
-        &json::obj(vec![("limit", json::i(loops))]),
-    );
-    start.elapsed().as_secs_f64()
-}
-
-fn bench_status(engine: &mut Engine, loops: i64) -> f64 {
-    let start = std::time::Instant::now();
-    for _ in 0..loops {
-        let _ = engine.call("status", &json::obj(vec![]));
-    }
-    start.elapsed().as_secs_f64()
-}
-
-fn bench_contended(engine: &mut Engine) -> f64 {
-    let _ = engine;
-    let storage = std::env::temp_dir().join(format!("chub-contend-{}", std::process::id()));
-    let _ = std::fs::remove_dir_all(&storage);
-    let shared = std::sync::Arc::new(std::sync::Mutex::new(
-        Engine::open(Some(&storage), None, "hub").expect("contended engine"),
-    ));
-    {
-        let mut guard = shared.lock().expect("lock");
-        for id in 0..4 {
-            let _ = guard.call(
-                "register_agent",
-                &json::obj(vec![("agent_id", json::s(format!("c{id}")))]),
-            );
-        }
-    }
-    let start = std::time::Instant::now();
-    let mut threads = Vec::new();
-    for id in 0..4 {
-        let shared = shared.clone();
-        threads.push(std::thread::spawn(move || {
-            for _ in 0..40 {
-                let mut guard = shared.lock().expect("lock");
-                let _ = guard.call(
-                    "acquire_lock",
-                    &json::obj(vec![
-                        ("document_path", json::s("contended.txt")),
-                        ("agent_id", json::s(format!("c{id}"))),
-                    ]),
-                );
-            }
-        }));
-    }
-    for thread in threads {
-        let _ = thread.join();
-    }
-    let elapsed = start.elapsed().as_secs_f64();
-    let _ = std::fs::remove_dir_all(&storage);
-    elapsed
-}
-
-fn bench_scale(engine: &mut Engine) -> f64 {
-    let start = std::time::Instant::now();
-    for n in 0..1000 {
-        let _ = engine.call(
-            "register_agent",
-            &json::obj(vec![("agent_id", json::s(format!("scale.{n}")))]),
-        );
-    }
-    let _ = engine.call("status", &json::obj(vec![]));
-    let _ = engine.call(
-        "list_agents",
-        &json::obj(vec![("active_only", json::b(true))]),
-    );
-    start.elapsed().as_secs_f64()
 }

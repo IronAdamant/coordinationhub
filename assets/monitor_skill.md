@@ -47,7 +47,7 @@ Otherwise:
 
   > [12:43:21] swarm update
   > - boundary: `hub.swarm.0.scout` locked `src/models/Recipe.js`, owned by `hub.swarm.0.models`
-  > - blocked: `t-cov-base-model` (assigned `hub.swarm.0.tests`) waiting on `check-allergens`
+  > - blocked: `t-cov-base-model` (assigned `hub.swarm.0.tests`) waiting on `audit-allergens`
   > - stale: `hub.swarm.0.io` last heartbeat 6 min ago — likely crashed
   > 4 agents active · 11 locks · 2 in_progress
 
