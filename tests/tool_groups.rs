@@ -400,3 +400,41 @@ fn editing_the_block_mid_session_updates_the_list() {
     drop(stdin);
     let _ = child.wait();
 }
+
+#[test]
+fn this_repos_agents_md_examples_switch_nothing() {
+    use coordinationhub::groups::{agent_tools_block, EnvSwitches, Surface};
+    let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
+    let text = std::fs::read_to_string(root.join("AGENTS.md")).unwrap();
+    assert!(text.contains("## Choosing groups"));
+    assert!(agent_tools_block(&text).is_none());
+    let surface = Surface::resolve(&EnvSwitches::parse(None, None).unwrap(), Some(&text));
+    assert!(!surface.configured());
+    assert_eq!(surface.exposed(), 51);
+    // The server run on this repo lists every tool and adds no instructions.
+    let base = scratch();
+    let mut child = Command::new(env!("CARGO_BIN_EXE_coordinationhub"))
+        .arg("serve-mcp")
+        .arg("--storage-dir")
+        .arg(base.join("store"))
+        .arg("--project-root")
+        .arg(root)
+        .env_remove("COORDINATIONHUB_TOOLS")
+        .env_remove("COORDINATIONHUB_DISABLE")
+        .env("COORDINATIONHUB_HOUSEKEEPING", "0")
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null())
+        .spawn()
+        .unwrap();
+    {
+        let mut stdin = child.stdin.take().unwrap();
+        stdin
+            .write_all(b"{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"initialize\",\"params\":{}}\n{\"jsonrpc\":\"2.0\",\"id\":2,\"method\":\"tools/list\"}\n")
+            .unwrap();
+    }
+    let out = child.wait_with_output().unwrap();
+    let replies: Vec<Value> = String::from_utf8_lossy(&out.stdout).lines().map(|line| json::parse(line).unwrap()).collect();
+    assert_eq!(replies[0].get("result").unwrap().get("instructions"), None);
+    assert_eq!(names(&replies).len(), 51);
+}
