@@ -179,7 +179,7 @@ fn a_disabled_tool_says_how_to_enable_it() {
 fn active_groups_are_reported_once_switched() {
     let (_, replies) = session(&[("COORDINATIONHUB_TOOLS", "locks")], &[("status", json::obj(vec![]))]);
     let instructions = replies[0].get("result").unwrap().get("instructions").and_then(Value::as_str);
-    assert_eq!(instructions, Some("CoordinationHub tool groups on: core, locks."));
+    assert_eq!(instructions, Some("CoordinationHub tool groups on: core, locks; off: tasks, messages, spawn, agents, diagnostics."));
     let (text, _) = tool_text(&replies[2]);
     let status = json::parse(&text).unwrap();
     assert_eq!(status.get("tool_groups").and_then(Value::as_str), Some("core, locks"));
@@ -205,10 +205,22 @@ fn an_unknown_name_exits_2_with_one_line() {
 
 #[test]
 fn core_cannot_be_disabled() {
-    let (_, replies) = session(
-        &[("COORDINATIONHUB_DISABLE", "core,status"), ("COORDINATIONHUB_TOOLS", "messages")],
-        &[("status", json::obj(vec![]))],
+    // Naming core, or a core tool, in the disable list stops the server.
+    let (out, replies) = session(&[("COORDINATIONHUB_DISABLE", "locks, Core")], &[]);
+    assert_eq!(out.status.code(), Some(2));
+    assert!(replies.is_empty());
+    assert_eq!(
+        String::from_utf8_lossy(&out.stderr).trim_end(),
+        r#"COORDINATIONHUB_DISABLE: group "core" is always on and cannot be disabled"#
     );
+    let (out, _) = session(&[("COORDINATIONHUB_DISABLE", "status")], &[]);
+    assert_eq!(out.status.code(), Some(2));
+    assert_eq!(
+        String::from_utf8_lossy(&out.stderr).trim_end(),
+        r#"COORDINATIONHUB_DISABLE: tool "status" is in group "core", which is always on and cannot be disabled"#
+    );
+    // An allowlist that leaves core out still exposes it.
+    let (_, replies) = session(&[("COORDINATIONHUB_TOOLS", "messages")], &[("status", json::obj(vec![]))]);
     let listed = names(&replies);
     for tool in group("core") {
         assert!(listed.contains(&tool), "{tool} missing");
