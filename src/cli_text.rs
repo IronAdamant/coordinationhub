@@ -853,12 +853,14 @@ fn task_rows(value: &Value) -> Vec<(usize, Value)> {
         }
     }
     let mut out = Vec::new();
-    if let Some(items) = value.get("tasks").or_else(|| value.get("subtasks")).and_then(Value::as_array) {
+    if let Some(items) = value.get("tasks").and_then(Value::as_array) {
+        out.extend(items.iter().map(|item| (0, item.clone())));
+    } else if value.get("id").is_some() && value.get("status").is_some() {
+        walk(value, 0, &mut out);
+    } else if let Some(items) = value.get("subtasks").and_then(Value::as_array) {
         out.extend(items.iter().map(|item| (0, item.clone())));
     } else if let Some(task) = value.get("task").filter(|task| matches!(task, Value::Object(_))) {
         out.push((0, task.clone()));
-    } else if value.get("id").is_some() && value.get("status").is_some() {
-        walk(value, 0, &mut out);
     }
     out
 }

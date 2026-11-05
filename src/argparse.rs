@@ -874,10 +874,7 @@ pub fn py_float_repr(value: f64) -> String {
     if value == 0.0 {
         return if value.is_sign_negative() { "-0.0".into() } else { "0.0".into() };
     }
-    let sci = format!("{:e}", value.abs());
-    let (mantissa, exponent) = sci.split_once('e').expect("exponent");
-    let exponent: i32 = exponent.parse().expect("exponent digits");
-    let digits: String = mantissa.chars().filter(|ch| *ch != '.').collect();
+    let (digits, exponent) = shortest_digits(value.abs());
     let sign = if value < 0.0 { "-" } else { "" };
     let decpt = exponent + 1;
     if decpt <= -4 || decpt > 16 {
@@ -906,6 +903,48 @@ pub fn py_float_repr(value: f64) -> String {
         out.push_str(&digits[decpt as usize..]);
     }
     out
+}
+
+fn sci_parts(text: &str) -> (String, i32) {
+    let (mantissa, exponent) = text.split_once('e').expect("exponent");
+    (
+        mantissa.chars().filter(char::is_ascii_digit).collect(),
+        exponent.parse().expect("exponent digits"),
+    )
+}
+
+/// The shortest digits that read back as `x`, and the decimal exponent.
+/// When two shortest candidates are exactly equally close, Python's repr
+/// keeps the one ending in an even digit; Rust's formatter rounds up.
+fn shortest_digits(x: f64) -> (String, i32) {
+    let (digits, exponent) = sci_parts(&format!("{x:e}"));
+    let n = digits.len();
+    let (probe, probe_exp) = sci_parts(&format!("{:.*e}", n, x));
+    if !probe.ends_with('5') {
+        return (digits, exponent);
+    }
+    // Enough digits to print x exactly: a double is m * 2^e2 and each
+    // negative power of two adds at most one significant decimal digit.
+    let bits = x.to_bits();
+    let biased = ((bits >> 52) & 0x7ff) as i32;
+    let e2 = if biased == 0 { -1074 } else { biased - 1075 };
+    let precision = if e2 >= 0 { 330 } else { 17 + (-e2) as usize };
+    let (exact, exact_exp) = sci_parts(&format!("{x:.precision$e}"));
+    let tie = exact_exp == probe_exp
+        && exact.as_bytes().get(n) == Some(&b'5')
+        && exact.as_bytes()[n + 1..].iter().all(|byte| *byte == b'0');
+    if !tie {
+        return (digits, exponent);
+    }
+    let lower = &exact[..n];
+    let last = lower.as_bytes()[n - 1] - b'0';
+    if last % 2 == 0 {
+        let text = format!("{}.{}e{}", &lower[..1], &lower[1..], exact_exp);
+        if text.parse::<f64>() == Ok(x) {
+            return (lower.to_string(), exact_exp);
+        }
+    }
+    (digits, exponent)
 }
 
 fn py_printable(ch: char) -> bool {
