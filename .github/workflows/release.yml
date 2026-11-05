@@ -89,6 +89,13 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
+          # This job has no checkout, so gh needs the repository named.
+          repo="${GITHUB_REPOSITORY}"
           tag="${GITHUB_REF_NAME}"
           notes="CoordinationHub ${tag}. Check SHA256SUMS before use. Binaries: linux x64, linux arm64, macOS x64, macOS arm64, Windows x64."
-          gh release create "$tag" dist/*.tar.gz dist/SHA256SUMS --title "$tag" --notes "$notes"
+          if gh release view "$tag" --repo "$repo" >/dev/null 2>&1; then
+            # A rerun, or a release made by hand: replace the assets in place.
+            gh release upload "$tag" dist/*.tar.gz dist/SHA256SUMS --repo "$repo" --clobber
+          else
+            gh release create "$tag" dist/*.tar.gz dist/SHA256SUMS --repo "$repo" --title "$tag" --notes "$notes"
+          fi
