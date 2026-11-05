@@ -91,7 +91,7 @@ The MCP server exposes 51 tools in seven groups. An agent that only needs part o
 
 - `COORDINATIONHUB_TOOLS`: comma-separated groups and/or tool names to expose (plus `core`); `all` is accepted.
 - `COORDINATIONHUB_DISABLE`: groups and/or tool names to hide, applied after `COORDINATIONHUB_TOOLS`.
-- Case and spaces are ignored. An unknown name stops the server with one line on stderr and exit code 2, so the client shows it failed. Calling a hidden tool returns an error that names the variable and what to change. With neither variable set, nothing changes.
+- Case and spaces are ignored, and an empty value counts as unset. An unknown name, or naming `core` or one of its tools in `COORDINATIONHUB_DISABLE`, stops the server with one line on stderr and exit code 2, so the client shows it failed. Calling a hidden tool returns an error that names the variable and what to change, and `initialize` ends with one line listing the groups on and off. With neither variable set, nothing changes.
 
 ```json
 "env": {"COORDINATIONHUB_DISABLE": "spawn,diagnostics"}
