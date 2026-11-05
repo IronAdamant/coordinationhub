@@ -11,6 +11,7 @@ pub mod cli_cmds;
 pub mod cli_text;
 pub mod db;
 pub mod engine;
+pub mod groups;
 pub mod hooks;
 pub mod house;
 pub mod http;

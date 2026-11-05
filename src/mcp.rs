@@ -1,6 +1,7 @@
 //! Newline JSON-RPC MCP server. Also accepts a Content-Length header frame.
 
 use crate::engine::Engine;
+use crate::groups::Surface;
 use crate::json::{self, Value};
 use crate::validate;
 use std::io::{self, BufRead, Write};
@@ -10,6 +11,7 @@ pub fn serve(
     storage: Option<PathBuf>,
     project: Option<PathBuf>,
     namespace: &str,
+    surface: Surface,
 ) -> Result<(), String> {
     let engine = std::sync::Arc::new(std::sync::Mutex::new(Engine::open(
         storage.as_deref(),
@@ -40,11 +42,11 @@ pub fn serve(
         let method = parsed.get("method").and_then(Value::as_str).unwrap_or("");
         let is_note = parsed.get("id").is_none();
         let response = match method {
-            "initialize" => Some(ok(id, initialize())),
+            "initialize" => Some(ok(id, initialize(&surface))),
             "notifications/initialized" | "initialized" => None,
             "tools/list" => {
                 let engine = engine.lock().map_err(|err| err.to_string())?;
-                Some(ok(id, tools_list(&engine)))
+                Some(ok(id, tools_list_for(&engine, &surface)))
             }
             "tools/call" => {
                 let params = parsed
@@ -56,8 +58,18 @@ pub fn serve(
                     .get("arguments")
                     .cloned()
                     .unwrap_or(Value::Object(vec![]));
-                let mut engine = engine.lock().map_err(|err| err.to_string())?;
-                Some(ok(id, call_result(&mut engine, name, &arguments)))
+                Some(ok(id, match surface.refusal(name) {
+                    Some(refusal) => content(&refusal, true),
+                    None => {
+                        let mut engine = engine.lock().map_err(|err| err.to_string())?;
+                        let result = call_result(&mut engine, name, &arguments);
+                        if name == "status" && surface.configured() {
+                            with_groups(result, &surface)
+                        } else {
+                            result
+                        }
+                    }
+                }))
             }
             "ping" => Some(ok(id, Value::Object(vec![]))),
             _ if is_note => None,
@@ -70,8 +82,8 @@ pub fn serve(
     Ok(())
 }
 
-fn initialize() -> Value {
-    json::obj(vec![
+fn initialize(surface: &Surface) -> Value {
+    let mut result = json::obj(vec![
         ("protocolVersion", json::s("2024-11-05")),
         (
             "capabilities",
@@ -87,16 +99,57 @@ fn initialize() -> Value {
                 ("version", json::s(crate::VERSION)),
             ]),
         ),
-    ])
+    ]);
+    if surface.configured() {
+        if let Value::Object(pairs) = &mut result {
+            pairs.push((
+                "instructions".into(),
+                json::s(format!("CoordinationHub tool groups on: {}.", surface.active_groups())),
+            ));
+        }
+    }
+    result
 }
 
+/// Every tool, as listed with neither group switch set.
 pub fn tools_list(engine: &Engine) -> Value {
+    tools_list_for(engine, &Surface::all())
+}
+
+/// The tools `surface` exposes, in the default order.
+pub fn tools_list_for(engine: &Engine, surface: &Surface) -> Value {
     let mut tools = Vec::new();
     for (name, schema) in &engine.schema.tools {
-        tools.push(tool_entry(name, schema));
+        if surface.allows(name) {
+            tools.push(tool_entry(name, schema));
+        }
     }
-    tools.push(who_tool());
+    if surface.allows("who") {
+        tools.push(who_tool());
+    }
     json::obj(vec![("tools", json::arr(tools))])
+}
+
+/// `status` with the switches set: the exposed tool count and the active
+/// groups on one line.
+fn with_groups(result: Value, surface: &Surface) -> Value {
+    let (text, is_error) = match (
+        result.get("content").and_then(Value::as_array).and_then(|items| items.first()).and_then(|item| item.get("text")).and_then(Value::as_str),
+        result.get("isError").and_then(Value::as_bool),
+    ) {
+        (Some(text), Some(false)) => (text.to_string(), false),
+        _ => return result,
+    };
+    let Ok(Value::Object(mut pairs)) = json::parse(&text) else {
+        return result;
+    };
+    for (key, value) in pairs.iter_mut() {
+        if key == "tools" {
+            *value = json::i(surface.exposed() as i64);
+        }
+    }
+    pairs.push(("tool_groups".into(), json::s(surface.active_groups())));
+    content(&json::dumps_pretty(&Value::Object(pairs)), is_error)
 }
 
 fn tool_entry(name: &str, schema: &Value) -> Value {
