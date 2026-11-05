@@ -414,6 +414,14 @@ fn words(text: &str) -> Vec<String> {
     out
 }
 
+/// Outside Python 3.12, argparse wraps usage lines differently. Two CLI
+/// results differ only in layout when the exit code, stdout and the final
+/// stderr line (the error sentence) agree.
+fn layout_only(left: &(i32, String, String), right: &(i32, String, String), py_minor: u32) -> bool {
+    let last = |text: &str| text.lines().rev().find(|line| !line.trim().is_empty()).map(str::to_string);
+    py_minor != 12 && left.0 == right.0 && left.1 == right.1 && last(&left.2) == last(&right.2)
+}
+
 fn obj(pairs: Vec<(&str, Value)>) -> Value {
     json::obj(pairs)
 }
@@ -584,7 +592,11 @@ fn harness_checks(sides: &Sides, ledger: &mut Ledger) {
     let left = sides.cli(Side::Python, &unknown, None, &sides.tmp);
     let right = sides.cli(Side::Rust, &unknown, None, &sides.tmp);
     if left.0 != right.0 || left.2 != right.2 {
-        ledger.diff("cli unknown flag", &left.2, &right.2);
+        if layout_only(&left, &right, sides.py_minor) {
+            ledger.note("help layout of Python 3.13: cli unknown flag", "usage wraps differently outside 3.12");
+        } else {
+            ledger.diff("cli unknown flag", &left.2, &right.2);
+        }
     }
     let cancel: Vec<String> = vec!["cancel-spawn".into(), "missing-row".into(), "--json".into()];
     let (py_store, py_project) = sides.fresh("json-py");
@@ -849,6 +861,10 @@ fn argparse_cases(sides: &Sides, ledger: &mut Ledger) {
         if left != right {
             if sides.py_minor != 12 && left.2.contains("invalid choice") && right.2.contains("invalid choice") {
                 ledger.note(&format!("help layout of Python 3.13: `{case}`"), "3.13 quotes choices");
+                continue;
+            }
+            if layout_only(&left, &right, sides.py_minor) {
+                ledger.note(&format!("help layout of Python 3.13: `{case}`"), "usage wraps differently outside 3.12");
                 continue;
             }
             ledger.diff(&format!("argparse `{case}`"), &format!("rc {}\n{}{}", left.0, left.1, left.2), &format!("rc {}\n{}{}", right.0, right.1, right.2));
