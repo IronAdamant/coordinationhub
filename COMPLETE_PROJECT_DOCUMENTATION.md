@@ -35,6 +35,8 @@ Live coordination for coding agents: identity, file locks, tasks, messages, and 
 | `examples/parity.rs` | Python 0.8.0 versus Rust compare |
 | `examples/bench.rs` | Timings and the speed gate |
 | `examples/check_zero_deps.rs`, `examples/check_no_todos.rs` | CI checks |
+| `examples/gen_docs.rs`, `examples/propose_stale_phrases.rs`, `examples/update_dispatch_floor.rs` | Ports of the 0.8.0 doc tools (they read a `coordinationhub/` Python tree) |
+| `examples/pyport/` | CPython behaviour those ports need: text I/O, a tokenizer, json, argparse |
 | `tests/surface.rs` | One pass over every tool |
 | `tests/argparse_goldens.rs` | Command lines checked against captured 0.8.0 output |
 | `tests/multi_agent.rs` | Three sessions sharing one hub end to end |

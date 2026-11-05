@@ -9,8 +9,8 @@ SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" &>/dev/null && pwd)"
 REPO_ROOT="$(cd -- "$SCRIPT_DIR/.." &>/dev/null && pwd)"
 
 echo "=== Proposed STALE_PHRASES additions ==="
-python "$REPO_ROOT/scripts/propose_stale_phrases.py" "$@"
+cargo run --quiet --release --manifest-path "$REPO_ROOT/Cargo.toml" --example propose_stale_phrases -- "$@"
 
 echo
 echo "=== Stale-phrase scan + doc drift check ==="
-python "$REPO_ROOT/scripts/gen_docs.py" --check
+cargo run --quiet --release --manifest-path "$REPO_ROOT/Cargo.toml" --example gen_docs -- --check

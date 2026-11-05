@@ -53,7 +53,7 @@ vim coordinationhub/__init__.py
 
 # 2. Run tests + docs
 python -m pytest tests/ -q
-python scripts/gen_docs.py
+cargo run --release --example gen_docs
 
 # 3. Commit + push
 git add coordinationhub/__init__.py AGENTS.md COMPLETE_PROJECT_DOCUMENTATION.md ...

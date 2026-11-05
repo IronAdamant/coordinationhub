@@ -156,7 +156,7 @@ The layering review documented in `findings/post_opus_review_5_followups/03` dec
 
 The project's older "every file ≤ 500 code LOC" rule was a single global cap. After T6.22 collapsed twelve mixins into a composed engine, `core.py` ended up as a deliberate facade pile (one one-liner per delegated subsystem method) which is genuinely larger than 500 code-LOC and *should* stay that way for readability. The policy below replaces the flat cap with explicit tiers so the discipline still matches reality.
 
-**Tiered code-LOC caps** (where "code-LOC" = non-blank, non-comment lines, the same metric `scripts/gen_docs.py` computes):
+**Tiered code-LOC caps** (where "code-LOC" = non-blank, non-comment lines, the same metric `examples/gen_docs.rs` computes):
 
 | Tier | Files | Cap | Rationale |
 |------|-------|-----|-----------|
@@ -192,10 +192,10 @@ To regenerate after changing tests:
 ```bash
 pip install -e '.[dev]'
 pytest --cov=coordinationhub --cov-report=json --cov-branch
-python scripts/gen_docs.py
+cargo run --release --example gen_docs
 ```
 
-When `coverage.json` is missing the table renders a one-line placeholder — `gen_docs.py --check` does not require the dev extra to pass.
+When `coverage.json` is missing the table renders a one-line placeholder — `gen_docs --check` does not require the dev extra to pass.
 
 <!-- GEN:dispatch-coverage -->
 _No `coverage.json` found. Run `pytest --cov=coordinationhub --cov-report=json --cov-branch` then `python scripts/gen_docs.py` to regenerate this table._
