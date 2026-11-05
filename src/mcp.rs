@@ -104,7 +104,7 @@ fn initialize(surface: &Surface) -> Value {
         if let Value::Object(pairs) = &mut result {
             pairs.push((
                 "instructions".into(),
-                json::s(format!("CoordinationHub tool groups on: {}.", surface.active_groups())),
+                json::s(surface.summary()),
             ));
         }
     }

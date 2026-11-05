@@ -145,6 +145,20 @@ impl Surface {
         }
         if let Some(names) = &deny {
             check(DISABLE_VAR, names, false)?;
+            // `core` is always on; naming it, or one of its tools, is a mistake
+            // the user should see.
+            for name in names {
+                if name == "core" {
+                    return Err(format!(
+                        "{DISABLE_VAR}: group \"core\" is always on and cannot be disabled"
+                    ));
+                }
+                if group_of(name) == Some("core") {
+                    return Err(format!(
+                        "{DISABLE_VAR}: tool \"{name}\" is in group \"core\", which is always on and cannot be disabled"
+                    ));
+                }
+            }
         }
         let mut hidden: Vec<Hidden> = Vec::new();
         if let Some(names) = &allow {
@@ -161,7 +175,7 @@ impl Surface {
         if let Some(names) = &deny {
             for tool in &all_tools {
                 let group = group_of(tool).unwrap_or("core");
-                if group == "core" || hidden.iter().any(|item| item.tool == *tool) {
+                if hidden.iter().any(|item| item.tool == *tool) {
                     continue;
                 }
                 if let Some(name) = names.iter().find(|name| name.as_str() == group || name.as_str() == *tool) {
@@ -206,6 +220,26 @@ impl Surface {
             .map(|(group, _)| *group)
             .collect::<Vec<_>>()
             .join(", ")
+    }
+
+    /// Groups with no exposed tool, comma separated.
+    pub fn inactive_groups(&self) -> String {
+        GROUPS
+            .iter()
+            .filter(|(_, tools)| !tools.iter().any(|tool| self.allows(tool)))
+            .map(|(group, _)| *group)
+            .collect::<Vec<_>>()
+            .join(", ")
+    }
+
+    /// The one line `initialize` ends with: groups on and groups off.
+    pub fn summary(&self) -> String {
+        let off = self.inactive_groups();
+        format!(
+            "CoordinationHub tool groups on: {}; off: {}.",
+            self.active_groups(),
+            if off.is_empty() { "none".to_string() } else { off }
+        )
     }
 
     /// Number of exposed tools.
