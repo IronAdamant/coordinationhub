@@ -247,7 +247,12 @@ fn type_ok(value: &Value, spec: &Value) -> bool {
         Value::Array(items) => items.iter().any(|item| type_ok(value, item)),
         Value::String(name) => match name.as_str() {
             "string" => matches!(value, Value::String(_)),
-            "integer" => matches!(value, Value::Int(_)),
+            // jsonschema (the `mcp` library's check) treats 3.0 as an integer.
+            "integer" => match value {
+                Value::Int(_) => true,
+                Value::Float(n) => n.is_finite() && n.fract() == 0.0,
+                _ => false,
+            },
             "number" => matches!(value, Value::Int(_) | Value::Float(_)),
             "boolean" => matches!(value, Value::Bool(_)),
             "object" => matches!(value, Value::Object(_)),

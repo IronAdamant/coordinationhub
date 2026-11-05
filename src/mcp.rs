@@ -140,14 +140,8 @@ fn who_tool() -> Value {
 fn call_result(engine: &mut Engine, name: &str, arguments: &Value) -> Value {
     match engine.call(name, arguments) {
         Ok(value) => content(&json::dumps_pretty(&value), false),
-        Err(err) => {
-            let text = if err.starts_with("Input validation error:") {
-                err
-            } else {
-                format!("Error: {err}")
-            };
-            content(&text, true)
-        }
+        Err(err) if err.starts_with("Input validation error:") => content(&err, true),
+        Err(err) => content(&format!("Error: {err}"), true),
     }
 }
 

@@ -440,19 +440,15 @@ fn pad(out: &mut String, indent: usize) {
     }
 }
 
+/// `json.dumps` float text: `float.__repr__`, and `NaN` / `Infinity` the
+/// way Python's encoder writes them.
 fn write_float(out: &mut String, n: f64) {
-    if n.is_nan() || n.is_infinite() {
-        out.push_str("null");
-        return;
-    }
-    if n.fract() == 0.0 && n.abs() < 1e15 {
-        let _ = write!(out, "{n:.1}");
-        return;
-    }
-    let text = format!("{n}");
-    out.push_str(&text);
-    if !text.contains('.') && !text.contains('e') && !text.contains('E') {
-        out.push_str(".0");
+    if n.is_nan() {
+        out.push_str("NaN");
+    } else if n.is_infinite() {
+        out.push_str(if n > 0.0 { "Infinity" } else { "-Infinity" });
+    } else {
+        out.push_str(&crate::argparse::py_float_repr(n));
     }
 }
 
@@ -491,29 +487,19 @@ pub fn py_repr(value: &Value) -> String {
         Value::Bool(true) => "True".into(),
         Value::Bool(false) => "False".into(),
         Value::Int(n) => n.to_string(),
-        Value::Float(n) => {
-            let mut out = String::new();
-            write_float(&mut out, *n);
-            out
-        }
-        Value::String(text) => {
-            let mut out = String::from("'");
-            for ch in text.chars() {
-                match ch {
-                    '\\' => out.push_str("\\\\"),
-                    '\'' => out.push_str("\\'"),
-                    '\n' => out.push_str("\\n"),
-                    c => out.push(c),
-                }
-            }
-            out.push('\'');
-            out
-        }
+        Value::Float(n) => crate::argparse::py_float_repr(*n),
+        Value::String(text) => crate::argparse::py_repr(text),
         Value::Array(items) => {
             let parts: Vec<String> = items.iter().map(py_repr).collect();
             format!("[{}]", parts.join(", "))
         }
-        Value::Object(_) => dumps(value),
+        Value::Object(pairs) => {
+            let parts: Vec<String> = pairs
+                .iter()
+                .map(|(key, item)| format!("{}: {}", crate::argparse::py_repr(key), py_repr(item)))
+                .collect();
+            format!("{{{}}}", parts.join(", "))
+        }
     }
 }
 

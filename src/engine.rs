@@ -494,7 +494,7 @@ impl Engine {
                 opt_i(args, "dep_id"),
             ),
             "acquire_coordinator_lease" => {
-                act_board::acquire_lease(state, need_str(args, "agent_id")?, opt_f_opt(args, "ttl"), true)
+                act_board::acquire_lease(state, need_str(args, "agent_id")?, opt_value(args, "ttl"), true)
             }
             "manage_leases" => self.manage_leases(args)?,
             "spawn_subagent" => act_board::spawn(
@@ -712,7 +712,7 @@ impl Engine {
         let state = &mut self.store.state;
         Ok(match action {
             "acquire" => {
-                act_board::acquire_lease(state, need_str(args, "agent_id")?, opt_f_opt(args, "ttl"), true)
+                act_board::acquire_lease(state, need_str(args, "agent_id")?, opt_value(args, "ttl"), true)
             }
             "refresh" => act_board::refresh_lease(state, need_str(args, "agent_id")?),
             "release" => act_board::release_lease_tool(state, need_str(args, "agent_id")?),
@@ -720,7 +720,7 @@ impl Engine {
             "claim" => act_board::claim_leadership(
                 state,
                 need_str(args, "agent_id")?,
-                opt_f_opt(args, "ttl"),
+                opt_value(args, "ttl"),
             ),
             other => json::obj(vec![(
                 "error",
@@ -884,6 +884,16 @@ impl Engine {
         let limit = opt_i(args, "limit").unwrap_or(100);
         let timeout = opt_f(args, "timeout_s", 0.0);
         let poll = opt_f(args, "poll_interval_s", 0.05).max(0.01);
+        // Python's hybrid wait spends 0.05 s on its in-process event bus and
+        // then gives up before reading the journal when the timeout has
+        // already passed. A timeout at or below that window, including a
+        // negative one, therefore always times out. This answers at once.
+        if timeout <= HYBRID_BUS_WAIT_S {
+            return Ok(json::obj(vec![
+                ("notifications", json::arr(vec![])),
+                ("timed_out", json::b(true)),
+            ]));
+        }
         let started = std::time::Instant::now();
         let opened = util::now();
         loop {
@@ -1236,6 +1246,9 @@ fn who_arguments(args: &Value) -> Result<(), String> {
     Ok(())
 }
 
+/// How long Python's `_hybrid_wait` blocks on its in-process event bus.
+pub const HYBRID_BUS_WAIT_S: f64 = 0.05;
+
 fn notification_window(
     state: &crate::db::State,
     opened_at: f64,
@@ -1305,6 +1318,12 @@ fn opt_bool(args: &Value, key: &str, default: bool) -> bool {
 }
 fn opt_f(args: &Value, key: &str, default: f64) -> f64 {
     args.get(key).and_then(Value::as_f64).unwrap_or(default)
+}
+fn opt_value<'a>(args: &'a Value, key: &str) -> Option<&'a Value> {
+    match args.get(key) {
+        Some(Value::Null) | None => None,
+        Some(other) => Some(other),
+    }
 }
 fn opt_f_opt(args: &Value, key: &str) -> Option<f64> {
     match args.get(key) {

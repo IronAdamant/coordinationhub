@@ -3,9 +3,6 @@
 use crate::json::Value;
 
 pub fn show(command: &str, value: &Value, pos: &[String], kv: &[(String, String)]) -> i32 {
-    if let Some(code) = crash_like_python(command, value) {
-        return code;
-    }
     let id = pos.first().map(|s| s.as_str()).unwrap_or("");
     let flag = |key: &str| kv.iter().find(|(name, _)| name == key).map(|(_, v)| v.as_str());
     match command {
@@ -67,17 +64,44 @@ pub fn show(command: &str, value: &Value, pos: &[String], kv: &[(String, String)
             }
         }
         "broadcast" => {
-            if value.get("handoff_id").is_some() {
-                println!("HANDOFF from {id}: {}", raw(value, "handoff_id"));
+            let present = |key: &str| !matches!(value.get(key), None | Some(Value::Null));
+            if present("handoff_id") {
+                println!("HANDOFF from {id}: {}", py_get(value, "handoff_id", "None"));
                 println!("  To: {}", join_strings(value, "to_agents"));
-                let doc = value.get("document_path").and_then(Value::as_str).unwrap_or("");
+                let doc = if truthy(value.get("document_path")) {
+                    py_get(value, "document_path", "")
+                } else {
+                    "(none)".to_string()
+                };
+                println!("  Document: {doc}");
+                println!("  Type: {}", py_get(value, "handoff_type", "None"));
+            } else if present("broadcast_id") {
+                println!("Broadcast from {id} (ack required)");
+                println!("  Broadcast ID: {}", py_get(value, "broadcast_id", "None"));
+                let pending = join_strings(value, "pending_acks");
                 println!(
-                    "  Document: {}",
-                    if doc.is_empty() { "(none)" } else { doc }
+                    "  Pending acks: {}",
+                    if pending.is_empty() { "(none)".to_string() } else { pending }
                 );
-                println!("  Type: {}", text(value, "handoff_type"));
             } else {
                 println!("Broadcast from {id}");
+                let ack = match value.get("acknowledged_by") {
+                    Some(found) if truthy(Some(found)) => py_str(found),
+                    _ => "(none)".to_string(),
+                };
+                println!("  Acknowledged by: {ack}");
+                if let Some(Value::Array(conflicts)) = value.get("conflicts") {
+                    if !conflicts.is_empty() {
+                        println!("  Conflicts:");
+                        for item in conflicts {
+                            println!(
+                                "    {} locked by {}",
+                                py_get(item, "document_path", "None"),
+                                py_get(item, "locked_by", "None")
+                            );
+                        }
+                    }
+                }
             }
         }
         "get-handoffs" => render_handoffs(value),
@@ -162,13 +186,17 @@ pub fn show(command: &str, value: &Value, pos: &[String], kv: &[(String, String)
         "leader-status" => render_leader(value, false),
         "ha-dashboard" => render_ha(value),
         "acquire-coordinator-lease" => {
-            if value.get("acquired").and_then(Value::as_bool) == Some(true) {
-                println!("Lease acquired: {}", text(value, "lease_name"));
-                println!("  Holder: {}", text(value, "holder_id"));
-                println!("  TTL: {:.1}s", number_value(value.get("ttl")));
-                println!("  Expires at: {}", raw(value, "expires_at"));
+            if truthy(value.get("acquired")) {
+                println!("Lease acquired: {}", py_get(value, "lease_name", "None"));
+                println!("  Holder: {}", py_get(value, "holder_id", "None"));
+                println!("  TTL: {}s", py_get(value, "ttl", "None"));
+                println!("  Expires at: {}", py_get(value, "expires_at", "None"));
             } else {
                 println!("Lease acquisition failed — leadership held by another agent");
+                if let Some(holder) = value.get("holder").filter(|found| truthy(Some(found))) {
+                    println!("  Current holder: {}", py_get(holder, "holder_id", "None"));
+                    println!("  Expires at: {}", py_get(holder, "expires_at", "None"));
+                }
             }
         }
         "refresh-coordinator-lease" => {
@@ -187,15 +215,16 @@ pub fn show(command: &str, value: &Value, pos: &[String], kv: &[(String, String)
             }
         }
         "claim-leadership" => {
-            if value.get("claimed").and_then(Value::as_bool) == Some(true) {
-                println!("Leadership claimed: {}", text(value, "lease_name"));
-                println!("  Holder: {}", text(value, "holder_id"));
+            if truthy(value.get("claimed")) {
+                println!("Leadership claimed: {}", py_get(value, "lease_name", "None"));
+                println!("  Holder: {}", py_get(value, "holder_id", "None"));
+                println!("  TTL: {}s", py_get(value, "ttl", "None"));
+                println!("  Expires at: {}", py_get(value, "expires_at", "None"));
             } else {
                 println!("Leadership claim failed");
-                if let Some(holder) = value.get("holder") {
-                    if !matches!(holder, Value::Null) {
-                        println!("  Current holder: {}", text(holder, "holder_id"));
-                    }
+                if let Some(holder) = value.get("holder").filter(|found| truthy(Some(found))) {
+                    println!("  Current holder: {}", py_get(holder, "holder_id", "None"));
+                    println!("  Expires at: {}", py_get(holder, "expires_at", "None"));
                 }
             }
         }
@@ -268,22 +297,8 @@ pub fn show(command: &str, value: &Value, pos: &[String], kv: &[(String, String)
             }
         }
         "scan-project" => {
-            println!(
-                "Scanned {} file(s)",
-                value
-                    .get("scanned")
-                    .or_else(|| value.get("files_scanned"))
-                    .and_then(Value::as_i64)
-                    .unwrap_or(0)
-            );
-            println!(
-                "  Owned files: {}",
-                value
-                    .get("owned")
-                    .or_else(|| value.get("owned_files"))
-                    .and_then(Value::as_i64)
-                    .unwrap_or(0)
-            );
+            println!("Scanned {} file(s)", py_get(value, "scanned", "0"));
+            println!("  Owned files: {}", py_get(value, "owned", "0"));
         }
         "dashboard" => render_dashboard(value),
         "agent-relations" => {
@@ -320,17 +335,16 @@ pub fn show(command: &str, value: &Value, pos: &[String], kv: &[(String, String)
             println!("Timed out: {}", py_seq(value, "timed_out"));
         }
         "wait-for-task" => {
-            if value.get("timed_out").and_then(Value::as_bool) == Some(true)
-                || text(value, "status") == "timeout"
-            {
-                println!("Timeout waiting for: {id}");
-            } else if text(value, "status") == "failed" {
-                println!("Task failed: {id}");
-                if let Some(err) = value.get("error").and_then(Value::as_str) {
-                    println!("  Error: {err}");
+            match value.get("status").and_then(Value::as_str) {
+                Some("completed") => println!("Task completed: {id}"),
+                Some("failed") => {
+                    println!("Task failed: {id}");
+                    if truthy(value.get("error")) {
+                        println!("  Error: {}", py_get(value, "error", "None"));
+                    }
                 }
-            } else {
-                println!("Task completed: {id}");
+                Some("not_found") => println!("Task not found: {id}"),
+                _ => println!("Timeout waiting for: {id}"),
             }
         }
         "wait-for-handoff" => {
@@ -369,7 +383,7 @@ pub fn show(command: &str, value: &Value, pos: &[String], kv: &[(String, String)
                 println!("Failed: {}", text(value, "reason"));
             }
         }
-        "get-conflicts" => println!("No conflicts recorded"),
+        "get-conflicts" => render_conflicts(value),
         "get-messages" => {
             let items = value.get("messages").and_then(Value::as_array);
             let count = items.map(|rows| rows.len()).unwrap_or(0);
@@ -512,10 +526,13 @@ pub fn show(command: &str, value: &Value, pos: &[String], kv: &[(String, String)
             }
         }
         "report-subagent-spawned" => {
-            if value.get("spawn_id").and_then(Value::as_str).is_some() {
-                println!("Spawn reported: {}", text(value, "spawn_id"));
-                println!("  Child: {}", text(value, "child_agent_id"));
-                let description = value.get("description").and_then(Value::as_str).unwrap_or("");
+            if truthy(value.get("spawn_id")) {
+                println!("Spawn reported: {}", py_get(value, "spawn_id", "None"));
+                println!("  Child: {}", py_get(value, "child_agent_id", "None"));
+                let description = match value.get("description") {
+                    Some(Value::String(text)) if !text.is_empty() => text.clone(),
+                    _ => "(none)".to_string(),
+                };
                 println!("  Description: {description}");
             } else {
                 let parent = if text(value, "parent_agent_id").is_empty() {
@@ -550,7 +567,12 @@ pub fn show(command: &str, value: &Value, pos: &[String], kv: &[(String, String)
             } else if let Some(items) = items {
                 println!("Failure history for {id} ({} entries):", items.len());
                 for item in items {
-                    println!("  {}: {}", text(item, "timestamp"), text(item, "error"));
+                    println!(
+                        "  attempt {} at {}: {}",
+                        py_get(item, "attempt", "?"),
+                        py_get(item, "last_attempt_at", "?"),
+                        py_truncate(item.get("error"), 80)
+                    );
                 }
             }
         }
@@ -596,12 +618,53 @@ pub fn show(command: &str, value: &Value, pos: &[String], kv: &[(String, String)
     0
 }
 
-fn number_value(value: Option<&Value>) -> f64 {
+/// Python `str()` of a value decoded from JSON.
+fn py_str(value: &Value) -> String {
     match value {
-        Some(Value::Int(n)) => *n as f64,
-        Some(Value::Float(n)) => *n,
-        _ => 0.0,
+        Value::String(text) => text.clone(),
+        other => py_repr_value(other),
     }
+}
+
+/// Python `repr()` of a value decoded from JSON.
+fn py_repr_value(value: &Value) -> String {
+    crate::json::py_repr(value)
+}
+
+/// `str(result.get(key, missing))`.
+fn py_get(value: &Value, key: &str, missing: &str) -> String {
+    match value.get(key) {
+        None => missing.to_string(),
+        Some(found) => py_str(found),
+    }
+}
+
+/// Python truthiness of `result.get(key)`.
+fn truthy(value: Option<&Value>) -> bool {
+    match value {
+        None | Some(Value::Null) | Some(Value::Bool(false)) => false,
+        Some(Value::Int(n)) => *n != 0,
+        Some(Value::Float(n)) => *n != 0.0,
+        Some(Value::String(text)) => !text.is_empty(),
+        Some(Value::Array(items)) => !items.is_empty(),
+        Some(Value::Object(pairs)) => !pairs.is_empty(),
+        Some(Value::Bool(true)) => true,
+    }
+}
+
+/// `cli_tasks._truncate`.
+fn py_truncate(value: Option<&Value>, max_len: usize) -> String {
+    let text = match value {
+        None => "unknown".to_string(),
+        Some(Value::Null) => return String::new(),
+        Some(other) => py_str(other),
+    };
+    if text.chars().count() <= max_len {
+        return text;
+    }
+    let mut out: String = text.chars().take(max_len.saturating_sub(3)).collect();
+    out.push_str("...");
+    out
 }
 
 fn py_field(value: &Value, key: &str, missing: &str) -> String {
@@ -611,66 +674,6 @@ fn py_field(value: &Value, key: &str, missing: &str) -> String {
         Some(Value::String(text)) => text.clone(),
         Some(other) => crate::json::dumps(other),
     }
-}
-
-fn crash_like_python(command: &str, value: &Value) -> Option<i32> {
-    let boom = |key: &str| {
-        eprintln!("Error: '{key}'");
-        1
-    };
-    match command {
-        "get-conflicts" => {
-            let items = value.get("conflicts").and_then(Value::as_array);
-            if let Some(items) = items {
-                if !items.is_empty() {
-                    println!("Conflicts ({}):", items.len());
-                    return Some(boom("agent_id"));
-                }
-            }
-        }
-        "get-available-tasks" => {
-            let items = value.get("tasks").and_then(Value::as_array);
-            if let Some(items) = items {
-                if !items.is_empty() {
-                    println!("Available tasks ({}):", items.len());
-                    return Some(boom("task_id"));
-                }
-            }
-        }
-        "query-tasks" => {
-            let items = value.get("tasks").and_then(Value::as_array);
-            if let Some(items) = items {
-                if !items.is_empty() {
-                    println!("Tasks ({}):", items.len());
-                    return Some(boom("task_id"));
-                }
-            }
-        }
-        "get-leader" | "leader-status" => {
-            if matches!(value.get("leader"), Some(Value::Object(_))) {
-                return Some(boom("agent_id"));
-            }
-        }
-        "list-pending-spawns" => {
-            if let Some(items) = value.get("spawns").and_then(Value::as_array) {
-                if !items.is_empty() {
-                    let row = &items[0];
-                    let parent = row.get("scope_id").and_then(Value::as_str).unwrap_or("");
-                    println!("Pending spawns for {parent}:");
-                    if row.get("id").and_then(Value::as_str).is_none() {
-                        return Some(boom("id"));
-                    }
-                    if row.get("description").map(|item| matches!(item, Value::Null)).unwrap_or(true)
-                    {
-                        eprintln!("Error: 'NoneType' object is not subscriptable");
-                        return Some(1);
-                    }
-                }
-            }
-        }
-        _ => {}
-    }
-    None
 }
 
 pub fn exit_code(command: &str, value: &Value) -> i32 {
@@ -838,27 +841,49 @@ fn render_handoffs(value: &Value) {
     }
 }
 
+/// Task rows from any query shape: `tasks`, `subtasks`, a single `task`,
+/// or a tree root with nested `subtasks`.
+fn task_rows(value: &Value) -> Vec<(usize, Value)> {
+    fn walk(node: &Value, depth: usize, out: &mut Vec<(usize, Value)>) {
+        out.push((depth, node.clone()));
+        if let Some(children) = node.get("subtasks").and_then(Value::as_array) {
+            for child in children {
+                walk(child, depth + 1, out);
+            }
+        }
+    }
+    let mut out = Vec::new();
+    if let Some(items) = value.get("tasks").or_else(|| value.get("subtasks")).and_then(Value::as_array) {
+        out.extend(items.iter().map(|item| (0, item.clone())));
+    } else if let Some(task) = value.get("task").filter(|task| matches!(task, Value::Object(_))) {
+        out.push((0, task.clone()));
+    } else if value.get("id").is_some() && value.get("status").is_some() {
+        walk(value, 0, &mut out);
+    }
+    out
+}
+
 fn render_tasks(value: &Value) {
-    let items = value.get("tasks").and_then(Value::as_array);
-    let Some(items) = items else {
-        println!("No tasks found");
-        return;
-    };
-    if items.is_empty() {
+    let rows = task_rows(value);
+    if rows.is_empty() {
         println!("No tasks found");
         return;
     }
-    println!("Tasks ({}):", items.len());
-    for item in items {
-        let assigned = item
-            .get("assigned_agent_id")
-            .and_then(Value::as_str)
-            .unwrap_or("unassigned");
+    println!("Tasks ({}):", rows.len());
+    for (depth, item) in rows {
+        let pad = "  ".repeat(depth);
+        let assigned = match item.get("assigned_agent_id") {
+            Some(Value::String(agent)) if !agent.is_empty() => agent.clone(),
+            _ => "(unassigned)".to_string(),
+        };
         println!(
-            "  [{}] {} — {assigned}",
-            text(item, "status"),
-            text(item, "id")
+            "{pad}  [{}] {} \u{2014} {assigned}",
+            py_get(&item, "status", "unknown"),
+            py_get(&item, "id", "?")
         );
+        if truthy(item.get("description")) {
+            println!("{pad}    {}", py_truncate(item.get("description"), 60));
+        }
     }
 }
 
@@ -873,8 +898,33 @@ fn render_available(value: &Value) {
     }
     println!("Available tasks ({}):", items.len());
     for item in items {
-        let desc = item.get("description").and_then(Value::as_str).unwrap_or("");
-        println!("  {} — {desc}", text(item, "id"));
+        let desc = match item.get("description") {
+            Some(Value::Null) | None => String::new(),
+            found => py_truncate(found, 60),
+        };
+        println!("  {} \u{2014} {desc}", py_get(item, "id", "?"));
+    }
+}
+
+fn render_conflicts(value: &Value) {
+    let items = value.get("conflicts").and_then(Value::as_array).unwrap_or(&[]);
+    if items.is_empty() {
+        println!("No conflicts recorded");
+        return;
+    }
+    println!("Conflicts ({}):", items.len());
+    for item in items {
+        let path = py_get(item, "document_path", "?");
+        let holder = py_get(item, "agent_a", "?");
+        let requester = py_get(item, "agent_b", "?");
+        match item.get("conflict_type").and_then(Value::as_str) {
+            Some("lock_stolen") => println!("  {path}: {requester} stole lock from {holder}"),
+            Some("denied") => println!("  {path}: {requester} denied; held by {holder}"),
+            other => println!(
+                "  {path}: {} between {holder} and {requester}",
+                other.unwrap_or("conflict")
+            ),
+        }
     }
 }
 
@@ -943,13 +993,26 @@ fn render_spawns(value: &Value, parent: &str) {
         println!("No pending spawns.");
         return;
     }
+    let now = crate::util::now();
     println!("Pending spawns for {parent}:");
     for item in items {
-        println!("  {}", text(&item, "task_id"));
+        let marker = match item.get("status").and_then(Value::as_str) {
+            Some("expired") => " [EXPIRED]",
+            Some("registered") => " [REGISTERED]",
+            _ => "",
+        };
+        let age = match item.get("created_at").and_then(Value::as_f64) {
+            Some(created) => format!("{:.1}s", now - created),
+            None => "unknown".to_string(),
+        };
+        let desc: String = match item.get("description") {
+            Some(Value::String(text)) => text.chars().take(40).collect(),
+            _ => String::new(),
+        };
+        println!("  {}{marker}", py_get(&item, "task_id", "?"));
         println!(
-            "    type={} | age=0s | desc={}",
-            text(&item, "subagent_type"),
-            text(&item, "description")
+            "    type={} | age={age} | desc={desc}",
+            py_get(&item, "subagent_type", "?")
         );
     }
 }

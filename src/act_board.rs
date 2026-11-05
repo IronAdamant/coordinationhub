@@ -51,7 +51,9 @@ pub fn create_task(
     priority: i64,
 ) -> Result<Value, String> {
     if state.tasks.iter().any(|task| task.id == task_id) {
-        return Err(format!("task id already exists: {task_id}"));
+        return Err(format!(
+            "task {task_id} already exists; use a new task_id, or update_task_status / assign_task on the existing task"
+        ));
     }
     let now = util::now();
     let description =
@@ -590,7 +592,7 @@ pub fn task_failures(state: &mut State, action: &str, task_id: Option<&str>, lim
                 .failures
                 .iter()
                 .filter(|row| row.status == "dead_letter")
-                .take(limit.max(0) as usize)
+                .take(crate::util::sql_limit(limit))
                 .map(|row| {
                     json::obj(vec![
                         ("id", json::i(row.id)),
@@ -755,7 +757,7 @@ pub fn get_messages(
             .unwrap_or(std::cmp::Ordering::Equal)
             .then(b.id.cmp(&a.id))
     });
-    rows.truncate(limit.max(0) as usize);
+    rows.truncate(crate::util::sql_limit(limit));
     let items: Vec<Value> = rows.into_iter().map(message_value).collect();
     let count = items.len() as i64;
     json::obj(vec![
@@ -1091,8 +1093,19 @@ fn dep_value(dep: &Dependency) -> Value {
     ])
 }
 
-pub fn acquire_lease(state: &mut State, agent_id: &str, ttl: Option<f64>, publish: bool) -> Value {
-    let ttl = ttl.unwrap_or(DEFAULT_LEASE_TTL);
+/// A lease TTL as the caller passed it. Python echoes the number it was
+/// given, so an int stays an int and a float stays a float. The default
+/// is the float 10.0.
+pub fn lease_ttl(ttl: Option<&Value>) -> (f64, Value) {
+    match ttl {
+        Some(Value::Int(n)) => (*n as f64, Value::Int(*n)),
+        Some(Value::Float(n)) => (*n, Value::Float(*n)),
+        _ => (DEFAULT_LEASE_TTL, Value::Float(DEFAULT_LEASE_TTL)),
+    }
+}
+
+pub fn acquire_lease(state: &mut State, agent_id: &str, ttl_arg: Option<&Value>, publish: bool) -> Value {
+    let (ttl, shown_ttl) = lease_ttl(ttl_arg);
     let now = util::now();
     let expires = now + ttl;
     if let Some(lease) = state
@@ -1135,17 +1148,9 @@ pub fn acquire_lease(state: &mut State, agent_id: &str, ttl: Option<f64>, publis
         ("acquired", json::b(true)),
         ("lease_name", json::s(COORDINATOR)),
         ("holder_id", json::s(agent_id)),
-        ("ttl", whole(ttl)),
+        ("ttl", shown_ttl),
         ("expires_at", json::f(expires)),
     ])
-}
-
-fn whole(n: f64) -> Value {
-    if n.fract() == 0.0 && n.abs() < 1e15 {
-        json::i(n as i64)
-    } else {
-        json::f(n)
-    }
 }
 
 pub fn refresh_lease(state: &mut State, agent_id: &str) -> Value {
@@ -1246,7 +1251,7 @@ fn lease_value(lease: &crate::db::Lease) -> Value {
     ])
 }
 
-pub fn claim_leadership(state: &mut State, agent_id: &str, ttl: Option<f64>) -> Value {
+pub fn claim_leadership(state: &mut State, agent_id: &str, ttl: Option<&Value>) -> Value {
     if live_lease(state)
         .map(|lease| lease.holder_id != agent_id)
         .unwrap_or(false)
@@ -1265,7 +1270,7 @@ pub fn claim_leadership(state: &mut State, agent_id: &str, ttl: Option<f64>) -> 
         json::obj(vec![
             ("lease_name", json::s(COORDINATOR)),
             ("holder_id", json::s(agent_id)),
-            ("ttl", json::f(ttl.unwrap_or(DEFAULT_LEASE_TTL))),
+            ("ttl", json::f(lease_ttl(ttl).0)),
         ]),
     );
     json::obj(vec![
@@ -1274,7 +1279,7 @@ pub fn claim_leadership(state: &mut State, agent_id: &str, ttl: Option<f64>) -> 
         ("holder_id", json::s(agent_id)),
         (
             "ttl",
-            got.get("ttl").cloned().unwrap_or(whole(DEFAULT_LEASE_TTL)),
+            got.get("ttl").cloned().unwrap_or(lease_ttl(None).1),
         ),
         (
             "expires_at",
@@ -1796,6 +1801,7 @@ pub fn record_handoff(
         let payload = json::obj(vec![
             ("handoff_id", json::i(id)),
             ("document_path", json::opt_str(document_path)),
+            ("handoff_type", json::s("scope_transfer")),
         ]);
         let _ = send_message(state, from, target, "handoff", Some(&payload), None, false);
     }
@@ -1992,7 +1998,7 @@ pub fn handoff_rows(state: &State, status: Option<&str>, from: Option<&str>, lim
     });
     let rows: Vec<Value> = rows_src
         .into_iter()
-        .take(limit.max(0) as usize)
+        .take(crate::util::sql_limit(limit))
         .map(|row| {
             json::obj(vec![
                 ("id", json::i(row.id)),

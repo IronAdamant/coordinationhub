@@ -608,7 +608,9 @@ pub fn prune_notifications(state: &mut State, max_age: Option<f64>, max_entries:
 }
 
 fn trim_oldest<T>(rows: &mut Vec<T>, max_entries: i64, key: impl Fn(&T) -> (f64, i64)) {
-    if max_entries < 0 || rows.len() as i64 <= max_entries {
+    // `DELETE ... ORDER BY created_at LIMIT count - max_entries`: a negative
+    // max_entries leaves an excess above the row count, so every row goes.
+    if rows.len() as i64 <= max_entries {
         return;
     }
     let mut order: Vec<usize> = (0..rows.len()).collect();
@@ -619,7 +621,7 @@ fn trim_oldest<T>(rows: &mut Vec<T>, max_entries: i64, key: impl Fn(&T) -> (f64,
             .unwrap_or(std::cmp::Ordering::Equal)
             .then(aid.cmp(&bid))
     });
-    let excess = rows.len() - max_entries as usize;
+    let excess = (rows.len() as i64 - max_entries).min(rows.len() as i64) as usize;
     let drop: Vec<usize> = order.into_iter().take(excess).collect();
     let mut keep = vec![true; rows.len()];
     for index in drop {
@@ -692,7 +694,7 @@ pub fn conflicts(
             .partial_cmp(&a.created_at)
             .unwrap_or(std::cmp::Ordering::Equal)
     });
-    rows.truncate(limit.max(0) as usize);
+    rows.truncate(crate::util::sql_limit(limit));
     let items = rows
         .into_iter()
         .map(|row| {
@@ -742,7 +744,7 @@ pub fn hotspots(state: &State, limit: i64) -> Value {
         })
         .collect();
     ranked.sort_by(|a, b| b.1.cmp(&a.1).then(a.0.cmp(&b.0)));
-    ranked.truncate(limit.max(0) as usize);
+    ranked.truncate(crate::util::sql_limit(limit));
     let items = ranked
         .into_iter()
         .map(|(path, count, agents, _)| {
