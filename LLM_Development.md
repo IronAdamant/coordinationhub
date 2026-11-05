@@ -1,5 +1,12 @@
 # LLM_Development.md — CoordinationHub
 
+## 2026-11-05 — Third verification
+
+- Notification waits use the moment the wait opened, so a stale row does not count as new.
+- An assessment filter that matches nobody scores 0. Lease ttl in JSON is a whole number. Prune does not add a key Python omits, and the CLI count includes coordination events.
+- Prose mode follows the 0.8.0 printers, including the six commands that exit 1 with `Error: 'field'`. Each command has its own help text.
+- Redaction applies the Python patterns in order, with a word boundary on both sides.
+
 ## 2026-11-04 — Verification fixes
 
 - The frozen-clock harness result is withdrawn. The harness now drives unmodified Python 0.8.0 and Rust over stdio with a live clock.

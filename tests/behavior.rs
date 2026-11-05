@@ -335,7 +335,7 @@ fn who_rejects_overlap_unregistered_and_bad_ttl() {
         obj(vec![
             ("action", json::s("claim")),
             ("agent_id", json::s("owner")),
-            ("area", json::s("ember")),
+            ("area", json::s("cedar")),
         ]),
     )
     .unwrap();
@@ -346,7 +346,7 @@ fn who_rejects_overlap_unregistered_and_bad_ttl() {
         obj(vec![
             ("action", json::s("claim")),
             ("agent_id", json::s("other")),
-            ("area", json::s("ember/kiln.rs")),
+            ("area", json::s("cedar/ring.rs")),
         ]),
     )
     .unwrap();

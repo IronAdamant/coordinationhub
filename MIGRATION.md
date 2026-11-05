@@ -59,13 +59,16 @@ These are the remaining differences. They are not papered over.
 - Validation errors from the Rust server start with `Input validation error:`. The wording after that follows this program's checker. It is not a byte-for-byte copy of the `mcp` 1.30 jsonschema sentence.
 - Characters above U+FFFF are written as UTF-16 surrogate pairs, which is what Python's JSON encoder does. Control characters below U+0020 are escaped.
 - `GET /events` requires the same bearer token as the other routes and allows four open streams per client address. A fifth receives 429.
-- A `who` area is resolved against the project root. A claim on `kiln` blocks `kiln/brick.rs` and `./kiln`.
+- A `who` area is resolved against the project root. A claim on a directory name blocks a file underneath it, and `./name` is the same area.
 - Assessment with no spec file uses the same implicit graph Python builds from the live agents, so Graph Loaded is True and a quiet session scores 100%. The live trace id is `live_session`.
 - `init` writes the same seven hook events Python writes (SessionStart, UserPromptSubmit, PreToolUse for Write|Edit and Agent, PostToolUse for Write|Edit plus the Stele and Trammel tools, SubagentStart, SubagentStop, SessionEnd), with the same matchers, timeouts, and status messages. The command is this binary plus `hook`, not `python -m coordinationhub.hooks.stdio_adapter`. An earlier build wrote only SessionStart. That was a gap, and it is fixed.
 - `doctor` checks the JSONL journal, the hooks file, and that the journal parses. It does not open a SQLite schema version. `doctor --json` prints `{"checks", "all_ok"}`. After `init`, every check passes.
 - `watch` refreshes until interrupted and prints the summary line (active agents, locks, conflicts). An earlier build printed the tree once. That was a gap, and it is fixed.
 - `auto-start-dashboard` stays quiet. If the port is free it starts `serve-sse` in the background.
-- `--help` lists every command. An earlier build omitted 13 commands that still ran. That was a gap, and it is fixed. The help text is still not the argparse transcript.
+- `coordinationhub <command> --help` prints that command's usage, a one-line description, and its flags. The wording is not a copy of argparse's generated help. An earlier build printed only the global command list.
+- In prose mode, these six commands exit 1 with `Error: 'field'` on stderr when Python 0.8.0 raises, and they print the same header line Python prints before the exception: `get-conflicts` (when any conflict exists), `get-available-tasks` and `query-tasks` (when the result has task rows), `get-leader` and `leader-status` (when a lease row exists), and `list-pending-spawns` (when a spawn row is missing `id`, or the description is null). Empty results print the same sentences as 0.8.0. JSON mode does not crash. This matches 0.8.0, including the crash. The stderr line is `Error: ...`, which is what `cli.py` prints. It is not a copied CPython traceback.
+- `prune-notifications` deletes old change notifications and the coordination events those calls recorded. The printed count is both, which is what 0.8.0 counts.
+- `doctor` always exits 0, including when no hooks file is present. The hooks check then says the config was not found. The storage check looks for `coordination.jsonl`, not `coordination.db`.
 
 ## Config snippets
 

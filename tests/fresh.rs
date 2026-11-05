@@ -79,7 +79,7 @@ fn bare_area_blocks_a_file_under_it() {
         obj(vec![
             ("action", json::s("claim")),
             ("agent_id", json::s("maple")),
-            ("area", json::s("kiln")),
+            ("area", json::s("grove")),
         ]),
     )
     .unwrap();
@@ -90,7 +90,7 @@ fn bare_area_blocks_a_file_under_it() {
         obj(vec![
             ("action", json::s("claim")),
             ("agent_id", json::s("quartz")),
-            ("area", json::s("kiln/brick.rs")),
+            ("area", json::s("grove/bench.rs")),
         ]),
     )
     .unwrap();
@@ -101,7 +101,7 @@ fn bare_area_blocks_a_file_under_it() {
         obj(vec![
             ("action", json::s("claim")),
             ("agent_id", json::s("quartz")),
-            ("area", json::s("./kiln")),
+            ("area", json::s("./grove")),
         ]),
     )
     .unwrap();

@@ -224,6 +224,7 @@ def main() -> int:
                 "get_available_tasks": {},
                 "manage_leases": {"action": "get", "agent_id": "root"},
                 "manage_work_intents": {"action": "get", "agent_id": "root"},
+                "run_assessment": {"format": "json", "graph_agent_id": "role-not-in-this-hub"},
             }
             wording = False
             for name in sorted(py_names):
@@ -234,25 +235,16 @@ def main() -> int:
                     import re
                     left_raw = re.sub(r"Run At:\*\* [^\\]+", "Run At:** ", left_raw)
                     right_raw = re.sub(r"Run At:\*\* [^\\]+", "Run At:** ", right_raw)
-                    left_scores = load_body(left_raw)
-                    right_scores = load_body(right_raw)
-                    if isinstance(left_scores, dict) and isinstance(right_scores, dict):
-                        left_scores = left_scores.get("scores", left_scores)
-                        right_scores = right_scores.get("scores", right_scores)
-                        same_score = all(
-                            scrub(left_scores.get(key)) == scrub(right_scores.get(key))
-                            for key in ("overall_score", "graph_loaded", "metrics", "suite_name")
-                        )
-                        same_traces = set((left_scores.get("traces") or {})) == set(
-                            (right_scores.get("traces") or {})
-                        )
-                        if same_score and same_traces:
-                            continue
-                if load_body(left_raw) == load_body(right_raw) or name == "status":
+                left_body = load_body(left_raw)
+                right_body = load_body(right_raw)
+                if name == "status" and isinstance(left_body, dict) and isinstance(right_body, dict):
+                    left_body.pop("tools", None)
+                    right_body.pop("tools", None)
+                if left_body == right_body:
                     continue
                 both_validation = (
                     "Input validation error" in left_raw and "Input validation error" in right_raw
-                ) or ("missing " in left_raw and "missing " in right_raw)
+                )
                 if both_validation:
                     wording = True
                     continue
@@ -299,6 +291,31 @@ def main() -> int:
             if "unknown command" in proc.stderr:
                 diffs.append(f"cli missing {command}")
                 print(f"DIFF cli missing {command}")
+
+        def run_side(side, args, store):
+            if side == "py":
+                argv = [sys.executable, "-m", "coordinationhub", *args]
+            else:
+                argv = [str(binary), *args]
+            argv += ["--storage-dir", str(store), "--project-root", str(Path(tmp) / "project")]
+            return subprocess.run(argv, env=env, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+
+        for label, args in (
+            ("cli heartbeat", ["heartbeat", "root"]),
+            ("cli cancel-spawn", ["cancel-spawn", "missing-row"]),
+        ):
+            py_proc = run_side("py", args, Path(tmp) / f"{label}-py")
+            rs_proc = run_side("rs", args, Path(tmp) / f"{label}-rs")
+            if py_proc.returncode != rs_proc.returncode:
+                diffs.append(f"{label} exit {py_proc.returncode} vs {rs_proc.returncode}")
+                print(f"DIFF {label} exit")
+            if py_proc.stdout != rs_proc.stdout or py_proc.stderr != rs_proc.stderr:
+                diffs.append(f"{label} output")
+                print(f"DIFF {label} output")
+                print("--- python ---")
+                print((py_proc.stdout + py_proc.stderr)[:300])
+                print("--- rust ---")
+                print((rs_proc.stdout + rs_proc.stderr)[:300])
         unexpected = [item for item in diffs if not any(token in item for token in ALLOWED)]
         print(f"ledger {len(diffs)} difference(s), {len(unexpected)} unexpected")
         for item in diffs:
