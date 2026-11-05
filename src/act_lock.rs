@@ -557,38 +557,61 @@ pub fn notify(
 ) -> Value {
     let norm = normalize_path(document_path, project_root);
     let worktree = project_root.map(|p| util::path_str(p));
-    record_notification(state, &norm, change_type, agent_id, worktree)
+    let result = record_notification(state, &norm, change_type, agent_id, worktree);
+    let created_at = result.get("created_at").and_then(Value::as_f64).unwrap_or(util::now());
+    let notification_id = result.get("notification_id").and_then(Value::as_i64).unwrap_or(0);
+    state.record_event(
+        "notification.created",
+        json::obj(vec![
+            ("document_path", json::s(&norm)),
+            ("change_type", json::s(change_type)),
+            ("agent_id", json::s(agent_id)),
+            ("created_at", json::f(created_at)),
+            ("notification_id", json::i(notification_id)),
+        ]),
+    );
+    result
 }
 
 pub fn prune_notifications(state: &mut State, max_age: Option<f64>, max_entries: Option<i64>) -> i64 {
     let now = util::now();
-    let before = state.notifications.len();
+    let before = state.notifications.len() + state.hub_events.len();
     if let Some(age) = max_age {
         let cutoff = now - age;
         state.notifications.retain(|row| row.created_at >= cutoff);
+        state.hub_events.retain(|row| row.created_at >= cutoff);
     }
     if let Some(max_entries) = max_entries {
-        if max_entries >= 0 && state.notifications.len() as i64 > max_entries {
-            let mut order: Vec<usize> = (0..state.notifications.len()).collect();
-            order.sort_by(|&a, &b| {
-                state.notifications[a]
-                    .created_at
-                    .partial_cmp(&state.notifications[b].created_at)
-                    .unwrap_or(std::cmp::Ordering::Equal)
-                    .then(state.notifications[a].id.cmp(&state.notifications[b].id))
-            });
-            let excess = state.notifications.len() - max_entries as usize;
-            let drop_ids: Vec<i64> = order
-                .into_iter()
-                .take(excess)
-                .map(|index| state.notifications[index].id)
-                .collect();
-            state
-                .notifications
-                .retain(|row| !drop_ids.contains(&row.id));
-        }
+        trim_oldest(&mut state.notifications, max_entries, |row| (row.created_at, row.id));
+        trim_oldest(&mut state.hub_events, max_entries, |row| (row.created_at, row.id));
     }
-    (before - state.notifications.len()) as i64
+    (before - state.notifications.len() - state.hub_events.len()) as i64
+}
+
+fn trim_oldest<T>(rows: &mut Vec<T>, max_entries: i64, key: impl Fn(&T) -> (f64, i64)) {
+    if max_entries < 0 || rows.len() as i64 <= max_entries {
+        return;
+    }
+    let mut order: Vec<usize> = (0..rows.len()).collect();
+    order.sort_by(|&a, &b| {
+        let (at, aid) = key(&rows[a]);
+        let (bt, bid) = key(&rows[b]);
+        at.partial_cmp(&bt)
+            .unwrap_or(std::cmp::Ordering::Equal)
+            .then(aid.cmp(&bid))
+    });
+    let excess = rows.len() - max_entries as usize;
+    let drop: Vec<usize> = order.into_iter().take(excess).collect();
+    let mut keep = vec![true; rows.len()];
+    for index in drop {
+        keep[index] = false;
+    }
+    let mut index = 0;
+    rows.retain(|_| {
+        let ok = keep[index];
+        index += 1;
+        ok
+    });
 }
 
 pub fn notifications(
@@ -693,6 +716,7 @@ pub fn hotspots(state: &State, limit: i64) -> Value {
                     agents.push(row.agent_b.clone());
                 }
             }
+            agents.sort();
             let first_id = rows.iter().map(|row| row.id).min().unwrap_or(0);
             let count = rows.len() as i64;
             (path, count, agents, first_id)

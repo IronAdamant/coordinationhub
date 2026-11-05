@@ -87,6 +87,19 @@ pub fn register(
             });
         }
     }
+    state.record_event(
+        "agent.registered",
+        json::obj(vec![
+            ("agent_id", json::s(agent_id)),
+            (
+                "parent_id",
+                match parent_id {
+                    Some(id) => json::s(id),
+                    None => json::null(),
+                },
+            ),
+        ]),
+    );
     context_bundle(
         state,
         agent_id,
@@ -343,6 +356,10 @@ pub fn deregister(state: &mut State, agent_id: &str) -> Value {
             .lineage
             .retain(|row| !(row.parent_id == agent_id && row.child_id == *child));
     }
+    state.record_event(
+        "agent.deregistered",
+        json::obj(vec![("agent_id", json::s(agent_id))]),
+    );
     let locks = act_lock::release_agent(state, agent_id);
     let released = locks.get("released").and_then(Value::as_i64).unwrap_or(0);
     let lease_released = release_lease(state, agent_id);

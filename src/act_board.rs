@@ -60,6 +60,14 @@ pub fn create_task(
         Some(items) if !items.is_empty() => json::dumps(&json::string_list(items)),
         _ => "[]".into(),
     };
+    state.record_event(
+        "task.created",
+        json::obj(vec![
+            ("task_id", json::s(task_id)),
+            ("parent_agent_id", json::s(parent_agent_id)),
+            ("description", json::s(&description)),
+        ]),
+    );
     state.tasks.push(Task {
         id: task_id.into(),
         parent_agent_id: parent_agent_id.into(),
@@ -668,6 +676,15 @@ pub fn send_message(
     let payload_json =
         payload.map(|value| truncate(Some(json::dumps(value)), max_message()).unwrap_or_default());
     let id = state.next("messages");
+    state.record_event(
+        "message.received",
+        json::obj(vec![
+            ("message_id", json::i(id)),
+            ("from_agent_id", json::s(from)),
+            ("to_agent_id", json::s(to)),
+            ("message_type", json::s(message_type)),
+        ]),
+    );
     state.messages.push(Message {
         id,
         from_agent_id: from.into(),
@@ -886,6 +903,22 @@ pub fn manage_deps(
                 )]);
             };
             let id = state.next("dependencies");
+            state.record_event(
+                "dependency.declared",
+                json::obj(vec![
+                    ("dep_id", json::i(id)),
+                    ("dependent_agent_id", json::s(dependent)),
+                    ("depends_on_agent_id", json::s(depends_on)),
+                    (
+                        "depends_on_task_id",
+                        match task {
+                            Some(task) => json::s(task),
+                            None => json::null(),
+                        },
+                    ),
+                    ("condition", json::s(condition)),
+                ]),
+            );
             state.dependencies.push(Dependency {
                 id,
                 dependent_agent_id: dependent.into(),
@@ -1298,24 +1331,43 @@ pub fn report_spawned(
             ]);
         }
     }
-    if let Some(row) = state.spawns.iter_mut().find(|row| {
+    let found = state.spawns.iter().position(|row| {
         row.parent_agent_id == parent
             && row.status == "pending"
             && kind
                 .map(|k| row.subagent_type.as_deref() == Some(k))
                 .unwrap_or(true)
-    }) {
-        row.status = "registered".into();
-        row.consumed_at = Some(util::now());
-        row.child_agent_id = Some(child.into());
-        row.source = source.into();
-        let spawn_id = row.id.clone();
-        let description = row.description.clone();
-        let prompt = row.prompt.clone();
-        row.status = "registered".into();
-        row.consumed_at = Some(util::now());
-        row.child_agent_id = Some(child.into());
-        row.source = source.into();
+    });
+    if let Some(pos) = found {
+        let packed = {
+            let row = &mut state.spawns[pos];
+            row.status = "registered".into();
+            row.consumed_at = Some(util::now());
+            row.child_agent_id = Some(child.into());
+            row.source = source.into();
+            (
+                row.id.clone(),
+                row.subagent_type.clone(),
+                row.description.clone(),
+                row.prompt.clone(),
+            )
+        };
+        let (spawn_id, kind_name, description, prompt) = packed;
+        state.record_event(
+            "spawner.registered",
+            json::obj(vec![
+                ("parent_agent_id", json::s(parent)),
+                ("child_agent_id", json::s(child)),
+                (
+                    "subagent_type",
+                    match &kind_name {
+                        Some(name) => json::s(name),
+                        None => json::null(),
+                    },
+                ),
+                ("spawn_id", json::s(&spawn_id)),
+            ]),
+        );
         return json::obj(vec![
             ("reported", json::b(true)),
             ("parent_agent_id", json::s(parent)),
@@ -1326,9 +1378,12 @@ pub fn report_spawned(
         ]);
     }
     json::obj(vec![
-        ("reported", json::b(false)),
-        ("reason", json::s("no_pending_spawn")),
+        ("reported", json::b(true)),
         ("parent_agent_id", json::s(parent)),
+        ("child_agent_id", json::s(child)),
+        ("spawn_id", json::null()),
+        ("description", json::null()),
+        ("prompt", json::null()),
     ])
 }
 

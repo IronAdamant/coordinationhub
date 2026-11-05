@@ -253,6 +253,7 @@ pub struct Ids {
     pub broadcasts: i64,
     pub claims: i64,
     pub claim_events: i64,
+    pub hub_events: i64,
 }
 
 #[derive(Clone, Debug, Default, PartialEq)]
@@ -280,6 +281,15 @@ pub struct State {
     pub broadcast_targets: Vec<BroadcastTarget>,
     pub claims: Vec<Claim>,
     pub claim_events: Vec<ClaimEvent>,
+    pub hub_events: Vec<HubEvent>,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct HubEvent {
+    pub id: i64,
+    pub topic: String,
+    pub payload: String,
+    pub created_at: f64,
 }
 
 impl State {
@@ -295,10 +305,21 @@ impl State {
             "broadcasts" => &mut self.ids.broadcasts,
             "claims" => &mut self.ids.claims,
             "claim_events" => &mut self.ids.claim_events,
+            "hub_events" => &mut self.ids.hub_events,
             _ => panic!("unknown id slot"),
         };
         *cell += 1;
         *cell
+    }
+
+    pub fn record_event(&mut self, topic: &str, payload: Value) {
+        let id = self.next("hub_events");
+        self.hub_events.push(HubEvent {
+            id,
+            topic: topic.to_string(),
+            payload: json::dumps(&payload),
+            created_at: crate::util::now(),
+        });
     }
 
     pub fn agent_mut(&mut self, id: &str) -> Option<&mut Agent> {
@@ -337,6 +358,7 @@ struct Digests {
     broadcasts: std::collections::HashMap<String, u64>,
     claims: std::collections::HashMap<String, u64>,
     claim_events: std::collections::HashMap<String, u64>,
+    hub_events: std::collections::HashMap<String, u64>,
     lineage: u64,
     descendants: u64,
     handoff_acks: u64,
@@ -707,6 +729,15 @@ impl Store {
             hash_ce,
             encode_ce,
         );
+        sync_map(
+            &mut lines,
+            &mut self.digests.hub_events,
+            &self.state.hub_events,
+            "hub_events",
+            |row| row.id.to_string(),
+            hash_hub,
+            encode_hub,
+        );
         let ids = hash_ids(&self.state.ids);
         if ids != self.digests.ids {
             lines.push(format!(
@@ -1067,6 +1098,7 @@ fn hash_ids(ids: &Ids) -> u64 {
         ids.broadcasts as u64,
         ids.claims as u64,
         ids.claim_events as u64,
+        ids.hub_events as u64,
     ])
 }
 
@@ -1113,6 +1145,7 @@ fn apply_line(state: &mut State, value: &Value) -> Result<(), String> {
                 broadcasts: num_i(ids, "broadcasts"),
                 claims: num_i(ids, "claims"),
                 claim_events: num_i(ids, "claim_events"),
+                hub_events: num_i(ids, "hub_events"),
             };
         }
         return Ok(());
@@ -1227,6 +1260,12 @@ fn apply_line(state: &mut State, value: &Value) -> Result<(), String> {
                 |item| item.id.to_string(),
                 |item| item.id.to_string(),
             ),
+            "hub_events" => upsert(
+                &mut state.hub_events,
+                decode_hub(row)?,
+                |item| item.id.to_string(),
+                |item| item.id.to_string(),
+            ),
             other => return Err(format!("unknown table {other}")),
         }
         return Ok(());
@@ -1262,6 +1301,7 @@ fn apply_line(state: &mut State, value: &Value) -> Result<(), String> {
             "broadcast_acks" => state.broadcast_acks.clear(),
             "broadcast_targets" => state.broadcast_targets.clear(),
             "claim_events" => state.claim_events.retain(|row| row.id.to_string() != id),
+            "hub_events" => state.hub_events.retain(|row| row.id.to_string() != id),
             _ => {}
         }
         return Ok(());
@@ -1295,6 +1335,7 @@ fn encode_ids(ids: &Ids) -> Value {
         ("broadcasts", json::i(ids.broadcasts)),
         ("claims", json::i(ids.claims)),
         ("claim_events", json::i(ids.claim_events)),
+        ("hub_events", json::i(ids.hub_events)),
     ])
 }
 
@@ -1555,6 +1596,24 @@ fn encode_claim(row: &Claim) -> Value {
         ("ttl", json::f(row.ttl)),
         ("expires_at", json::f(row.expires_at)),
         ("note", json::opt_string(&row.note)),
+    ])
+}
+
+fn hash_hub(row: &HubEvent) -> u64 {
+    mix(&[
+        row.id as u64,
+        hash_str(&row.topic),
+        hash_str(&row.payload),
+        hash_f(row.created_at),
+    ])
+}
+
+fn encode_hub(row: &HubEvent) -> Value {
+    json::obj(vec![
+        ("id", json::i(row.id)),
+        ("topic", json::s(&row.topic)),
+        ("payload", json::s(&row.payload)),
+        ("created_at", json::f(row.created_at)),
     ])
 }
 
@@ -1835,6 +1894,15 @@ fn decode_claim(v: &Value) -> Result<Claim, String> {
         note: opt_str(v, "note"),
     })
 }
+fn decode_hub(v: &Value) -> Result<HubEvent, String> {
+    Ok(HubEvent {
+        id: num_i(v, "id"),
+        topic: req_str(v, "topic")?,
+        payload: req_str(v, "payload")?,
+        created_at: num_f(v, "created_at"),
+    })
+}
+
 fn decode_ce(v: &Value) -> Result<ClaimEvent, String> {
     Ok(ClaimEvent {
         id: num_i(v, "id"),

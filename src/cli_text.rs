@@ -288,8 +288,17 @@ pub fn show(command: &str, value: &Value, pos: &[String], kv: &[(String, String)
         }
         "dashboard" => render_dashboard(value),
         "agent-relations" => {
-            let lineage = value.get("lineage");
-            if let Some(lineage) = lineage {
+            if let Some(items) = value.get("siblings").and_then(Value::as_array) {
+                if items.is_empty() {
+                    println!("No siblings for {id}");
+                } else {
+                    println!("{} sibling(s):", items.len());
+                    for item in items {
+                        println!("  {}: {}", text(item, "agent_id"), text(item, "status"));
+                    }
+                }
+            } else {
+                let lineage = value.get("lineage").unwrap_or(value);
                 let ancestors = id_list(lineage, "ancestors");
                 let descendants = id_list(lineage, "descendants");
                 println!("Lineage for {id}:");
@@ -305,22 +314,11 @@ pub fn show(command: &str, value: &Value, pos: &[String], kv: &[(String, String)
                         &descendants
                     }
                 );
-            } else if let Some(items) = value.get("siblings").and_then(Value::as_array) {
-                if items.is_empty() {
-                    println!("No siblings for {id}");
-                } else {
-                    println!("{} sibling(s):", items.len());
-                    for item in items {
-                        println!("  {}: {}", text(item, "agent_id"), text(item, "status"));
-                    }
-                }
-            } else {
-                println!("{}", crate::json::dumps_pretty(value));
             }
         }
         "wait-for-locks" => {
-            println!("Released: {}", list_or_none(value, "released"));
-            println!("Timed out: {}", list_or_none(value, "timed_out"));
+            println!("Released: {}", py_seq(value, "released"));
+            println!("Timed out: {}", py_seq(value, "timed_out"));
         }
         "wait-for-task" => {
             if value.get("timed_out").and_then(Value::as_bool) == Some(true)
@@ -411,12 +409,30 @@ pub fn show(command: &str, value: &Value, pos: &[String], kv: &[(String, String)
             }
         }
         "agent-status" => {
-            println!("Agent: {}", text(value, "agent_id"));
-            println!("  Status: {}", text(value, "status"));
-            let task = value.get("current_task").and_then(Value::as_str).unwrap_or("(none)");
+            let shown = if text(value, "agent_id").is_empty() {
+                id.to_string()
+            } else {
+                text(value, "agent_id")
+            };
+            println!("Agent: {shown}");
+            let status = value.get("status").and_then(Value::as_str).unwrap_or("unknown");
+            println!("  Status: {status}");
+            let task = py_field(value, "current_task", "(none)");
             println!("  Task: {task}");
-            let locks = value.get("locks").or_else(|| value.get("active_locks")).and_then(Value::as_array);
+            let locks = value
+                .get("locks")
+                .or_else(|| value.get("active_locks"))
+                .and_then(Value::as_array);
             println!("  Locks: {}", locks.map(|rows| rows.len()).unwrap_or(0));
+            if let Some(locks) = locks {
+                for lock in locks {
+                    println!(
+                        "    {} ({})",
+                        text(lock, "document_path"),
+                        text(lock, "lock_type")
+                    );
+                }
+            }
         }
         "admin-locks" => {
             if value.get("released").is_some() {
@@ -434,7 +450,47 @@ pub fn show(command: &str, value: &Value, pos: &[String], kv: &[(String, String)
                 println!("{}", crate::json::dumps_pretty(value));
             }
         }
-        "manage-dependencies" => println!("{}", crate::json::dumps_pretty(value)),
+        "manage-dependencies" => {
+            let mode = id;
+            let agent = pos.get(1).map(|s| s.as_str()).unwrap_or("");
+            if mode == "assert" {
+                if value.get("can_start").and_then(Value::as_bool) == Some(true) {
+                    println!("{agent} can start: no blockers");
+                } else {
+                    let blockers = value.get("blockers").and_then(Value::as_array);
+                    let count = blockers.map(|rows| rows.len()).unwrap_or(0);
+                    println!("{agent} CANNOT start — {count} blocker(s):");
+                    if let Some(blockers) = blockers {
+                        for item in blockers {
+                            println!(
+                                "  → {} ({})",
+                                text(item, "depends_on_agent_id"),
+                                text(item, "condition")
+                            );
+                        }
+                    }
+                }
+            } else {
+                let blocked = value.get("blocked").and_then(Value::as_bool) == Some(true);
+                println!("Dependencies for {agent}:");
+                println!("  Blocked: {}", if blocked { "True" } else { "False" });
+                let rows = value.get("unsatisfied").and_then(Value::as_array);
+                if rows.map(|items| items.is_empty()).unwrap_or(true) {
+                    println!("  (none)");
+                } else if let Some(rows) = rows {
+                    for item in rows {
+                        println!(
+                            "  → {} ({})",
+                            text(item, "depends_on_agent_id"),
+                            text(item, "condition")
+                        );
+                        if let Some(task) = item.get("depends_on_task_id").and_then(Value::as_str) {
+                            println!("    Task: {task}");
+                        }
+                    }
+                }
+            }
+        }
         "get-all-dependencies" => {
             let items = value.get("dependencies").and_then(Value::as_array);
             if items.map(|rows| rows.is_empty()).unwrap_or(true) {
@@ -442,10 +498,10 @@ pub fn show(command: &str, value: &Value, pos: &[String], kv: &[(String, String)
             } else if let Some(items) = items {
                 println!("{} declared dependency/dependencies:", items.len());
                 for item in items {
-                    let sat = if item.get("satisfied").and_then(Value::as_bool) == Some(true) {
-                        "satisfied"
+                    let sat = if satisfied_flag(item.get("satisfied")) {
+                        "OK"
                     } else {
-                        "open"
+                        "PENDING"
                     };
                     println!(
                         "  [{sat}] {} -> {} ({})",
@@ -457,26 +513,35 @@ pub fn show(command: &str, value: &Value, pos: &[String], kv: &[(String, String)
             }
         }
         "report-subagent-spawned" => {
-            if value.get("reported").and_then(Value::as_bool) == Some(true) {
+            if value.get("spawn_id").and_then(Value::as_str).is_some() {
                 println!("Spawn reported: {}", text(value, "spawn_id"));
                 println!("  Child: {}", text(value, "child_agent_id"));
-                println!("  Description: {}", text(value, "description"));
+                let description = value.get("description").and_then(Value::as_str).unwrap_or("");
+                println!("  Description: {description}");
             } else {
-                println!(
-                    "No pending spawn found for {}",
+                let parent = if text(value, "parent_agent_id").is_empty() {
+                    id.to_string()
+                } else {
                     text(value, "parent_agent_id")
-                );
+                };
+                println!("No pending spawn found for {parent}");
+                let child = if text(value, "child_agent_id").is_empty() {
+                    pos.get(1).map(|s| s.as_str()).unwrap_or("").to_string()
+                } else {
+                    text(value, "child_agent_id")
+                };
+                println!("  Child: {child}");
             }
         }
         "wait-for-broadcast-acks" => {
-            println!(
-                "Acknowledged by: {}",
-                list_or_none(value, "acknowledged_by")
-            );
             if value.get("timed_out").and_then(Value::as_bool) == Some(true) {
-                if let Some(reason) = value.get("reason").and_then(Value::as_str) {
-                    println!("  Reason: {reason}");
-                }
+                let reason = value.get("reason").and_then(Value::as_str).unwrap_or("timeout");
+                println!("Timed out waiting for broadcast acks: {reason}");
+            } else {
+                println!(
+                    "Broadcast {id} acknowledged by: {}",
+                    list_or_none(value, "acknowledged_by")
+                );
             }
         }
         "task-failure-history" => {
@@ -524,45 +589,66 @@ pub fn show(command: &str, value: &Value, pos: &[String], kv: &[(String, String)
     0
 }
 
+fn py_field(value: &Value, key: &str, missing: &str) -> String {
+    match value.get(key) {
+        None => missing.to_string(),
+        Some(Value::Null) => "None".into(),
+        Some(Value::String(text)) => text.clone(),
+        Some(other) => crate::json::dumps(other),
+    }
+}
+
 fn crash_like_python(command: &str, value: &Value) -> Option<i32> {
-    let boom = |kind: &str| {
-        eprintln!("Traceback (most recent call last):\n{kind}");
+    let boom = |key: &str| {
+        eprintln!("Error: '{key}'");
         1
     };
     match command {
         "get-conflicts" => {
             let items = value.get("conflicts").and_then(Value::as_array);
-            if items.map(|rows| !rows.is_empty()).unwrap_or(false) {
-                return Some(boom("KeyError: 'agent_id'"));
+            if let Some(items) = items {
+                if !items.is_empty() {
+                    println!("Conflicts ({}):", items.len());
+                    return Some(boom("agent_id"));
+                }
             }
         }
         "get-available-tasks" => {
             let items = value.get("tasks").and_then(Value::as_array);
-            if items.map(|rows| !rows.is_empty()).unwrap_or(false) {
-                return Some(boom("KeyError: 'task_id'"));
+            if let Some(items) = items {
+                if !items.is_empty() {
+                    println!("Available tasks ({}):", items.len());
+                    return Some(boom("task_id"));
+                }
             }
         }
         "query-tasks" => {
             let items = value.get("tasks").and_then(Value::as_array);
-            if items.map(|rows| !rows.is_empty()).unwrap_or(false) {
-                return Some(boom("KeyError: 'task_id'"));
+            if let Some(items) = items {
+                if !items.is_empty() {
+                    println!("Tasks ({}):", items.len());
+                    return Some(boom("task_id"));
+                }
             }
         }
         "get-leader" | "leader-status" => {
             if matches!(value.get("leader"), Some(Value::Object(_))) {
-                return Some(boom("KeyError: 'agent_id'"));
+                return Some(boom("agent_id"));
             }
         }
         "list-pending-spawns" => {
             if let Some(items) = value.get("spawns").and_then(Value::as_array) {
                 if !items.is_empty() {
                     let row = &items[0];
+                    let parent = row.get("scope_id").and_then(Value::as_str).unwrap_or("");
+                    println!("Pending spawns for {parent}:");
                     if row.get("id").and_then(Value::as_str).is_none() {
-                        return Some(boom("KeyError: 'id'"));
+                        return Some(boom("id"));
                     }
                     if row.get("description").map(|item| matches!(item, Value::Null)).unwrap_or(true)
                     {
-                        return Some(boom("TypeError: 'NoneType' object is not subscriptable"));
+                        eprintln!("Error: 'NoneType' object is not subscriptable");
+                        return Some(1);
                     }
                 }
             }
@@ -935,6 +1021,33 @@ fn id_list(value: &Value, key: &str) -> String {
                 .join(", ")
         })
         .unwrap_or_default()
+}
+
+fn satisfied_flag(value: Option<&Value>) -> bool {
+    match value {
+        Some(Value::Bool(flag)) => *flag,
+        Some(Value::Int(n)) => *n != 0,
+        Some(Value::Float(n)) => *n != 0.0,
+        _ => false,
+    }
+}
+
+fn py_seq(value: &Value, key: &str) -> String {
+    let Some(Value::Array(items)) = value.get(key) else {
+        return "(none)".into();
+    };
+    if items.is_empty() {
+        return "(none)".into();
+    }
+    let body = items
+        .iter()
+        .map(|item| match item {
+            Value::String(text) => format!("'{}'", text.replace('\'', "\\'")),
+            other => crate::json::dumps(other),
+        })
+        .collect::<Vec<_>>()
+        .join(", ");
+    format!("[{body}]")
 }
 
 fn list_or_none(value: &Value, key: &str) -> String {
