@@ -146,14 +146,14 @@ fn run_serve_mcp(flags: Flags) -> i32 {
     let project = flags.project.clone().or_else(|| from_env("COORDINATIONHUB_PROJECT_ROOT"));
     // COORDINATIONHUB_TOOLS / COORDINATIONHUB_DISABLE: a bad name stops the
     // server with one line and exit code 2, so the client shows it failed.
-    let surface = match crate::groups::Surface::from_env() {
-        Ok(surface) => surface,
+    let switches = match crate::groups::EnvSwitches::from_env() {
+        Ok(switches) => switches,
         Err(line) => {
             eprintln!("{line}");
             return 2;
         }
     };
-    match mcp::serve(storage, project, &flags.namespace, surface) {
+    match mcp::serve(storage, project, &flags.namespace, switches) {
         Ok(()) => 0,
         Err(err) => {
             eprintln!("Error: {err}");

@@ -1,23 +1,62 @@
 //! Newline JSON-RPC MCP server. Also accepts a Content-Length header frame.
 
 use crate::engine::Engine;
-use crate::groups::Surface;
+use crate::groups::{EnvSwitches, Surface};
 use crate::json::{self, Value};
 use crate::validate;
 use std::io::{self, BufRead, Write};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
+
+/// The project's AGENTS.md, watched by size and modification time so an
+/// agent can change the `agent-tools` block mid-session.
+struct AgentsFile {
+    path: PathBuf,
+    stamp: Option<(std::time::SystemTime, u64)>,
+}
+
+impl AgentsFile {
+    fn new(root: &Path) -> AgentsFile {
+        let path = root.join("AGENTS.md");
+        let stamp = stamp(&path);
+        AgentsFile { path, stamp }
+    }
+
+    fn text(&self) -> Option<String> {
+        std::fs::read_to_string(&self.path).ok()
+    }
+
+    /// True when the file appeared, vanished, or changed size or time.
+    fn changed(&mut self) -> bool {
+        let now = stamp(&self.path);
+        if now == self.stamp {
+            return false;
+        }
+        self.stamp = now;
+        true
+    }
+}
+
+fn stamp(path: &Path) -> Option<(std::time::SystemTime, u64)> {
+    let meta = std::fs::metadata(path).ok()?;
+    Some((meta.modified().ok()?, meta.len()))
+}
 
 pub fn serve(
     storage: Option<PathBuf>,
     project: Option<PathBuf>,
     namespace: &str,
-    surface: Surface,
+    switches: EnvSwitches,
 ) -> Result<(), String> {
-    let engine = std::sync::Arc::new(std::sync::Mutex::new(Engine::open(
-        storage.as_deref(),
-        project.as_deref(),
-        namespace,
-    )?));
+    let opened = Engine::open(storage.as_deref(), project.as_deref(), namespace)?;
+    let root = opened
+        .project_root
+        .clone()
+        .or_else(|| std::env::current_dir().ok())
+        .unwrap_or_else(|| PathBuf::from("."));
+    let mut agents = AgentsFile::new(&root);
+    let mut surface = Surface::resolve(&switches, agents.text().as_deref());
+    let mut initialized = false;
+    let engine = std::sync::Arc::new(std::sync::Mutex::new(opened));
     crate::house::spawn(engine.clone());
     let stdin = io::stdin();
     let mut reader = stdin.lock();
@@ -41,6 +80,25 @@ pub fn serve(
         let id = parsed.get("id").cloned().unwrap_or(Value::Null);
         let method = parsed.get("method").and_then(Value::as_str).unwrap_or("");
         let is_note = parsed.get("id").is_none();
+        // Pick up an edited agent-tools block before answering; tell the
+        // client to refetch the list when the exposed tools changed.
+        if initialized && agents.changed() {
+            let next = Surface::resolve(&switches, agents.text().as_deref());
+            let moved = next.exposed_names() != surface.exposed_names();
+            surface = next;
+            if moved {
+                write_frame(
+                    &mut stdout,
+                    &json::obj(vec![
+                        ("jsonrpc", json::s("2.0")),
+                        ("method", json::s("notifications/tools/list_changed")),
+                    ]),
+                )?;
+            }
+        }
+        if method == "initialize" {
+            initialized = true;
+        }
         let response = match method {
             "initialize" => Some(ok(id, initialize(&surface))),
             "notifications/initialized" | "initialized" => None,
@@ -89,7 +147,7 @@ fn initialize(surface: &Surface) -> Value {
             "capabilities",
             json::obj(vec![(
                 "tools",
-                json::obj(vec![("listChanged", json::b(false))]),
+                json::obj(vec![("listChanged", json::b(true))]),
             )]),
         ),
         (
@@ -102,10 +160,7 @@ fn initialize(surface: &Surface) -> Value {
     ]);
     if surface.configured() {
         if let Value::Object(pairs) = &mut result {
-            pairs.push((
-                "instructions".into(),
-                json::s(surface.summary()),
-            ));
+            pairs.push(("instructions".into(), json::s(surface.instructions())));
         }
     }
     result
@@ -149,6 +204,9 @@ fn with_groups(result: Value, surface: &Surface) -> Value {
         }
     }
     pairs.push(("tool_groups".into(), json::s(surface.active_groups())));
+    if !surface.warnings().is_empty() {
+        pairs.push(("tool_groups_warning".into(), json::s(surface.warnings().join("\n"))));
+    }
     content(&json::dumps_pretty(&Value::Object(pairs)), is_error)
 }
 
