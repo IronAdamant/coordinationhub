@@ -64,9 +64,12 @@ class Server:
         self.proc.wait(timeout=5)
 
 
-def once(argv: list[str], env: dict, work) -> float:
+def once(argv: list[str], env: dict, work, setup=None) -> float:
+    """Time ``work`` on a fresh server. ``setup`` runs first and is not timed."""
     server = Server(argv, env)
     try:
+        if setup is not None:
+            setup(server)
         start = time.perf_counter()
         work(server)
         return time.perf_counter() - start
@@ -91,15 +94,15 @@ def main() -> int:
         env["PYTHONPATH"] = str(legacy)
         rows = []
 
-        def measure(name: str, work) -> None:
+        def measure(name: str, work, setup=None) -> None:
             samples = {"python": [], "rust": []}
             for _ in range(RUNS):
                 py_dir = tempfile.mkdtemp(dir=tmp)
                 rs_dir = tempfile.mkdtemp(dir=tmp)
                 py_argv = [sys.executable, "-m", "coordinationhub", "serve-mcp", "--storage-dir", py_dir]
                 rs_argv = [binary, "serve-mcp", "--storage-dir", rs_dir]
-                samples["python"].append(once(py_argv, env, work))
-                samples["rust"].append(once(rs_argv, env, work))
+                samples["python"].append(once(py_argv, env, work, setup))
+                samples["rust"].append(once(rs_argv, env, work, setup))
             py = median(samples["python"])
             rs = median(samples["rust"])
             rows.append({
@@ -133,19 +136,20 @@ def main() -> int:
             for _ in range(20):
                 server.call("tools/call", {"name": "get_agent_tree", "arguments": {}})
 
-        def status_450(server: Server) -> None:
+        # The verify-4 workload: 450 agents registered flat under one
+        # parent (untimed setup), then 450 status calls (timed).
+        def status_450_setup(server: Server) -> None:
             server.call("initialize", {"protocolVersion": "2024-11-05", "capabilities": {}, "clientInfo": {"name": "bench", "version": "0"}})
             server.call("tools/call", {"name": "register_agent", "arguments": {"agent_id": "p0"}})
-            parent = "p0"
             for n in range(1, 450):
-                agent = f"p{n}"
-                server.call("tools/call", {"name": "register_agent", "arguments": {"agent_id": agent, "parent_id": parent}})
-                parent = agent
+                server.call("tools/call", {"name": "register_agent", "arguments": {"agent_id": f"p{n}", "parent_id": "p0"}})
+
+        def status_450(server: Server) -> None:
             for _ in range(450):
                 server.call("tools/call", {"name": "status", "arguments": {}})
 
         measure("startup_and_status", startup)
-        measure("status_450", status_450)
+        measure("status_450", status_450, status_450_setup)
         measure(f"register_x{LOOPS}", registers)
         measure(f"lock_x{LOOPS}", locks)
         measure(f"tree_x20_after_{LOOPS}", tree)
