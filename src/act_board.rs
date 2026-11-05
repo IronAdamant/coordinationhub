@@ -1090,6 +1090,14 @@ pub fn acquire_lease(state: &mut State, agent_id: &str, ttl: Option<f64>) -> Val
             expires_at: expires,
         });
     }
+    state.record_event(
+        "lease.acquired",
+        json::obj(vec![
+            ("lease_name", json::s(COORDINATOR)),
+            ("holder_id", json::s(agent_id)),
+            ("ttl", json::f(ttl)),
+        ]),
+    );
     json::obj(vec![
         ("acquired", json::b(true)),
         ("lease_name", json::s(COORDINATOR)),
@@ -1128,6 +1136,13 @@ pub fn refresh_lease(state: &mut State, agent_id: &str) -> Value {
     lease.acquired_at = now;
     lease.expires_at = now + lease.ttl;
     let expires = lease.expires_at;
+    state.record_event(
+        "lease.refreshed",
+        json::obj(vec![
+            ("lease_name", json::s(COORDINATOR)),
+            ("holder_id", json::s(agent_id)),
+        ]),
+    );
     json::obj(vec![
         ("refreshed", json::b(true)),
         ("lease_name", json::s(COORDINATOR)),

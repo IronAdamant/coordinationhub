@@ -198,6 +198,16 @@ pub fn acquire(
     if let Some(warning) = proximity_warning(state, &norm, agent_id) {
         result.push(("proximity_warning", warning));
     }
+    state.record_event(
+        "lock.acquired",
+        json::obj(vec![
+            ("document_path", json::s(&norm)),
+            ("agent_id", json::s(agent_id)),
+            ("lock_type", json::s(lock_type)),
+            ("region_start", json::opt_i(region_start)),
+            ("region_end", json::opt_i(region_end)),
+        ]),
+    );
     json::obj(result)
 }
 
