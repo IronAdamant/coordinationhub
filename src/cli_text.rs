@@ -612,7 +612,6 @@ pub fn show(command: &str, value: &Value, pos: &[String], kv: &[(String, String)
                 println!("No agent tree available");
             }
         }
-        "who" => println!("{}", crate::json::dumps_pretty(value)),
         _ => println!("{}", crate::json::dumps_pretty(value)),
     }
     0
