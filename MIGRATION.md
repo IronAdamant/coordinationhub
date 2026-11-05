@@ -47,7 +47,7 @@ The store is `coordination.jsonl` plus `coordination.lock`, in the directory whe
 
 ### Added at the owner's request
 
-- **Tool groups.** `COORDINATIONHUB_TOOLS` and `COORDINATIONHUB_DISABLE` hide MCP tools by group or name (see the README). With neither set, `initialize` and `tools/list` are unchanged. When set, `initialize` carries a one-line `instructions` listing the groups on and off, and the `status` tool reports `tool_groups` and counts only the exposed tools.
+- **Tool groups.** An `agent-tools` block in the project's `AGENTS.md` (chosen by agents) and `COORDINATIONHUB_TOOLS` / `COORDINATIONHUB_DISABLE` (set by the operator, winning per key) hide MCP tools by group or name (see the README). `initialize` advertises `tools.listChanged: true` (0.8.0: `false`), and after an edit to the block that changes the tool set the server sends `notifications/tools/list_changed`. With no block and neither variable set, `tools/list` is unchanged. When set, `initialize` carries a one-line `instructions` listing the groups on and off, and the `status` tool reports `tool_groups` and counts only the exposed tools.
 
 ### Platform and layout
 
