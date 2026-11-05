@@ -650,7 +650,7 @@ options:
         args: r#"--version"#,
         columns: None,
         rc: 0,
-        stdout: r#"coordinationhub 1.1.0
+        stdout: r#"coordinationhub 1.1.1
 "#,
         stderr: r#""#,
     },
@@ -658,7 +658,7 @@ options:
         args: r#"-V"#,
         columns: None,
         rc: 0,
-        stdout: r#"coordinationhub 1.1.0
+        stdout: r#"coordinationhub 1.1.1
 "#,
         stderr: r#""#,
     },
@@ -666,7 +666,7 @@ options:
         args: r#"--vers"#,
         columns: None,
         rc: 0,
-        stdout: r#"coordinationhub 1.1.0
+        stdout: r#"coordinationhub 1.1.1
 "#,
         stderr: r#""#,
     },
@@ -674,7 +674,7 @@ options:
         args: r#"-V status"#,
         columns: None,
         rc: 0,
-        stdout: r#"coordinationhub 1.1.0
+        stdout: r#"coordinationhub 1.1.1
 "#,
         stderr: r#""#,
     },
