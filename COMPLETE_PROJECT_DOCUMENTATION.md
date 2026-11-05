@@ -1,6 +1,6 @@
 # CoordinationHub
 
-Updated 2026-11-04. This file lists the Rust tree. The Python 0.8.0 inventory is on the `python-legacy` branch.
+Updated 2026-11-05. This file lists the Rust tree. The Python 0.8.0 inventory is on the `python-legacy` branch.
 
 ## Purpose
 
@@ -12,7 +12,13 @@ Live coordination for coding agents: identity, file locks, tasks, messages, and 
 | --- | --- |
 | `src/main.rs` | Process entry |
 | `src/lib.rs` | Module root |
-| `src/cli.rs` | Command line |
+| `src/cli.rs` | Command line dispatch |
+| `src/argparse.rs` | Python 3.12 argparse behaviour: parsing, errors, help |
+| `src/cli_catalog.rs` | The 0.8.0 parser's commands, flags and help text |
+| `src/cli_cmds.rs` | Command to tool arguments |
+| `src/cli_text.rs` | Readable output |
+| `src/hooks.rs` | `coordinationhub hook` |
+| `src/house.rs` | Background housekeeping |
 | `src/engine.rs` | Tool dispatch |
 | `src/mcp.rs` | Newline JSON-RPC |
 | `src/http.rs` | Dashboard and POST /call |
@@ -26,9 +32,12 @@ Live coordination for coding agents: identity, file locks, tasks, messages, and 
 | `src/util.rs` | Clock, paths, file lock |
 | `assets/tools.json` | The 50 Python tool schemas |
 | `assets/dashboard.html` | Dashboard page |
-| `parity/harness.py` | Python versus Rust compare |
-| `parity/bench.py` | Timings and the speed gate |
+| `examples/parity.rs` | Python 0.8.0 versus Rust compare |
+| `examples/bench.rs` | Timings and the speed gate |
+| `examples/check_zero_deps.rs`, `examples/check_no_todos.rs` | CI checks |
 | `tests/surface.rs` | One pass over every tool |
+| `tests/argparse_goldens.rs` | Command lines checked against captured 0.8.0 output |
+| `tests/multi_agent.rs` | Three sessions sharing one hub end to end |
 | `PARITY.md` | Checklist |
 | `MIGRATION.md` | What changed on purpose |
 | `BENCHMARKS.md` | Measured numbers |

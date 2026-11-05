@@ -1,142 +1,32 @@
 # Parity with Python 0.8.0
 
-The harness is `parity/harness.py`. It starts unmodified Python 0.8.0 (`python-legacy`, stdio, `mcp==1.30.0`) and the Rust binary. Both use the real clock. Time fields and pids are omitted from the compare because two processes do not share one timestamp. Nothing else is rewritten. `status.tools` is left at 51 on the Rust side and recorded in the ledger.
+```bash
+git fetch origin python-legacy
+python -m pip install "mcp==1.30.0"          # the version 0.8.0's stdio server runs on
+cargo build --release
+cargo run --release --example parity -- target/release/coordinationhub [--python python3.12]
+```
 
-The earlier harness froze `time.time`, `os.getpid`, and every timeout at 0, and it rewrote `status.tools` to 50. That run is withdrawn. It is not a result.
+`examples/parity.rs` extracts the unmodified 0.8.0 tree from `python-legacy` (byte-identical to the PyPI package) and runs it beside the Rust binary over real MCP stdio and the real CLI. Neither side is patched; both use the real clock. Time fields, pids, temporary paths, epoch and ISO timestamps are masked, CRLF is folded to LF, and the Python child runs with `PYTHONUTF8=1` so Windows pipes carry UTF-8. Everything else is compared.
 
-## Ledger
+Every difference goes into a ledger. A difference whose title is in `ALLOWED` is one `MIGRATION.md` documents; for those the harness also checks the Rust reply against the documented one, so a regression there still fails. Anything else fails the run with exit 1. CI runs it on Linux with Python 3.12.
 
-Fixed in this branch, and covered by `tests/behavior.rs` plus the stdio harness:
+## What it compares
 
-- Several processes share one journal. The lock is per call.
-- Wait tools sleep and return real `waited_s` values and the Python reply shapes.
-- `await_subagent_registration` waits for a reported spawn. `caller_agent_id` must match the parent.
-- A partly acknowledged handoff cannot be completed. Status returns the handoff row.
-- Lock retry, notification pruning, `limit` of -1, available-task filtering, and task query order.
-- UTF-8 agent ids and the em dashes in tool descriptions.
-- Assessment report: per-trace section, True/False, local time, keyword scores.
-- Dashboard rows for handoffs, dependencies, locks, and tasks. `GET /events` stays open.
-- The CLI commands from the Python tree, including heartbeat and deregister text.
-- The hook registers, locks, notifies, and correlates sub-agents.
-- Housekeeping on long-running servers, and `doctor` checks the journal and hooks.
-- `who` rejects overlapping paths, unregistered agents, a lapsed heartbeat, and a bad `ttl`.
+- **The original harness checks**: 15 scripted MCP calls (registration with a non-ASCII id, locks and a refused lock, notifications with `limit: -1`, tasks, status, the agent tree), the caller `worktree_root`, the tool list, every tool called with empty or safe arguments, every CLI command present, `heartbeat` and `cancel-spawn` text and exit codes, `acquire-lock --help`, an unknown flag, and `cancel-spawn --json`.
+- **MCP scenarios**: contention hotspot ties and `limit` -1 / 0 / 1, conflicts with `limit: -1`, a duplicate task id, a string and an integer-valued float priority, lease ttl as integer, float and default, lease release and claim, a handoff message's payload (`handoff_type`), message `limit: -1`, `get_notifications` with `timeout_s: -1`, a negative lock ttl, an unknown tool, a caller mismatch, deregistration.
+- **A 70-command CLI sequence**, once with `--json` and once readable: registration, locks with negative ttl and region, prefixes such as `--agent` and `--exclude` and `--unread`, negative `--limit` and `--timeout`, `--priority=-4`, a duplicate task, task trees and failure history, dependencies, broadcasts and handoffs, leases refused and claimed, spawns, scan, status.
+- **argparse**: 18 error cases (unrecognized arguments with their values, invalid choices, invalid int and float values, `--message -loud`, a dash-led positional, `-j` before the command, an ambiguous prefix, `--json=yes`, a missing value) and `--help` for the top level and all 75 commands. With Python 3.12 the bytes must match; with another Python the help only has to list every option Python lists.
+- **prune-notifications** counts after ten event-writing commands, for `--max-entries 2` and `-1` and `--max-age-seconds 0` and `3600`.
 
-Still different on purpose (see MIGRATION.md):
+## Ledger on this branch
 
-- 51 tools, because of `who`.
-- Unknown dependency satisfaction is `not_found`.
-- Caller `worktree_root` is stored.
-- A forced exclusive lock evicts every shared holder.
-- Server version is this package, not the `mcp` library.
-- Duplicate task ids and validation errors use this program's sentences, not a fake database error and not a fake correlation id.
+With Python 3.12 the run records only documented differences: `status.tools`, the `register_agent` reply's `worktree_root`, the duplicate task id (MCP and CLI), the integer-valued float, the unknown tool, the validation wording, satisfying an unknown dependency, and the readable-output fixes for the commands listed in `MIGRATION.md`.
 
-`cargo test` runs `tests/surface.rs`, `tests/behavior.rs`, and `tests/fresh.rs`. The fresh file uses inputs that are not copied from the verification reports.
+## Tests
 
-The journal file is not compared. See `MIGRATION.md`.
+`cargo test --release` runs without Python:
 
-## Tools (50) plus who
-
-Each line is covered by `parity/harness.py` and by `tests/surface.rs`.
-
-- [x] register_agent
-- [x] heartbeat
-- [x] deregister_agent
-- [x] list_agents
-- [x] get_agent_relations
-- [x] acquire_lock
-- [x] release_lock
-- [x] refresh_lock
-- [x] get_lock_status
-- [x] list_locks
-- [x] admin_locks
-- [x] broadcast
-- [x] acknowledge_broadcast
-- [x] wait_for_broadcast_acks
-- [x] wait_for_locks
-- [x] await_agent
-- [x] notify_change
-- [x] get_notifications
-- [x] get_conflicts
-- [x] get_contention_hotspots
-- [x] status
-- [x] load_coordination_spec
-- [x] scan_project
-- [x] get_agent_status
-- [x] get_file_agent_map
-- [x] update_agent_status
-- [x] get_agent_tree
-- [x] run_assessment
-- [x] send_message
-- [x] manage_messages
-- [x] create_task
-- [x] assign_task
-- [x] update_task_status
-- [x] query_tasks
-- [x] create_subtask
-- [x] wait_for_task
-- [x] get_available_tasks
-- [x] task_failures
-- [x] manage_work_intents
-- [x] wait_for_handoff
-- [x] manage_dependencies
-- [x] acquire_coordinator_lease
-- [x] manage_leases
-- [x] spawn_subagent
-- [x] report_subagent_spawned
-- [x] get_pending_spawns
-- [x] await_subagent_registration
-- [x] request_subagent_deregistration
-- [x] is_subagent_stop_requested
-- [x] await_subagent_stopped
-- [x] who (Rust addition, surface test and a claim/handoff/release check)
-
-Count: 50 shared tools ticked, plus `who`.
-
-## CLI
-
-Exercised with the same argv shape and `--json`, clock and PID fixed:
-
-- [x] register
-- [x] heartbeat
-- [x] list-agents
-- [x] status
-- [x] acquire-lock
-- [x] lock-status
-- [x] release-lock
-
-Other commands dispatch through the same engine methods as the tools. `--help` text is not byte-compared (see `MIGRATION.md`).
-
-## HTTP
-
-- [x] GET /health returns `status` and `tools_version` (harness, both servers)
-- [x] GET / dashboard HTML is served (surface build includes the page; the harness checks /health)
-- [x] GET /tools and POST /call use the same dispatch as MCP
-- [x] GET /api/dashboard-data and GET /events read the same state picture
-
-## Lock rules
-
-- [x] exclusive deny, with a conflict row
-- [x] force replaces the holder and records `lock_stolen`
-- [x] release by the holder, and `not_locked` after that
-- [x] shared region locks on the same span
-- [x] whole-file release asks for the region when only region locks exist (engine path)
-- [x] TTL refresh
-- [x] reap_expired
-- [x] two processes racing one path: exactly one acquire wins (harness concurrent section)
-
-## Other
-
-- [x] register collision uses the PID
-- [x] deregister reparents children and releases locks
-- [x] notifications exclude an agent
-- [x] messages, mark read, caller mismatch
-- [x] tasks, subtasks, failure history, retry only from the dead-letter row
-- [x] work intents and the proximity warning on acquire
-- [x] dependencies declare, check, satisfy, assert
-- [x] coordinator lease acquire, reject, refresh, release, claim
-- [x] spawn id `parent.Type.seq`, invalid type, report, stop request
-- [x] broadcast with require_ack, ack, and handoff targets
-- [x] env caps listed in the README
-- [x] zero Cargo dependencies (`tests/surface.rs` and `scripts/check_zero_deps.py`)
-
-82 checklist rows are ticked in this file (50 shared tools, `who`, the CLI commands, HTTP, lock rules, and the other rows above).
+- `tests/argparse_goldens.rs`: 24 command lines whose stdout, stderr and exit code were captured from 0.8.0 on Python 3.12 (errors, prefixes, help at 80, 60 and 120 columns).
+- `tests/round5.rs`: one test per fifth-review fix.
+- `tests/surface.rs`, `tests/behavior.rs`, `tests/fresh.rs`, `tests/round3.rs`, `tests/round4.rs`: the tool surface, lock and lease rules, waits, the hook, the dashboard data, zero crate dependencies.

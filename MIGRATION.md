@@ -1,6 +1,6 @@
 # Migration from Python 0.8.0
 
-The `python-legacy` branch is the Python 0.8.0 tree, unchanged. This branch is the Rust program. Tool names, argument names, and the JSON returned for the shared tools are what the parity harness compares.
+The `python-legacy` branch is the Python 0.8.0 tree, unchanged (it is byte-identical to the PyPI 0.8.0 package). This branch is the Rust program. It keeps every 0.8.0 tool, CLI command, flag and reply shape. Where 0.8.0 crashed, hid an error, or printed the wrong thing, the Rust program gives the working result instead; each of those is listed below. `cargo run --release --example parity` compares the two and fails on any difference not listed here.
 
 ## Install
 
@@ -10,68 +10,47 @@ Replace `pip install coordinationhub` with the Rust binary:
 cargo install --path . --locked
 ```
 
-The console script is still named `coordinationhub`. `serve-mcp` replaces `python -m coordinationhub.mcp_stdio`. The optional `mcp` Python package is no longer required. Current releases of that package no longer expose the `Server.list_tools` decorator the Python server called, so the legacy stdio entry point does not start on a current install. The Rust server speaks newline JSON-RPC itself.
+The command is still `coordinationhub`. `coordinationhub serve-mcp` replaces `python -m coordinationhub.mcp_stdio`; the Python `mcp` package is not needed. Nothing else is installed at run time.
 
 ## Storage
 
-The journal is `coordination.jsonl` plus `coordination.lock` in the same directory Python used for `coordination.db`.
+The store is `coordination.jsonl` plus `coordination.lock`, in the directory where 0.8.0 kept `coordination.db` (`<project>/.coordinationhub`, or `~/.coordinationhub` with no project). The SQLite file is not read. Start a fresh store, or let a running 0.8.0 swarm finish on `python-legacy` first. Tool replies are compared, not file bytes.
 
-Rust does not read or write the SQLite file. Copying an old `coordination.db` into the directory does not restore agents or locks. Start a fresh journal, or keep a Python 0.8.0 process on `python-legacy` until that swarm is finished.
+## Differences
 
-The on-disk bytes are not part of the parity compare. Tool results are.
+### Accepted earlier by the owner
 
-## Tool surface
+- **51 tools.** `who` is added (`status`, `claim`, `release`, `handoff` of a work area), so `status.tools` is 51. A `who` claim is not a file lock: it names an area, ends at its `ttl` (default 600 s), when the owner's heartbeat is older than `COORDINATIONHUB_AGENTS_STALE_TIMEOUT_S`, or at deregistration, and a claim on `src/parser` blocks one on `src/parser/lexer.rs`. `who` is an MCP tool only.
+- **Satisfying an unknown dependency** (`manage_dependencies` mode `satisfy`, or `satisfy-dependency`) returns `not_found`. 0.8.0 reported it satisfied and recorded an event.
+- **`register_agent` reply.** Its `worktree_root` is the value the caller passed. 0.8.0 replies with the project root. Both store the caller's value.
+- **Forced exclusive lock** removes every conflicting holder, including shared holders. 0.8.0 removed one row and could leave an exclusive lock beside a shared one.
+- **`initialize`** reports this package's version, `1.0.0`. 0.8.0 reports the `mcp` library's version.
+- **Validation wording.** Schema errors start with `Input validation error:` as in 0.8.0; the sentence after it is this program's (for example `limit must be >= 1 (got -1)` where 0.8.0 says `-1 is less than the minimum of 1`).
+- **Housekeeping.** `serve` and `serve-mcp` reap stale agents, expired locks and lapsed claims in the background unless `COORDINATIONHUB_HOUSEKEEPING=0`. 0.8.0 does it only when the variable is `1`.
+- **Hook command.** `init` writes the same seven hook events, matchers, timeouts and status messages, with the command `<this binary> hook` instead of `python -m coordinationhub.hooks.stdio_adapter`, and prints `Hook command:` where 0.8.0 printed `Python interpreter:`. `--auto-dashboard` prints the dashboard command with this binary.
+- **`doctor`.** It checks the JSONL journal instead of the SQLite file and schema table, and replaces the `hook_python` check (can `python3` import the package) with `hook_command`. Its messages name the journal: `journal exists at ...`, `journal parses; schema is current`, `coordinationhub 1.0.0 binary`.
 
-The 50 Python tools keep their names and input schemas (`TOOLS_VERSION` stays `1.0.0` for that set).
+### Fixes for 0.8.0 bugs
 
-One tool was added:
+- **Tool errors are reported.** 0.8.0's stdio server turns every exception inside a tool into the ordinary text `Error: Internal tool execution error (correlation_id=...)` without `isError`. Here the reply has `isError: true` and says what went wrong:
+  - a duplicate task id: `task <id> already exists; use a new task_id, or update_task_status / assign_task on the existing task` (the CLI prints the same; 0.8.0's CLI printed `UNIQUE constraint failed: tasks.id`)
+  - an unknown tool: `Unknown tool: '<name>'. Available: [...]`
+- **Integer-valued floats.** `3.0` where an integer is expected is taken as `3`, as JSON Schema allows. 0.8.0 accepted it at the schema and then failed inside the tool.
+- **Readable (non-`--json`) output** reports what happened. 0.8.0 read keys its own replies do not have:
+  - `claim-leadership` says `Leadership claimed` with the holder, TTL and expiry; 0.8.0 always printed `Leadership claim failed`. A refused claim also shows the holder's expiry.
+  - `wait-for-task` says `Task completed` or `Task failed`; 0.8.0 printed `Timeout waiting for` for a finished task.
+  - `scan-project` prints the file and owned counts; 0.8.0 printed 0 and 0.
+  - `task-failure-history` prints `attempt N at <time>: <error>`; 0.8.0 printed `?: <error>`.
+  - `report-subagent-spawned` prints `Description: (none)` when there is none; 0.8.0 printed `None`.
+  - `get-conflicts`, `get-available-tasks`, `query-tasks`, `get-leader`, `leader-status` and `list-pending-spawns` print their rows. 0.8.0 printed the header and exited 1 with `Error: '<field>'` whenever there was a row. `query-tasks task`, `subtasks` and `tree` print the task(s); 0.8.0 printed `No tasks found`.
+- **`doctor`, `init` and `auto-start-dashboard` honour `--storage-dir` and `--project-root`.** 0.8.0 accepted the flags and ignored them (it used the current directory's git project or `~/.coordinationhub`).
 
-- `who` with `action` of `status` (default), `claim`, `release`, or `handoff`
+### Platform and layout
 
-`status.tools` counts the Rust surface, so it is 51 rather than 50. That number is a real difference. The harness records it. It does not rewrite it.
-
-`who` claims are not file locks. A claim names an area. It ends when its `ttl` elapses (default 600 seconds), when the owner's heartbeat is older than `COORDINATIONHUB_AGENTS_STALE_TIMEOUT_S` (default 600), or when the owner is deregistered. A claim on `src/parser` blocks a claim on `src/parser/lexer.rs`. The claimer and a handoff recipient must be registered and active. `ttl` must be a number and must not be negative. Relatum still holds the handoff document. stele-context still holds the code map.
-
-## Behaviour kept
-
-Lock acquire, release, refresh, region overlap, shared locks, denied attempts, retry with jittered backoff, and expiry follow the Python rules, including the strict `region_end` boundary. Heartbeat, register collision, descendant reparenting, tasks, messages, intents, dependencies, leases (`COORDINATOR_LEADER`), spawns, broadcasts, and handoffs return the same JSON shapes. Wait tools sleep until the condition is true or the timeout elapses, and `waited_s` is the time this process actually waited. Several processes share one journal: the lock is held for one call, then released, and the next call reads new lines.
-
-`run_assessment` prints a per-trace section, `True` or `False` for the graph, and a local timestamp. Scores use the same keyword groups as the Python scorers. With no graph loaded, handoff latency is 0.
-
-`GET /events` stays open, sends `id:` and `data:` frames, and replays the current snapshot when `Last-Event-ID` is behind.
-
-`coordinationhub hook` registers the session, locks on PreToolUse Write or Edit, notifies and releases on PostToolUse, and correlates a stashed Agent description with SubagentStart.
-
-Long-running `serve` and `serve-mcp` processes reap stale agents, expired locks, and lapsed claims. Set `COORDINATIONHUB_HOUSEKEEPING=0` to turn that off. Python leaves it off unless the variable is set.
-
-YAML coordination specs still fail with the same message Python produced when `ruamel.yaml` was not installed. Use `coordination_spec.json`.
-
-## Behaviour that differs on purpose
-
-These are the remaining differences. They are not papered over.
-
-- `status.tools` is 51 because of `who`. Python reports 50.
-- `manage_dependencies` mode `satisfy` on an unknown `dep_id` returns `not_found`. Python reported the dependency as satisfied.
-- `register_agent` keeps a `worktree_root` the caller passed. The Python MCP path stores the project root instead.
-- `acquire_lock` with `force` on an exclusive lock removes every conflicting holder, including every shared holder. Python removed one row and could leave an exclusive lock beside a shared lock.
-- `initialize` reports this package version (`1.0.0`). Python's stdio server reports the version of the `mcp` library.
-- A duplicate task id returns `task id already exists: ...`. Python's stdio adapter hides the database error behind an internal message and a correlation id. This program does not invent that text.
-- Validation errors from the Rust server start with `Input validation error:`. The wording after that follows this program's checker. It is not a byte-for-byte copy of the `mcp` 1.30 jsonschema sentence.
-- Characters above U+FFFF are written as UTF-16 surrogate pairs, which is what Python's JSON encoder does. Control characters below U+0020 are escaped.
-- `GET /events` requires the same bearer token as the other routes and allows four open streams per client address. A fifth receives 429.
-- A `who` area is resolved against the project root. A claim on a directory name blocks a file underneath it, and `./name` is the same area.
-- Assessment with no spec file uses the same implicit graph Python builds from the live agents, so Graph Loaded is True and a quiet session scores 100%. The live trace id is `live_session`.
-- `init` writes the same seven hook events Python writes (SessionStart, UserPromptSubmit, PreToolUse for Write|Edit and Agent, PostToolUse for Write|Edit plus the Stele and Trammel tools, SubagentStart, SubagentStop, SessionEnd), with the same matchers, timeouts, and status messages. The command is this binary plus `hook`, not `python -m coordinationhub.hooks.stdio_adapter`. An earlier build wrote only SessionStart. That was a gap, and it is fixed.
-- `doctor` checks the JSONL journal, the hooks file, and that the journal parses. It does not open a SQLite schema version. `doctor --json` prints `{"checks", "all_ok"}`. After `init`, every check passes.
-- `watch` refreshes until interrupted and prints the summary line (active agents, locks, conflicts). An earlier build printed the tree once. That was a gap, and it is fixed.
-- `auto-start-dashboard` stays quiet. If the port is free it starts `serve-sse` in the background.
-- `coordinationhub <command> --help` prints the same text as Python 0.8.0 argparse when the terminal width is 80 columns, including `-j`, `--json`, `--replica`, and each flag's description. An unknown flag exits 2 with argparse's `unrecognized arguments` message. A negative number after a value flag is the value, so `--ttl -3` prints `TTL: -3.0s`.
-- In prose mode, these six commands exit 1 with `Error: 'field'` on stderr when Python 0.8.0 raises, and they print the same header line Python prints before the exception: `get-conflicts` (when any conflict exists), `get-available-tasks` and `query-tasks` (when the result has task rows), `get-leader` and `leader-status` (when a lease row exists), and `list-pending-spawns` (when a spawn row is missing `id`, or the description is null). Empty results print the same sentences as 0.8.0. JSON mode does not crash. `cancel-spawn --json` for a missing id prints the JSON and exits 0; without `--json` it exits 3. `release-coordinator-lease` exits 0 even when this agent does not hold the lease. The stderr line is `Error: ...`, which is what `cli.py` prints. It is not a copied CPython traceback.
-- `prune-notifications` deletes old change notifications and the coordination events those calls recorded. The printed count is both. The events are the same topics Python 0.8.0 writes, including lock release, handoff acknowledge, complete and cancel, task assign and status, dependency satisfaction, lease release and claim, scan, load, and assessment. `create-subtask` does not write `task.created`.
-- Contention hotspots with the same conflict count are ordered by document path.
-- A duplicate task id is `task id already exists: ...`. Python's stdio adapter hides the database error behind `Error: Internal tool execution error (correlation_id=...)` with a new random id on every call. Copying that sentence would require inventing Python's id, so the two replies are not the same text.
-- `doctor` always exits 0, including when no hooks file is present. The hooks check then says the config was not found. The storage check looks for `coordination.jsonl`, not `coordination.db`.
+- **Help layout.** `--help`, usage lines and argparse errors are laid out the way Python 3.12's argparse does, at any `COLUMNS` or terminal width. Python 3.13's argparse prints a few lines differently (an option with two names shows the metavar once; a `nargs='+'` positional wraps differently) and quotes the choices in `invalid choice` errors.
+- **Windows output.** Text is UTF-8 with LF line endings, and MCP frames end with LF. When its output is piped, 0.8.0 on Windows writes the ANSI code page (and fails on characters outside it) and CRLF, unless `PYTHONUTF8=1` is set.
+- **MCP framing.** The stdio server also accepts `Content-Length:` framed requests, besides the newline-delimited JSON 0.8.0 accepts.
 
 ## Config snippets
 
-See the README for Claude Code, Cursor, and Grok Build. Point `command` at the Rust binary and pass `serve-mcp`.
+See the README for Claude Code, Cursor and Grok Build. Point `command` at the Rust binary and pass `serve-mcp`.

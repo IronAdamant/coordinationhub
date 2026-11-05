@@ -13,12 +13,14 @@ Rust rewrite of the Python 0.8.0 program. The Python tree remains on `python-leg
 
 ### Added
 - Stdio MCP server, HTTP dashboard server, and CLI, with no Cargo crates
-- Parity harness (`parity/harness.py`) and benchmark gate (`parity/bench.py`)
+- Every 0.8.0 CLI command and flag, parsed like Python 3.12's argparse (prefixes, typed and choice errors, help wrapped to the terminal), plus `init --monitor-skill`, the `serve-sse` browser launch and `auto-start-dashboard`
+- Parity harness and benchmark gate as std-only examples (`examples/parity.rs`, `examples/bench.rs`), with `check_zero_deps` and `check_no_todos`
 - `who` for a compact picture plus claim, handoff, and release of a work area
 - Release workflow that builds linux x64, linux arm64, macOS x64, macOS arm64, and Windows x64, with `SHA256SUMS`
 
 ### Changed
 - On-disk state is `coordination.jsonl` instead of `coordination.db`. See `MIGRATION.md`.
+- Where 0.8.0 crashed, hid a tool error, or printed the wrong result, the working result is returned; `MIGRATION.md` lists each case.
 
 ## [0.8.0] - 2026-06-11
 

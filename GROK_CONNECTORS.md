@@ -19,6 +19,8 @@ Example config:
 }
 ```
 
+If the connector cannot pass `--project-root` or `--storage-dir`, set `COORDINATIONHUB_PROJECT_ROOT` or `COORDINATIONHUB_STORAGE_DIR` in its `env`.
+
 The dashboard listens on `coordinationhub serve` (port 9877) or `coordinationhub serve-sse` (port 9898). Both stay on the loopback interface unless you pass `--host`.
 
 See `README.md` for Claude Code and Cursor as well.

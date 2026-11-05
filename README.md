@@ -1,48 +1,22 @@
 # CoordinationHub
 
-CoordinationHub is the live coordination layer for a swarm of coding agents. It tracks who is registered, who holds which file lock, who owns a piece of work, and what just changed. Agents talk to it over MCP or the command line. A small HTTP server serves a dashboard.
+A shared board for coding agents working on the same project. It records who is working, who holds which file, which tasks are open, claimed, done or handed off, and lets agents message and wait on each other. Agents use it through MCP (stdio) or the command line; a small HTTP server shows a live dashboard.
 
-The core is Rust and uses only the Rust standard library. There are no Cargo crates.
-
-Version 1.0.0 is a rewrite of the Python 0.8.0 tree. That tree is still on the `python-legacy` branch and is what the parity harness compares against.
-
-## How this fits with the other tools
-
-CoordinationHub is the live board: locks, heartbeats, claims, and a compact picture of who is doing what.
-
-- [Relatum](https://github.com/IronAdamant/Relatum) stores the handoff documents an orchestrator passes to a subagent. It is the durable note, not the live lock.
-- [stele-context](https://github.com/IronAdamant/stele-context) is the local code map and context cache. It does not decide who owns a file.
-- [Trammel](https://github.com/IronAdamant/Trammel) plans and checks work. CoordinationHub records who claimed it.
-- [Chisel](https://github.com/IronAdamant/Chisel) answers which tests a change touches. It does not coordinate the agents making the change.
-
-Use them together. Do not look for a second copy of those jobs here.
+It is one Rust binary built from the standard library only: no crates, nothing to install at run time. Version 1.0.0 replaces the Python 0.8.0 program (kept on the `python-legacy` branch) with the same tools, commands and replies; `MIGRATION.md` lists the few deliberate differences.
 
 ## Install
 
-Build from this repository:
-
 ```bash
-cargo build --release
-cargo install --path . --locked
+cargo install --path . --locked    # builds and installs `coordinationhub`
+coordinationhub init               # optional: IDE hooks in ~/.coordinationhub/hooks.json
+coordinationhub doctor             # check the setup
 ```
 
-`cargo install` uses the binary this repo builds. The crate is not published.
+Tagged releases attach binaries for Linux x64 and arm64, macOS x64 and arm64, and Windows x64, with `SHA256SUMS`.
 
-Tagged releases attach binaries and `SHA256SUMS` for:
+## Connect an agent
 
-- linux x64 and linux arm64
-- macOS x64 and macOS arm64
-- Windows x64
-
-Check the sums before you copy a binary onto `PATH`.
-
-## MCP
-
-The stdio server speaks newline-delimited JSON-RPC.
-
-### Claude Code
-
-`.mcp.json` at the project root:
+Claude Code (`.mcp.json` at the project root), Cursor (`.cursor/mcp.json`) and other MCP clients start the stdio server the same way:
 
 ```json
 {
@@ -55,87 +29,70 @@ The stdio server speaks newline-delimited JSON-RPC.
 }
 ```
 
-### Cursor
+The server keeps its store in the project's `.coordinationhub/` directory (the nearest folder with `.git`), or in `~/.coordinationhub/` outside a project. A client that cannot pass `--project-root` or `--storage-dir` can set `COORDINATIONHUB_PROJECT_ROOT` or `COORDINATIONHUB_STORAGE_DIR` in the server's `env`.
 
-`~/.cursor/mcp.json` or the project `.cursor/mcp.json`:
+## Example
 
-```json
-{
-  "mcpServers": {
-    "coordinationhub": {
-      "command": "coordinationhub",
-      "args": ["serve-mcp"]
-    }
-  }
-}
-```
-
-### Grok Build
-
-```json
-{
-  "mcpServers": {
-    "coordinationhub": {
-      "command": "coordinationhub",
-      "args": ["serve-mcp"],
-      "env": {
-        "COORDINATIONHUB_PROJECT_ROOT": "."
-      }
-    }
-  }
-}
-```
-
-The same `serve-mcp` command is the one to put in a Grok connector that launches a local process. The HTTP server (`coordinationhub serve`) is there for the dashboard and for `POST /call`.
-
-## Use
+Two agents split dependent work and contend for a file:
 
 ```bash
-coordinationhub init
-coordinationhub register agent-a --json
-coordinationhub acquire-lock src/main.rs agent-a --json
-coordinationhub who --action claim --agent-id agent-a --area src/main.rs
-coordinationhub who --action status --json
-coordinationhub serve --no-auth --port 9877
-coordinationhub serve-sse --no-auth --port 9898
+coordinationhub register planner
+coordinationhub register worker-1 --parent-id planner
+coordinationhub create-task T-api planner "add retry to fetch()"
+coordinationhub create-task T-tests planner "test the retry path" --depends-on T-api
+coordinationhub assign-task T-api worker-1
+coordinationhub acquire-lock src/api.rs worker-1
+coordinationhub acquire-lock src/api.rs planner     # FAILED: src/api.rs is locked by worker-1 (exit 4)
+coordinationhub update-task-status T-api completed --summary "3 tries with backoff"
+coordinationhub release-lock src/api.rs worker-1
+coordinationhub get-available-tasks                 # T-tests is open now
 ```
 
-`who` is the compact call added in this rewrite. `status` lists the board. `claim` takes an area (a path, a task id, or a name) until the owner's heartbeat stops or someone hands it off. `release` drops it. `handoff` moves it to another registered agent.
+Over MCP the same steps are `register_agent`, `create_task`, `assign_task`, `acquire_lock`, `update_task_status`, `release_lock` and `get_available_tasks`. Add `--json` to any command for machine-readable output; `coordinationhub <command> --help` lists every flag.
 
-## Storage
+## How it works
 
-Python 0.8.0 stored a SQLite file at `.coordinationhub/coordination.db` under the project, or in `~/.coordinationhub` when no project root was set.
+- **One store per project.** State is an append-only journal (`coordination.jsonl`). Each call takes a short file lock, reads lines written since its last call, applies the change and appends it, so any number of agent sessions, CLI calls and hooks share one board safely.
+- **Agents** register with an id and an optional parent, send heartbeats, and deregister; leaving releases their locks and re-parents their children.
+- **Locks** are exclusive or shared, for a whole file or a line range, with a TTL. A refused lock says who holds it and until when.
+- **Work**: tasks with priority, dependencies and subtasks, assignment and status, failure history and retries, work intents, and agent-to-agent dependencies.
+- **Talking**: direct messages, sibling broadcasts with acknowledgements, formal handoffs, change notifications, and wait tools that return as soon as the thing they wait for happens.
+- **Leadership**: one coordinator lease with a TTL; a refused lease names the holder and its expiry.
+- **Hooks**: `coordinationhub hook` (written by `init`) registers a session, locks a file before Write or Edit, and notifies and releases afterwards.
+- **Dashboard**: `coordinationhub serve-sse` serves a live page at http://127.0.0.1:9898.
 
-Rust stores an append-only journal at `coordination.jsonl` in that same directory, plus `coordination.lock`. The tool results match the Python tree. The file bytes do not. See `MIGRATION.md`.
+It works alongside [Relatum](https://github.com/IronAdamant/Relatum) (handoff documents), [stele-context](https://github.com/IronAdamant/stele-context) (code map), [Trammel](https://github.com/IronAdamant/Trammel) (plans) and [Chisel](https://github.com/IronAdamant/Chisel) (test impact); it does not duplicate them.
 
-## Environment
+## Performance
 
-| Variable | Role |
-| --- | --- |
-| `COORDINATIONHUB_STORAGE_DIR` | Journal directory |
-| `COORDINATIONHUB_PROJECT_ROOT` | Project root used to relativise paths |
-| `COORDINATIONHUB_NAMESPACE` | Agent id prefix (default `hub`) |
-| `COORDINATIONHUB_COORDINATION_URL` | URL embedded in a register response |
-| `COORDINATIONHUB_NOW` | Frozen clock for tests, seconds |
-| `COORDINATIONHUB_PID` | PID stored on the agent row |
-| `COORDINATIONHUB_HOUSEKEEPING` | Accepted; the long-running pruner from Python is not started |
-| `COORDINATIONHUB_MAX_DESCRIPTION` and the other `COORDINATIONHUB_MAX_*` caps | Same field caps as Python |
-| `COORDINATIONHUB_SPAWN_TTL_SECONDS` | Pending spawn lifetime |
-| `COORDINATIONHUB_MAX_PENDING_SPAWNS` | Cap on pending spawns |
+Measured on 5 November 2026 on a Windows 11 desktop: unmodified Python 0.8.0 (CPython 3.12.10, `mcp` 1.30.0) and the Rust release binary, both over MCP stdio, median of 3 runs, in seconds. Another build was running at the time, so the absolute numbers are noisy. CI's `benchmark-gate` reruns these rows on Linux and fails if Rust is slower on any of them. `BENCHMARKS.md` has the details and the longer review workload.
+
+| Operation | Python seconds | Rust seconds |
+| --- | ---: | ---: |
+| startup and status | 1.7481 | 0.0102 |
+| status x450 after 450 agents | 1.0599 | 0.2301 |
+| register x100 | 2.2121 | 0.0945 |
+| lock x100 | 1.8191 | 0.1246 |
+| get_agent_tree x20 after 100 agents | 3.2875 | 0.2107 |
 
 ## Develop
 
 ```bash
 cargo test --release
-python3 parity/harness.py target/release/coordinationhub
-python3 parity/bench.py target/release/coordinationhub
+git fetch origin python-legacy && python -m pip install "mcp==1.30.0"
+cargo run --release --example parity -- target/release/coordinationhub --python python3.12
+cargo run --release --example bench -- target/release/coordinationhub --python python3.12
 ```
 
-The harness needs the `python-legacy` branch (`git fetch origin python-legacy`).
+`PARITY.md` explains the comparison with 0.8.0, `MIGRATION.md` lists the differences, `BENCHMARKS.md` has the timings, and `CHANGELOG.md` the releases.
 
-## Further reading
+## Environment
 
-- `PARITY.md` lists every Python behaviour and the test that covers it
-- `MIGRATION.md` lists what changed on purpose
-- `BENCHMARKS.md` has the measured timings
-- `CHANGELOG.md` records the release
+| Variable | Role |
+| --- | --- |
+| `COORDINATIONHUB_STORAGE_DIR`, `COORDINATIONHUB_PROJECT_ROOT` | Store and project for `serve-mcp` when the flags are not given |
+| `COORDINATIONHUB_COORDINATION_URL` | URL included in a registration reply |
+| `COORDINATIONHUB_HOUSEKEEPING` | `0` stops the background reaping of stale agents, expired locks and lapsed claims in `serve` and `serve-mcp` |
+| `COORDINATIONHUB_AGENTS_STALE_TIMEOUT_S` | Heartbeat age after which an agent is stale (default 600) |
+| `COORDINATIONHUB_MAX_DESCRIPTION` and the other `COORDINATIONHUB_MAX_*` caps | Field length caps, as in 0.8.0 |
+| `COORDINATIONHUB_SPAWN_TTL_SECONDS`, `COORDINATIONHUB_MAX_PENDING_SPAWNS` | Pending sub-agent spawn lifetime and cap |
