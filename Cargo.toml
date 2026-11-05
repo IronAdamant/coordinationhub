@@ -1,0 +1,17 @@
+[package]
+name = "coordinationhub"
+version = "1.0.0"
+edition = "2021"
+rust-version = "1.83"
+license = "MIT"
+publish = false
+description = "Live coordination and work ownership for AI coding agents. std only."
+readme = "README.md"
+
+[dependencies]
+
+[dev-dependencies]
+
+[[bin]]
+name = "coordinationhub"
+path = "src/main.rs"

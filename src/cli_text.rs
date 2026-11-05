@@ -1,0 +1,1164 @@
+//! Human-readable CLI text, matching the Python command printers.
+
+use crate::json::Value;
+
+pub fn show(command: &str, value: &Value, pos: &[String], kv: &[(String, String)]) -> i32 {
+    let id = pos.first().map(|s| s.as_str()).unwrap_or("");
+    let flag = |key: &str| kv.iter().find(|(name, _)| name == key).map(|(_, v)| v.as_str());
+    match command {
+        "status" => render_status(value),
+        "register" => {
+            println!("Registered: {}", text(value, "agent_id"));
+            if let Some(parent) = value.get("parent_id").and_then(Value::as_str) {
+                println!("  Parent: {parent}");
+            }
+            println!("  Worktree: {}", text(value, "worktree_root"));
+        }
+        "heartbeat" => {
+            let updated = value.get("updated").and_then(Value::as_bool).unwrap_or(false);
+            println!("Heartbeat: {id} — updated: {}", py_bool(updated));
+        }
+        "deregister" => {
+            println!("Deregistered: {id}");
+            println!("  Children orphaned: {}", num(value, "children_orphaned"));
+            println!("  Locks released: {}", num(value, "locks_released"));
+        }
+        "list-agents" => render_agents(value),
+        "acquire-lock" | "release-lock" | "refresh-lock" => render_lock(command, value, id),
+        "lock-status" => {
+            if value.get("locked").and_then(Value::as_bool) == Some(true) {
+                println!("LOCKED: {id}");
+                println!("  By: {}", text(value, "locked_by"));
+                println!("  Expires: {}", raw(value, "expires_at"));
+            } else {
+                println!("UNLOCKED: {id}");
+            }
+        }
+        "list-locks" => render_lock_list(value),
+        "notify-change" => println!(
+            "Recorded: {} on {} by {}",
+            pos.get(1).map(|s| s.as_str()).unwrap_or(""),
+            id,
+            pos.get(2).map(|s| s.as_str()).unwrap_or("")
+        ),
+        "get-notifications" | "prune-notifications" => {
+            if value.get("pruned").is_some() && command == "prune-notifications" {
+                println!("Pruned {} notification(s)", num(value, "pruned"));
+            } else {
+                render_notes(value);
+            }
+        }
+        "wait-for-notifications" => {
+            let notes = value.get("notifications").and_then(Value::as_array);
+            let count = notes.map(|items| items.len()).unwrap_or(0);
+            println!("Notifications for {id}: {count}");
+            if let Some(items) = notes {
+                for item in items {
+                    println!(
+                        "  {}: {} by {}",
+                        text(item, "document_path"),
+                        text(item, "change_type"),
+                        text(item, "agent_id")
+                    );
+                }
+            }
+        }
+        "broadcast" => {
+            let present = |key: &str| !matches!(value.get(key), None | Some(Value::Null));
+            if present("handoff_id") {
+                println!("HANDOFF from {id}: {}", py_get(value, "handoff_id", "None"));
+                println!("  To: {}", join_strings(value, "to_agents"));
+                let doc = if truthy(value.get("document_path")) {
+                    py_get(value, "document_path", "")
+                } else {
+                    "(none)".to_string()
+                };
+                println!("  Document: {doc}");
+                println!("  Type: {}", py_get(value, "handoff_type", "None"));
+            } else if present("broadcast_id") {
+                println!("Broadcast from {id} (ack required)");
+                println!("  Broadcast ID: {}", py_get(value, "broadcast_id", "None"));
+                let pending = join_strings(value, "pending_acks");
+                println!(
+                    "  Pending acks: {}",
+                    if pending.is_empty() { "(none)".to_string() } else { pending }
+                );
+            } else {
+                println!("Broadcast from {id}");
+                let ack = match value.get("acknowledged_by") {
+                    Some(found) if truthy(Some(found)) => py_str(found),
+                    _ => "(none)".to_string(),
+                };
+                println!("  Acknowledged by: {ack}");
+                if let Some(Value::Array(conflicts)) = value.get("conflicts") {
+                    if !conflicts.is_empty() {
+                        println!("  Conflicts:");
+                        for item in conflicts {
+                            println!(
+                                "    {} locked by {}",
+                                py_get(item, "document_path", "None"),
+                                py_get(item, "locked_by", "None")
+                            );
+                        }
+                    }
+                }
+            }
+        }
+        "get-handoffs" => render_handoffs(value),
+        "complete-handoff" => println!("Completed handoff {id}"),
+        "cancel-handoff" => println!("Cancelled handoff {id}"),
+        "acknowledge-handoff" => {
+            let agent = pos.get(1).map(|s| s.as_str()).unwrap_or("");
+            if value.get("acknowledged").and_then(Value::as_bool) == Some(true) {
+                println!("Acknowledged handoff {id} by {agent}");
+            } else {
+                println!("Failed: {}", text(value, "reason"));
+            }
+        }
+        "create-task" => {
+            println!("Task created: {id}");
+            let deps: Vec<&str> = kv
+                .iter()
+                .filter(|(key, _)| key == "depends_on")
+                .map(|(_, item)| item.as_str())
+                .collect();
+            if !deps.is_empty() {
+                println!("  Depends on: {}", deps.join(", "));
+            }
+            if let Some(priority) = flag("priority").and_then(|item| item.parse::<i64>().ok()) {
+                if priority != 0 {
+                    println!("  Priority: {priority}");
+                }
+            }
+        }
+        "create-subtask" => {
+            println!("Subtask created: {id}");
+            println!(
+                "  Parent task: {}",
+                pos.get(1).map(|s| s.as_str()).unwrap_or("")
+            );
+        }
+        "assign-task" => println!(
+            "Task assigned: {id} → {}",
+            pos.get(1).map(|s| s.as_str()).unwrap_or("")
+        ),
+        "update-task-status" => {
+            println!(
+                "Task updated: {id} → {}",
+                pos.get(1).map(|s| s.as_str()).unwrap_or("")
+            );
+            if let Some(summary) = flag("summary") {
+                if !summary.is_empty() {
+                    let shown: String = summary.chars().take(80).collect();
+                    println!("  Summary: {shown}");
+                }
+            }
+        }
+        "query-tasks" => render_tasks(value),
+        "get-available-tasks" => render_available(value),
+        "declare-work-intent" => {
+            println!(
+                "Intent declared: {id} → {}",
+                pos.get(1).map(|s| s.as_str()).unwrap_or("")
+            );
+            println!(
+                "  Intent: {}",
+                pos.get(2).map(|s| s.as_str()).unwrap_or("")
+            );
+        }
+        "get-work-intents" => render_intents(value),
+        "clear-work-intent" => println!("Intent cleared: {id}"),
+        "declare-dependency" => {
+            println!(
+                "Dependency declared: {id} → {}",
+                pos.get(1).map(|s| s.as_str()).unwrap_or("")
+            );
+            if let Some(task) = flag("depends_on_task_id") {
+                println!("  Task: {task}");
+            }
+            println!(
+                "  Condition: {}",
+                flag("condition").unwrap_or("task_completed")
+            );
+        }
+        "satisfy-dependency" => println!("Dependency {id} marked as satisfied"),
+        "get-leader" => render_leader(value, true),
+        "leader-status" => render_leader(value, false),
+        "ha-dashboard" => render_ha(value),
+        "acquire-coordinator-lease" => {
+            if truthy(value.get("acquired")) {
+                println!("Lease acquired: {}", py_get(value, "lease_name", "None"));
+                println!("  Holder: {}", py_get(value, "holder_id", "None"));
+                println!("  TTL: {}s", py_get(value, "ttl", "None"));
+                println!("  Expires at: {}", py_get(value, "expires_at", "None"));
+            } else {
+                println!("Lease acquisition failed — leadership held by another agent");
+                if let Some(holder) = value.get("holder").filter(|found| truthy(Some(found))) {
+                    println!("  Current holder: {}", py_get(holder, "holder_id", "None"));
+                    println!("  Expires at: {}", py_get(holder, "expires_at", "None"));
+                }
+            }
+        }
+        "refresh-coordinator-lease" => {
+            if value.get("refreshed").and_then(Value::as_bool) == Some(true) {
+                println!("Lease refreshed: {}", text(value, "lease_name"));
+                println!("  New expiry: {}", raw(value, "expires_at"));
+            } else {
+                eprintln!("Refresh failed: {}", text(value, "error"));
+            }
+        }
+        "release-coordinator-lease" => {
+            if value.get("released").and_then(Value::as_bool) == Some(true) {
+                println!("Lease released: {}", text(value, "lease_name"));
+            } else {
+                println!("Release failed: {}", text(value, "error"));
+            }
+        }
+        "claim-leadership" => {
+            if truthy(value.get("claimed")) {
+                println!("Leadership claimed: {}", py_get(value, "lease_name", "None"));
+                println!("  Holder: {}", py_get(value, "holder_id", "None"));
+                println!("  TTL: {}s", py_get(value, "ttl", "None"));
+                println!("  Expires at: {}", py_get(value, "expires_at", "None"));
+            } else {
+                println!("Leadership claim failed");
+                if let Some(holder) = value.get("holder").filter(|found| truthy(Some(found))) {
+                    println!("  Current holder: {}", py_get(holder, "holder_id", "None"));
+                    println!("  Expires at: {}", py_get(holder, "expires_at", "None"));
+                }
+            }
+        }
+        "spawn-subagent" => {
+            println!("Spawn registered: {}", text(value, "spawn_id"));
+            println!("  Parent: {}", text(value, "parent_agent_id"));
+            println!("  Status: pending");
+        }
+        "list-pending-spawns" => render_spawns(value, id),
+        "cancel-spawn" => {
+            if value.get("cancelled").and_then(Value::as_bool) == Some(true) {
+                println!("Spawn cancelled: {id}");
+            } else if value.get("not_found").and_then(Value::as_bool) == Some(true) {
+                eprintln!("Spawn not found or already consumed: {id}");
+            } else {
+                eprintln!("Cancel failed: {}", text(value, "error"));
+            }
+        }
+        "request-subagent-deregistration" => {
+            let child = pos.get(1).map(|s| s.as_str()).unwrap_or("");
+            if value.get("requested").and_then(Value::as_bool) == Some(true) {
+                println!("Stop requested for: {child}");
+            } else if value.get("not_found").and_then(Value::as_bool) == Some(true) {
+                eprintln!("Agent not found or not active: {child}");
+            } else {
+                eprintln!("Stop request failed: {}", text(value, "error"));
+            }
+        }
+        "await-agent" => {
+            println!("Agent: {id}");
+            println!("  Status: {}", text(value, "status"));
+            if value.get("awaited").and_then(Value::as_bool) == Some(true) {
+                let waited = value.get("waited_s").and_then(Value::as_f64).unwrap_or(0.0);
+                println!("  Waited: {waited:.1}s");
+            } else {
+                println!("  Timeout: {}s", raw(value, "timeout_s"));
+            }
+        }
+        "await-subagent-stopped" => {
+            if value.get("stopped").and_then(Value::as_bool) == Some(true) {
+                println!("Agent stopped: {id}");
+            } else {
+                println!("Timeout waiting for: {id}");
+                println!("  Escalate: call deregister_agent to force cleanup");
+            }
+        }
+        "send-message" => {
+            println!(
+                "MESSAGE SENT to {}",
+                pos.get(1).map(|s| s.as_str()).unwrap_or("")
+            );
+            println!("  From: {id}");
+            println!(
+                "  Type: {}",
+                pos.get(2).map(|s| s.as_str()).unwrap_or("")
+            );
+        }
+        "validate-spec" => {
+            if value.get("valid").and_then(Value::as_bool) == Some(true) {
+                println!("Coordination spec is valid");
+            } else {
+                println!("Coordination spec is INVALID");
+                if let Some(items) = value.get("errors").and_then(Value::as_array) {
+                    for item in items {
+                        if let Some(text) = item.as_str() {
+                            println!("  {text}");
+                        }
+                    }
+                }
+            }
+        }
+        "scan-project" => {
+            println!("Scanned {} file(s)", py_get(value, "scanned", "0"));
+            println!("  Owned files: {}", py_get(value, "owned", "0"));
+        }
+        "dashboard" => render_dashboard(value),
+        "agent-relations" => {
+            if let Some(items) = value.get("siblings").and_then(Value::as_array) {
+                if items.is_empty() {
+                    println!("No siblings for {id}");
+                } else {
+                    println!("{} sibling(s):", items.len());
+                    for item in items {
+                        println!("  {}: {}", text(item, "agent_id"), text(item, "status"));
+                    }
+                }
+            } else {
+                let lineage = value.get("lineage").unwrap_or(value);
+                let ancestors = id_list(lineage, "ancestors");
+                let descendants = id_list(lineage, "descendants");
+                println!("Lineage for {id}:");
+                println!(
+                    "  Ancestors: {}",
+                    if ancestors.is_empty() { "(none)" } else { &ancestors }
+                );
+                println!(
+                    "  Descendants: {}",
+                    if descendants.is_empty() {
+                        "(none)"
+                    } else {
+                        &descendants
+                    }
+                );
+            }
+        }
+        "wait-for-locks" => {
+            println!("Released: {}", py_seq(value, "released"));
+            println!("Timed out: {}", py_seq(value, "timed_out"));
+        }
+        "wait-for-task" => {
+            match value.get("status").and_then(Value::as_str) {
+                Some("completed") => println!("Task completed: {id}"),
+                Some("failed") => {
+                    println!("Task failed: {id}");
+                    if truthy(value.get("error")) {
+                        println!("  Error: {}", py_get(value, "error", "None"));
+                    }
+                }
+                Some("not_found") => println!("Task not found: {id}"),
+                _ => println!("Timeout waiting for: {id}"),
+            }
+        }
+        "wait-for-handoff" => {
+            if value.get("timed_out").and_then(Value::as_bool) == Some(true) {
+                println!("Timed out waiting for handoff {id}");
+            } else {
+                println!("Handoff {id} completed");
+            }
+        }
+        "retry-task" => {
+            if value.get("retried").and_then(Value::as_bool) == Some(true) {
+                println!("Task resurrected: {id}");
+            } else {
+                println!("Retry failed: {}", text(value, "reason"));
+            }
+        }
+        "dead-letter-queue" => {
+            let items = value
+                .get("dead_letter_tasks")
+                .and_then(Value::as_array)
+                .map(|rows| rows.to_vec())
+                .unwrap_or_default();
+            if items.is_empty() {
+                println!("Dead letter queue is empty");
+            } else {
+                println!("Dead letter queue ({}):", items.len());
+                for item in items {
+                    println!("  {} — failed at {}", text(&item, "task_id"), text(&item, "failed_at"));
+                }
+            }
+        }
+        "acknowledge-broadcast" => {
+            if value.get("acknowledged").and_then(Value::as_bool) == Some(true) {
+                println!("Acknowledged broadcast {id} by {}", pos.get(1).map(|s| s.as_str()).unwrap_or(""));
+            } else {
+                println!("Failed: {}", text(value, "reason"));
+            }
+        }
+        "get-conflicts" => render_conflicts(value),
+        "get-messages" => {
+            let items = value.get("messages").and_then(Value::as_array);
+            let count = items.map(|rows| rows.len()).unwrap_or(0);
+            println!("Messages for {id}: {count}");
+            if let Some(items) = items {
+                for item in items {
+                    let read = item.get("read_at").map(|v| !matches!(v, Value::Null)).unwrap_or(false);
+                    println!(
+                        "  From: {} | Type: {} | Read: {}",
+                        text(item, "from_agent_id"),
+                        text(item, "message_type"),
+                        if read { "True" } else { "False" }
+                    );
+                }
+            }
+        }
+        "mark-messages-read" => {
+            println!(
+                "Marked {} message(s) as read for {id}",
+                num(value, "marked_read")
+            );
+        }
+        "contention-hotspots" => {
+            let items = value.get("hotspots").and_then(Value::as_array);
+            if items.map(|rows| rows.is_empty()).unwrap_or(true) {
+                println!("No contention hotspots");
+            } else if let Some(items) = items {
+                println!("Contention hotspots ({}):", items.len());
+                for item in items {
+                    println!(
+                        "  {}: {} conflict(s)",
+                        text(item, "document_path"),
+                        num(item, "conflict_count")
+                    );
+                }
+            }
+        }
+        "agent-status" => {
+            let shown = if text(value, "agent_id").is_empty() {
+                id.to_string()
+            } else {
+                text(value, "agent_id")
+            };
+            println!("Agent: {shown}");
+            let status = value.get("status").and_then(Value::as_str).unwrap_or("unknown");
+            println!("  Status: {status}");
+            let task = py_field(value, "current_task", "(none)");
+            println!("  Task: {task}");
+            let locks = value
+                .get("locks")
+                .or_else(|| value.get("active_locks"))
+                .and_then(Value::as_array);
+            println!("  Locks: {}", locks.map(|rows| rows.len()).unwrap_or(0));
+            if let Some(locks) = locks {
+                for lock in locks {
+                    println!(
+                        "    {} ({})",
+                        text(lock, "document_path"),
+                        text(lock, "lock_type")
+                    );
+                }
+            }
+        }
+        "admin-locks" => {
+            if value.get("released").is_some() {
+                println!(
+                    "Released {} lock(s) for {}",
+                    num(value, "released"),
+                    flag("agent_id").unwrap_or("unknown")
+                );
+            } else if value.get("reaped").is_some() && value.get("orphaned_children").is_some() {
+                println!("Reaped {} stale agent(s)", num(value, "reaped"));
+                println!("  Orphaned children: {}", num(value, "orphaned_children"));
+            } else if value.get("reaped").is_some() {
+                println!("Reaped {} expired lock(s)", num(value, "reaped"));
+            } else {
+                println!("{}", crate::json::dumps_pretty(value));
+            }
+        }
+        "manage-dependencies" => {
+            let mode = id;
+            let agent = pos.get(1).map(|s| s.as_str()).unwrap_or("");
+            if mode == "assert" {
+                if value.get("can_start").and_then(Value::as_bool) == Some(true) {
+                    println!("{agent} can start: no blockers");
+                } else {
+                    let blockers = value.get("blockers").and_then(Value::as_array);
+                    let count = blockers.map(|rows| rows.len()).unwrap_or(0);
+                    println!("{agent} CANNOT start — {count} blocker(s):");
+                    if let Some(blockers) = blockers {
+                        for item in blockers {
+                            println!(
+                                "  → {} ({})",
+                                text(item, "depends_on_agent_id"),
+                                text(item, "condition")
+                            );
+                        }
+                    }
+                }
+            } else {
+                let blocked = value.get("blocked").and_then(Value::as_bool) == Some(true);
+                println!("Dependencies for {agent}:");
+                println!("  Blocked: {}", if blocked { "True" } else { "False" });
+                let rows = value.get("unsatisfied").and_then(Value::as_array);
+                if rows.map(|items| items.is_empty()).unwrap_or(true) {
+                    println!("  (none)");
+                } else if let Some(rows) = rows {
+                    for item in rows {
+                        println!(
+                            "  → {} ({})",
+                            text(item, "depends_on_agent_id"),
+                            text(item, "condition")
+                        );
+                        if let Some(task) = item.get("depends_on_task_id").and_then(Value::as_str) {
+                            println!("    Task: {task}");
+                        }
+                    }
+                }
+            }
+        }
+        "get-all-dependencies" => {
+            let items = value.get("dependencies").and_then(Value::as_array);
+            if items.map(|rows| rows.is_empty()).unwrap_or(true) {
+                println!("No dependencies declared");
+            } else if let Some(items) = items {
+                println!("{} declared dependency/dependencies:", items.len());
+                for item in items {
+                    let sat = if satisfied_flag(item.get("satisfied")) {
+                        "OK"
+                    } else {
+                        "PENDING"
+                    };
+                    println!(
+                        "  [{sat}] {} -> {} ({})",
+                        text(item, "dependent_agent_id"),
+                        text(item, "depends_on_agent_id"),
+                        text(item, "condition")
+                    );
+                }
+            }
+        }
+        "report-subagent-spawned" => {
+            if truthy(value.get("spawn_id")) {
+                println!("Spawn reported: {}", py_get(value, "spawn_id", "None"));
+                println!("  Child: {}", py_get(value, "child_agent_id", "None"));
+                let description = match value.get("description") {
+                    Some(Value::String(text)) if !text.is_empty() => text.clone(),
+                    _ => "(none)".to_string(),
+                };
+                println!("  Description: {description}");
+            } else {
+                let parent = if text(value, "parent_agent_id").is_empty() {
+                    id.to_string()
+                } else {
+                    text(value, "parent_agent_id")
+                };
+                println!("No pending spawn found for {parent}");
+                let child = if text(value, "child_agent_id").is_empty() {
+                    pos.get(1).map(|s| s.as_str()).unwrap_or("").to_string()
+                } else {
+                    text(value, "child_agent_id")
+                };
+                println!("  Child: {child}");
+            }
+        }
+        "wait-for-broadcast-acks" => {
+            if value.get("timed_out").and_then(Value::as_bool) == Some(true) {
+                let reason = value.get("reason").and_then(Value::as_str).unwrap_or("timeout");
+                println!("Timed out waiting for broadcast acks: {reason}");
+            } else {
+                println!(
+                    "Broadcast {id} acknowledged by: {}",
+                    list_or_none(value, "acknowledged_by")
+                );
+            }
+        }
+        "task-failure-history" => {
+            let items = value.get("history").and_then(Value::as_array);
+            if items.map(|rows| rows.is_empty()).unwrap_or(true) {
+                println!("No failure history for {id}");
+            } else if let Some(items) = items {
+                println!("Failure history for {id} ({} entries):", items.len());
+                for item in items {
+                    println!(
+                        "  attempt {} at {}: {}",
+                        py_get(item, "attempt", "?"),
+                        py_get(item, "last_attempt_at", "?"),
+                        py_truncate(item.get("error"), 80)
+                    );
+                }
+            }
+        }
+        "load-spec" => {
+            println!("Loaded coordination spec");
+            let agents = value
+                .get("agents")
+                .and_then(Value::as_array)
+                .map(|items| items.len())
+                .unwrap_or(0);
+            let handoffs = value
+                .get("handoffs")
+                .and_then(Value::as_array)
+                .map(|items| items.len())
+                .unwrap_or(0);
+            println!("  Agents: {agents}");
+            println!("  Handoffs: {handoffs}");
+            if let Some(errors) = value.get("errors").and_then(Value::as_array) {
+                if !errors.is_empty() {
+                    println!("  Errors: {}", errors.len());
+                    for err in errors {
+                        println!("    {}", err.as_str().unwrap_or(""));
+                    }
+                }
+            }
+        }
+        "assess" => {
+            let report = value.get("report").and_then(Value::as_str).unwrap_or("");
+            println!("{report}");
+        }
+        "agent-tree" => {
+            if value.get("tree").and_then(Value::as_object).is_some() {
+                if let Some(text) = value.get("text_tree").and_then(Value::as_str) {
+                    println!("{text}");
+                }
+            } else {
+                println!("No agent tree available");
+            }
+        }
+        _ => println!("{}", crate::json::dumps_pretty(value)),
+    }
+    0
+}
+
+/// Python `str()` of a value decoded from JSON.
+fn py_str(value: &Value) -> String {
+    match value {
+        Value::String(text) => text.clone(),
+        other => py_repr_value(other),
+    }
+}
+
+/// Python `repr()` of a value decoded from JSON.
+fn py_repr_value(value: &Value) -> String {
+    crate::json::py_repr(value)
+}
+
+/// `str(result.get(key, missing))`.
+fn py_get(value: &Value, key: &str, missing: &str) -> String {
+    match value.get(key) {
+        None => missing.to_string(),
+        Some(found) => py_str(found),
+    }
+}
+
+/// Python truthiness of `result.get(key)`.
+fn truthy(value: Option<&Value>) -> bool {
+    match value {
+        None | Some(Value::Null) | Some(Value::Bool(false)) => false,
+        Some(Value::Int(n)) => *n != 0,
+        Some(Value::Float(n)) => *n != 0.0,
+        Some(Value::String(text)) => !text.is_empty(),
+        Some(Value::Array(items)) => !items.is_empty(),
+        Some(Value::Object(pairs)) => !pairs.is_empty(),
+        Some(Value::Bool(true)) => true,
+    }
+}
+
+/// `cli_tasks._truncate`.
+fn py_truncate(value: Option<&Value>, max_len: usize) -> String {
+    let text = match value {
+        None => "unknown".to_string(),
+        Some(Value::Null) => return String::new(),
+        Some(other) => py_str(other),
+    };
+    if text.chars().count() <= max_len {
+        return text;
+    }
+    let mut out: String = text.chars().take(max_len.saturating_sub(3)).collect();
+    out.push_str("...");
+    out
+}
+
+fn py_field(value: &Value, key: &str, missing: &str) -> String {
+    match value.get(key) {
+        None => missing.to_string(),
+        Some(Value::Null) => "None".into(),
+        Some(Value::String(text)) => text.clone(),
+        Some(other) => crate::json::dumps(other),
+    }
+}
+
+pub fn exit_code(command: &str, value: &Value) -> i32 {
+    match command {
+        "acquire-lock" => {
+            if value.get("acquired").and_then(Value::as_bool) == Some(true) {
+                0
+            } else {
+                4
+            }
+        }
+        "refresh-coordinator-lease" => {
+            if value.get("refreshed").and_then(Value::as_bool) == Some(true) {
+                0
+            } else {
+                4
+            }
+        }
+        "release-coordinator-lease" => 0,
+        "request-subagent-deregistration" => {
+            if value.get("not_found").and_then(Value::as_bool) == Some(true) {
+                3
+            } else if value.get("requested").and_then(Value::as_bool) == Some(true) {
+                0
+            } else {
+                1
+            }
+        }
+        "cancel-spawn" => {
+            if value.get("not_found").and_then(Value::as_bool) == Some(true) {
+                3
+            } else if value.get("cancelled").and_then(Value::as_bool) == Some(true) {
+                0
+            } else {
+                1
+            }
+        }
+        _ => 0,
+    }
+}
+
+fn render_status(value: &Value) {
+    println!("CoordinationHub Status");
+    if let Value::Object(pairs) = value {
+        for (key, item) in pairs {
+            let label = key
+                .split('_')
+                .map(|word| {
+                    let mut chars = word.chars();
+                    match chars.next() {
+                        Some(first) => first.to_uppercase().collect::<String>() + chars.as_str(),
+                        None => String::new(),
+                    }
+                })
+                .collect::<Vec<_>>()
+                .join(" ");
+            let shown = match item {
+                Value::Bool(true) => "False".replace("False", "True"),
+                Value::Bool(false) => "False".into(),
+                _ => crate::json::dumps(item),
+            };
+            println!("  {label}: {shown}");
+        }
+    }
+}
+
+fn render_agents(value: &Value) {
+    let Some(items) = value.get("agents").and_then(Value::as_array) else {
+        println!("No agents registered");
+        return;
+    };
+    if items.is_empty() {
+        println!("No agents registered");
+        return;
+    }
+    println!("{} agent(s):", items.len());
+    for item in items {
+        let id = text(item, "agent_id");
+        let status = text(item, "status");
+        let stale = item.get("stale").and_then(Value::as_bool).unwrap_or(false);
+        let mark = if stale { "!" } else { " " };
+        let tag = if stale { " (STALE)" } else { "" };
+        println!(" {mark} {id}: {status}{tag}");
+    }
+}
+
+fn render_lock(command: &str, value: &Value, path: &str) {
+    if value.get("acquired").and_then(Value::as_bool) == Some(true) {
+        println!("LOCKED: {path}");
+        println!("  Agent: {}", text(value, "locked_by"));
+        println!("  Expires: {}", raw(value, "expires_at"));
+    } else if value.get("released").and_then(Value::as_bool) == Some(true) {
+        println!("RELEASED: {path}");
+    } else if value.get("refreshed").and_then(Value::as_bool) == Some(true) {
+        println!("REFRESHED: {path}");
+        println!("  Expires: {}", raw(value, "expires_at"));
+    } else if command == "acquire-lock" {
+        eprintln!(
+            "FAILED: {path} is locked by {}",
+            text(value, "locked_by")
+        );
+        eprintln!("  Expires: {}", raw(value, "expires_at"));
+    } else {
+        println!("FAILED: {}", text(value, "reason"));
+    }
+}
+
+fn render_lock_list(value: &Value) {
+    let Some(locks) = value.get("locks").and_then(Value::as_array) else {
+        println!("No active locks");
+        return;
+    };
+    if locks.is_empty() {
+        println!("No active locks");
+        return;
+    }
+    println!("Active locks ({}):", locks.len());
+    for lock in locks {
+        println!("  {}", text(lock, "document_path"));
+        println!("    Held by: {}", text(lock, "locked_by"));
+        println!("    Type: {}", text(lock, "lock_type"));
+        let expires = lock.get("expires_at").and_then(Value::as_f64).unwrap_or(0.0);
+        println!("    Expires: {expires:.0}");
+    }
+}
+
+fn render_notes(value: &Value) {
+    let Some(items) = value.get("notifications").and_then(Value::as_array) else {
+        println!("No notifications");
+        return;
+    };
+    if items.is_empty() {
+        println!("No notifications");
+        return;
+    }
+    println!("{} notification(s):", items.len());
+    for item in items {
+        println!(
+            "  {}: {} by {}",
+            text(item, "document_path"),
+            text(item, "change_type"),
+            text(item, "agent_id")
+        );
+    }
+}
+
+fn render_handoffs(value: &Value) {
+    let Some(items) = value.get("handoffs").and_then(Value::as_array) else {
+        println!("No handoffs found");
+        return;
+    };
+    if items.is_empty() {
+        println!("No handoffs found");
+        return;
+    }
+    println!("{} handoff(s):", items.len());
+    for item in items {
+        println!(
+            "  [{}] {} {} → {}",
+            text(item, "status"),
+            raw(item, "id"),
+            text(item, "from_agent_id"),
+            join_strings(item, "to_agents")
+        );
+    }
+}
+
+/// Task rows from any query shape: `tasks`, `subtasks`, a single `task`,
+/// or a tree root with nested `subtasks`.
+fn task_rows(value: &Value) -> Vec<(usize, Value)> {
+    fn walk(node: &Value, depth: usize, out: &mut Vec<(usize, Value)>) {
+        out.push((depth, node.clone()));
+        if let Some(children) = node.get("subtasks").and_then(Value::as_array) {
+            for child in children {
+                walk(child, depth + 1, out);
+            }
+        }
+    }
+    let mut out = Vec::new();
+    if let Some(items) = value.get("tasks").and_then(Value::as_array) {
+        out.extend(items.iter().map(|item| (0, item.clone())));
+    } else if value.get("id").is_some() && value.get("status").is_some() {
+        walk(value, 0, &mut out);
+    } else if let Some(items) = value.get("subtasks").and_then(Value::as_array) {
+        out.extend(items.iter().map(|item| (0, item.clone())));
+    } else if let Some(task) = value.get("task").filter(|task| matches!(task, Value::Object(_))) {
+        out.push((0, task.clone()));
+    }
+    out
+}
+
+fn render_tasks(value: &Value) {
+    let rows = task_rows(value);
+    if rows.is_empty() {
+        println!("No tasks found");
+        return;
+    }
+    println!("Tasks ({}):", rows.len());
+    for (depth, item) in rows {
+        let pad = "  ".repeat(depth);
+        let assigned = match item.get("assigned_agent_id") {
+            Some(Value::String(agent)) if !agent.is_empty() => agent.clone(),
+            _ => "(unassigned)".to_string(),
+        };
+        println!(
+            "{pad}  [{}] {} \u{2014} {assigned}",
+            py_get(&item, "status", "unknown"),
+            py_get(&item, "id", "?")
+        );
+        if truthy(item.get("description")) {
+            println!("{pad}    {}", py_truncate(item.get("description"), 60));
+        }
+    }
+}
+
+fn render_available(value: &Value) {
+    let Some(items) = value.get("tasks").and_then(Value::as_array) else {
+        println!("No available tasks");
+        return;
+    };
+    if items.is_empty() {
+        println!("No available tasks");
+        return;
+    }
+    println!("Available tasks ({}):", items.len());
+    for item in items {
+        let desc = match item.get("description") {
+            Some(Value::Null) | None => String::new(),
+            found => py_truncate(found, 60),
+        };
+        println!("  {} \u{2014} {desc}", py_get(item, "id", "?"));
+    }
+}
+
+fn render_conflicts(value: &Value) {
+    let items = value.get("conflicts").and_then(Value::as_array).unwrap_or(&[]);
+    if items.is_empty() {
+        println!("No conflicts recorded");
+        return;
+    }
+    println!("Conflicts ({}):", items.len());
+    for item in items {
+        let path = py_get(item, "document_path", "?");
+        let holder = py_get(item, "agent_a", "?");
+        let requester = py_get(item, "agent_b", "?");
+        match item.get("conflict_type").and_then(Value::as_str) {
+            Some("lock_stolen") => println!("  {path}: {requester} stole lock from {holder}"),
+            Some("denied") => println!("  {path}: {requester} denied; held by {holder}"),
+            other => println!(
+                "  {path}: {} between {holder} and {requester}",
+                other.unwrap_or("conflict")
+            ),
+        }
+    }
+}
+
+fn render_intents(value: &Value) {
+    let Some(items) = value.get("intents").and_then(Value::as_array) else {
+        println!("No active work intents");
+        return;
+    };
+    if items.is_empty() {
+        println!("No active work intents");
+        return;
+    }
+    println!("{} active intent(s):", items.len());
+    for item in items {
+        println!(
+            "  {}: {} — {}",
+            text(item, "agent_id"),
+            text(item, "document_path"),
+            text(item, "intent")
+        );
+    }
+}
+
+fn render_leader(value: &Value, full: bool) {
+    let leader = value.get("leader");
+    if leader.map(|item| matches!(item, Value::Null)).unwrap_or(true) {
+        if full {
+            println!("No active coordinator leader");
+        } else {
+            println!("No active leader");
+        }
+        return;
+    }
+    let leader = leader.unwrap();
+    let holder = text(leader, "holder_id");
+    if full {
+        println!("Current leader: {holder}");
+        println!("  Lease: {}", text(leader, "lease_name"));
+        println!("  Expires: {}", raw(leader, "expires_at"));
+    } else {
+        println!("Leader: {holder} (expires {})", raw(leader, "expires_at"));
+    }
+}
+
+fn render_ha(value: &Value) {
+    let leader = value.get("leader");
+    if leader.map(|item| matches!(item, Value::Null)).unwrap_or(true) {
+        println!("No active coordinator lease");
+        return;
+    }
+    let leader = leader.unwrap();
+    println!("Coordinator lease:");
+    println!("  Lease: {}", text(leader, "lease_name"));
+    println!("  Holder: {}", text(leader, "holder_id"));
+    println!("  Acquired at: {}", raw(leader, "acquired_at"));
+    println!("  Expires at: {}", raw(leader, "expires_at"));
+}
+
+fn render_spawns(value: &Value, parent: &str) {
+    let items = value
+        .get("spawns")
+        .and_then(Value::as_array)
+        .map(|items| items.to_vec())
+        .unwrap_or_default();
+    if items.is_empty() {
+        println!("No pending spawns.");
+        return;
+    }
+    let now = crate::util::now();
+    println!("Pending spawns for {parent}:");
+    for item in items {
+        let marker = match item.get("status").and_then(Value::as_str) {
+            Some("expired") => " [EXPIRED]",
+            Some("registered") => " [REGISTERED]",
+            _ => "",
+        };
+        let age = match item.get("created_at").and_then(Value::as_f64) {
+            Some(created) => format!("{:.1}s", now - created),
+            None => "unknown".to_string(),
+        };
+        let desc: String = match item.get("description") {
+            Some(Value::String(text)) => text.chars().take(40).collect(),
+            _ => String::new(),
+        };
+        println!("  {}{marker}", py_get(&item, "task_id", "?"));
+        println!(
+            "    type={} | age={age} | desc={desc}",
+            py_get(&item, "subagent_type", "?")
+        );
+    }
+}
+
+fn render_dashboard(value: &Value) {
+    println!("{}", "=".repeat(60));
+    println!("CoordinationHub Dashboard");
+    println!("{}", "=".repeat(60));
+    let agents = value.get("agents").and_then(Value::as_array);
+    let locks = value.get("locks").and_then(Value::as_array);
+    let tasks = value.get("tasks").and_then(Value::as_array);
+    println!("\nAgents ({}):", agents.map(|i| i.len()).unwrap_or(0));
+    if let Some(items) = agents {
+        for item in items {
+            let stale = if item.get("stale").and_then(Value::as_bool) == Some(true) {
+                " (STALE)"
+            } else {
+                ""
+            };
+            println!("  {}: {}{stale}", text(item, "agent_id"), text(item, "status"));
+        }
+    }
+    println!("\nLocks ({}):", locks.map(|i| i.len()).unwrap_or(0));
+    if locks.map(|i| i.is_empty()).unwrap_or(true) {
+        println!("  (none)");
+    } else if let Some(items) = locks {
+        for item in items {
+            println!(
+                "  {} — {} ({})",
+                text(item, "document_path"),
+                text(item, "locked_by"),
+                text(item, "lock_type")
+            );
+        }
+    }
+    println!("\nTasks ({}):", tasks.map(|i| i.len()).unwrap_or(0));
+    if tasks.map(|i| i.is_empty()).unwrap_or(true) {
+        println!("  (none)");
+    } else if let Some(items) = tasks {
+        for item in items {
+            println!("  [{}] {}", text(item, "status"), text(item, "id"));
+        }
+    }
+    println!("{}", "═".repeat(60));
+}
+
+fn text(value: &Value, key: &str) -> String {
+    value
+        .get(key)
+        .and_then(Value::as_str)
+        .unwrap_or("")
+        .to_string()
+}
+
+fn num(value: &Value, key: &str) -> i64 {
+    value.get(key).and_then(Value::as_i64).unwrap_or(0)
+}
+
+fn raw(value: &Value, key: &str) -> String {
+    value
+        .get(key)
+        .map(crate::json::dumps)
+        .unwrap_or_else(|| "null".into())
+}
+
+fn id_list(value: &Value, key: &str) -> String {
+    value
+        .get(key)
+        .and_then(Value::as_array)
+        .map(|items| {
+            items
+                .iter()
+                .filter_map(|item| {
+                    item.as_str()
+                        .or_else(|| item.get("agent_id").and_then(Value::as_str))
+                })
+                .collect::<Vec<_>>()
+                .join(", ")
+        })
+        .unwrap_or_default()
+}
+
+fn satisfied_flag(value: Option<&Value>) -> bool {
+    match value {
+        Some(Value::Bool(flag)) => *flag,
+        Some(Value::Int(n)) => *n != 0,
+        Some(Value::Float(n)) => *n != 0.0,
+        _ => false,
+    }
+}
+
+fn py_seq(value: &Value, key: &str) -> String {
+    let Some(Value::Array(items)) = value.get(key) else {
+        return "(none)".into();
+    };
+    if items.is_empty() {
+        return "(none)".into();
+    }
+    let body = items
+        .iter()
+        .map(|item| match item {
+            Value::String(text) => format!("'{}'", text.replace('\'', "\\'")),
+            other => crate::json::dumps(other),
+        })
+        .collect::<Vec<_>>()
+        .join(", ");
+    format!("[{body}]")
+}
+
+fn list_or_none(value: &Value, key: &str) -> String {
+    let items = value
+        .get(key)
+        .and_then(Value::as_array)
+        .map(|rows| {
+            rows.iter()
+                .filter_map(Value::as_str)
+                .collect::<Vec<_>>()
+                .join(", ")
+        })
+        .unwrap_or_default();
+    if items.is_empty() {
+        "(none)".into()
+    } else {
+        items
+    }
+}
+
+fn join_strings(value: &Value, key: &str) -> String {
+    value
+        .get(key)
+        .and_then(Value::as_array)
+        .map(|items| {
+            items
+                .iter()
+                .filter_map(Value::as_str)
+                .collect::<Vec<_>>()
+                .join(", ")
+        })
+        .unwrap_or_default()
+}
+
+fn py_bool(value: bool) -> &'static str {
+    if value {
+        "True"
+    } else {
+        "False"
+    }
+}

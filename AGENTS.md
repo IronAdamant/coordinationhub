@@ -8,6 +8,36 @@ CoordinationHub externalizes the coordination bottleneck for multi-agent coding 
 
 Zero third-party dependencies in core. Works standalone or alongside Stele, Chisel, and Trammel.
 
+## Choosing groups
+
+CoordinationHub's MCP tools come in groups, and the agent working on a project picks the ones it needs. Put one line per tool in the first fenced block whose info string is `agent-tools` in the project's `AGENTS.md` (project root: `--project-root`, `COORDINATIONHUB_PROJECT_ROOT`, the nearest folder with `.git`, else the current directory). Use `coordinationhub: tools <groups>` to keep only those (plus `core`) or `coordinationhub: disable <groups>` to hide some. The server rereads the file on the next request and the client refetches the tool list, so no restart is needed. `COORDINATIONHUB_TOOLS` / `COORDINATIONHUB_DISABLE` in the client's `env` override the matching line. A mistake in the file is reported in the `initialize` instructions and by `status`; it never stops the server.
+
+CoordinationHub is the suite's owner for `locks`, `tasks` and `messages`. When it runs, keep those here and switch them off in the other tools; when it does not need them, switch them off here instead.
+
+| Group | For | Turn it off when |
+| --- | --- | --- |
+| `core` | register, heartbeat, deregister, list agents, status | never (always on) |
+| `locks` | file locks, the coordinator lease, work intents, `who` claims | one agent works on the project, or every agent has its own worktree |
+| `tasks` | the shared task board: dependencies, assignment, waits, failures | one agent works alone, or Trammel's step queue already hands out the work |
+| `messages` | messages, broadcasts, handoffs, change notifications | agents never need to talk while they work |
+| `spawn` | the sub-agent spawn registry | the client tracks sub-agents itself (Claude Code's Task tool with the hook) |
+| `agents` | lineage, agent status, the file-to-agent map | you do not inspect who spawned whom |
+| `diagnostics` | project scan, coordination spec, assessment | you do not use a coordination spec |
+
+The lines below go inside a block fenced with three backticks and the info string `agent-tools`. Several agents or sessions sharing one checkout (CoordinationHub owns locks, tasks and messages):
+
+```text
+coordinationhub: tools locks, tasks, messages
+trammel: disable locks
+chisel: disable locks
+```
+
+One agent working alone:
+
+```text
+coordinationhub: tools tasks
+```
+
 ## Architecture
 
 <!-- GEN:directory-tree -->
@@ -156,7 +186,7 @@ The layering review documented in `findings/post_opus_review_5_followups/03` dec
 
 The project's older "every file ≤ 500 code LOC" rule was a single global cap. After T6.22 collapsed twelve mixins into a composed engine, `core.py` ended up as a deliberate facade pile (one one-liner per delegated subsystem method) which is genuinely larger than 500 code-LOC and *should* stay that way for readability. The policy below replaces the flat cap with explicit tiers so the discipline still matches reality.
 
-**Tiered code-LOC caps** (where "code-LOC" = non-blank, non-comment lines, the same metric `scripts/gen_docs.py` computes):
+**Tiered code-LOC caps** (where "code-LOC" = non-blank, non-comment lines, the same metric `examples/gen_docs.rs` computes):
 
 | Tier | Files | Cap | Rationale |
 |------|-------|-----|-----------|
@@ -192,10 +222,10 @@ To regenerate after changing tests:
 ```bash
 pip install -e '.[dev]'
 pytest --cov=coordinationhub --cov-report=json --cov-branch
-python scripts/gen_docs.py
+cargo run --release --example gen_docs
 ```
 
-When `coverage.json` is missing the table renders a one-line placeholder — `gen_docs.py --check` does not require the dev extra to pass.
+When `coverage.json` is missing the table renders a one-line placeholder — `gen_docs --check` does not require the dev extra to pass.
 
 <!-- GEN:dispatch-coverage -->
 _No `coverage.json` found. Run `pytest --cov=coordinationhub --cov-report=json --cov-branch` then `python scripts/gen_docs.py` to regenerate this table._

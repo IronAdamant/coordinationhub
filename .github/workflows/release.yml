@@ -1,109 +1,94 @@
-name: Release (GitHub + PyPI)
+# Builds release binaries and a checksum file when a tag is pushed.
+# Pull requests do not run this workflow. Do not push a tag from a pull request.
+name: Release
 
 on:
   push:
-    tags:
-      - 'v*'
-  workflow_dispatch:     # Manually (re)publish an existing tag, e.g. after a PyPI outage
-    inputs:
-      tag:
-        description: 'Existing release tag to (re)publish (e.g. v0.8.0)'
-        required: true
-        type: string
+    tags: ["v*"]
 
-# Single deliberate exception to the zero-third-party-actions rule (maintainer
-# decision, 2026-06-11): PyPI publishing uses the official pypa/gh-action-pypi-publish,
-# pinned to a commit SHA. The previous hand-rolled curl mint-token + twine step
-# was replaced because the official action is the supported trusted-publishing
-# path. All other steps still use only pre-installed tools.
-#
-# This single workflow handles the full release:
-# 1. Build sdist + wheel
-# 2. Create GitHub Release + attach artifacts
-# 3. Publish those exact artifacts to PyPI via OIDC Trusted Publishing
+permissions:
+  contents: write
 
 jobs:
-  create-release:
-    runs-on: ubuntu-latest
-    permissions:
-      contents: write
-      id-token: write
-
+  build:
+    name: ${{ matrix.asset }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            target: x86_64-unknown-linux-gnu
+            asset: coordinationhub-linux-x64
+          - os: ubuntu-24.04-arm
+            target: aarch64-unknown-linux-gnu
+            asset: coordinationhub-linux-arm64
+          - os: macos-latest
+            target: aarch64-apple-darwin
+            asset: coordinationhub-macos-arm64
+          - os: macos-15-intel
+            target: x86_64-apple-darwin
+            asset: coordinationhub-macos-x64
+          - os: windows-latest
+            target: x86_64-pc-windows-msvc
+            asset: coordinationhub-windows-x64
     steps:
-      - name: Checkout at the exact tag
-        env:
-          REPO: ${{ github.repository }}
-          TAG: ${{ inputs.tag || github.ref_name }}
-        run: |
-          set -euxo pipefail
-          git init -q
-          git config --global --add safe.directory "$PWD"
-          git remote add origin "https://github.com/${REPO}.git"
-          git -c protocol.version=2 fetch --depth=1 origin "refs/tags/${TAG}"
-          git checkout --force FETCH_HEAD
-
-      - name: Select Python 3.12 from tool cache
+      - uses: actions/checkout@v4
+      - name: The tag must match the Cargo.toml version
+        shell: bash
         run: |
           set -euo pipefail
-          PY_DIR=$(ls -d /opt/hostedtoolcache/Python/3.12.*/x64 2>/dev/null | sort -V | tail -1)
-          if [ -z "$PY_DIR" ] || [ ! -x "$PY_DIR/bin/python" ]; then
-            echo "::error::Python 3.12 not found in tool cache"
+          version="$(grep -m1 '^version = ' Cargo.toml | cut -d'"' -f2)"
+          if [ "v${version}" != "${GITHUB_REF_NAME}" ]; then
+            echo "tag ${GITHUB_REF_NAME} does not match Cargo.toml version ${version}"
             exit 1
           fi
-          echo "$PY_DIR/bin" >> "$GITHUB_PATH"
-          "$PY_DIR/bin/python" --version
-
-      - name: Build sdist and wheel
+      - uses: dtolnay/rust-toolchain@1.83.0
+        with:
+          targets: ${{ matrix.target }}
+      - name: Build
+        run: cargo build --release --locked --target ${{ matrix.target }}
+      - name: Pack
+        shell: bash
         run: |
           set -euo pipefail
-          pip install --disable-pip-version-check build
-          python -m build
-          ls -lh dist/
-
-      - name: Create or update GitHub Release + attach artifacts
-        env:
-          GH_TOKEN: ${{ github.token }}
-          TAG: ${{ inputs.tag || github.ref_name }}
-          REPO: ${{ github.repository }}
-        run: |
-          set -euo pipefail
-
-          TITLE="${TAG} — $(git log -1 --pretty=%s || echo 'Release')"
-
-          if gh release view "$TAG" --repo "$REPO" >/dev/null 2>&1; then
-            echo "Release $TAG already exists — updating assets (idempotent re-run)"
-            gh release upload "$TAG" --repo "$REPO" --clobber dist/*.tar.gz dist/*.whl || true
+          ext=""
+          if [ "${{ runner.os }}" = "Windows" ]; then ext=".exe"; fi
+          mkdir -p "dist/${{ matrix.asset }}"
+          cp "target/${{ matrix.target }}/release/coordinationhub${ext}" "dist/${{ matrix.asset }}/"
+          tar -C dist -czf "dist/${{ matrix.asset }}.tar.gz" "${{ matrix.asset }}"
+          if command -v sha256sum >/dev/null; then
+            (cd dist && sha256sum "${{ matrix.asset }}.tar.gz" > "${{ matrix.asset }}.sha256")
           else
-            gh release create "$TAG" \
-              --repo "$REPO" \
-              --title "$TITLE" \
-              --generate-notes \
-              --verify-tag \
-              dist/*.tar.gz \
-              dist/*.whl
-            echo "Created GitHub Release $TAG with attached artifacts."
+            (cd dist && shasum -a 256 "${{ matrix.asset }}.tar.gz" > "${{ matrix.asset }}.sha256")
           fi
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.asset }}
+          path: |
+            dist/${{ matrix.asset }}.tar.gz
+            dist/${{ matrix.asset }}.sha256
 
-          gh release view "$TAG" --repo "$REPO" --json assets --jq '.assets[].name'
-
-  publish-pypi:
-    needs: create-release
+  checksums:
+    name: SHA256SUMS
+    needs: build
     runs-on: ubuntu-latest
-    environment: pypi
-    permissions:
-      id-token: write
-      contents: read
-
     steps:
-      - name: Download the GitHub Release artifacts (exact bytes that were attached)
-        env:
-          GH_TOKEN: ${{ github.token }}
-          REPO: ${{ github.repository }}
-          TAG: ${{ inputs.tag || github.ref_name }}
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+      - name: Combine checksums
         run: |
           set -euo pipefail
-          gh release download "$TAG" --repo "$REPO" --dir dist
-          ls -lh dist/
-
-      - name: Publish to PyPI (official PyPA action, OIDC trusted publishing)
-        uses: pypa/gh-action-pypi-publish@cef221092ed1bacb1cc03d23a2d87d1d172e277b  # v1.14.0
+          cd dist
+          cat *.sha256 | sort > SHA256SUMS
+          sha256sum -c SHA256SUMS
+      - name: Publish the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          tag="${GITHUB_REF_NAME}"
+          notes="CoordinationHub ${tag}. Check SHA256SUMS before use. Binaries: linux x64, linux arm64, macOS x64, macOS arm64, Windows x64."
+          gh release create "$tag" dist/*.tar.gz dist/SHA256SUMS --title "$tag" --notes "$notes"

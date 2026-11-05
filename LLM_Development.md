@@ -1,5 +1,41 @@
 # LLM_Development.md — CoordinationHub
 
+## 2026-11-05 — Fifth verification
+
+- The command line runs a port of CPython 3.12 argparse over tables taken from the 0.8.0 parser: unique long-flag prefixes, choices and int/float errors naming the value, `expected one argument` for a dash-led value, every stray value in `unrecognized arguments`, and help wrapped to `COLUMNS` (19,000 help texts across 250 widths match Python 3.12).
+- Ruling applied: match function, fix 0.8.0's bugs. The six readable commands that exited with `Error: 'field'` print their rows; claim, wait-for-task, scan, failure history and spawn descriptions report what happened; MCP tool errors are `isError` with the cause (a duplicate task id says it already exists); `3.0` counts as an integer.
+- Lease ttl keeps the caller's number type, negative limits return every row, a negative prune max removes every row, handoff messages carry `handoff_type`, a refused lease shows holder and expiry.
+- Windows: paths follow `os.path.realpath` (no `\\?\` prefix, project-relative paths before a file exists), local time comes from kernel32 (the GNU build no longer mixes C runtimes), JSON floats follow `repr` including ties to even.
+- Python tooling moved to std-only Rust examples (`parity`, `bench`, `check_zero_deps`, `check_no_todos`); `status_450` times 450 status calls again; `tests/multi_agent.rs` drives three sessions on one hub.
+
+## 2026-11-05 — Fourth verification
+
+- Coordination events follow the 0.8.0 publish sites, so prune counts match. A subtask does not emit `task.created`.
+- Descendant rows are appended instead of rewritten, and a clean read does not hash the whole store. A 450-deep chain and the status calls after it are faster than Python.
+- Per-command help is the argparse text, unknown flags exit 2, and a negative flag value is kept.
+
+## 2026-11-05 — Third verification
+
+- Notification waits use the moment the wait opened, so a stale row does not count as new.
+- An assessment filter that matches nobody scores 0. Lease ttl in JSON is a whole number. Prune does not add a key Python omits, and the CLI count includes coordination events.
+- Prose mode follows the 0.8.0 printers, including the six commands that exit 1 with `Error: 'field'`. Each command has its own help text.
+- Redaction applies the Python patterns in order, with a word boundary on both sides.
+
+## 2026-11-04 — Verification fixes
+
+- The frozen-clock harness result is withdrawn. The harness now drives unmodified Python 0.8.0 and Rust over stdio with a live clock.
+- The store lock is per call. Wait tools sleep. Handoffs, spawns, notifications, tasks, UTF-8, assessment, the dashboard stream, the hook, doctor, and the CLI commands follow the Python shapes except the differences listed in `MIGRATION.md`.
+- `tests/behavior.rs` covers sharing, waits, handoffs, unicode, and `who`.
+- Benchmarks in `BENCHMARKS.md` are stdio medians from this machine. Rust was faster on every row.
+
+## 2026-11-04 — Rust rewrite
+
+- Kept Python 0.8.0 on `python-legacy` before editing.
+- Replaced the runtime with a std-only Rust binary: MCP, CLI, HTTP dashboard, append-only journal.
+- Added `who` (claim, handoff, release, compact status). Relatum and stele-context stay the document and the code map.
+
+
+
 **Version:** <!-- GEN:version -->0.8.0<!-- /GEN -->
 **Last updated:** 2026-06-11
 

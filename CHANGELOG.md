@@ -7,6 +7,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.0.0] - 2026-11-05
+
+Rust rewrite of the Python 0.8.0 program. The Python tree remains on `python-legacy`.
+
+### Added
+- Stdio MCP server, HTTP dashboard server, and CLI, with no Cargo crates
+- Every 0.8.0 CLI command and flag, parsed like Python 3.12's argparse (prefixes, typed and choice errors, help wrapped to the terminal), plus `init --monitor-skill`, the `serve-sse` browser launch and `auto-start-dashboard`
+- Parity harness and benchmark gate as std-only examples (`examples/parity.rs`, `examples/bench.rs`), with `check_zero_deps` and `check_no_todos`; `gen_docs`, `propose_stale_phrases` and `update_dispatch_floor` are ported the same way
+- `who` for a compact picture plus claim, handoff, and release of a work area
+- `COORDINATIONHUB_TOOLS` / `COORDINATIONHUB_DISABLE` to switch MCP tool groups off (default surface unchanged)
+- Release workflow that builds linux x64, linux arm64, macOS x64, macOS arm64, and Windows x64, with `SHA256SUMS`
+
+### Changed
+- On-disk state is `coordination.jsonl` instead of `coordination.db`. See `MIGRATION.md`.
+- Where 0.8.0 crashed, hid a tool error, or printed the wrong result, the working result is returned; `MIGRATION.md` lists each case.
+
 ## [0.8.0] - 2026-06-11
 
 **Final release.** Development is paused — see the README retrospective.
@@ -48,7 +64,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 - Combined GitHub Release + PyPI publishing workflow
 
-[Unreleased]: https://github.com/IronAdamant/coordinationhub/compare/v0.8.0...HEAD
+[Unreleased]: https://github.com/IronAdamant/coordinationhub/compare/v1.0.0...HEAD
+[1.0.0]: https://github.com/IronAdamant/coordinationhub/compare/v0.8.0...v1.0.0
 [0.8.0]: https://github.com/IronAdamant/coordinationhub/compare/v0.7.12...v0.8.0
 [0.7.12]: https://github.com/IronAdamant/coordinationhub/compare/v0.7.11...v0.7.12
 [0.7.11]: https://github.com/IronAdamant/coordinationhub/compare/v0.7.10...v0.7.11

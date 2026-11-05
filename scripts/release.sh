@@ -49,9 +49,9 @@ echo
 echo -e "${YELLOW}Running pre-release validation...${NC}"
 
 echo "→ Checking documentation is up to date..."
-if ! python scripts/gen_docs.py --check >/dev/null 2>&1; then
+if ! cargo run --quiet --release --example gen_docs -- --check >/dev/null 2>&1; then
   echo -e "${RED}ERROR: Documentation is out of date.${NC}"
-  echo "Please run: python scripts/gen_docs.py"
+  echo "Please run: cargo run --release --example gen_docs"
   echo "Then commit the changes before releasing."
   exit 1
 fi
@@ -95,7 +95,7 @@ echo -e "${GREEN}✓ Updated version to $VERSION${NC}"
 
 # --- 4. Regenerate docs ---
 echo "→ Regenerating documentation..."
-python scripts/gen_docs.py
+cargo run --quiet --release --example gen_docs
 echo -e "${GREEN}✓ Documentation regenerated${NC}"
 
 # --- 5. Changelog handling ---
