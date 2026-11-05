@@ -17,7 +17,8 @@ const VALID_STATUS: &[&str] = &[
     "in_progress",
     "pending",
 ];
-const COORDINATOR: &str = "COORDINATOR_LEADER";
+/// The one lease name, as 0.8.0 stores it.
+pub const COORDINATOR: &str = "COORDINATOR_LEADER";
 const DEFAULT_LEASE_TTL: f64 = 10.0;
 
 fn max_description() -> i64 {
@@ -1190,6 +1191,20 @@ pub fn refresh_lease(state: &mut State, agent_id: &str) -> Value {
             ("error", json::s("Not the current lease holder")),
         ]);
     }
+    // An expired lease is held by nobody: refreshing it would hand back
+    // leadership that another agent may already have acted without.
+    if lease.expires_at <= now {
+        let expired = json::dumps(&json::f(lease.expires_at));
+        return json::obj(vec![
+            ("refreshed", json::b(false)),
+            (
+                "error",
+                json::s(format!(
+                    "Lease expired at {expired}; call acquire_coordinator_lease to take it again"
+                )),
+            ),
+        ]);
+    }
     lease.acquired_at = now;
     lease.expires_at = now + lease.ttl;
     let expires = lease.expires_at;
@@ -1238,8 +1253,10 @@ pub fn release_lease_tool(state: &mut State, agent_id: &str) -> Value {
     ])
 }
 
+/// The live leader. An expired lease counts as no leader, as 0.8.0's
+/// `get_lease_holder` documents (its query did not check the expiry).
 pub fn leader(state: &State) -> Value {
-    match any_lease(state) {
+    match live_lease(state) {
         Some(lease) => json::obj(vec![("leader", lease_value(lease))]),
         None => json::obj(vec![("leader", json::null())]),
     }
@@ -1251,13 +1268,6 @@ fn live_lease(state: &State) -> Option<&crate::db::Lease> {
         .leases
         .iter()
         .find(|lease| lease.lease_name == COORDINATOR && lease.expires_at > now)
-}
-
-fn any_lease(state: &State) -> Option<&crate::db::Lease> {
-    state
-        .leases
-        .iter()
-        .find(|lease| lease.lease_name == COORDINATOR)
 }
 
 fn lease_value(lease: &crate::db::Lease) -> Value {

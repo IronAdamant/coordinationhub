@@ -378,7 +378,7 @@ pub fn deregister(state: &mut State, agent_id: &str) -> Value {
         state.record_event(
             "lease.released",
             json::obj(vec![
-                ("lease_name", json::s("COORDINATOR_LEADER")),
+                ("lease_name", json::s(crate::act_board::COORDINATOR)),
                 ("holder_id", json::s(agent_id)),
             ]),
         );
@@ -396,11 +396,14 @@ pub fn deregister(state: &mut State, agent_id: &str) -> Value {
     ])
 }
 
+/// Drops the coordinator lease when this agent holds it, as 0.8.0's
+/// deregistration does. The name must be the stored one,
+/// `COORDINATOR_LEADER`; matching `"coordinator"` left the lease held.
 fn release_lease(state: &mut State, agent_id: &str) -> bool {
     let before = state.leases.len();
-    state
-        .leases
-        .retain(|lease| !(lease.lease_name == "coordinator" && lease.holder_id == agent_id));
+    state.leases.retain(|lease| {
+        !(lease.lease_name == crate::act_board::COORDINATOR && lease.holder_id == agent_id)
+    });
     before != state.leases.len()
 }
 

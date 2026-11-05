@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.1.1] - 2026-11-05
+
+From the Specula live test (B12).
+
+### Fixed
+- `deregister_agent` releases the coordinator lease its agent holds (`lease_released: true`), as 0.8.0 does. It matched the lease name `coordinator` instead of the stored `COORDINATOR_LEADER`, so the lease stayed held until its TTL ran out
+- An expired coordinator lease has no holder: `manage_leases` `get`, `get-leader`, `leader-status` and `ha-dashboard` show no leader, and `refresh` of an expired lease is refused with a pointer to `acquire_coordinator_lease`. 0.8.0 showed a lapsed leader indefinitely (see `MIGRATION.md`)
+
 ## [1.1.0] - 2026-11-05
 
 Changes for agents, from a multi-agent run on one store. `MIGRATION.md` lists each difference from 0.8.0.
@@ -84,7 +92,8 @@ Rust rewrite of the Python 0.8.0 program. The Python tree remains on `python-leg
 ### Added
 - Combined GitHub Release + PyPI publishing workflow
 
-[Unreleased]: https://github.com/IronAdamant/coordinationhub/compare/v1.1.0...HEAD
+[Unreleased]: https://github.com/IronAdamant/coordinationhub/compare/v1.1.1...HEAD
+[1.1.1]: https://github.com/IronAdamant/coordinationhub/compare/v1.1.0...v1.1.1
 [1.1.0]: https://github.com/IronAdamant/coordinationhub/compare/v1.0.0...v1.1.0
 [1.0.0]: https://github.com/IronAdamant/coordinationhub/compare/v0.8.0...v1.0.0
 [0.8.0]: https://github.com/IronAdamant/coordinationhub/compare/v0.7.12...v0.8.0

@@ -1,5 +1,10 @@
 # LLM_Development.md — CoordinationHub
 
+## 2026-11-05 — 1.1.1 lease fixes (Specula B12)
+
+- Deregistration matched the lease name `coordinator`; the stored name is `COORDINATOR_LEADER` (`act_board::COORDINATOR`, now shared). 0.8.0 released the lease, so this restores parity; the harness's new `lease-holder` scenario fails on 1.1.0.
+- `leader()` returns only a live lease and `refresh` refuses an expired one. 0.8.0 showed and renewed lapsed leases although its `get_lease_holder` docstring says otherwise; listed in `MIGRATION.md`. `tests/lease_lifecycle.rs` covers MCP and the three CLI leader views.
+
 ## 2026-11-05 — 1.1.0 agent improvements
 
 - `assign_task` checks the holder and writes in one call under the journal lock: a second agent is refused with the holder, status and next step (`unassigned_only`, ask, or `force`). 16 CLI processes claiming one task have exactly one winner.

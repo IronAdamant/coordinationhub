@@ -51,6 +51,8 @@ const ALLOWED: &[&str] = &[
     "explicit handoff tools",
     "assign_task refuses a held task",
     "lease get without agent_id",
+    "expired lease reads as no leader",
+    "refresh of an expired lease is refused",
     "version flag and assign-task --force",
 ];
 
@@ -750,6 +752,21 @@ fn mcp_scenarios(sides: &Sides, ledger: &mut Ledger) {
             ],
         ),
         (
+            // The holder's deregistration releases the lease, as in 0.8.0;
+            // then a lease whose TTL has run out (ttl 0).
+            "lease-holder",
+            vec![
+                reg("oud_1"),
+                ("acquire_coordinator_lease", obj(vec![("agent_id", s("oud_1")), ("ttl", json::i(300))])),
+                ("deregister_agent", obj(vec![("agent_id", s("oud_1"))])),
+                ("manage_leases", obj(vec![("action", s("get")), ("agent_id", s("oud_1"))])),
+                ("acquire_coordinator_lease", obj(vec![("agent_id", s("viol")), ("ttl", json::i(0))])),
+                ("manage_leases", obj(vec![("action", s("get")), ("agent_id", s("expiry-check"))])),
+                // Documented: Rust refuses, 0.8.0 renews. Last.
+                ("manage_leases", obj(vec![("action", s("refresh")), ("agent_id", s("viol"))])),
+            ],
+        ),
+        (
             "claims",
             vec![
                 reg("fife"), reg("harp"),
@@ -815,6 +832,18 @@ fn mcp_scenarios(sides: &Sides, ledger: &mut Ledger) {
                 rust_error: false,
                 rust_prefix: "{\n  \"assigned\": false,\n  \"reason\": \"already_assigned\",\n  \"task_id\": \"SOLO-1\",\n  \"assigned_agent_id\": \"fife\"",
                 python_prefix: "{\n  \"assigned\": true",
+            }),
+            "manage_leases" if args.get("agent_id").and_then(Value::as_str) == Some("expiry-check") => Some(Documented {
+                title: "expired lease reads as no leader",
+                rust_error: false,
+                rust_prefix: "{\n  \"leader\": null\n}",
+                python_prefix: "{\n  \"leader\": {\n    \"lease_name\": \"COORDINATOR_LEADER\",\n    \"holder_id\": \"viol\"",
+            }),
+            "manage_leases" if args.get("action").and_then(Value::as_str) == Some("refresh") && args.get("agent_id").and_then(Value::as_str) == Some("viol") => Some(Documented {
+                title: "refresh of an expired lease is refused",
+                rust_error: false,
+                rust_prefix: "{\n  \"refreshed\": false,\n  \"error\": \"Lease expired at ",
+                python_prefix: "{\n  \"refreshed\": true",
             }),
             "manage_leases" if args.get("agent_id").is_none() => Some(Documented {
                 title: "lease get without agent_id",
