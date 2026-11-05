@@ -611,8 +611,10 @@ pub fn lineage(state: &State, agent_id: &str) -> Value {
 }
 
 pub fn worktree_of(project_root: Option<&Path>, explicit: Option<&str>) -> String {
-    if let Some(path) = explicit {
-        return util::path_str(Path::new(path));
+    // Python stores `worktree_root or effective_root`: the caller's text as
+    // given, and the resolved project root when it is absent or empty.
+    if let Some(path) = explicit.filter(|path| !path.is_empty()) {
+        return path.to_string();
     }
     if let Some(root) = project_root {
         return util::path_str(root);

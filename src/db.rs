@@ -1982,10 +1982,7 @@ fn decode_ce(v: &Value) -> Result<ClaimEvent, String> {
 }
 
 pub fn home_storage() -> PathBuf {
-    let home = std::env::var("HOME")
-        .or_else(|_| std::env::var("USERPROFILE"))
-        .unwrap_or_else(|_| ".".into());
-    PathBuf::from(home).join(".coordinationhub")
+    util::home_dir().join(".coordinationhub")
 }
 
 pub fn resolve_storage(storage_dir: Option<&Path>, project_root: Option<&Path>) -> PathBuf {
