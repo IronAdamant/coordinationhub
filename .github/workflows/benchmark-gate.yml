@@ -28,4 +28,4 @@ jobs:
         env:
           COORDINATIONHUB_BENCH_LOOPS: "200"
           COORDINATIONHUB_BENCH_RUNS: "3"
-        run: python3 parity/bench.py target/release/coordinationhub
+        run: cargo run --locked --release --example bench -- target/release/coordinationhub --python python
