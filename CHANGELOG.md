@@ -7,6 +7,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.1.0] - 2026-11-05
+
+Changes for agents, from a multi-agent run on one store. `MIGRATION.md` lists each difference from 0.8.0.
+
+### Added
+- `acknowledge_handoff`, `complete_handoff` and `cancel_handoff` MCP tools (54 tools). The `wait_for_handoff` modes still work
+- `assign_task` `force` argument and CLI `assign-task --force` to reassign on purpose
+- `get_available_tasks` `unassigned_only` argument: only tasks an idle agent can claim
+- `coordinationhub --version` / `-V`
+
+### Changed
+- `assign_task` refuses a task another agent holds, in one step under the store lock, so concurrent claims have exactly one winner; the refusal names the holder and the next step. The CLI exits 4 when refused and 3 for a missing task
+- MCP tool replies are compact JSON with UTF-8 text: 23% fewer reply bytes on the 39-call multi-agent run
+- `manage_leases` action `get` no longer needs `agent_id`
+- An unknown tool name gets up to three close matches instead of the whole tool list
+- `tools_version` is `1.1.0`
+
+### Fixed
+- The release workflow publishes without a checkout (`gh release --repo`) and replaces the assets of an existing release
+
 ## [1.0.0] - 2026-11-05
 
 Rust rewrite of the Python 0.8.0 program. The Python tree remains on `python-legacy`.
@@ -64,7 +84,8 @@ Rust rewrite of the Python 0.8.0 program. The Python tree remains on `python-leg
 ### Added
 - Combined GitHub Release + PyPI publishing workflow
 
-[Unreleased]: https://github.com/IronAdamant/coordinationhub/compare/v1.0.0...HEAD
+[Unreleased]: https://github.com/IronAdamant/coordinationhub/compare/v1.1.0...HEAD
+[1.1.0]: https://github.com/IronAdamant/coordinationhub/compare/v1.0.0...v1.1.0
 [1.0.0]: https://github.com/IronAdamant/coordinationhub/compare/v0.8.0...v1.0.0
 [0.8.0]: https://github.com/IronAdamant/coordinationhub/compare/v0.7.12...v0.8.0
 [0.7.12]: https://github.com/IronAdamant/coordinationhub/compare/v0.7.11...v0.7.12

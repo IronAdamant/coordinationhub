@@ -2,7 +2,7 @@
 
 A shared board for coding agents working on the same project. It records who is working, who holds which file, which tasks are open, claimed, done or handed off, and lets agents message and wait on each other. Agents use it through MCP (stdio) or the command line; a small HTTP server shows a live dashboard.
 
-It is one Rust binary built from the standard library only: no crates, nothing to install at run time. Version 1.0.0 replaces the Python 0.8.0 program (kept on the `python-legacy` branch) with the same tools, commands and replies; `MIGRATION.md` lists the few deliberate differences.
+It is one Rust binary built from the standard library only: no crates, nothing to install at run time. It replaces the Python 0.8.0 program (kept on the `python-legacy` branch) with the same tools, commands and replies; `MIGRATION.md` lists the deliberate differences. Version 1.1.0 makes task claims safe under concurrency, adds explicit handoff tools and sends compact replies (see the changelog). `coordinationhub --version` prints the installed version.
 
 ## Install
 
@@ -41,6 +41,7 @@ coordinationhub register worker-1 --parent-id planner
 coordinationhub create-task T-api planner "add retry to fetch()"
 coordinationhub create-task T-tests planner "test the retry path" --depends-on T-api
 coordinationhub assign-task T-api worker-1
+coordinationhub assign-task T-api planner           # refused: T-api is already assigned to worker-1 (exit 4)
 coordinationhub acquire-lock src/api.rs worker-1
 coordinationhub acquire-lock src/api.rs planner     # FAILED: src/api.rs is locked by worker-1 (exit 4)
 coordinationhub update-task-status T-api completed --summary "3 tries with backoff"
@@ -50,13 +51,15 @@ coordinationhub get-available-tasks                 # T-tests is open now
 
 Over MCP the same steps are `register_agent`, `create_task`, `assign_task`, `acquire_lock`, `update_task_status`, `release_lock` and `get_available_tasks`. Add `--json` to any command for machine-readable output; `coordinationhub <command> --help` lists every flag.
 
+An agent claims a task by assigning it to itself. The claim is checked and written in one step under the store lock, so when several agents claim the same task at once exactly one gets it and the others are told who holds it; `get_available_tasks` with `unassigned_only` lists only tasks nobody holds, and `force` reassigns on purpose. A handoff goes `broadcast` (with `handoff_targets`), `acknowledge_handoff` by each recipient, then `complete_handoff`; `wait_for_handoff` only waits or reads the status.
+
 ## How it works
 
 - **One store per project.** State is an append-only journal (`coordination.jsonl`). Each call takes a short file lock, reads lines written since its last call, applies the change and appends it, so any number of agent sessions, CLI calls and hooks share one board safely.
 - **Agents** register with an id and an optional parent, send heartbeats, and deregister; leaving releases their locks and re-parents their children.
 - **Locks** are exclusive or shared, for a whole file or a line range, with a TTL. A refused lock says who holds it and until when.
 - **Work**: tasks with priority, dependencies and subtasks, assignment and status, failure history and retries, work intents, and agent-to-agent dependencies.
-- **Talking**: direct messages, sibling broadcasts with acknowledgements, formal handoffs, change notifications, and wait tools that return as soon as the thing they wait for happens.
+- **Talking**: direct messages, sibling broadcasts with acknowledgements, formal handoffs, change notifications, and wait tools that return as soon as the thing they wait for happens. MCP replies are compact JSON.
 - **Leadership**: one coordinator lease with a TTL; a refused lease names the holder and its expiry.
 - **Hooks**: `coordinationhub hook` (written by `init`) registers a session, locks a file before Write or Edit, and notifies and releases afterwards.
 - **Dashboard**: `coordinationhub serve-sse` serves a live page at http://127.0.0.1:9898.
@@ -77,14 +80,14 @@ Measured on 5 November 2026 on a Windows 11 desktop: unmodified Python 0.8.0 (CP
 
 ## Tool groups
 
-The MCP server exposes 51 tools in seven groups. An agent that only needs part of them can switch the rest off in the client's `env` block; the CLI is not affected. `locks`, `tasks` and `messages` are the names the IronAdamant tools share for overlapping features, so one word means the same thing in every tool.
+The MCP server exposes 54 tools in seven groups. An agent that only needs part of them can switch the rest off in the client's `env` block; the CLI is not affected. `locks`, `tasks` and `messages` are the names the IronAdamant tools share for overlapping features, so one word means the same thing in every tool.
 
 | Group | Tools | Overlaps with |
 | --- | --- | --- |
 | `core` (always on) | `register_agent`, `heartbeat`, `deregister_agent`, `list_agents`, `status` | |
 | `locks` | `acquire_lock`, `release_lock`, `refresh_lock`, `get_lock_status`, `list_locks`, `admin_locks`, `wait_for_locks`, `get_conflicts`, `get_contention_hotspots`, `manage_work_intents`, `acquire_coordinator_lease`, `manage_leases`, `who` | Chisel locks, Trammel step claims |
 | `tasks` | `create_task`, `create_subtask`, `assign_task`, `update_task_status`, `query_tasks`, `get_available_tasks`, `wait_for_task`, `task_failures`, `manage_dependencies` | Trammel plans |
-| `messages` | `send_message`, `manage_messages`, `broadcast`, `acknowledge_broadcast`, `wait_for_broadcast_acks`, `wait_for_handoff`, `notify_change`, `get_notifications` | |
+| `messages` | `send_message`, `manage_messages`, `broadcast`, `acknowledge_broadcast`, `wait_for_broadcast_acks`, `acknowledge_handoff`, `complete_handoff`, `cancel_handoff`, `wait_for_handoff`, `notify_change`, `get_notifications` | |
 | `spawn` | `spawn_subagent`, `report_subagent_spawned`, `get_pending_spawns`, `await_subagent_registration`, `request_subagent_deregistration`, `is_subagent_stop_requested`, `await_subagent_stopped`, `await_agent` | |
 | `agents` | `get_agent_relations`, `get_agent_tree`, `get_agent_status`, `update_agent_status`, `get_file_agent_map` | |
 | `diagnostics` | `scan_project`, `load_coordination_spec`, `run_assessment` | |
@@ -97,10 +100,10 @@ The MCP server exposes 51 tools in seven groups. An agent that only needs part o
 "env": {"COORDINATIONHUB_DISABLE": "spawn,diagnostics"}
 ```
 
-A lean set for agents that coordinate files, tasks and messages (22 tools, about half the schema text: 17.6 KB of `tools/list` instead of 36.6 KB):
+A lean set for agents that coordinate files, tasks and messages (24 tools, about half the schema text: 18.9 KB of `tools/list` instead of 38.1 KB):
 
 ```json
-"env": {"COORDINATIONHUB_TOOLS": "acquire_lock,release_lock,list_locks,who,acquire_coordinator_lease,manage_leases,create_task,assign_task,update_task_status,get_available_tasks,query_tasks,wait_for_task,send_message,manage_messages,get_notifications,broadcast,wait_for_handoff"}
+"env": {"COORDINATIONHUB_TOOLS": "acquire_lock,release_lock,list_locks,who,acquire_coordinator_lease,manage_leases,create_task,assign_task,update_task_status,get_available_tasks,query_tasks,wait_for_task,send_message,manage_messages,get_notifications,broadcast,acknowledge_handoff,complete_handoff,wait_for_handoff"}
 ```
 
 ### Choosing groups
