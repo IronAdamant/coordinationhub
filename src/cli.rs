@@ -134,7 +134,17 @@ fn has(flags: &Flags, key: &str) -> bool {
 }
 
 fn run_serve_mcp(flags: Flags) -> i32 {
-    match mcp::serve(flags.storage, flags.project, &flags.namespace) {
+    // As in 0.8.0: the flags win, then COORDINATIONHUB_STORAGE_DIR and
+    // COORDINATIONHUB_PROJECT_ROOT (handy in MCP client configs).
+    let from_env = |name: &str| {
+        std::env::var(name)
+            .ok()
+            .filter(|value| !value.is_empty())
+            .map(PathBuf::from)
+    };
+    let storage = flags.storage.clone().or_else(|| from_env("COORDINATIONHUB_STORAGE_DIR"));
+    let project = flags.project.clone().or_else(|| from_env("COORDINATIONHUB_PROJECT_ROOT"));
+    match mcp::serve(storage, project, &flags.namespace) {
         Ok(()) => 0,
         Err(err) => {
             eprintln!("Error: {err}");
