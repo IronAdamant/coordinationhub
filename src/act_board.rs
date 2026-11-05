@@ -60,14 +60,6 @@ pub fn create_task(
         Some(items) if !items.is_empty() => json::dumps(&json::string_list(items)),
         _ => "[]".into(),
     };
-    state.record_event(
-        "task.created",
-        json::obj(vec![
-            ("task_id", json::s(task_id)),
-            ("parent_agent_id", json::s(parent_agent_id)),
-            ("description", json::s(&description)),
-        ]),
-    );
     state.tasks.push(Task {
         id: task_id.into(),
         parent_agent_id: parent_agent_id.into(),
@@ -92,6 +84,13 @@ pub fn create_task(
 
 pub fn assign_task(state: &mut State, task_id: &str, assigned: &str) -> Value {
     let Some(pos) = state.tasks.iter().position(|task| task.id == task_id) else {
+        state.record_event(
+            "task.assigned",
+            json::obj(vec![
+                ("task_id", json::s(task_id)),
+                ("assigned_agent_id", json::s(assigned)),
+            ]),
+        );
         return json::obj(vec![
             ("assigned", json::b(false)),
             ("reason", json::s("task_not_found")),
@@ -114,6 +113,13 @@ pub fn assign_task(state: &mut State, task_id: &str, assigned: &str) -> Value {
         }
     }
     upsert_task_text(state, assigned, Some(description), now);
+    state.record_event(
+        "task.assigned",
+        json::obj(vec![
+            ("task_id", json::s(task_id)),
+            ("assigned_agent_id", json::s(assigned)),
+        ]),
+    );
     json::obj(vec![
         ("assigned", json::b(true)),
         ("task_id", json::s(task_id)),
@@ -188,6 +194,24 @@ pub fn update_task(
         state.tasks[pos].error = Some(error);
     }
     let changed = prior != status;
+    if status == "completed" && changed {
+        state.record_event(
+            "task.completed",
+            json::obj(vec![
+                ("task_id", json::s(task_id)),
+                ("status", json::s("completed")),
+            ]),
+        );
+    }
+    if status == "failed" && changed {
+        state.record_event(
+            "task.failed",
+            json::obj(vec![
+                ("task_id", json::s(task_id)),
+                ("status", json::s("failed")),
+            ]),
+        );
+    }
     let mut satisfied = 0_i64;
     let mut failure = Value::Null;
     if status == "completed" && changed {
@@ -659,6 +683,7 @@ pub fn send_message(
     message_type: &str,
     payload: Option<&Value>,
     caller: Option<&str>,
+    publish: bool,
 ) -> Value {
     if let Some(caller) = caller {
         if caller != from {
@@ -676,15 +701,17 @@ pub fn send_message(
     let payload_json =
         payload.map(|value| truncate(Some(json::dumps(value)), max_message()).unwrap_or_default());
     let id = state.next("messages");
-    state.record_event(
-        "message.received",
-        json::obj(vec![
-            ("message_id", json::i(id)),
-            ("from_agent_id", json::s(from)),
-            ("to_agent_id", json::s(to)),
-            ("message_type", json::s(message_type)),
-        ]),
-    );
+    if publish {
+        state.record_event(
+            "message.received",
+            json::obj(vec![
+                ("message_id", json::i(id)),
+                ("from_agent_id", json::s(from)),
+                ("to_agent_id", json::s(to)),
+                ("message_type", json::s(message_type)),
+            ]),
+        );
+    }
     state.messages.push(Message {
         id,
         from_agent_id: from.into(),
@@ -966,6 +993,10 @@ pub fn manage_deps(
             if let Some(dep) = state.dependencies.iter_mut().find(|dep| dep.id == dep_id) {
                 dep.satisfied = 1;
                 dep.satisfied_at = Some(util::now());
+                state.record_event(
+                    "dependency.satisfied",
+                    json::obj(vec![("dep_id", json::i(dep_id))]),
+                );
                 json::obj(vec![
                     ("satisfied", json::b(true)),
                     ("dep_id", json::i(dep_id)),
@@ -1060,7 +1091,7 @@ fn dep_value(dep: &Dependency) -> Value {
     ])
 }
 
-pub fn acquire_lease(state: &mut State, agent_id: &str, ttl: Option<f64>) -> Value {
+pub fn acquire_lease(state: &mut State, agent_id: &str, ttl: Option<f64>, publish: bool) -> Value {
     let ttl = ttl.unwrap_or(DEFAULT_LEASE_TTL);
     let now = util::now();
     let expires = now + ttl;
@@ -1090,14 +1121,16 @@ pub fn acquire_lease(state: &mut State, agent_id: &str, ttl: Option<f64>) -> Val
             expires_at: expires,
         });
     }
-    state.record_event(
-        "lease.acquired",
-        json::obj(vec![
-            ("lease_name", json::s(COORDINATOR)),
-            ("holder_id", json::s(agent_id)),
-            ("ttl", json::f(ttl)),
-        ]),
-    );
+    if publish {
+        state.record_event(
+            "lease.acquired",
+            json::obj(vec![
+                ("lease_name", json::s(COORDINATOR)),
+                ("holder_id", json::s(agent_id)),
+                ("ttl", json::f(ttl)),
+            ]),
+        );
+    }
     json::obj(vec![
         ("acquired", json::b(true)),
         ("lease_name", json::s(COORDINATOR)),
@@ -1168,6 +1201,13 @@ pub fn release_lease_tool(state: &mut State, agent_id: &str) -> Value {
         ]);
     }
     state.leases.remove(pos);
+    state.record_event(
+        "lease.released",
+        json::obj(vec![
+            ("lease_name", json::s(COORDINATOR)),
+            ("holder_id", json::s(agent_id)),
+        ]),
+    );
     json::obj(vec![
         ("released", json::b(true)),
         ("lease_name", json::s(COORDINATOR)),
@@ -1219,7 +1259,15 @@ pub fn claim_leadership(state: &mut State, agent_id: &str, ttl: Option<f64>) -> 
             ("holder", holder),
         ]);
     }
-    let got = acquire_lease(state, agent_id, ttl);
+    let got = acquire_lease(state, agent_id, ttl, false);
+    state.record_event(
+        "lease.claimed",
+        json::obj(vec![
+            ("lease_name", json::s(COORDINATOR)),
+            ("holder_id", json::s(agent_id)),
+            ("ttl", json::f(ttl.unwrap_or(DEFAULT_LEASE_TTL))),
+        ]),
+    );
     json::obj(vec![
         ("claimed", json::b(true)),
         ("lease_name", json::s(COORDINATOR)),
@@ -1521,6 +1569,18 @@ pub fn broadcast(
         if !targets.is_empty() {
             let recorded = record_handoff(state, agent_id, targets, document_path, project_root);
             let id = recorded.get("handoff_id").cloned().unwrap_or(json::null());
+            if let Some(hid) = id.as_i64() {
+                state.record_event(
+                    "handoff.created",
+                    json::obj(vec![
+                        ("handoff_id", json::i(hid)),
+                        ("from_agent_id", json::s(agent_id)),
+                        ("to_agents", json::string_list(targets)),
+                        ("document_path", json::opt_str(document_path)),
+                        ("handoff_type", json::s("scope_transfer")),
+                    ]),
+                );
+            }
             return json::obj(vec![
                 ("handoff_id", id),
                 ("to_agents", json::string_list(targets)),
@@ -1574,8 +1634,18 @@ pub fn broadcast(
                 "broadcast_ack_request",
                 Some(&payload),
                 None,
+                false,
             );
         }
+        state.record_event(
+            "broadcast.created",
+            json::obj(vec![
+                ("broadcast_id", json::i(id)),
+                ("agent_id", json::s(agent_id)),
+                ("document_path", json::opt_str(document_path)),
+                ("pending_acks", json::string_list(&live)),
+            ]),
+        );
         return json::obj(vec![
             ("broadcast_id", json::i(id)),
             ("acknowledged_by", json::arr(vec![])),
@@ -1636,6 +1706,13 @@ pub fn ack_broadcast(state: &mut State, broadcast_id: i64, agent_id: &str) -> Va
         .iter()
         .any(|ack| ack.broadcast_id == broadcast_id && ack.agent_id == agent_id)
     {
+        state.record_event(
+            "broadcast.ack",
+            json::obj(vec![
+                ("broadcast_id", json::i(broadcast_id)),
+                ("agent_id", json::s(agent_id)),
+            ]),
+        );
         return json::obj(vec![
             ("acknowledged", json::b(true)),
             ("broadcast_id", json::i(broadcast_id)),
@@ -1648,6 +1725,13 @@ pub fn ack_broadcast(state: &mut State, broadcast_id: i64, agent_id: &str) -> Va
         agent_id: agent_id.into(),
         acknowledged_at: now,
     });
+    state.record_event(
+        "broadcast.ack",
+        json::obj(vec![
+            ("broadcast_id", json::i(broadcast_id)),
+            ("agent_id", json::s(agent_id)),
+        ]),
+    );
     json::obj(vec![
         ("acknowledged", json::b(true)),
         ("broadcast_id", json::i(broadcast_id)),
@@ -1713,7 +1797,7 @@ pub fn record_handoff(
             ("handoff_id", json::i(id)),
             ("document_path", json::opt_str(document_path)),
         ]);
-        let _ = send_message(state, from, target, "handoff", Some(&payload), None);
+        let _ = send_message(state, from, target, "handoff", Some(&payload), None, false);
     }
     json::obj(vec![
         ("recorded", json::b(true)),
@@ -1778,6 +1862,13 @@ pub fn ack_handoff(state: &mut State, handoff_id: i64, agent_id: &str) -> Value 
         .filter(|ack| ack.handoff_id == handoff_id)
         .count() as i64;
     let expected = targets.len() as i64;
+    state.record_event(
+        "handoff.ack",
+        json::obj(vec![
+            ("handoff_id", json::i(handoff_id)),
+            ("agent_id", json::s(agent_id)),
+        ]),
+    );
     let aggregate = if expected > 0 && acks >= expected {
         state.handoffs[pos].status = "acknowledged".into();
         state.handoffs[pos].acknowledged_at = Some(now);
@@ -1866,12 +1957,20 @@ pub fn finish_handoff(state: &mut State, handoff_id: i64, complete: bool) -> Val
     if complete {
         state.handoffs[pos].status = "completed".into();
         state.handoffs[pos].completed_at = Some(util::now());
+        state.record_event(
+            "handoff.completed",
+            json::obj(vec![("handoff_id", json::i(handoff_id))]),
+        );
         json::obj(vec![
             ("completed", json::b(true)),
             ("handoff_id", json::i(handoff_id)),
         ])
     } else {
         state.handoffs[pos].status = "cancelled".into();
+        state.record_event(
+            "handoff.cancelled",
+            json::obj(vec![("handoff_id", json::i(handoff_id))]),
+        );
         json::obj(vec![
             ("cancelled", json::b(true)),
             ("handoff_id", json::i(handoff_id)),

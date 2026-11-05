@@ -165,8 +165,7 @@ pub fn show(command: &str, value: &Value, pos: &[String], kv: &[(String, String)
             if value.get("acquired").and_then(Value::as_bool) == Some(true) {
                 println!("Lease acquired: {}", text(value, "lease_name"));
                 println!("  Holder: {}", text(value, "holder_id"));
-                let ttl = value.get("ttl").and_then(Value::as_f64).unwrap_or(0.0);
-                println!("  TTL: {ttl:.1}s");
+                println!("  TTL: {:.1}s", number_value(value.get("ttl")));
                 println!("  Expires at: {}", raw(value, "expires_at"));
             } else {
                 println!("Lease acquisition failed — leadership held by another agent");
@@ -569,6 +568,14 @@ pub fn show(command: &str, value: &Value, pos: &[String], kv: &[(String, String)
                 .unwrap_or(0);
             println!("  Agents: {agents}");
             println!("  Handoffs: {handoffs}");
+            if let Some(errors) = value.get("errors").and_then(Value::as_array) {
+                if !errors.is_empty() {
+                    println!("  Errors: {}", errors.len());
+                    for err in errors {
+                        println!("    {}", err.as_str().unwrap_or(""));
+                    }
+                }
+            }
         }
         "assess" => {
             let report = value.get("report").and_then(Value::as_str).unwrap_or("");
@@ -587,6 +594,14 @@ pub fn show(command: &str, value: &Value, pos: &[String], kv: &[(String, String)
         _ => println!("{}", crate::json::dumps_pretty(value)),
     }
     0
+}
+
+fn number_value(value: Option<&Value>) -> f64 {
+    match value {
+        Some(Value::Int(n)) => *n as f64,
+        Some(Value::Float(n)) => *n,
+        _ => 0.0,
+    }
 }
 
 fn py_field(value: &Value, key: &str, missing: &str) -> String {
@@ -674,13 +689,7 @@ pub fn exit_code(command: &str, value: &Value) -> i32 {
                 4
             }
         }
-        "release-coordinator-lease" => {
-            if value.get("released").and_then(Value::as_bool) == Some(true) {
-                0
-            } else {
-                4
-            }
-        }
+        "release-coordinator-lease" => 0,
         "request-subagent-deregistration" => {
             if value.get("not_found").and_then(Value::as_bool) == Some(true) {
                 3

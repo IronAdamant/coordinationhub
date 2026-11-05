@@ -111,16 +111,21 @@ pub fn register(
 }
 
 fn record_descendants(state: &mut State, agent_id: &str, parent_id: &str, now: f64) {
+    let known = state
+        .descendants
+        .iter()
+        .any(|row| row.descendant_id == agent_id);
     let mut stack = vec![(parent_id.to_string(), 1_i64)];
     let mut seen = HashSet::new();
     while let Some((ancestor, depth)) = stack.pop() {
         if !seen.insert(ancestor.clone()) {
             continue;
         }
-        if !state
-            .descendants
-            .iter()
-            .any(|row| row.ancestor_id == ancestor && row.descendant_id == agent_id)
+        if !known
+            || !state
+                .descendants
+                .iter()
+                .any(|row| row.ancestor_id == ancestor && row.descendant_id == agent_id)
         {
             state.descendants.push(Descendant {
                 ancestor_id: ancestor.clone(),
@@ -356,14 +361,33 @@ pub fn deregister(state: &mut State, agent_id: &str) -> Value {
             .lineage
             .retain(|row| !(row.parent_id == agent_id && row.child_id == *child));
     }
+    let locks = act_lock::release_agent(state, agent_id);
+    let released = locks.get("released").and_then(Value::as_i64).unwrap_or(0);
+    if released > 0 {
+        state.record_event(
+            "lock.released",
+            json::obj(vec![
+                ("agent_id", json::s(agent_id)),
+                ("bulk", json::b(true)),
+                ("count", json::i(released)),
+            ]),
+        );
+    }
+    let lease_released = release_lease(state, agent_id);
+    if lease_released {
+        state.record_event(
+            "lease.released",
+            json::obj(vec![
+                ("lease_name", json::s("COORDINATOR_LEADER")),
+                ("holder_id", json::s(agent_id)),
+            ]),
+        );
+    }
+    release_claims(state, agent_id);
     state.record_event(
         "agent.deregistered",
         json::obj(vec![("agent_id", json::s(agent_id))]),
     );
-    let locks = act_lock::release_agent(state, agent_id);
-    let released = locks.get("released").and_then(Value::as_i64).unwrap_or(0);
-    let lease_released = release_lease(state, agent_id);
-    release_claims(state, agent_id);
     json::obj(vec![
         ("deregistered", json::b(true)),
         ("children_orphaned", json::i(orphaned)),

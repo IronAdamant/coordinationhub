@@ -53,7 +53,8 @@ pub fn validate_tool(schema: &Schema, tool: &str, args: &Value) -> Result<(), St
     let Some(params) = spec.get("parameters") else {
         return Ok(());
     };
-    validate(args, params, "").map_err(|err| format!("{tool}: {err}"))
+    let _ = tool;
+    validate(args, params, "")
 }
 
 fn merged_enum(errors: &[String]) -> Option<String> {
@@ -116,21 +117,19 @@ pub fn validate(value: &Value, schema: &Value, path: &str) -> Result<(), String>
     }
     if let Some(type_spec) = schema.get("type") {
         if !type_ok(value, type_spec) {
-            let where_ = if path.is_empty() { "value" } else { path };
-            return Err(format!(
-                "{where_} must be of type {} (got {})",
-                json::py_repr(type_spec),
-                value.py_type_name()
-            ));
+            let expected = match type_spec {
+                Value::String(name) => format!("'{name}'"),
+                other => json::py_repr(other),
+            };
+            return Err(format!("{} is not of type {expected}", json::py_repr(value)));
         }
     }
     if let Some(Value::Array(enum_vals)) = schema.get("enum") {
         if !enum_vals.iter().any(|item| item == value) {
-            let where_ = if path.is_empty() { "value" } else { path };
             return Err(format!(
-                "{where_} must be one of {} (got {})",
-                json::py_repr(&Value::Array(enum_vals.clone())),
-                json::py_repr(value)
+                "{} is not one of {}",
+                json::py_repr(value),
+                json::py_repr(&Value::Array(enum_vals.clone()))
             ));
         }
     }
@@ -146,9 +145,8 @@ pub fn validate(value: &Value, schema: &Value, path: &str) -> Result<(), String>
             .unwrap_or_default();
         for key in &required {
             if !pairs.iter().any(|(name, _)| name == key) {
-                let where_ = if path.is_empty() { "value" } else { path };
                 return Err(format!(
-                    "{where_}: missing required property {}",
+                    "{} is a required property",
                     json::py_repr(&json::s(*key))
                 ));
             }
@@ -228,8 +226,10 @@ pub fn validate(value: &Value, schema: &Value, path: &str) -> Result<(), String>
         let len = text.chars().count();
         if let Some(min) = schema.get("minLength").and_then(Value::as_i64) {
             if (len as i64) < min {
-                let where_ = if path.is_empty() { "value" } else { path };
-                return Err(format!("{where_} must have length >= {min} (got {len})"));
+                if min == 1 && text.is_empty() {
+                    return Err("'' should be non-empty".into());
+                }
+                return Err(format!("{} is too short", json::py_repr(&json::s(text))));
             }
         }
         if let Some(max) = schema.get("maxLength").and_then(Value::as_i64) {

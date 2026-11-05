@@ -228,12 +228,16 @@ pub fn validate_graph(data: &Value) -> Value {
         ]);
     }
     let mut errors = Vec::new();
-    let Some(Value::Array(agents)) = data.get("agents") else {
-        errors.push("agents: required field is missing".to_string());
-        return json::obj(vec![
-            ("valid", json::b(false)),
-            ("errors", json::string_list(&errors)),
-        ]);
+    let agents: Vec<Value> = match data.get("agents") {
+        None => {
+            errors.push("agents: required field is missing".to_string());
+            Vec::new()
+        }
+        Some(Value::Array(items)) => items.clone(),
+        Some(_) => {
+            errors.push("agents must be a list".to_string());
+            Vec::new()
+        }
     };
     let required = ["id", "responsibilities", "role"];
     let allowed = ["id", "model", "responsibilities", "role"];
@@ -285,6 +289,59 @@ pub fn validate_graph(data: &Value) -> Value {
             if !matches!(resp, Value::Array(_)) {
                 errors.push(format!("agents[{index}].responsibilities must be a list"));
             }
+        }
+    }
+    match data.get("handoffs") {
+        None => {}
+        Some(Value::Array(items)) => {
+            let ids_set: Vec<String> = ids.clone();
+            for (index, handoff) in items.iter().enumerate() {
+                let Value::Object(pairs) = handoff else {
+                    errors.push(format!("handoffs[{index}]: must be an object"));
+                    continue;
+                };
+                let keys: Vec<&str> = pairs.iter().map(|(k, _)| k.as_str()).collect();
+                let need = ["from", "to", "condition"];
+                let mut missing: Vec<&str> = need.iter().copied().filter(|k| !keys.contains(k)).collect();
+                missing.sort();
+                if !missing.is_empty() {
+                    errors.push(format!(
+                        "handoffs[{index}]: missing required fields: {}",
+                        json::py_repr(&json::string_list(&missing.iter().map(|s| (*s).to_string()).collect::<Vec<_>>()))
+                    ));
+                }
+                let mut unknown: Vec<String> = keys.iter().filter(|k| !need.contains(*k)).map(|s| (*s).to_string()).collect();
+                unknown.sort();
+                if !unknown.is_empty() {
+                    errors.push(format!(
+                        "handoffs[{index}]: unknown fields: {}",
+                        json::py_repr(&json::string_list(&unknown))
+                    ));
+                }
+                if !ids_set.is_empty() {
+                    for field in ["from", "to"] {
+                        if let Some(value) = handoff.get(field).and_then(Value::as_str) {
+                            if !ids_set.iter().any(|id| id == value) {
+                                errors.push(format!(
+                                    "handoffs[{index}].{field}: {} is not a defined agent id",
+                                    json::py_repr(&json::s(value))
+                                ));
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        Some(_) => errors.push("handoffs must be a list".into()),
+    }
+    if let Some(escalation) = data.get("escalation") {
+        if !matches!(escalation, Value::Object(_)) {
+            errors.push("escalation must be an object".into());
+        }
+    }
+    if let Some(assessment) = data.get("assessment") {
+        if !matches!(assessment, Value::Object(_)) {
+            errors.push("assessment must be an object".into());
         }
     }
     (
@@ -435,6 +492,21 @@ pub fn scan(
             owned += 1;
         }
     }
+    state.record_event(
+        "scan.completed",
+        json::obj(vec![
+            ("scanned", json::i(scanned)),
+            ("owned", json::i(owned)),
+            (
+                "worktree_root",
+                json::s(
+                    worktree
+                        .map(|path| path.to_string())
+                        .unwrap_or_else(|| root.to_string_lossy().replace('\\', "/")),
+                ),
+            ),
+        ]),
+    );
     json::obj(vec![
         ("scanned", json::i(scanned)),
         ("owned", json::i(owned)),

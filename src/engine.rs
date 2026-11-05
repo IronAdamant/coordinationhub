@@ -328,7 +328,25 @@ impl Engine {
             }
             "status" => act_board::system_status(state, graph_loaded, tools),
             "load_coordination_spec" => {
-                let (value, graph) = act_view::load_spec(state, root_ref, opt_str(args, "path"));
+                let path = opt_str(args, "path");
+                let (value, graph) = act_view::load_spec(state, root_ref, path);
+                let loaded = value.get("loaded").and_then(Value::as_bool).unwrap_or(false);
+                let missing = path.map(|path| !std::path::Path::new(path).is_file()).unwrap_or(false);
+                if !missing {
+                    state.record_event(
+                        "graph.loaded",
+                        json::obj(vec![
+                            ("loaded", json::b(loaded)),
+                            (
+                                "path",
+                                match path {
+                                    Some(path) => json::s(path),
+                                    None => json::null(),
+                                },
+                            ),
+                        ]),
+                    );
+                }
                 self.graph = graph;
                 value
             }
@@ -367,13 +385,25 @@ impl Engine {
                     implicit = act_view::implicit_graph(state);
                     &implicit
                 };
-                act_view::assess(
+                let value = act_view::assess(
                     state,
                     opt_str(args, "suite_path"),
                     opt_str(args, "format").unwrap_or("markdown"),
                     opt_str(args, "graph_agent_id"),
                     Some(graph_ref),
-                )
+                );
+                state.record_event(
+                    "assessment.completed",
+                    json::obj(vec![
+                        ("suite_path", json::opt_str(opt_str(args, "suite_path"))),
+                        ("graph_agent_id", json::opt_str(opt_str(args, "graph_agent_id"))),
+                        (
+                            "scores",
+                            value.get("scores").cloned().unwrap_or(Value::Object(vec![])),
+                        ),
+                    ]),
+                );
+                value
             }
             "send_message" => act_board::send_message(
                 state,
@@ -382,16 +412,31 @@ impl Engine {
                 need_str(args, "message_type")?,
                 args.get("payload"),
                 opt_str(args, "caller_agent_id"),
+                true,
             ),
             "manage_messages" => self.manage_messages(args)?,
-            "create_task" => act_board::create_task(
-                state,
-                need_str(args, "task_id")?,
-                need_str(args, "parent_agent_id")?,
-                need_str(args, "description")?,
-                opt_strings(args, "depends_on").as_deref(),
-                opt_i(args, "priority").unwrap_or(0),
-            )?,
+            "create_task" => {
+                let task_id = need_str(args, "task_id")?;
+                let parent = need_str(args, "parent_agent_id")?;
+                let description = need_str(args, "description")?;
+                let value = act_board::create_task(
+                    state,
+                    task_id,
+                    parent,
+                    description,
+                    opt_strings(args, "depends_on").as_deref(),
+                    opt_i(args, "priority").unwrap_or(0),
+                )?;
+                state.record_event(
+                    "task.created",
+                    json::obj(vec![
+                        ("task_id", json::s(task_id)),
+                        ("parent_agent_id", json::s(parent)),
+                        ("description", json::s(description)),
+                    ]),
+                );
+                value
+            }
             "assign_task" => act_board::assign_task(
                 state,
                 need_str(args, "task_id")?,
@@ -449,7 +494,7 @@ impl Engine {
                 opt_i(args, "dep_id"),
             ),
             "acquire_coordinator_lease" => {
-                act_board::acquire_lease(state, need_str(args, "agent_id")?, opt_f_opt(args, "ttl"))
+                act_board::acquire_lease(state, need_str(args, "agent_id")?, opt_f_opt(args, "ttl"), true)
             }
             "manage_leases" => self.manage_leases(args)?,
             "spawn_subagent" => act_board::spawn(
@@ -524,7 +569,19 @@ impl Engine {
                         json::s("agent_id is required for release_by_agent"),
                     )]));
                 };
-                act_lock::release_agent(state, agent)
+                let value = act_lock::release_agent(state, agent);
+                let removed = value.get("released").and_then(Value::as_i64).unwrap_or(0);
+                if removed > 0 {
+                    state.record_event(
+                        "lock.released",
+                        json::obj(vec![
+                            ("agent_id", json::s(agent)),
+                            ("bulk", json::b(true)),
+                            ("count", json::i(removed)),
+                        ]),
+                    );
+                }
+                value
             }
             "reap_expired" => act_lock::reap_expired(state, opt_f(args, "grace_seconds", 0.0)),
             "reap_stale" => {
@@ -575,6 +632,7 @@ impl Engine {
                     kind,
                     args.get("payload"),
                     opt_str(args, "caller_agent_id"),
+                    true,
                 )
             }
             "get" => act_board::get_messages(
@@ -654,7 +712,7 @@ impl Engine {
         let state = &mut self.store.state;
         Ok(match action {
             "acquire" => {
-                act_board::acquire_lease(state, need_str(args, "agent_id")?, opt_f_opt(args, "ttl"))
+                act_board::acquire_lease(state, need_str(args, "agent_id")?, opt_f_opt(args, "ttl"), true)
             }
             "refresh" => act_board::refresh_lease(state, need_str(args, "agent_id")?),
             "release" => act_board::release_lease_tool(state, need_str(args, "agent_id")?),
@@ -1130,8 +1188,7 @@ fn read_only(tool: &str, args: &Value) -> bool {
         | "query_tasks"
         | "get_available_tasks"
         | "get_pending_spawns"
-        | "is_subagent_stop_requested"
-        | "run_assessment" => true,
+        | "is_subagent_stop_requested" => true,
         "get_notifications" => {
             args.get("prune_max_age_seconds").is_none()
                 && args.get("prune_max_entries").is_none()

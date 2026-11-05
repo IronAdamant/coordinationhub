@@ -10,7 +10,7 @@ pub fn main(argv: &[String]) -> i32 {
     if let Some(command) = argv.first() {
         if argv.iter().skip(1).any(|arg| arg == "--help" || arg == "-h") {
             if let Some(text) = crate::cli_help::command_help(command) {
-                println!("{text}");
+                print!("{text}");
                 return 0;
             }
         }
@@ -49,22 +49,10 @@ pub fn main(argv: &[String]) -> i32 {
 }
 
 fn print_help() {
-    println!("CoordinationHub — live coordination and work ownership for coding agents");
-    println!();
-    println!("Usage: coordinationhub <command> [flags]");
-    println!();
-    println!("Commands:");
-    for name in COMMANDS {
-        println!("  {name}");
-    }
-    println!();
-    println!("Shared flags (after the command):");
-    println!("  --storage-dir PATH");
-    println!("  --project-root PATH");
-    println!("  --namespace NAME");
-    println!("  -j, --json");
+    print!("{}", crate::cli_catalog::MAIN_HELP);
 }
 
+#[allow(dead_code)]
 const COMMANDS: &[&str] = &[
     "serve",
     "serve-mcp",
@@ -157,7 +145,7 @@ struct Flags {
     bools: Vec<String>,
 }
 
-fn parse_flags(args: &[String]) -> Flags {
+fn parse_flags(command: &str, args: &[String]) -> Result<Flags, String> {
     let mut flags = Flags {
         storage: None,
         project: None,
@@ -167,18 +155,125 @@ fn parse_flags(args: &[String]) -> Flags {
         map: Vec::new(),
         bools: Vec::new(),
     };
+    let Some(spec) = crate::cli_catalog::command(command) else {
+        permissive_flags(&mut flags, args);
+        return Ok(flags);
+    };
+    let mut unknown = Vec::new();
+    let mut index = 0;
+    while index < args.len() {
+        let arg = &args[index];
+        if let Some((name, inline)) = arg.split_once('=') {
+            if let Some(opt) = spec.options.iter().find(|opt| opt.names.contains(&name)) {
+                if !opt.takes_value {
+                    unknown.push(arg.clone());
+                } else {
+                    remember(&mut flags, opt.dest, name, inline);
+                }
+                index += 1;
+                continue;
+            }
+        }
+        if arg.starts_with('-') && arg != "-" {
+            if let Some(opt) = spec.options.iter().find(|opt| opt.names.iter().any(|n| *n == arg)) {
+                if opt.takes_value {
+                    if index + 1 >= args.len() {
+                        unknown.push(arg.clone());
+                        index += 1;
+                        continue;
+                    }
+                    index += 1;
+                    remember(&mut flags, opt.dest, arg, &args[index]);
+                    if opt.repeat {
+                        while index + 1 < args.len() && !args[index + 1].starts_with('-') {
+                            index += 1;
+                            remember(&mut flags, opt.dest, arg, &args[index]);
+                        }
+                    }
+                } else {
+                    remember_bool(&mut flags, opt.dest, arg);
+                }
+            } else {
+                unknown.push(arg.clone());
+                if index + 1 < args.len() && args[index + 1].starts_with('-') && !is_number(&args[index + 1]) {
+                    // a following flag is parsed on the next loop
+                } else if index + 1 < args.len() && !spec.options.iter().any(|opt| opt.names.iter().any(|n| *n == args[index + 1].as_str())) {
+                    // argparse reports the value of an unknown option too when it is not itself a flag
+                    if args[index + 1].starts_with('-') || spec.options.iter().all(|opt| !opt.names.iter().any(|n| *n == args[index + 1].as_str())) {
+                        // leave it; the next iteration classifies it
+                    }
+                }
+            }
+            index += 1;
+            continue;
+        }
+        flags.positionals.push(arg.clone());
+        index += 1;
+    }
+    if !unknown.is_empty() {
+        return Err(format!(
+            "{}coordinationhub: error: unrecognized arguments: {}\n",
+            crate::cli_catalog::MAIN_USAGE,
+            unknown.join(" ")
+        ));
+    }
+    if flags.positionals.len() > spec.max_positionals {
+        let extra = flags.positionals[spec.max_positionals..].join(" ");
+        return Err(format!(
+            "{}coordinationhub: error: unrecognized arguments: {extra}\n",
+            crate::cli_catalog::MAIN_USAGE
+        ));
+    }
+    if flags.positionals.len() < spec.required.len() {
+        let missing = spec.required[flags.positionals.len()..].join(", ");
+        return Err(format!(
+            "{}coordinationhub {command}: error: the following arguments are required: {missing}\n",
+            spec.usage
+        ));
+    }
+    Ok(flags)
+}
+
+fn is_number(text: &str) -> bool {
+    let rest = text.strip_prefix('-').unwrap_or(text);
+    !rest.is_empty() && rest.chars().all(|ch| ch.is_ascii_digit() || ch == '.')
+}
+
+fn remember(flags: &mut Flags, dest: &str, name: &str, value: &str) {
+    let key = name.trim_start_matches('-').replace('-', "_");
+    if dest == "storage_dir" {
+        flags.storage = Some(PathBuf::from(value));
+    } else if dest == "project_root" {
+        flags.project = Some(PathBuf::from(value));
+    } else if dest == "namespace" {
+        flags.namespace = value.to_string();
+    }
+    flags.map.push((dest.to_string(), value.to_string()));
+    if key != dest {
+        flags.map.push((key, value.to_string()));
+    }
+}
+
+fn remember_bool(flags: &mut Flags, dest: &str, name: &str) {
+    if dest == "json_output" || name == "--json" || name == "-j" {
+        flags.json = true;
+    }
+    flags.bools.push(dest.to_string());
+    let key = name.trim_start_matches('-').replace('-', "_");
+    if key != dest {
+        flags.bools.push(key);
+    }
+}
+
+fn permissive_flags(flags: &mut Flags, args: &[String]) {
     let mut index = 0;
     while index < args.len() {
         let arg = &args[index];
         if arg == "--json" || arg == "-j" {
             flags.json = true;
-        } else if let Some(rest) = arg.strip_prefix("--storage-dir=") {
-            flags.storage = Some(PathBuf::from(rest));
         } else if arg == "--storage-dir" {
             index += 1;
             flags.storage = args.get(index).map(PathBuf::from);
-        } else if let Some(rest) = arg.strip_prefix("--project-root=") {
-            flags.project = Some(PathBuf::from(rest));
         } else if arg == "--project-root" {
             index += 1;
             flags.project = args.get(index).map(PathBuf::from);
@@ -187,32 +282,24 @@ fn parse_flags(args: &[String]) -> Flags {
             if let Some(value) = args.get(index) {
                 flags.namespace = value.clone();
             }
-        } else if arg.starts_with("--")
-            && index + 1 < args.len()
-            && !args[index + 1].starts_with('-')
-        {
+        } else if arg.starts_with("--") && index + 1 < args.len() && !args[index + 1].starts_with('-') {
             let key = arg.trim_start_matches('-').replace('-', "_");
             index += 1;
-            flags.map.push((key.clone(), args[index].clone()));
-            if matches!(
-                key.as_str(),
-                "handoff_targets" | "extensions" | "depends_on" | "message_ids"
-            ) {
-                while index + 1 < args.len() && !args[index + 1].starts_with('-') {
-                    index += 1;
-                    flags.map.push((key.clone(), args[index].clone()));
-                }
-            }
+            flags.map.push((key, args[index].clone()));
         } else if arg.starts_with("--") {
-            flags
-                .bools
-                .push(arg.trim_start_matches('-').replace('-', "_"));
+            flags.bools.push(arg.trim_start_matches('-').replace('-', "_"));
         } else {
             flags.positionals.push(arg.clone());
         }
         index += 1;
     }
-    flags
+}
+
+fn flags_or_exit(command: &str, args: &[String]) -> Result<Flags, i32> {
+    parse_flags(command, args).map_err(|err| {
+        eprint!("{err}");
+        2
+    })
 }
 
 fn flag<'a>(flags: &'a Flags, key: &str) -> Option<&'a str> {
@@ -228,7 +315,10 @@ fn has(flags: &Flags, key: &str) -> bool {
 }
 
 fn run_serve_mcp(args: &[String]) -> i32 {
-    let flags = parse_flags(args);
+    let flags = match flags_or_exit("serve-mcp", args) {
+        Ok(flags) => flags,
+        Err(code) => return code,
+    };
     match mcp::serve(flags.storage, flags.project, &flags.namespace) {
         Ok(()) => 0,
         Err(err) => {
@@ -239,7 +329,10 @@ fn run_serve_mcp(args: &[String]) -> i32 {
 }
 
 fn run_serve(command: &str, args: &[String]) -> i32 {
-    let flags = parse_flags(args);
+    let flags = match flags_or_exit(command, args) {
+        Ok(flags) => flags,
+        Err(code) => return code,
+    };
     let port = flag(&flags, "port")
         .and_then(|v| v.parse().ok())
         .unwrap_or(if command == "serve-sse" { 9898 } else { 9877 });
@@ -265,7 +358,10 @@ fn run_serve(command: &str, args: &[String]) -> i32 {
 }
 
 fn run_call(args: &[String]) -> i32 {
-    let flags = parse_flags(args);
+    let flags = match flags_or_exit("call", args) {
+        Ok(flags) => flags,
+        Err(code) => return code,
+    };
     let Some(tool) = flags.positionals.first() else {
         eprintln!("Error: usage: coordinationhub call <tool> --args JSON");
         return 1;
@@ -313,7 +409,10 @@ fn emit_tool(flags: &Flags, tool: &str, args: &Value) -> i32 {
 }
 
 fn run_tool_command(command: &str, args: &[String]) -> i32 {
-    let flags = parse_flags(args);
+    let flags = match flags_or_exit(command, args) {
+        Ok(flags) => flags,
+        Err(code) => return code,
+    };
     let built = match command_args(command, &flags) {
         Ok(Some(pair)) => pair,
         Ok(None) => {
@@ -581,14 +680,18 @@ fn command_args(
         ),
         "get-notifications" => (
             "get_notifications",
-            json::obj(vec![(
-                "limit",
-                json::i(
-                    flag(flags, "limit")
-                        .and_then(|v| v.parse().ok())
-                        .unwrap_or(100),
+            json::obj(vec![
+                ("since", json::opt_f(flag(flags, "since").and_then(|v| v.parse().ok()))),
+                ("exclude_agent", json::opt_str(flag(flags, "exclude_agent"))),
+                (
+                    "limit",
+                    json::i(
+                        flag(flags, "limit")
+                            .and_then(|v| v.parse().ok())
+                            .unwrap_or(100),
+                    ),
                 ),
-            )]),
+            ]),
             None,
         ),
         "get-conflicts" => (
@@ -823,7 +926,10 @@ fn render_agents(value: &Value) {
 }
 
 fn run_init(args: &[String]) -> i32 {
-    let flags = parse_flags(args);
+    let flags = match flags_or_exit("init", args) {
+        Ok(flags) => flags,
+        Err(code) => return code,
+    };
     let root = flags.project.clone().or_else(|| {
         crate::util::detect_project_root(
             &std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")),
@@ -877,7 +983,10 @@ fn run_init(args: &[String]) -> i32 {
 }
 
 fn run_cancel_spawn(args: &[String]) -> i32 {
-    let flags = parse_flags(args);
+    let flags = match flags_or_exit("cancel-spawn", args) {
+        Ok(flags) => flags,
+        Err(code) => return code,
+    };
     let Some(spawn_id) = flags.positionals.first() else {
         eprintln!("Error: spawn_id required");
         return 2;
@@ -907,9 +1016,9 @@ fn run_cancel_spawn(args: &[String]) -> i32 {
     if value.get("not_found").and_then(Value::as_bool) == Some(true) {
         if flags.json {
             println!("{}", json::dumps_pretty(&value));
-        } else {
-            eprintln!("Spawn not found or already consumed: {spawn_id}");
+            return 0;
         }
+        eprintln!("Spawn not found or already consumed: {spawn_id}");
         return 3;
     }
     if flags.json {
@@ -927,7 +1036,10 @@ fn run_cancel_spawn(args: &[String]) -> i32 {
 }
 
 fn run_watch(args: &[String]) -> i32 {
-    let flags = parse_flags(args);
+    let flags = match flags_or_exit("watch", args) {
+        Ok(flags) => flags,
+        Err(code) => return code,
+    };
     let interval: f64 = flag(&flags, "interval")
         .or_else(|| flag(&flags, "poll_interval"))
         .and_then(|value| value.parse().ok())
@@ -958,7 +1070,10 @@ fn run_watch(args: &[String]) -> i32 {
 }
 
 fn run_auto_dashboard(args: &[String]) -> i32 {
-    let flags = parse_flags(args);
+    let flags = match flags_or_exit("auto-start-dashboard", args) {
+        Ok(flags) => flags,
+        Err(code) => return code,
+    };
     let host = flag(&flags, "host").unwrap_or("127.0.0.1");
     let port: u16 = flag(&flags, "port").and_then(|v| v.parse().ok()).unwrap_or(9898);
     if std::net::TcpStream::connect_timeout(
@@ -1111,7 +1226,10 @@ fn doctor_checks(storage: &std::path::Path) -> Vec<(String, bool, String)> {
 }
 
 fn run_doctor(args: &[String]) -> i32 {
-    let flags = parse_flags(args);
+    let flags = match flags_or_exit("doctor", args) {
+        Ok(flags) => flags,
+        Err(code) => return code,
+    };
     let root = flags.project.clone().or_else(|| {
         crate::util::detect_project_root(
             &std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")),
@@ -1150,7 +1268,10 @@ fn run_doctor(args: &[String]) -> i32 {
 }
 
 fn run_hook(args: &[String]) -> i32 {
-    let flags = parse_flags(args);
+    let flags = match flags_or_exit("hook", args) {
+        Ok(flags) => flags,
+        Err(code) => return code,
+    };
     let mut input = String::new();
     use std::io::Read;
     let _ = std::io::stdin().read_to_string(&mut input);
@@ -1174,7 +1295,10 @@ fn run_hook(args: &[String]) -> i32 {
 }
 
 fn run_bench(args: &[String]) -> i32 {
-    let flags = parse_flags(args);
+    let flags = match flags_or_exit("bench", args) {
+        Ok(flags) => flags,
+        Err(code) => return code,
+    };
     let loops = flag(&flags, "loops")
         .and_then(|v| v.parse().ok())
         .unwrap_or(200_i64);

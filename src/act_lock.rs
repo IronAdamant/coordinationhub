@@ -407,6 +407,15 @@ pub fn release(
     state.locks.retain(|lock| !owned.contains(&lock.id));
     let worktree = project_root.map(|p| util::path_str(p));
     record_notification(state, &norm, "unlocked", agent_id, worktree);
+    state.record_event(
+        "lock.released",
+        json::obj(vec![
+            ("document_path", json::s(&norm)),
+            ("agent_id", json::s(agent_id)),
+            ("region_start", json::opt_i(region_start)),
+            ("region_end", json::opt_i(region_end)),
+        ]),
+    );
     json::obj(vec![("released", json::b(true)), ("count", json::i(count))])
 }
 
@@ -732,7 +741,7 @@ pub fn hotspots(state: &State, limit: i64) -> Value {
             (path, count, agents, first_id)
         })
         .collect();
-    ranked.sort_by(|a, b| b.1.cmp(&a.1).then(a.3.cmp(&b.3)));
+    ranked.sort_by(|a, b| b.1.cmp(&a.1).then(a.0.cmp(&b.0)));
     ranked.truncate(limit.max(0) as usize);
     let items = ranked
         .into_iter()

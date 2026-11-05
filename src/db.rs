@@ -337,6 +337,7 @@ pub struct Store {
     digests: Digests,
     offset: u64,
     lock: Option<FileLock>,
+    clean: bool,
 }
 
 #[derive(Default)]
@@ -359,8 +360,8 @@ struct Digests {
     claims: std::collections::HashMap<String, u64>,
     claim_events: std::collections::HashMap<String, u64>,
     hub_events: std::collections::HashMap<String, u64>,
-    lineage: u64,
-    descendants: u64,
+    lineage_rows: std::collections::HashMap<String, u64>,
+    descendant_rows: std::collections::HashMap<String, u64>,
     handoff_acks: u64,
     broadcast_acks: u64,
     broadcast_targets: u64,
@@ -381,6 +382,7 @@ impl Store {
             digests: Digests::default(),
             offset,
             lock: None,
+            clean: true,
         };
         store.remember();
         Ok(store)
@@ -397,11 +399,18 @@ impl Store {
             .join("coordination.lock");
         let lock = FileLock::exclusive(&lock_path).map_err(|e| e.to_string())?;
         self.lock = Some(lock);
+        if self.clean {
+            if self.catch_up()? {
+                self.remember();
+            }
+            return Ok(());
+        }
         let dirty = !self.changed_lines().is_empty();
         let applied = self.catch_up()?;
         if applied && !dirty {
             self.remember();
         }
+        self.clean = !dirty;
         Ok(())
     }
 
@@ -474,6 +483,7 @@ impl Store {
                 .map_err(|e| e.to_string())?
                 .len();
         }
+        self.clean = true;
         if !held {
             self.end();
         }
@@ -526,8 +536,18 @@ impl Store {
         self.digests.claims = digest_map(&self.state.claims, |row| row.id.to_string(), hash_claim);
         self.digests.claim_events =
             digest_map(&self.state.claim_events, |row| row.id.to_string(), hash_ce);
-        self.digests.lineage = hash_slice(&self.state.lineage, hash_lineage);
-        self.digests.descendants = hash_slice(&self.state.descendants, hash_desc);
+        self.digests.hub_events =
+            digest_map(&self.state.hub_events, |row| row.id.to_string(), hash_hub);
+        self.digests.lineage_rows = digest_map(
+            &self.state.lineage,
+            |row| format!("{}\u{1f}{}", row.parent_id, row.child_id),
+            hash_lineage,
+        );
+        self.digests.descendant_rows = digest_map(
+            &self.state.descendants,
+            |row| format!("{}\u{1f}{}", row.ancestor_id, row.descendant_id),
+            hash_desc,
+        );
         self.digests.handoff_acks = hash_slice(&self.state.handoff_acks, hash_hack);
         self.digests.broadcast_acks = hash_slice(&self.state.broadcast_acks, hash_back);
         self.digests.broadcast_targets = hash_slice(&self.state.broadcast_targets, hash_bt);
@@ -545,22 +565,36 @@ impl Store {
             hash_agent,
             encode_agent,
         );
-        sync_slice(
+        sync_map(
             &mut lines,
-            &mut self.digests.lineage,
+            &mut self.digests.lineage_rows,
             &self.state.lineage,
             "lineage",
+            |row| format!("{}\u{1f}{}", row.parent_id, row.child_id),
             hash_lineage,
             encode_lineage,
         );
-        sync_slice(
-            &mut lines,
-            &mut self.digests.descendants,
-            &self.state.descendants,
-            "descendants",
-            hash_desc,
-            encode_desc,
-        );
+        if self.state.descendants.len() >= self.digests.descendant_rows.len() {
+            let start = self.digests.descendant_rows.len();
+            for row in &self.state.descendants[start..] {
+                let id = format!("{}\u{1f}{}", row.ancestor_id, row.descendant_id);
+                lines.push(format!(
+                    "{{\"t\":\"put\",\"table\":\"descendants\",\"row\":{}}}",
+                    json::dumps(&encode_desc(row))
+                ));
+                self.digests.descendant_rows.insert(id, hash_desc(row));
+            }
+        } else {
+            sync_map(
+                &mut lines,
+                &mut self.digests.descendant_rows,
+                &self.state.descendants,
+                "descendants",
+                |row| format!("{}\u{1f}{}", row.ancestor_id, row.descendant_id),
+                hash_desc,
+                encode_desc,
+            );
+        }
         sync_map(
             &mut lines,
             &mut self.digests.locks,
@@ -1159,8 +1193,25 @@ fn apply_line(state: &mut State, value: &Value) -> Result<(), String> {
                 |item| item.agent_id.clone(),
                 |item| item.agent_id.clone(),
             ),
-            "lineage" => state.lineage.push(decode_lineage(row)?),
-            "descendants" => state.descendants.push(decode_desc(row)?),
+            "lineage" => {
+                let row = decode_lineage(row)?;
+                let key = format!("{}\u{1f}{}", row.parent_id, row.child_id);
+                upsert(
+                    &mut state.lineage,
+                    row,
+                    |_| key.clone(),
+                    |item| format!("{}\u{1f}{}", item.parent_id, item.child_id),
+                );
+            }
+            "descendants" => {
+                let row = decode_desc(row)?;
+                upsert(
+                    &mut state.descendants,
+                    row,
+                    |item| format!("{}\u{1f}{}", item.ancestor_id, item.descendant_id),
+                    |item| format!("{}\u{1f}{}", item.ancestor_id, item.descendant_id),
+                );
+            }
             "locks" => upsert(
                 &mut state.locks,
                 decode_lock(row)?,
@@ -1295,8 +1346,24 @@ fn apply_line(state: &mut State, value: &Value) -> Result<(), String> {
             "intents" => state
                 .intents
                 .retain(|row| format!("{}|{}", row.agent_id, row.document_path) != id),
-            "lineage" => state.lineage.clear(),
-            "descendants" => state.descendants.clear(),
+            "lineage" => {
+                if id == "*" {
+                    state.lineage.clear();
+                } else {
+                    state.lineage.retain(|row| {
+                        format!("{}\u{1f}{}", row.parent_id, row.child_id) != id
+                    });
+                }
+            }
+            "descendants" => {
+                if id == "*" {
+                    state.descendants.clear();
+                } else {
+                    state.descendants.retain(|row| {
+                        format!("{}\u{1f}{}", row.ancestor_id, row.descendant_id) != id
+                    });
+                }
+            }
             "handoff_acks" => state.handoff_acks.clear(),
             "broadcast_acks" => state.broadcast_acks.clear(),
             "broadcast_targets" => state.broadcast_targets.clear(),
