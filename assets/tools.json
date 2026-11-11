@@ -1,8 +1,8 @@
 {
-  "tools_version": "1.1.0",
+  "tools_version": "1.2.0",
   "tools": {
     "register_agent": {
-      "description": "Register an agent with the coordination hub and receive a context bundle containing sibling agents, active locks, coordination URLs, and (if a coordination graph is loaded) the agent's responsibilities and owned files.",
+      "description": "Join the hub at the start of your work, before taking locks or tasks: returns who else is active, which files are locked and recent changes. Pass worktree_root when you work in your own git worktree.",
       "parameters": {
         "type": "object",
         "properties": {
@@ -30,7 +30,7 @@
       }
     },
     "heartbeat": {
-      "description": "Send a heartbeat to keep the agent registered and alive. Call at least every 30 seconds.",
+      "description": "Call between steps (every 30 s to a few minutes, and before and after a long build or test run). It keeps you listed as active and renews your locks that have less than half their TTL left, so a lock lasts as long as you keep heartbeating. The reply lists locks_renewed, locks_expiring (will run out before the next heartbeat) and locks_expired (ran out before a heartbeat could renew them: acquire_lock again). A heartbeat brings back an agent the reaper marked stale (revived: true).",
       "parameters": {
         "type": "object",
         "properties": {
@@ -45,7 +45,7 @@
       }
     },
     "deregister_agent": {
-      "description": "Deregister an agent, orphan its children to the grandparent, and release all its locks. Use when an agent is done.",
+      "description": "Call when your work is finished. Releases your locks (locks_released counts the ones still held; locks_expired lists those whose TTL had already run out), hands your children to your parent and frees the coordinator lease.",
       "parameters": {
         "type": "object",
         "properties": {
@@ -60,7 +60,7 @@
       }
     },
     "list_agents": {
-      "description": "List all registered agents. Shows active agents by default. Includes heartbeat age so you can detect stale agents.",
+      "description": "See who else is working on the project now. By default it hides agents without a heartbeat for stale_timeout seconds; stale_hidden and hint then name them (often busy in a long build). active_only=false lists every agent ever registered.",
       "parameters": {
         "type": "object",
         "properties": {
@@ -79,7 +79,7 @@
       }
     },
     "get_agent_relations": {
-      "description": "Get the ancestor chain and descendants (mode='lineage') or agents that share the same parent (mode='siblings') for a given agent.",
+      "description": "Find your parent and children (mode='lineage') or the agents that share your parent (mode='siblings'), for example to decide whom to message.",
       "parameters": {
         "type": "object",
         "properties": {
@@ -103,7 +103,7 @@
       }
     },
     "acquire_lock": {
-      "description": "Acquire an exclusive or shared lock on a document path or region. Supports region locking: provide region_start/region_end (line numbers) to lock a specific range instead of the whole file. Shared locks allow concurrent access; exclusive locks block all other locks on overlapping regions. If the lock is already held by another agent and not expired, returns conflict info unless force=True (which steals the lock and records a conflict). Use before writing any shared file. When retry=True, uses exponential backoff to wait for lock release.",
+      "description": "Before editing a file other agents may also edit (shared modules, lib.rs, Cargo.toml), lock it so nobody overwrites your change; grep cannot tell you who is about to edit a file. Pass region_start/region_end to lock only some lines; shared locks allow concurrent readers. If another agent holds it the reply names them (or force=true steals it and records a conflict). The TTL (default 300 s) is renewed by your heartbeats, so pick it for a stretch without heartbeats, not for the whole task. retry=true waits with backoff (at most 600 s).",
       "parameters": {
         "type": "object",
         "properties": {
@@ -166,7 +166,7 @@
       }
     },
     "release_lock": {
-      "description": "Release a held lock. Only the lock owner can release it. Specify region_start/region_end to release a specific region lock. Omit region params to release a whole-file lock.",
+      "description": "Release your lock as soon as your edit of a shared file is done. reason 'expired' means the TTL ran out before this call (expired_at says when; locked_by names any new holder): nothing was released, and you should check the file before relying on your lock. Pass region_start/region_end for a region lock.",
       "parameters": {
         "type": "object",
         "properties": {
@@ -194,7 +194,7 @@
       }
     },
     "refresh_lock": {
-      "description": "Extend a lock's TTL without releasing and re-acquiring it. Only the lock owner can refresh. Specify region to refresh a region lock.",
+      "description": "Extend one lock's TTL (or change it) without releasing it. heartbeat already renews all your locks under half their TTL; use this to give one lock a longer TTL. reason 'expired' means it ran out first: acquire_lock again.",
       "parameters": {
         "type": "object",
         "properties": {
@@ -227,7 +227,7 @@
       }
     },
     "get_lock_status": {
-      "description": "Check if a document is currently locked and by whom. Returns all active locks on the path (including region locks). Also cleans up expired locks on read.",
+      "description": "Before editing a shared file, check whether someone holds it and until when. Returns every active lock on the path, including region locks.",
       "parameters": {
         "type": "object",
         "properties": {
@@ -242,7 +242,7 @@
       }
     },
     "list_locks": {
-      "description": "List all active (non-expired) locks. Optionally filter by agent_id. Returns lock details including document path, holder, expiry time, lock type, and region (if region lock). Pass force_refresh=True to re-warm the in-memory cache from SQLite before reading — useful for recovering from a suspected cache desync.",
+      "description": "See every active lock, or one agent's (agent_id): which shared files are taken and by whom, with expiry times. Use it to pick work that does not collide.",
       "parameters": {
         "type": "object",
         "properties": {
@@ -258,7 +258,7 @@
       }
     },
     "admin_locks": {
-      "description": "Administrative lock operations. action='release_by_agent' releases all locks for an agent. action='reap_expired' clears expired locks. action='reap_stale' marks stale agents stopped and cleans their locks.",
+      "description": "Clean-up for coordinators. action='release_by_agent' drops all of one agent's locks (released counts live ones, expired lists ones that had run out); 'reap_expired' clears expired locks; 'reap_stale' marks agents without a recent heartbeat stopped and drops their locks.",
       "parameters": {
         "type": "object",
         "properties": {
@@ -293,7 +293,7 @@
       }
     },
     "broadcast": {
-      "description": "Announce an intention to all live sibling agents before taking an action. Returns which siblings are live and any lock conflicts. When handoff_targets is provided, performs a formal multi-recipient handoff recorded in the handoffs table. When require_ack is True, creates a trackable broadcast record and sends acknowledgment request messages to each live sibling.",
+      "description": "Tell your live sibling agents what you are about to do before an action that affects them (changing a shared API, say). With handoff_targets it records a formal handoff; with require_ack it tracks who acknowledged.",
       "parameters": {
         "type": "object",
         "properties": {
@@ -336,7 +336,7 @@
       }
     },
     "acknowledge_broadcast": {
-      "description": "Acknowledge receipt of a broadcast. Called by recipient agents when they receive a broadcast_ack_request message.",
+      "description": "Answer a broadcast_ack_request message you received, so the sender's wait_for_broadcast_acks can finish.",
       "parameters": {
         "type": "object",
         "properties": {
@@ -356,7 +356,7 @@
       }
     },
     "wait_for_broadcast_acks": {
-      "description": "Poll until all expected broadcast acknowledgments are received or timeout expires. Use after broadcast with require_ack=True to wait for recipients.",
+      "description": "After broadcast with require_ack=true, wait until every recipient acknowledged or the timeout passes. Waits at most 600 s whatever the timeout; a capped reply has wait_capped_s.",
       "parameters": {
         "type": "object",
         "properties": {
@@ -376,7 +376,7 @@
       }
     },
     "wait_for_locks": {
-      "description": "Poll until all specified locks are released or a timeout expires. Useful for waiting for a parallel agent to finish before proceeding.",
+      "description": "Wait until other agents release the given files, then edit them, instead of polling get_lock_status. Returns released and still-locked paths. Waits at most 600 s whatever the timeout; a capped reply has wait_capped_s.",
       "parameters": {
         "type": "object",
         "properties": {
@@ -404,7 +404,7 @@
       }
     },
     "await_agent": {
-      "description": "Wait for an agent to complete (deregister) before proceeding. Polls agent status until the agent is stopped or timeout expires. Use this to coordinate sequential dependencies between agents.",
+      "description": "Wait until another agent deregisters (finishes), when your next step depends on its work. Waits at most 600 s whatever the timeout; a capped reply has wait_capped_s.",
       "parameters": {
         "type": "object",
         "properties": {
@@ -424,7 +424,7 @@
       }
     },
     "notify_change": {
-      "description": "Record a change event so other agents can poll for it. Call after making a change to a shared document.",
+      "description": "After changing a shared file, record it so other agents see it in get_notifications (and know to re-read it).",
       "parameters": {
         "type": "object",
         "properties": {
@@ -449,7 +449,7 @@
       }
     },
     "get_notifications": {
-      "description": "Poll for change notifications since a timestamp. If timeout_s > 0, long-polls until new notifications arrive. If prune_max_age_seconds or prune_max_entries is provided, prunes old data first.",
+      "description": "Check what other agents changed, locked or unlocked since a time (since), or long-poll with timeout_s as an idle wait (it answers as soon as something arrives, at most 600 s; timed_out says nothing came). Pass agent_id as yourself to also get locks_expiring (your locks under half their TTL: heartbeat renews them) and locks_expired (ran out). prune_* options delete old rows first.",
       "parameters": {
         "type": "object",
         "properties": {
@@ -470,12 +470,12 @@
           },
           "agent_id": {
             "type": "string",
-            "description": "Waiter identity when timeout_s > 0",
+            "description": "You: adds your expiring and expired locks to the reply",
             "default": null
           },
           "timeout_s": {
             "type": "number",
-            "description": "Long-poll timeout (0 = immediate)",
+            "description": "Long-poll timeout in seconds (0 = answer at once; at most 600)",
             "default": 0.0
           },
           "poll_interval_s": {
@@ -497,7 +497,7 @@
       }
     },
     "get_conflicts": {
-      "description": "Query the conflict log for lock steals and ownership violations. Useful for post-mortems and debugging agent interactions.",
+      "description": "Look up lock steals, refused locks and ownership crossings, for example to find out why a lock was refused or who overwrote whom.",
       "parameters": {
         "type": "object",
         "properties": {
@@ -520,7 +520,7 @@
       }
     },
     "get_contention_hotspots": {
-      "description": "Rank files by lock contention frequency. Returns files ordered by how many lock conflicts they've been involved in, along with the agents involved. Use to identify coordination chokepoints — files that multiple agents need access to and that cause frequent contention.",
+      "description": "Find the files agents fight over most (ranked by lock conflicts), to split work or plan the order of edits on them.",
       "parameters": {
         "type": "object",
         "properties": {
@@ -533,7 +533,7 @@
       }
     },
     "status": {
-      "description": "Get a summary of the coordination system state: registered agents, active locks, pending notifications, conflicts, and whether a coordination graph is loaded.",
+      "description": "One-call summary of the hub: agent, lock, notification and conflict counts, and whether a coordination graph is loaded.",
       "parameters": {
         "type": "object",
         "properties": {}
@@ -656,7 +656,7 @@
       }
     },
     "get_agent_tree": {
-      "description": "Get the hierarchical agent tree with live work status. Each node shows the agent's current task, active file locks (with type and region), and boundary crossing warnings when locking files owned by other agents. Use as a shared situational reference — any agent sees the same live state. If agent_id is omitted, returns the tree rooted at the oldest active root agent.",
+      "description": "See the whole swarm at once: who spawned whom, what each agent is doing, which files each has locked, and boundary warnings. Start here when you join a project already in progress.",
       "parameters": {
         "type": "object",
         "properties": {
@@ -669,7 +669,7 @@
       }
     },
     "send_message": {
-      "description": "Send a direct message to another agent. Messages are stored and can be retrieved via manage_messages. Use for query/response patterns between agents.",
+      "description": "Ask or tell one specific agent something (an API question, a handoff note). The recipient reads it with manage_messages action='get'.",
       "parameters": {
         "type": "object",
         "properties": {
@@ -705,7 +705,7 @@
       }
     },
     "manage_messages": {
-      "description": "Unified messaging: send | get | mark_read. Use action='get' to retrieve messages.",
+      "description": "Read your messages (action='get', unread_only to filter), mark them read (mark_read), or send one (send). Check after registering and between steps.",
       "parameters": {
         "type": "object",
         "properties": {
@@ -819,7 +819,7 @@
       }
     },
     "create_task": {
-      "description": "Create a new task in the shared task registry. The creating agent (parent_agent_id) assigns the task to a child or sibling agent.",
+      "description": "Put a piece of work on the shared board so an agent can claim it (assign_task). depends_on orders tasks.",
       "parameters": {
         "type": "object",
         "properties": {
@@ -859,7 +859,7 @@
       }
     },
     "assign_task": {
-      "description": "Assign a task to an agent (an agent assigns itself to claim it). Refused when the task is already assigned to another agent: the reply names the holder and status. Pass force=true to reassign on purpose. Assigning to the current assignee succeeds.",
+      "description": "Claim a task before working on it (assign it to yourself) so no other agent takes it. Refused when another agent holds it: the reply names the holder. force=true reassigns on purpose.",
       "parameters": {
         "type": "object",
         "properties": {
@@ -884,7 +884,7 @@
       }
     },
     "update_task_status": {
-      "description": "Update a task's status. When a task is completed, include a summary that a parent agent can compress upward in the hierarchy.",
+      "description": "Report progress on a task you hold: in_progress, completed (with a summary) or failed (with an error).",
       "parameters": {
         "type": "object",
         "properties": {
@@ -925,7 +925,7 @@
       }
     },
     "query_tasks": {
-      "description": "Unified task query. query_type='task' fetches one task by ID. query_type='child' fetches tasks created by an agent. query_type='by_agent' fetches tasks assigned to an agent. query_type='all' fetches every task. query_type='subtasks' fetches direct subtasks of a task. query_type='tree' fetches a task and its nested subtasks.",
+      "description": "Read tasks: one by id (task), those you created (child), those assigned to an agent (by_agent), all, a task's subtasks, or its tree.",
       "parameters": {
         "type": "object",
         "properties": {
@@ -1011,7 +1011,7 @@
       }
     },
     "wait_for_task": {
-      "description": "Poll until a task reaches a terminal state (completed or failed) or the timeout expires. Use this to coordinate sequential dependencies between tasks when depends_on alone is not sufficient (e.g., waiting for a task completed by an external agent or system).",
+      "description": "Wait until a task is completed or failed, when your work depends on it. Waits at most 600 s whatever the timeout; a capped reply has wait_capped_s.",
       "parameters": {
         "type": "object",
         "properties": {
@@ -1038,7 +1038,7 @@
       }
     },
     "get_available_tasks": {
-      "description": "Return tasks whose depends_on are all satisfied (completed) and that are not currently claimed. A task is \"available\" if its status is \"pending\" and all tasks in its depends_on list have status \"completed\". Use this to find work that can be picked up by an idle agent.",
+      "description": "Find work to pick up: pending tasks whose dependencies are completed. unassigned_only=true leaves out tasks someone already claimed.",
       "parameters": {
         "type": "object",
         "properties": {
@@ -1055,7 +1055,7 @@
       }
     },
     "manage_work_intents": {
-      "description": "Unified work intent management: declare | get | clear.",
+      "description": "Announce which files you plan to touch soon (declare), see others' plans (get), or withdraw yours (clear). Lighter than a lock: it warns others when they lock those files.",
       "parameters": {
         "type": "object",
         "properties": {
@@ -1139,7 +1139,7 @@
       }
     },
     "wait_for_handoff": {
-      "description": "Wait until a handoff is completed (mode='completion', the default) or read its record (mode='status'). To act on a handoff use acknowledge_handoff, complete_handoff or cancel_handoff; the older modes 'ack', 'complete' and 'cancel' still work here.",
+      "description": "Wait until a handoff is completed (mode='completion', the default), or read its record (mode='status'). To act on a handoff use acknowledge_handoff, complete_handoff or cancel_handoff; the older modes 'ack', 'complete' and 'cancel' still work here. Waits at most 600 s whatever the timeout; a capped reply has wait_capped_s.",
       "parameters": {
         "type": "object",
         "properties": {
@@ -1459,7 +1459,7 @@
       }
     },
     "await_subagent_registration": {
-      "description": "Poll until a pending spawn is consumed (sub-agent registered) or timeout. The parent agent calls this after ``spawn_subagent`` to wait for the external spawning system to report that the sub-agent is alive. Returns the consumed spawn record on success, or timed_out:true if the sub-agent did not register within the timeout.",
+      "description": "After spawn_subagent, wait until the spawned agent registers. Returns the consumed spawn record, or timed_out. Waits at most 600 s whatever the timeout; a capped reply has wait_capped_s.",
       "parameters": {
         "type": "object",
         "properties": {
@@ -1519,7 +1519,7 @@
       }
     },
     "await_subagent_stopped": {
-      "description": "Poll until a child agent is stopped or the timeout is reached. Returns ``stopped: True`` if the child called ``deregister_agent`` within the timeout. Returns ``timed_out: True`` with ``escalate: True`` if the child did not stop in time — the caller should then call ``deregister_agent`` directly to force cleanup.",
+      "description": "After request_subagent_deregistration, wait until the child stops. timed_out with escalate=true means call deregister_agent for it yourself. Waits at most 600 s whatever the timeout; a capped reply has wait_capped_s.",
       "parameters": {
         "type": "object",
         "properties": {

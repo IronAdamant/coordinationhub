@@ -36,14 +36,14 @@ jobs:
         with:
           fetch-depth: 0
       - name: Fetch the Python tree
-        run: git fetch origin python-legacy:python-legacy
+        run: git fetch --force origin tag pre-rust-python-legacy
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
       - name: Install and import
         run: |
           set -euo pipefail
-          git worktree add /tmp/coordinationhub-python python-legacy
+          git worktree add --detach /tmp/coordinationhub-python pre-rust-python-legacy
           python -m pip install -e "/tmp/coordinationhub-python" pytest
           python -c "import coordinationhub; assert coordinationhub.__version__ == '0.8.0'"
           python -m pytest /tmp/coordinationhub-python/tests -q --tb=line
@@ -60,7 +60,7 @@ jobs:
         with:
           python-version: "3.12"
       - name: Fetch the Python tree
-        run: git fetch origin python-legacy:python-legacy
+        run: git fetch --force origin tag pre-rust-python-legacy
       - name: Build
         run: cargo build --locked --release
       - name: Install the stdio package Python 0.8.0 needs

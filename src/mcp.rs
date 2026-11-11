@@ -4,8 +4,11 @@ use crate::engine::Engine;
 use crate::groups::{EnvSwitches, Surface};
 use crate::json::{self, Value};
 use crate::validate;
+use crate::waits::Waits;
 use std::io::{self, BufRead, Write};
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Arc, Mutex};
 
 /// The project's AGENTS.md, watched by size and modification time so an
 /// agent can change the `agent-tools` block mid-session.
@@ -56,24 +59,29 @@ pub fn serve(
     let mut agents = AgentsFile::new(&root);
     let mut surface = Surface::resolve(&switches, agents.text().as_deref());
     let mut initialized = false;
-    let engine = std::sync::Arc::new(std::sync::Mutex::new(opened));
+    let waits = Arc::new(Waits::new(storage, project, namespace));
+    let engine = Arc::new(Mutex::new(opened));
     crate::house::spawn(engine.clone());
     let stdin = io::stdin();
     let mut reader = stdin.lock();
-    let mut stdout = io::stdout();
+    let out: Shared = Arc::new(Mutex::new(io::stdout()));
+    // Waits in flight, by request id (as JSON text), with their cancel flags.
+    let pending: Pending = Arc::new(Mutex::new(Vec::new()));
+    let mut threads: Vec<std::thread::JoinHandle<()>> = Vec::new();
     loop {
         let message = match read_frame(&mut reader) {
             Ok(Some(text)) => text,
             Ok(None) => break,
             Err(err) => return Err(err),
         };
+        threads.retain(|thread| !thread.is_finished());
         if message.trim().is_empty() {
             continue;
         }
         let parsed = match json::parse(&message) {
             Ok(value) => value,
             Err(err) => {
-                let _ = write_frame(&mut stdout, &error_response(Value::Null, -32700, &err));
+                let _ = send(&out, &error_response(Value::Null, -32700, &err));
                 continue;
             }
         };
@@ -87,8 +95,8 @@ pub fn serve(
             let moved = next.exposed_names() != surface.exposed_names();
             surface = next;
             if moved {
-                write_frame(
-                    &mut stdout,
+                send(
+                    &out,
                     &json::obj(vec![
                         ("jsonrpc", json::s("2.0")),
                         ("method", json::s("notifications/tools/list_changed")),
@@ -102,6 +110,20 @@ pub fn serve(
         let response = match method {
             "initialize" => Some(ok(id, initialize(&surface))),
             "notifications/initialized" | "initialized" => None,
+            "notifications/cancelled" => {
+                let target = parsed
+                    .get("params")
+                    .and_then(|params| params.get("requestId"))
+                    .map(json::dumps);
+                if let (Some(target), Ok(pending)) = (target, pending.lock()) {
+                    for (key, flag) in pending.iter() {
+                        if *key == target {
+                            flag.store(true, Ordering::SeqCst);
+                        }
+                    }
+                }
+                None
+            }
             "tools/list" => {
                 let engine = engine.lock().map_err(|err| err.to_string())?;
                 Some(ok(id, tools_list_for(&engine, &surface)))
@@ -111,33 +133,81 @@ pub fn serve(
                     .get("params")
                     .cloned()
                     .unwrap_or(Value::Object(vec![]));
-                let name = params.get("name").and_then(Value::as_str).unwrap_or("");
+                let name = params.get("name").and_then(Value::as_str).unwrap_or("").to_string();
                 let arguments = params
                     .get("arguments")
                     .cloned()
                     .unwrap_or(Value::Object(vec![]));
-                Some(ok(id, match surface.refusal(name) {
-                    Some(refusal) => content(&refusal, true),
+                match surface.refusal(&name) {
+                    Some(refusal) => Some(ok(id, content(&refusal, true))),
+                    None if crate::engine::blocks(&name, &arguments) => {
+                        if waits.admit() {
+                            threads.push(spawn_wait(&waits, &out, &pending, id, name, arguments));
+                            None
+                        } else {
+                            Some(ok(id, content(&Waits::refusal(), true)))
+                        }
+                    }
                     None => {
                         let mut engine = engine.lock().map_err(|err| err.to_string())?;
-                        let result = call_result(&mut engine, name, &arguments);
-                        if name == "status" && surface.configured() {
+                        let result = reply(engine.call(&name, &arguments));
+                        Some(ok(id, if name == "status" && surface.configured() {
                             with_groups(result, &surface)
                         } else {
                             result
-                        }
+                        }))
                     }
-                }))
+                }
             }
             "ping" => Some(ok(id, Value::Object(vec![]))),
             _ if is_note => None,
             _ => Some(error_response(id, -32601, "method not found")),
         };
         if let Some(response) = response {
-            write_frame(&mut stdout, &response)?;
+            send(&out, &response)?;
         }
     }
+    // The client closed stdin: let the waits in flight answer (each ends by
+    // its capped timeout) before the process exits.
+    for thread in threads {
+        let _ = thread.join();
+    }
     Ok(())
+}
+
+type Shared = Arc<Mutex<io::Stdout>>;
+type Pending = Arc<Mutex<Vec<(String, Arc<AtomicBool>)>>>;
+
+/// Runs a waiting call on its own thread and engine, so the read loop keeps
+/// answering other calls. A cancelled call gets no response, as MCP asks.
+fn spawn_wait(
+    waits: &Arc<Waits>,
+    out: &Shared,
+    pending: &Pending,
+    id: Value,
+    name: String,
+    arguments: Value,
+) -> std::thread::JoinHandle<()> {
+    let flag = Arc::new(AtomicBool::new(false));
+    let key = json::dumps(&id);
+    if let Ok(mut pending) = pending.lock() {
+        pending.push((key.clone(), flag.clone()));
+    }
+    let (waits, out, pending) = (waits.clone(), out.clone(), pending.clone());
+    std::thread::spawn(move || {
+        let result = reply(waits.run(&name, &arguments, flag.clone()));
+        if let Ok(mut pending) = pending.lock() {
+            pending.retain(|(item, held)| !(item == &key && Arc::ptr_eq(held, &flag)));
+        }
+        if !flag.load(Ordering::SeqCst) {
+            let _ = send(&out, &ok(id, result));
+        }
+    })
+}
+
+fn send(out: &Shared, value: &Value) -> Result<(), String> {
+    let mut stdout = out.lock().map_err(|err| err.to_string())?;
+    write_frame(&mut *stdout, value)
 }
 
 fn initialize(surface: &Surface) -> Value {
@@ -233,7 +303,7 @@ fn tool_entry(name: &str, schema: &Value) -> Value {
 fn who_tool() -> Value {
     json::obj(vec![
         ("name", json::s("who")),
-        ("description", json::s("Compact coordination picture, plus claim, release, and handoff of a work area. One call shows who owns which task, file, or area.")),
+        ("description", json::s("Start here when you join or pick new work: one compact call shows who owns which task, file lock and work area. claim reserves an area (a directory, feature or task id) so others keep out of it; release and handoff end or pass it on.")),
         ("inputSchema", json::obj(vec![
             ("type", json::s("object")),
             ("properties", json::obj(vec![
@@ -248,8 +318,8 @@ fn who_tool() -> Value {
     ])
 }
 
-fn call_result(engine: &mut Engine, name: &str, arguments: &Value) -> Value {
-    match engine.call(name, arguments) {
+fn reply(result: Result<Value, String>) -> Value {
+    match result {
         // Compact JSON: agents parse it, and indentation only costs tokens.
         Ok(value) => content(&json::dumps_tight(&value), false),
         Err(err) if err.starts_with("Input validation error:") => content(&err, true),

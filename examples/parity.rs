@@ -54,6 +54,12 @@ const ALLOWED: &[&str] = &[
     "expired lease reads as no leader",
     "refresh of an expired lease is refused",
     "version flag and assign-task --force",
+    "heartbeat reports expired locks",
+    "release of an expired lock says expired",
+    "get_notifications warns about expired locks",
+    "deregister lists expired locks apart",
+    "list_agents names quiet agents",
+    "heartbeat revives a reaped agent",
 ];
 
 /// Tools in the Rust tools/list that 0.8.0 does not have.
@@ -800,6 +806,31 @@ fn mcp_scenarios(sides: &Sides, ledger: &mut Ledger) {
                 ("deregister_agent", obj(vec![("agent_id", s("gong"))])),
             ],
         ),
+        (
+            // 1.2.0: a lock whose TTL ran out (ttl 0) is reported as expired.
+            "lapsed-locks",
+            vec![
+                reg("ney"),
+                ("acquire_lock", obj(vec![("document_path", s("score/bell.rs")), ("agent_id", s("ney")), ("ttl", json::i(0))])),
+                ("heartbeat", obj(vec![("agent_id", s("ney"))])),
+                ("release_lock", obj(vec![("document_path", s("score/bell.rs")), ("agent_id", s("ney"))])),
+                ("acquire_lock", obj(vec![("document_path", s("score/oud.rs")), ("agent_id", s("ney")), ("ttl", json::i(0))])),
+                ("get_notifications", obj(vec![("agent_id", s("ney")), ("since", json::f(9.0e9))])),
+                ("get_notifications", obj(vec![("exclude_agent", s("ney")), ("since", json::f(9.0e9))])),
+                ("deregister_agent", obj(vec![("agent_id", s("ney"))])),
+            ],
+        ),
+        (
+            // 1.2.0: a reaped agent is named by list_agents and revived by
+            // its heartbeat.
+            "quiet-agent",
+            vec![
+                reg("kora"),
+                ("admin_locks", obj(vec![("action", s("reap_stale")), ("timeout", json::i(0))])),
+                ("list_agents", obj(vec![])),
+                ("heartbeat", obj(vec![("agent_id", s("kora"))])),
+            ],
+        ),
     ];
     let documented = |tool: &str, args: &Value| -> Option<Documented> {
         match tool {
@@ -844,6 +875,42 @@ fn mcp_scenarios(sides: &Sides, ledger: &mut Ledger) {
                 rust_error: false,
                 rust_prefix: "{\n  \"refreshed\": false,\n  \"error\": \"Lease expired at ",
                 python_prefix: "{\n  \"refreshed\": true",
+            }),
+            "heartbeat" if args.get("agent_id").and_then(Value::as_str) == Some("ney") => Some(Documented {
+                title: "heartbeat reports expired locks",
+                rust_error: false,
+                rust_prefix: "{\n  \"updated\": true,\n  \"next_heartbeat_in\": 30,\n  \"locks_expired\": [\n    {\n      \"document_path\": \"",
+                python_prefix: "{\n  \"updated\": true,\n  \"next_heartbeat_in\": 30\n}",
+            }),
+            "release_lock" if args.get("agent_id").and_then(Value::as_str) == Some("ney") => Some(Documented {
+                title: "release of an expired lock says expired",
+                rust_error: false,
+                rust_prefix: "{\n  \"released\": false,\n  \"reason\": \"expired\",\n  \"expired_at\": ",
+                python_prefix: "{\n  \"released\": true",
+            }),
+            "get_notifications" if args.get("agent_id").and_then(Value::as_str) == Some("ney") => Some(Documented {
+                title: "get_notifications warns about expired locks",
+                rust_error: false,
+                rust_prefix: "{\n  \"notifications\": [],\n  \"locks_expired\": [\n    {\n      \"document_path\": \"",
+                python_prefix: "{\n  \"notifications\": []\n}",
+            }),
+            "deregister_agent" if args.get("agent_id").and_then(Value::as_str) == Some("ney") => Some(Documented {
+                title: "deregister lists expired locks apart",
+                rust_error: false,
+                rust_prefix: "{\n  \"deregistered\": true,\n  \"children_orphaned\": 0,\n  \"locks_released\": 0,\n  \"locks_expired\": [\n    {\n      \"document_path\": \"",
+                python_prefix: "{\n  \"deregistered\": true,\n  \"children_orphaned\": 0,\n  \"locks_released\": 1",
+            }),
+            "list_agents" => Some(Documented {
+                title: "list_agents names quiet agents",
+                rust_error: false,
+                rust_prefix: "{\n  \"agents\": [],\n  \"stale_hidden\": [\n    \"kora\"\n  ],\n  \"hint\": ",
+                python_prefix: "{\n  \"agents\": []\n}",
+            }),
+            "heartbeat" if args.get("agent_id").and_then(Value::as_str) == Some("kora") => Some(Documented {
+                title: "heartbeat revives a reaped agent",
+                rust_error: false,
+                rust_prefix: "{\n  \"updated\": true,\n  \"next_heartbeat_in\": 30,\n  \"revived\": true",
+                python_prefix: "{\n  \"updated\": false,\n  \"next_heartbeat_in\": 30,\n  \"reason\": \"agent_stopped\"",
             }),
             "manage_leases" if args.get("agent_id").is_none() => Some(Documented {
                 title: "lease get without agent_id",
@@ -1105,7 +1172,7 @@ fn prune_counts(sides: &Sides, ledger: &mut Ledger) {
 // ------------------------------------------------------------------
 
 fn legacy_ref(root: &Path) -> String {
-    for reference in ["python-legacy", "origin/python-legacy"] {
+    for reference in ["pre-rust-python-legacy", "python-legacy", "origin/python-legacy"] {
         let ok = Command::new("git")
             .args(["rev-parse", "--verify", reference])
             .current_dir(root)
@@ -1118,7 +1185,7 @@ fn legacy_ref(root: &Path) -> String {
             return reference.to_string();
         }
     }
-    eprintln!("python-legacy is not available");
+    eprintln!("the Python 0.8.0 tree is not available: git fetch origin tag pre-rust-python-legacy");
     std::process::exit(1);
 }
 

@@ -22,6 +22,9 @@ pub fn show(command: &str, value: &Value, pos: &[String], kv: &[(String, String)
             println!("Deregistered: {id}");
             println!("  Children orphaned: {}", num(value, "children_orphaned"));
             println!("  Locks released: {}", num(value, "locks_released"));
+            if let Some(expired) = value.get("locks_expired").and_then(Value::as_array) {
+                println!("  Locks already expired: {}", expired.len());
+            }
         }
         "list-agents" => render_agents(value),
         "acquire-lock" | "release-lock" | "refresh-lock" => render_lock(command, value, id),
@@ -786,6 +789,9 @@ fn render_lock(command: &str, value: &Value, path: &str) {
         eprintln!("  Expires: {}", raw(value, "expires_at"));
     } else {
         println!("FAILED: {}", text(value, "reason"));
+        if let Some(why) = value.get("error").and_then(Value::as_str) {
+            println!("  {why}");
+        }
     }
 }
 

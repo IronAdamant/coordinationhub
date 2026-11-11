@@ -158,7 +158,7 @@ fn tree(server: &mut Server, loops: usize) {
 }
 
 fn legacy_ref(root: &Path) -> Option<String> {
-    ["python-legacy", "origin/python-legacy"].into_iter().find_map(|reference| {
+    ["pre-rust-python-legacy", "python-legacy", "origin/python-legacy"].into_iter().find_map(|reference| {
         Command::new("git")
             .args(["rev-parse", "--verify", reference])
             .current_dir(root)
@@ -173,7 +173,7 @@ fn legacy_ref(root: &Path) -> Option<String> {
 
 fn extract_legacy(root: &Path, dest: &Path) {
     let Some(reference) = legacy_ref(root) else {
-        eprintln!("python-legacy is not available");
+        eprintln!("the Python 0.8.0 tree is not available: git fetch origin tag pre-rust-python-legacy");
         std::process::exit(1);
     };
     let archive = dest.with_extension("tar");

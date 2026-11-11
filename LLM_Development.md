@@ -1,5 +1,13 @@
 # LLM_Development.md — CoordinationHub
 
+## 2026-11-11 — 1.2.0 lock lapses, waits, quiet agents (Specula M5)
+
+- Root causes, from Specula's own journal (1214 lines, all lanes in one server process): every lane was reaped as stale about ten minutes after registering (cargo builds outlast the 600 s window) and every later heartbeat was refused, so `list_agents` showed `[]`; about 100 of 129 locks were deleted by the housekeeping reaper after their 7200 s TTL with no record, so releases answered `not_locked` / `not_owner` and renderfollow's deregistration counted 1 of 12. The stdio server handled one request at a time with the engine mutex held through waits, so one lane's long poll stalled every other lane's heartbeat and `update_task_status` (all lanes share the lead session's server).
+- Lapses are `lock.expired` hub events (no new journal table, which a 1.1 binary on the same store would refuse); `act_lock::lapses` folds the agent's lock events. `take_locks` is the one place that drops rows and records expiries.
+- `heartbeat` renews locks under half their TTL; `last_lifecycle` (registered/deregistered/reaped/revived events) decides whether a stopped agent may be revived.
+- `waits.rs`: waits run on pooled engines over the same store; `Engine::pause` checks a cancel flag every 100 ms; `blocking()` caps timeouts at `max_wait_s()`. `tests/common` now sends MCP calls one at a time, as agents do.
+- `FileLock` polls a non-blocking lock up to `lock_wait_s()`; `Store::begin` drops the lock when the catch-up read fails; the Windows `LockFileEx` call gets a real `OVERLAPPED`.
+
 ## 2026-11-05 — 1.1.1 lease fixes (Specula B12)
 
 - Deregistration matched the lease name `coordinator`; the stored name is `COORDINATOR_LEADER` (`act_board::COORDINATOR`, now shared). 0.8.0 released the lease, so this restores parity; the harness's new `lease-holder` scenario fails on 1.1.0.

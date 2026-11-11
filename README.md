@@ -2,7 +2,7 @@
 
 A shared board for coding agents working on the same project. It records who is working, who holds which file, which tasks are open, claimed, done or handed off, and lets agents message and wait on each other. Agents use it through MCP (stdio) or the command line; a small HTTP server shows a live dashboard.
 
-It is one Rust binary built from the standard library only: no crates, nothing to install at run time. It replaces the Python 0.8.0 program (kept on the `python-legacy` branch) with the same tools, commands and replies; `MIGRATION.md` lists the deliberate differences. Version 1.1.0 makes task claims safe under concurrency, adds explicit handoff tools and sends compact replies (see the changelog). `coordinationhub --version` prints the installed version.
+It is one Rust binary built from the standard library only: no crates, nothing to install at run time. It replaces the Python 0.8.0 program (kept at the tag `pre-rust-python-legacy`) with the same tools, commands and replies; `MIGRATION.md` lists the deliberate differences. Version 1.1.0 makes task claims safe under concurrency, adds explicit handoff tools and sends compact replies; 1.2.0 keeps locks alive while their holder heartbeats, reports lapsed locks, and stops long waits from holding up other calls (see the changelog). `coordinationhub --version` prints the installed version.
 
 ## Install
 
@@ -57,7 +57,9 @@ An agent claims a task by assigning it to itself. The claim is checked and writt
 
 - **One store per project.** State is an append-only journal (`coordination.jsonl`). Each call takes a short file lock, reads lines written since its last call, applies the change and appends it, so any number of agent sessions, CLI calls and hooks share one board safely.
 - **Agents** register with an id and an optional parent, send heartbeats, and deregister; leaving releases their locks and re-parents their children.
-- **Locks** are exclusive or shared, for a whole file or a line range, with a TTL. A refused lock says who holds it and until when.
+- **Locks** are exclusive or shared, for a whole file or a line range, with a TTL. A refused lock says who holds it and until when. Each heartbeat renews the caller's locks that have less than half their TTL left, so a lock lasts as long as its holder keeps heartbeating, and the TTL only frees the files of an agent that stopped. A lock that ran out anyway is reported as `expired` (with `expired_at`) by `release_lock`, `refresh_lock`, `heartbeat`, `get_notifications` (with `agent_id`), `deregister_agent` (`locks_expired`) and `admin_locks` `release_by_agent`.
+- **Quiet agents.** The reaper marks an agent stopped after 600 s without a heartbeat (`COORDINATIONHUB_AGENTS_STALE_TIMEOUT_S`); its next heartbeat makes it active again (`revived: true`). `list_agents` names the agents it hides for being quiet in `stale_hidden`.
+- **Waits** (`get_notifications` with `timeout_s`, `wait_for_*`, `await_*`, `acquire_lock` with `retry`) run on their own thread and engine, so they never hold up other calls on the same server, stop when the client cancels them, and last at most 600 s (`COORDINATIONHUB_MAX_WAIT_S` sets a lower cap) before answering `timed_out`. A call waits at most 30 s for the store's file lock (`COORDINATIONHUB_LOCK_WAIT_S`) and then fails with `store busy` instead of hanging.
 - **Work**: tasks with priority, dependencies and subtasks, assignment and status, failure history and retries, work intents, and agent-to-agent dependencies.
 - **Talking**: direct messages, sibling broadcasts with acknowledgements, formal handoffs, change notifications, and wait tools that return as soon as the thing they wait for happens. MCP replies are compact JSON.
 - **Leadership**: one coordinator lease with a TTL; a refused lease names the holder and its expiry.
@@ -140,7 +142,7 @@ coordinationhub: tools tasks
 
 ```bash
 cargo test --release
-git fetch origin python-legacy && python -m pip install "mcp==1.30.0"
+git fetch origin tag pre-rust-python-legacy && python -m pip install "mcp==1.30.0"
 cargo run --release --example parity -- target/release/coordinationhub --python python3.12
 cargo run --release --example bench -- target/release/coordinationhub --python python3.12
 ```

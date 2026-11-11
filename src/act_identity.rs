@@ -292,15 +292,18 @@ pub fn heartbeat(state: &mut State, agent_id: &str) -> Value {
     let now = util::now();
     let status = state.agent(agent_id).map(|agent| agent.status.clone());
     match status.as_deref() {
-        Some("active") => {
+        Some("active") => beat(state, agent_id, now, false),
+        // The reaper marked this agent stopped after a quiet spell (a long
+        // build, say); a heartbeat shows it is alive, so it is active again.
+        Some("stopped") if last_lifecycle(state, agent_id) == Some("agent.reaped") => {
             if let Some(agent) = state.agent_mut(agent_id) {
-                agent.last_heartbeat = now;
+                agent.status = "active".into();
             }
-            refresh_claims(state, agent_id, now);
-            json::obj(vec![
-                ("updated", json::b(true)),
-                ("next_heartbeat_in", json::i(HEARTBEAT_INTERVAL)),
-            ])
+            state.record_event(
+                "agent.revived",
+                json::obj(vec![("agent_id", json::s(agent_id))]),
+            );
+            beat(state, agent_id, now, true)
         }
         Some(other) => json::obj(vec![
             ("updated", json::b(false)),
@@ -313,6 +316,88 @@ pub fn heartbeat(state: &mut State, agent_id: &str) -> Value {
             ("reason", json::s("not_registered")),
         ]),
     }
+}
+
+/// A heartbeat from a live agent: refresh it and its claims, renew its
+/// locks that have less than half their TTL left, and report what needs
+/// attention. The lock keys appear only when there is something to say.
+fn beat(state: &mut State, agent_id: &str, now: f64, revived: bool) -> Value {
+    if let Some(agent) = state.agent_mut(agent_id) {
+        agent.last_heartbeat = now;
+    }
+    refresh_claims(state, agent_id, now);
+    let (renewed, soon) = act_lock::renew(state, agent_id, now, HEARTBEAT_INTERVAL as f64);
+    // Rows that ran out before this heartbeat become lapses, reported below.
+    act_lock::take_locks(state, now, |lock| {
+        lock.locked_by == agent_id && lock.locked_at + lock.lock_ttl <= now
+    });
+    let gone = act_lock::lapses(state, agent_id);
+    let mut pairs = vec![
+        ("updated", json::b(true)),
+        ("next_heartbeat_in", json::i(HEARTBEAT_INTERVAL)),
+    ];
+    if revived {
+        pairs.push(("revived", json::b(true)));
+    }
+    if renewed > 0 {
+        pairs.push(("locks_renewed", json::i(renewed)));
+    }
+    if !soon.is_empty() {
+        pairs.push(("locks_expiring", json::arr(soon)));
+    }
+    if !gone.is_empty() {
+        pairs.push((
+            "locks_expired",
+            json::arr(gone.iter().map(act_lock::Lapse::to_value).collect()),
+        ));
+        pairs.push((
+            "hint",
+            json::s("these locks ran out before a heartbeat renewed them; acquire_lock again to keep editing, or release_lock to clear the warning"),
+        ));
+    }
+    json::obj(pairs)
+}
+
+/// The latest of `agent.registered`, `agent.deregistered`, `agent.reaped`
+/// and `agent.revived` for this agent, from the event journal.
+pub fn last_lifecycle(state: &State, agent_id: &str) -> Option<&'static str> {
+    let needle = json::dumps(&json::s(agent_id));
+    for event in state.hub_events.iter().rev() {
+        let topic = match event.topic.as_str() {
+            "agent.registered" => "agent.registered",
+            "agent.deregistered" => "agent.deregistered",
+            "agent.reaped" => "agent.reaped",
+            "agent.revived" => "agent.revived",
+            _ => continue,
+        };
+        if !event.payload.contains(&needle) {
+            continue;
+        }
+        let Ok(payload) = json::parse(&event.payload) else {
+            continue;
+        };
+        if payload.get("agent_id").and_then(Value::as_str) == Some(agent_id) {
+            return Some(topic);
+        }
+    }
+    None
+}
+
+/// Agents that `list_agents` hides by default although they never
+/// deregistered: active with a heartbeat older than `stale_timeout`, or
+/// marked stopped by the reaper. Most are busy in a long build.
+pub fn quiet_agents(state: &State, stale_timeout: f64) -> Vec<String> {
+    let cutoff = util::now() - stale_timeout;
+    state
+        .agents
+        .iter()
+        .filter(|agent| match agent.status.as_str() {
+            "active" => agent.last_heartbeat < cutoff,
+            "stopped" => last_lifecycle(state, &agent.agent_id) == Some("agent.reaped"),
+            _ => false,
+        })
+        .map(|agent| agent.agent_id.clone())
+        .collect()
 }
 
 fn refresh_claims(state: &mut State, agent_id: &str, now: f64) {
@@ -363,6 +448,7 @@ pub fn deregister(state: &mut State, agent_id: &str) -> Value {
     }
     let locks = act_lock::release_agent(state, agent_id);
     let released = locks.get("released").and_then(Value::as_i64).unwrap_or(0);
+    let expired = locks.get("expired").cloned();
     if released > 0 {
         state.record_event(
             "lock.released",
@@ -388,12 +474,18 @@ pub fn deregister(state: &mut State, agent_id: &str) -> Value {
         "agent.deregistered",
         json::obj(vec![("agent_id", json::s(agent_id))]),
     );
-    json::obj(vec![
+    let mut reply = vec![
         ("deregistered", json::b(true)),
         ("children_orphaned", json::i(orphaned)),
         ("locks_released", json::i(released)),
-        ("lease_released", json::b(lease_released)),
-    ])
+    ];
+    // Locks whose TTL ran out before this call: not released, since the
+    // agent no longer held them, but listed so the agent knows.
+    if let Some(expired) = expired {
+        reply.push(("locks_expired", expired));
+    }
+    reply.push(("lease_released", json::b(lease_released)));
+    json::obj(reply)
 }
 
 /// Drops the coordinator lease when this agent holds it, as 0.8.0's
@@ -508,6 +600,11 @@ pub fn reap_stale(state: &mut State, timeout: f64) -> Value {
         if let Some(agent) = state.agent_mut(&agent_id) {
             agent.status = "stopped".into();
         }
+        // Lets a later heartbeat tell a quiet agent from a deregistered one.
+        state.record_event(
+            "agent.reaped",
+            json::obj(vec![("agent_id", json::s(&agent_id))]),
+        );
         reaped += 1;
         let children: Vec<String> = state
             .agents

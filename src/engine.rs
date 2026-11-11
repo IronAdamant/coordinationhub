@@ -9,6 +9,8 @@ use crate::json::{self, Value};
 use crate::util;
 use crate::validate::{self, Schema};
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Arc;
 
 pub struct Engine {
     pub store: Store,
@@ -16,6 +18,9 @@ pub struct Engine {
     pub namespace: String,
     pub graph: Option<Graph>,
     pub schema: Schema,
+    /// Set by the transport when the client cancels the call this engine is
+    /// running; every wait checks it between polls.
+    pub cancel: Option<Arc<AtomicBool>>,
 }
 
 impl Engine {
@@ -38,6 +43,7 @@ impl Engine {
             namespace: namespace.to_string(),
             graph: None,
             schema,
+            cancel: None,
         };
         let (loaded, graph) = act_view::load_spec(
             &mut engine.store.state,
@@ -87,8 +93,9 @@ impl Engine {
         if tool == "who" {
             self.store.begin()?;
             let value = self.who(&args);
-            self.store.commit()?;
+            let saved = self.store.commit();
             self.store.end();
+            saved?;
             return Ok(value);
         }
         if blocks(tool, &args) {
@@ -98,11 +105,13 @@ impl Engine {
         let result = self.dispatch(tool, &args);
         match result {
             Ok(value) => {
-                if !read_only(tool, &args) {
-                    self.store.commit()?;
-                }
+                let saved = if read_only(tool, &args) {
+                    Ok(())
+                } else {
+                    self.store.commit()
+                };
                 self.store.end();
-                Ok(value)
+                saved.map(|_| value)
             }
             Err(err) => {
                 self.store.end();
@@ -171,12 +180,15 @@ impl Engine {
             }
             "heartbeat" => act_identity::heartbeat(state, need_str(args, "agent_id")?),
             "deregister_agent" => act_identity::deregister(state, need_str(args, "agent_id")?),
-            "list_agents" => act_identity::list_rows(
-                state,
-                opt_bool(args, "active_only", true),
-                opt_f(args, "stale_timeout", 600.0),
-                false,
-            ),
+            "list_agents" => {
+                let active_only = opt_bool(args, "active_only", true);
+                let stale = opt_f(args, "stale_timeout", 600.0);
+                let mut value = act_identity::list_rows(state, active_only, stale, false);
+                if active_only {
+                    with_quiet(&mut value, act_identity::quiet_agents(state, stale), stale);
+                }
+                value
+            }
             "get_agent_relations" => act_identity::relations(
                 state,
                 need_str(args, "agent_id")?,
@@ -309,12 +321,14 @@ impl Engine {
                         opt_i(args, "prune_max_entries"),
                     );
                 }
-                act_lock::notifications(
+                let mut value = act_lock::notifications(
                     state,
                     opt_f_opt(args, "since"),
                     opt_str(args, "exclude_agent"),
                     opt_i(args, "limit").unwrap_or(100),
-                )
+                );
+                with_lock_warnings(&mut value, state, args);
+                value
             }
             "get_conflicts" => act_lock::conflicts(
                 state,
@@ -608,14 +622,13 @@ impl Engine {
                     .filter(|agent| agent.status == "stopped")
                     .map(|agent| agent.agent_id.clone())
                     .collect();
-                let before = state.locks.len();
-                state
-                    .locks
-                    .retain(|lock| !stopped.iter().any(|id| id == &lock.locked_by));
+                let (live, expired) = act_lock::take_locks(state, util::now(), |lock| {
+                    stopped.iter().any(|id| id == &lock.locked_by)
+                });
                 if let Value::Object(pairs) = &mut result {
                     pairs.push((
                         "locks_released".into(),
-                        json::i((before - state.locks.len()) as i64),
+                        json::i((live.len() + expired.len()) as i64),
                     ));
                 }
                 result
@@ -827,12 +840,64 @@ impl Engine {
     fn edit<T>(&mut self, body: impl FnOnce(&mut Self) -> T) -> Result<T, String> {
         self.store.begin()?;
         let value = body(self);
-        self.store.commit()?;
+        let saved = self.store.commit();
         self.store.end();
+        saved.map(|_| value)
+    }
+
+    /// Runs a call that waits. Its timeout is capped at `max_wait_s()` (600 s
+    /// unless `COORDINATIONHUB_MAX_WAIT_S` is lower), well under an MCP
+    /// client's idle timeout; a capped reply carries `wait_capped_s`.
+    fn blocking(&mut self, tool: &str, args: &Value) -> Result<Value, String> {
+        let cap = max_wait_s();
+        let (key, scale, default) = wait_timeout(tool);
+        let asked = opt_f_opt(args, key).unwrap_or(default) / scale;
+        let mut capped_args = args.clone();
+        let capped = asked > cap;
+        if capped {
+            if let Value::Object(pairs) = &mut capped_args {
+                pairs.retain(|(name, _)| name != key);
+                pairs.push((key.to_string(), json::f(cap * scale)));
+            }
+        }
+        let mut value = self.wait_for(tool, &capped_args)?;
+        if capped {
+            if let Value::Object(pairs) = &mut value {
+                pairs.push(("wait_capped_s".into(), json::f(cap)));
+            }
+        }
         Ok(value)
     }
 
-    fn blocking(&mut self, tool: &str, args: &Value) -> Result<Value, String> {
+    fn cancelled(&self) -> bool {
+        self.cancel
+            .as_ref()
+            .map(|flag| flag.load(Ordering::SeqCst))
+            .unwrap_or(false)
+    }
+
+    /// Sleeps one poll interval, never past `timeout` from `start`, and
+    /// says whether waiting may go on: false once the time is up or the
+    /// call was cancelled. It wakes every 100 ms to notice a cancel.
+    fn pause(&self, start: std::time::Instant, timeout: f64, poll: f64) -> bool {
+        let limit = std::time::Duration::from_secs_f64(timeout.max(0.0));
+        let elapsed = start.elapsed();
+        if self.cancelled() || elapsed >= limit {
+            return false;
+        }
+        let slice = std::time::Duration::from_secs_f64(poll.max(0.0)).min(limit - elapsed);
+        let until = std::time::Instant::now() + slice;
+        loop {
+            let now = std::time::Instant::now();
+            if now >= until || self.cancelled() {
+                break;
+            }
+            std::thread::sleep((until - now).min(std::time::Duration::from_millis(100)));
+        }
+        !self.cancelled() && start.elapsed() < limit
+    }
+
+    fn wait_for(&mut self, tool: &str, args: &Value) -> Result<Value, String> {
         match tool {
             "acquire_lock" => self.acquire_retry(args),
             "get_notifications" => self.wait_notifications(args),
@@ -881,7 +946,10 @@ impl Engine {
                     .unwrap_or(0.5);
                 let jitter = backoff * (0.5 + unit);
                 if elapsed_ms + jitter <= timeout_ms {
-                    std::thread::sleep(std::time::Duration::from_secs_f64(jitter / 1000.0));
+                    let pause = jitter / 1000.0;
+                    if !self.pause(std::time::Instant::now(), pause, pause) && self.cancelled() {
+                        return Ok(result);
+                    }
                     backoff *= 2.0;
                     attempt += 1;
                     continue;
@@ -926,17 +994,14 @@ impl Engine {
                     limit,
                 )
             })?;
-            if !rows.is_empty() {
-                return Ok(json::obj(vec![
+            if !rows.is_empty() || !self.pause(started, timeout, poll) {
+                let timed_out = rows.is_empty();
+                let mut value = json::obj(vec![
                     ("notifications", json::arr(rows)),
-                    ("timed_out", json::b(false)),
-                ]));
-            }
-            if !sleep_until(started, timeout, poll) {
-                return Ok(json::obj(vec![
-                    ("notifications", json::arr(vec![])),
-                    ("timed_out", json::b(true)),
-                ]));
+                    ("timed_out", json::b(timed_out)),
+                ]);
+                self.view(|engine| with_lock_warnings(&mut value, &engine.store.state, args))?;
+                return Ok(value);
             }
         }
     }
@@ -964,7 +1029,7 @@ impl Engine {
                     ("waited_s", json::f(waited(started))),
                 ]));
             }
-            if !sleep_until(started, timeout, poll) {
+            if !self.pause(started, timeout, poll) {
                 return Ok(json::obj(vec![
                     ("task_id", json::s(task_id)),
                     ("status", json::s("timeout")),
@@ -1005,7 +1070,7 @@ impl Engine {
                     waiting.into_iter().map(json::s).collect::<Vec<_>>(),
                 )
             })?;
-            if split.1.is_empty() || !sleep_until(started, timeout, 0.05) {
+            if split.1.is_empty() || !self.pause(started, timeout, 0.05) {
                 return Ok(json::obj(vec![
                     ("released", json::arr(split.0)),
                     ("timed_out", json::arr(split.1)),
@@ -1032,7 +1097,7 @@ impl Engine {
                     ("waited_s", json::f(waited(started))),
                 ]));
             }
-            if !sleep_until(started, timeout, 0.05) {
+            if !self.pause(started, timeout, 0.05) {
                 return Ok(json::obj(vec![
                     ("awaited", json::b(false)),
                     ("agent_id", json::s(agent_id)),
@@ -1089,7 +1154,7 @@ impl Engine {
                     ("spawn", spawn),
                 ]));
             }
-            if !sleep_until(started, timeout, 0.05) {
+            if !self.pause(started, timeout, 0.05) {
                 return Ok(json::obj(vec![
                     ("timed_out", json::b(true)),
                     ("timeout", json::f(timeout)),
@@ -1119,7 +1184,7 @@ impl Engine {
                     ("child_agent_id", json::s(&child)),
                 ]));
             }
-            if !sleep_until(started, timeout, 0.05) {
+            if !self.pause(started, timeout, 0.05) {
                 return Ok(json::obj(vec![
                     ("timed_out", json::b(true)),
                     ("child_agent_id", json::s(child)),
@@ -1165,7 +1230,7 @@ impl Engine {
                 ]));
             }
             let count = acked.as_array().map(|items| items.len() as i64).unwrap_or(0);
-            if count >= expected || !sleep_until(started, timeout, 0.05) {
+            if count >= expected || !self.pause(started, timeout, 0.05) {
                 let pending = status
                     .get("pending_acks")
                     .cloned()
@@ -1194,7 +1259,7 @@ impl Engine {
                     .map(|row| row.status == "completed")
                     .unwrap_or(false)
             })?;
-            if done || !sleep_until(started, timeout, 0.05) {
+            if done || !self.pause(started, timeout, 0.05) {
                 return Ok(json::obj(vec![
                     ("timed_out", json::b(!done)),
                     ("handoff_id", json::i(id)),
@@ -1239,7 +1304,8 @@ fn read_only(tool: &str, args: &Value) -> bool {
     }
 }
 
-fn blocks(tool: &str, args: &Value) -> bool {
+/// True for calls that wait (poll until something happens or a timeout).
+pub fn blocks(tool: &str, args: &Value) -> bool {
     match tool {
         "acquire_lock" => opt_bool(args, "retry", false),
         "get_notifications" => opt_f(args, "timeout_s", 0.0) > 0.0,
@@ -1306,18 +1372,64 @@ fn waited(start: std::time::Instant) -> f64 {
     start.elapsed().as_secs_f64()
 }
 
-fn sleep_until(start: std::time::Instant, timeout: f64, poll: f64) -> bool {
-    let limit = std::time::Duration::from_secs_f64(timeout.max(0.0));
-    let elapsed = start.elapsed();
-    if elapsed >= limit {
-        return false;
+/// The longest any call may wait, in seconds: 600, or
+/// `COORDINATIONHUB_MAX_WAIT_S` when that is lower and positive.
+pub fn max_wait_s() -> f64 {
+    let asked = util::env_f64("COORDINATIONHUB_MAX_WAIT_S", MAX_WAIT_S);
+    if asked > 0.0 && asked < MAX_WAIT_S {
+        asked
+    } else {
+        MAX_WAIT_S
     }
-    let left = (limit - elapsed).as_secs_f64();
-    let slice = poll.min(left).max(0.0);
-    if slice > 0.0 {
-        std::thread::sleep(std::time::Duration::from_secs_f64(slice));
+}
+
+pub const MAX_WAIT_S: f64 = 600.0;
+
+/// The timeout argument of a waiting tool: its name, how many of its units
+/// make a second, and its default.
+fn wait_timeout(tool: &str) -> (&'static str, f64, f64) {
+    match tool {
+        "acquire_lock" => ("timeout_ms", 1000.0, 5000.0),
+        "get_notifications" => ("timeout_s", 1.0, 0.0),
+        "wait_for_task" | "await_agent" => ("timeout_s", 1.0, 60.0),
+        "await_subagent_registration" => ("timeout", 1.0, 300.0),
+        "await_subagent_stopped" => ("timeout", 1.0, 30.0),
+        _ => ("timeout_s", 1.0, 30.0),
     }
-    start.elapsed() < limit
+}
+
+/// Adds `locks_expiring` and `locks_expired` for the calling agent
+/// (`agent_id`) to a `get_notifications` reply, when there are any.
+fn with_lock_warnings(value: &mut Value, state: &crate::db::State, args: &Value) {
+    let Some(agent) = opt_str(args, "agent_id") else {
+        return;
+    };
+    let (soon, gone) = act_lock::warnings(state, agent, util::now());
+    if let Value::Object(pairs) = value {
+        if !soon.is_empty() {
+            pairs.push(("locks_expiring".into(), json::arr(soon)));
+        }
+        if !gone.is_empty() {
+            pairs.push(("locks_expired".into(), json::arr(gone)));
+        }
+    }
+}
+
+/// Names the agents `list_agents` left out for being quiet, so an empty
+/// list during long builds is not mistaken for an empty swarm.
+fn with_quiet(value: &mut Value, quiet: Vec<String>, stale: f64) {
+    if quiet.is_empty() {
+        return;
+    }
+    if let Value::Object(pairs) = value {
+        let hint = format!(
+            "{} registered agent(s) sent no heartbeat for over {} s and are hidden (busy in a long build, or gone without deregistering); pass active_only=false to list them. A heartbeat makes an agent active again.",
+            quiet.len(),
+            json::py_repr(&json::f(stale))
+        );
+        pairs.push(("stale_hidden".into(), json::string_list(&quiet)));
+        pairs.push(("hint".into(), json::s(hint)));
+    }
 }
 
 fn need_str<'a>(args: &'a Value, key: &str) -> Result<&'a str, String> {

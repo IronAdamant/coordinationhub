@@ -7,6 +7,9 @@ use std::path::Path;
 
 const DEFAULT_TTL: f64 = 300.0;
 
+/// A heartbeat renews a lock once less than this share of its TTL is left.
+pub const RENEW_FRACTION: f64 = 0.5;
+
 pub fn regions_overlap(a0: Option<i64>, a1: Option<i64>, b0: Option<i64>, b1: Option<i64>) -> bool {
     if a0.is_none() || b0.is_none() {
         return true;
@@ -350,20 +353,38 @@ pub fn release(
     project_root: Option<&Path>,
 ) -> Value {
     let norm = normalize_path(document_path, project_root);
+    let now = util::now();
+    let same_region = |lock: &Lock| {
+        if region_start.is_some() {
+            lock.region_start == region_start && lock.region_end == region_end
+        } else {
+            lock.region_start.is_none()
+        }
+    };
     let rows: Vec<&Lock> = state
         .locks
         .iter()
-        .filter(|lock| {
-            lock.document_path == norm
-                && if region_start.is_some() {
-                    lock.region_start == region_start && lock.region_end == region_end
-                } else {
-                    lock.region_start.is_none()
-                }
-        })
+        .filter(|lock| lock.document_path == norm && same_region(lock))
         .collect();
-    if rows.is_empty() {
-        if region_start.is_none() {
+    let any_rows = !rows.is_empty();
+    let own: Vec<(i64, bool)> = rows
+        .iter()
+        .filter(|lock| lock.locked_by == agent_id)
+        .map(|lock| (lock.id, lock_alive(lock, now)))
+        .collect();
+    if !own.is_empty() && own.iter().all(|(_, alive)| !alive) {
+        // Every row this agent has here ran out of TTL: say so instead of
+        // releasing a lock the agent no longer had.
+        let (_, expired) = take_locks(state, now, |lock| {
+            lock.document_path == norm && lock.locked_by == agent_id && same_region(lock)
+        });
+        let at = expired.iter().map(expiry).fold(f64::MIN, f64::max);
+        clear_lapse(state, agent_id, Some((&norm, region_start, region_end)));
+        let holder = live_holder(state, &norm, agent_id, now);
+        return expired_reply("released", &norm, at, holder.as_deref(), now);
+    }
+    if own.is_empty() {
+        if !any_rows && region_start.is_none() {
             let regions: Vec<Value> = state
                 .locks
                 .iter()
@@ -387,22 +408,20 @@ pub fn release(
                 ]);
             }
         }
+        if let Some(lapse) = lapses(state, agent_id)
+            .into_iter()
+            .find(|lapse| lapse.matches(&norm, region_start, region_end))
+        {
+            clear_lapse(state, agent_id, Some((&norm, region_start, region_end)));
+            let holder = live_holder(state, &norm, agent_id, now);
+            return expired_reply("released", &norm, lapse.expired_at, holder.as_deref(), now);
+        }
         return json::obj(vec![
             ("released", json::b(false)),
-            ("reason", json::s("not_locked")),
+            ("reason", json::s(if any_rows { "not_owner" } else { "not_locked" })),
         ]);
     }
-    let owned: Vec<i64> = rows
-        .iter()
-        .filter(|lock| lock.locked_by == agent_id)
-        .map(|lock| lock.id)
-        .collect();
-    if owned.is_empty() {
-        return json::obj(vec![
-            ("released", json::b(false)),
-            ("reason", json::s("not_owner")),
-        ]);
-    }
+    let owned: Vec<i64> = own.iter().map(|(id, _)| *id).collect();
     let count = owned.len() as i64;
     state.locks.retain(|lock| !owned.contains(&lock.id));
     let worktree = project_root.map(|p| util::path_str(p));
@@ -430,29 +449,269 @@ pub fn refresh(
 ) -> Value {
     let norm = normalize_path(document_path, project_root);
     let now = util::now();
-    if let Some(lock) = state.locks.iter_mut().find(|lock| {
+    let mine = |lock: &Lock| {
         lock.document_path == norm
             && lock.locked_by == agent_id
             && lock.region_start == region_start
             && lock.region_end == region_end
-    }) {
-        if lock.locked_at + lock.lock_ttl <= now {
+    };
+    if let Some(lock) = state.locks.iter_mut().find(|lock| mine(lock)) {
+        if lock_alive(lock, now) {
+            lock.locked_at = now;
+            lock.lock_ttl = ttl;
             return json::obj(vec![
-                ("refreshed", json::b(false)),
-                ("reason", json::s("not_locked")),
+                ("refreshed", json::b(true)),
+                ("expires_at", json::f(now + ttl)),
             ]);
         }
-        lock.locked_at = now;
-        lock.lock_ttl = ttl;
-        return json::obj(vec![
-            ("refreshed", json::b(true)),
-            ("expires_at", json::f(now + ttl)),
-        ]);
+        let (_, expired) = take_locks(state, now, mine);
+        let at = expired.iter().map(expiry).fold(f64::MIN, f64::max);
+        clear_lapse(state, agent_id, Some((&norm, region_start, region_end)));
+        let holder = live_holder(state, &norm, agent_id, now);
+        return expired_reply("refreshed", &norm, at, holder.as_deref(), now);
+    }
+    if let Some(lapse) = lapses(state, agent_id)
+        .into_iter()
+        .find(|lapse| lapse.matches(&norm, region_start, region_end))
+    {
+        clear_lapse(state, agent_id, Some((&norm, region_start, region_end)));
+        let holder = live_holder(state, &norm, agent_id, now);
+        return expired_reply("refreshed", &norm, lapse.expired_at, holder.as_deref(), now);
     }
     json::obj(vec![
         ("refreshed", json::b(false)),
         ("reason", json::s("not_locked")),
     ])
+}
+
+/// The reply to releasing or refreshing a lock whose TTL ran out: when it
+/// lapsed, who holds the file now, and what to do next.
+fn expired_reply(verb: &str, path: &str, expired_at: f64, holder: Option<&str>, now: f64) -> Value {
+    let ago = (now - expired_at).max(0.0).round() as i64;
+    let next = match holder {
+        Some(other) => format!("{other} holds it now; ask them or wait_for_locks, then acquire_lock"),
+        None => "call acquire_lock again if you still need it".to_string(),
+    };
+    let mut pairs = vec![
+        (verb, json::b(false)),
+        ("reason", json::s("expired")),
+        ("expired_at", json::f(expired_at)),
+    ];
+    if let Some(other) = holder {
+        pairs.push(("locked_by", json::s(other)));
+    }
+    pairs.push((
+        "error",
+        json::s(format!(
+            "your lock on {path} expired {ago} s ago (its ttl ran out; heartbeat renews held locks); {next}"
+        )),
+    ));
+    json::obj(pairs)
+}
+
+fn live_holder(state: &State, path: &str, agent_id: &str, now: f64) -> Option<String> {
+    state
+        .locks
+        .iter()
+        .find(|lock| lock.document_path == path && lock.locked_by != agent_id && lock_alive(lock, now))
+        .map(|lock| lock.locked_by.clone())
+}
+
+fn expiry(lock: &Lock) -> f64 {
+    lock.locked_at + lock.lock_ttl
+}
+
+/// Removes the locks `pick` selects and returns them as (live, expired).
+/// Each expired one is recorded as a `lock.expired` event, so its holder
+/// can later be told the lock lapsed rather than that it never existed.
+pub fn take_locks(
+    state: &mut State,
+    now: f64,
+    pick: impl Fn(&Lock) -> bool,
+) -> (Vec<Lock>, Vec<Lock>) {
+    let mut live = Vec::new();
+    let mut expired = Vec::new();
+    let mut kept = Vec::with_capacity(state.locks.len());
+    for lock in std::mem::take(&mut state.locks) {
+        if !pick(&lock) {
+            kept.push(lock);
+        } else if lock_alive(&lock, now) {
+            live.push(lock);
+        } else {
+            expired.push(lock);
+        }
+    }
+    state.locks = kept;
+    for lock in &expired {
+        state.record_event(
+            "lock.expired",
+            json::obj(vec![
+                ("document_path", json::s(&lock.document_path)),
+                ("agent_id", json::s(&lock.locked_by)),
+                ("region_start", json::opt_i(lock.region_start)),
+                ("region_end", json::opt_i(lock.region_end)),
+                ("expired_at", json::f(expiry(lock))),
+            ]),
+        );
+    }
+    (live, expired)
+}
+
+/// A lock that ran out of TTL and whose holder has not yet been told so by
+/// a release, refresh, re-acquire or deregistration.
+#[derive(Clone, Debug, PartialEq)]
+pub struct Lapse {
+    pub document_path: String,
+    pub region_start: Option<i64>,
+    pub region_end: Option<i64>,
+    pub expired_at: f64,
+}
+
+impl Lapse {
+    fn matches(&self, path: &str, start: Option<i64>, end: Option<i64>) -> bool {
+        self.document_path == path && self.region_start == start && self.region_end == end
+    }
+
+    pub fn to_value(&self) -> Value {
+        let mut pairs = vec![
+            ("document_path", json::s(&self.document_path)),
+            ("expired_at", json::f(self.expired_at)),
+        ];
+        if self.region_start.is_some() {
+            pairs.push(("region_start", json::opt_i(self.region_start)));
+            pairs.push(("region_end", json::opt_i(self.region_end)));
+        }
+        json::obj(pairs)
+    }
+}
+
+/// The agent's lapsed locks, read from the event journal. A `lock.expired`
+/// event stays open until the same agent acquires, releases or clears that
+/// lock, releases all its locks, or deregisters. Keeping them as events
+/// means no new journal table, which a 1.1 binary sharing the store could
+/// not read.
+pub fn lapses(state: &State, agent_id: &str) -> Vec<Lapse> {
+    let needle = json::dumps(&json::s(agent_id));
+    let mut open: Vec<Lapse> = Vec::new();
+    for event in &state.hub_events {
+        let topic = event.topic.as_str();
+        if !matches!(
+            topic,
+            "lock.expired"
+                | "lock.acquired"
+                | "lock.released"
+                | "lock.expired_cleared"
+                | "agent.deregistered"
+        ) || !event.payload.contains(&needle)
+        {
+            continue;
+        }
+        let Ok(payload) = json::parse(&event.payload) else {
+            continue;
+        };
+        if payload.get("agent_id").and_then(Value::as_str) != Some(agent_id) {
+            continue;
+        }
+        let bulk = payload.get("bulk").and_then(Value::as_bool) == Some(true);
+        if topic == "agent.deregistered" || bulk {
+            open.clear();
+            continue;
+        }
+        let path = payload.get("document_path").and_then(Value::as_str).unwrap_or("");
+        let start = payload.get("region_start").and_then(Value::as_i64);
+        let end = payload.get("region_end").and_then(Value::as_i64);
+        open.retain(|lapse| !lapse.matches(path, start, end));
+        if topic == "lock.expired" {
+            open.push(Lapse {
+                document_path: path.to_string(),
+                region_start: start,
+                region_end: end,
+                expired_at: payload
+                    .get("expired_at")
+                    .and_then(Value::as_f64)
+                    .unwrap_or(event.created_at),
+            });
+        }
+    }
+    open
+}
+
+/// Marks lapses as reported: one lock (path and region), or all of the
+/// agent's when `which` is None.
+pub fn clear_lapse(
+    state: &mut State,
+    agent_id: &str,
+    which: Option<(&str, Option<i64>, Option<i64>)>,
+) {
+    let payload = match which {
+        Some((path, start, end)) => json::obj(vec![
+            ("agent_id", json::s(agent_id)),
+            ("document_path", json::s(path)),
+            ("region_start", json::opt_i(start)),
+            ("region_end", json::opt_i(end)),
+        ]),
+        None => json::obj(vec![("agent_id", json::s(agent_id)), ("bulk", json::b(true))]),
+    };
+    state.record_event("lock.expired_cleared", payload);
+}
+
+/// Heartbeat renewal: every live lock of `agent_id` with less than half of
+/// its TTL left starts a fresh TTL (its `locked_at` becomes now). Returns
+/// how many were renewed and the locks that still run out before the next
+/// heartbeat is due (a TTL shorter than `next_beat`).
+pub fn renew(state: &mut State, agent_id: &str, now: f64, next_beat: f64) -> (i64, Vec<Value>) {
+    let mut renewed = 0;
+    let mut soon = Vec::new();
+    for lock in state.locks.iter_mut().filter(|lock| lock.locked_by == agent_id) {
+        if !lock_alive(lock, now) {
+            continue;
+        }
+        if expiry(lock) - now < lock.lock_ttl * RENEW_FRACTION {
+            lock.locked_at = now;
+            renewed += 1;
+        }
+        let left = expiry(lock) - now;
+        if left < next_beat {
+            soon.push(expiring(lock, left));
+        }
+    }
+    (renewed, soon)
+}
+
+/// For `get_notifications`: the live locks of `agent_id` a heartbeat would
+/// renew now (less than half their TTL left), and its lapsed locks.
+pub fn warnings(state: &State, agent_id: &str, now: f64) -> (Vec<Value>, Vec<Value>) {
+    let mut soon = Vec::new();
+    let mut gone = lapses(state, agent_id);
+    for lock in state.locks.iter().filter(|lock| lock.locked_by == agent_id) {
+        let left = expiry(lock) - now;
+        if left <= 0.0 {
+            gone.retain(|lapse| {
+                !lapse.matches(&lock.document_path, lock.region_start, lock.region_end)
+            });
+            gone.push(Lapse {
+                document_path: lock.document_path.clone(),
+                region_start: lock.region_start,
+                region_end: lock.region_end,
+                expired_at: expiry(lock),
+            });
+        } else if left < lock.lock_ttl * RENEW_FRACTION {
+            soon.push(expiring(lock, left));
+        }
+    }
+    (soon, gone.iter().map(Lapse::to_value).collect())
+}
+
+fn expiring(lock: &Lock, left: f64) -> Value {
+    let mut pairs = vec![
+        ("document_path", json::s(&lock.document_path)),
+        ("expires_in_s", json::f((left * 10.0).round() / 10.0)),
+    ];
+    if lock.region_start.is_some() {
+        pairs.push(("region_start", json::opt_i(lock.region_start)));
+        pairs.push(("region_end", json::opt_i(lock.region_end)));
+    }
+    json::obj(pairs)
 }
 
 pub fn status(state: &State, document_path: &str, project_root: Option<&Path>) -> Value {
@@ -529,13 +788,18 @@ pub fn list_locks(state: &State, agent_id: Option<&str>) -> Value {
     json::obj(vec![("locks", json::arr(locks)), ("count", json::i(count))])
 }
 
+/// Drops every lock of `agent_id`. `released` counts the live ones; locks
+/// whose TTL had already run out, and lapses not yet reported, are listed
+/// under `expired` (left out when there are none) and marked reported.
 pub fn release_agent(state: &mut State, agent_id: &str) -> Value {
-    let before = state.locks.len();
-    state.locks.retain(|lock| lock.locked_by != agent_id);
-    json::obj(vec![(
-        "released",
-        json::i((before - state.locks.len()) as i64),
-    )])
+    let (live, _) = take_locks(state, util::now(), |lock| lock.locked_by == agent_id);
+    let gone = lapses(state, agent_id);
+    let mut pairs = vec![("released", json::i(live.len() as i64))];
+    if !gone.is_empty() {
+        clear_lapse(state, agent_id, None);
+        pairs.push(("expired", json::arr(gone.iter().map(Lapse::to_value).collect())));
+    }
+    json::obj(pairs)
 }
 
 pub fn reap_expired(state: &mut State, grace: f64) -> Value {
@@ -557,14 +821,9 @@ pub fn reap_expired(state: &mut State, grace: f64) -> Value {
             }
         }
     }
-    let before = state.locks.len();
-    state
-        .locks
-        .retain(|lock| lock.locked_at + lock.lock_ttl >= now);
-    json::obj(vec![(
-        "reaped",
-        json::i((before - state.locks.len()) as i64),
-    )])
+    // A lock at exactly its expiry instant is kept, as before.
+    let (_, expired) = take_locks(state, now, |lock| lock.locked_at + lock.lock_ttl < now);
+    json::obj(vec![("reaped", json::i(expired.len() as i64))])
 }
 
 pub fn notify(
