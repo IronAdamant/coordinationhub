@@ -26,6 +26,7 @@ From Specula's M5 lanes (about fifteen lane reports). `MIGRATION.md` lists each 
 - A heartbeat from an agent the reaper marked stopped makes it active again (`revived: true`) instead of answering `agent_stopped`; a deregistered agent still gets `agent_stopped`
 - Waiting calls run on their own thread and engine in `serve-mcp` and `serve`, so a long poll no longer holds up other agents' calls
 - `tools_version` is `1.2.0`
+- CI, `parity` and `bench` read Python 0.8.0 from the `pre-rust-python-legacy` tag; the `python-legacy` branch is gone from GitHub
 
 ### Fixed
 - Lock lapses were silent: the reaper deleted expired locks without a trace, so a lane learned of it only from a puzzling release reply. Each expiry is now recorded (`lock.expired` event) and reported to its holder

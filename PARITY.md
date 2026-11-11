@@ -1,13 +1,13 @@
 # Parity with Python 0.8.0
 
 ```bash
-git fetch origin python-legacy
+git fetch origin tag pre-rust-python-legacy
 python -m pip install "mcp==1.30.0"          # the version 0.8.0's stdio server runs on
 cargo build --release
 cargo run --release --example parity -- target/release/coordinationhub [--python python3.12]
 ```
 
-`examples/parity.rs` extracts the unmodified 0.8.0 tree from `python-legacy` (byte-identical to the PyPI package) and runs it beside the Rust binary over real MCP stdio and the real CLI. Neither side is patched; both use the real clock. Time fields, pids, temporary paths, epoch and ISO timestamps are masked, CRLF is folded to LF, and the Python child runs with `PYTHONUTF8=1` so Windows pipes carry UTF-8. Everything else is compared. Rust MCP replies are compact JSON since 1.1.0; each one is parsed and written again in 0.8.0's indented layout before the comparison, so replies are compared by value, and a separate check fails the run if the Rust text is not compact.
+`examples/parity.rs` extracts the unmodified 0.8.0 tree from the tag `pre-rust-python-legacy` (byte-identical to the PyPI package) and runs it beside the Rust binary over real MCP stdio and the real CLI. Neither side is patched; both use the real clock. Time fields, pids, temporary paths, epoch and ISO timestamps are masked, CRLF is folded to LF, and the Python child runs with `PYTHONUTF8=1` so Windows pipes carry UTF-8. Everything else is compared. Rust MCP replies are compact JSON since 1.1.0; each one is parsed and written again in 0.8.0's indented layout before the comparison, so replies are compared by value, and a separate check fails the run if the Rust text is not compact.
 
 Every difference goes into a ledger. A difference whose title is in `ALLOWED` is one `MIGRATION.md` documents; for those the harness also checks the Rust reply against the documented one, so a regression there still fails. Anything else fails the run with exit 1. CI runs it on Linux with Python 3.12.
 

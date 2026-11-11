@@ -19,7 +19,7 @@ jobs:
         with:
           python-version: "3.12"
       - name: Fetch the Python tree
-        run: git fetch origin python-legacy:python-legacy
+        run: git fetch --force origin tag pre-rust-python-legacy
       - name: Install the stdio package Python 0.8.0 needs
         run: python -m pip install "mcp==1.30.0"
       - name: Build

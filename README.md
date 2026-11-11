@@ -2,7 +2,7 @@
 
 A shared board for coding agents working on the same project. It records who is working, who holds which file, which tasks are open, claimed, done or handed off, and lets agents message and wait on each other. Agents use it through MCP (stdio) or the command line; a small HTTP server shows a live dashboard.
 
-It is one Rust binary built from the standard library only: no crates, nothing to install at run time. It replaces the Python 0.8.0 program (kept on the `python-legacy` branch) with the same tools, commands and replies; `MIGRATION.md` lists the deliberate differences. Version 1.1.0 makes task claims safe under concurrency, adds explicit handoff tools and sends compact replies; 1.2.0 keeps locks alive while their holder heartbeats, reports lapsed locks, and stops long waits from holding up other calls (see the changelog). `coordinationhub --version` prints the installed version.
+It is one Rust binary built from the standard library only: no crates, nothing to install at run time. It replaces the Python 0.8.0 program (kept at the tag `pre-rust-python-legacy`) with the same tools, commands and replies; `MIGRATION.md` lists the deliberate differences. Version 1.1.0 makes task claims safe under concurrency, adds explicit handoff tools and sends compact replies; 1.2.0 keeps locks alive while their holder heartbeats, reports lapsed locks, and stops long waits from holding up other calls (see the changelog). `coordinationhub --version` prints the installed version.
 
 ## Install
 
@@ -142,7 +142,7 @@ coordinationhub: tools tasks
 
 ```bash
 cargo test --release
-git fetch origin python-legacy && python -m pip install "mcp==1.30.0"
+git fetch origin tag pre-rust-python-legacy && python -m pip install "mcp==1.30.0"
 cargo run --release --example parity -- target/release/coordinationhub --python python3.12
 cargo run --release --example bench -- target/release/coordinationhub --python python3.12
 ```

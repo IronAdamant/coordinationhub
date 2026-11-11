@@ -1,6 +1,6 @@
 # Migration from Python 0.8.0
 
-The `python-legacy` branch is the Python 0.8.0 tree, unchanged (it is byte-identical to the PyPI 0.8.0 package). This branch is the Rust program. It keeps every 0.8.0 tool, CLI command, flag and reply shape. Where 0.8.0 crashed, hid an error, or printed the wrong thing, the Rust program gives the working result instead; each of those is listed below. `cargo run --release --example parity` compares the two and fails on any difference not listed here.
+The tag `pre-rust-python-legacy` (formerly the `python-legacy` branch) is the Python 0.8.0 tree, unchanged (it is byte-identical to the PyPI 0.8.0 package). This branch is the Rust program. It keeps every 0.8.0 tool, CLI command, flag and reply shape. Where 0.8.0 crashed, hid an error, or printed the wrong thing, the Rust program gives the working result instead; each of those is listed below. `cargo run --release --example parity` compares the two and fails on any difference not listed here.
 
 ## Install
 
@@ -14,7 +14,7 @@ The command is still `coordinationhub`. `coordinationhub serve-mcp` replaces `py
 
 ## Storage
 
-The store is `coordination.jsonl` plus `coordination.lock`, in the directory where 0.8.0 kept `coordination.db` (`<project>/.coordinationhub`, or `~/.coordinationhub` with no project). The SQLite file is not read. Start a fresh store, or let a running 0.8.0 swarm finish on `python-legacy` first. Tool replies are compared, not file bytes.
+The store is `coordination.jsonl` plus `coordination.lock`, in the directory where 0.8.0 kept `coordination.db` (`<project>/.coordinationhub`, or `~/.coordinationhub` with no project). The SQLite file is not read. Start a fresh store, or let a running 0.8.0 swarm finish on 0.8.0 first. Tool replies are compared, not file bytes.
 
 ## Differences
 

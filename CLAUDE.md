@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## What this is
 
-CoordinationHub is a shared coordination layer for coding agents on one project: agent identity and lineage, document locks (including line regions), a task board with dependencies, work intents, messages, broadcasts, handoffs, a coordinator lease, and a live dashboard. This branch is a std-only Rust rewrite of Python 0.8.0 (kept unchanged on `python-legacy`). **Zero crates, no build.rs, nothing needed at run time.** Python appears only as the parity reference in `examples/parity.rs` and `examples/bench.rs`.
+CoordinationHub is a shared coordination layer for coding agents on one project: agent identity and lineage, document locks (including line regions), a task board with dependencies, work intents, messages, broadcasts, handoffs, a coordinator lease, and a live dashboard. This branch is a std-only Rust rewrite of Python 0.8.0 (kept unchanged at the tag `pre-rust-python-legacy`, formerly the `python-legacy` branch). **Zero crates, no build.rs, nothing needed at run time.** Python appears only as the parity reference in `examples/parity.rs` and `examples/bench.rs`.
 
 ## Commands
 
@@ -17,10 +17,10 @@ cargo run --release --example check_zero_deps          # Cargo.toml must have no
 cargo run --release --example check_no_todos           # no unfinished markers in src, tests
 cargo run --release --example gen_docs -- --root <python tree> [--check]   # ports of the 0.8.0 doc tools;
 cargo run --release --example propose_stale_phrases    # they read a coordinationhub/ Python package,
-cargo run --release --example update_dispatch_floor -- --root <python tree>  # e.g. python-legacy
+cargo run --release --example update_dispatch_floor -- --root <python tree>  # e.g. the pre-rust-python-legacy tag
 ```
 
-`parity` and `bench` need `git fetch origin python-legacy` and `pip install "mcp==1.30.0"` for that Python.
+`parity` and `bench` need `git fetch origin tag pre-rust-python-legacy` and `pip install "mcp==1.30.0"` for that Python.
 
 ## Layout
 

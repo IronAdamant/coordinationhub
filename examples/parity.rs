@@ -1172,7 +1172,7 @@ fn prune_counts(sides: &Sides, ledger: &mut Ledger) {
 // ------------------------------------------------------------------
 
 fn legacy_ref(root: &Path) -> String {
-    for reference in ["python-legacy", "origin/python-legacy"] {
+    for reference in ["pre-rust-python-legacy", "python-legacy", "origin/python-legacy"] {
         let ok = Command::new("git")
             .args(["rev-parse", "--verify", reference])
             .current_dir(root)
@@ -1185,7 +1185,7 @@ fn legacy_ref(root: &Path) -> String {
             return reference.to_string();
         }
     }
-    eprintln!("python-legacy is not available");
+    eprintln!("the Python 0.8.0 tree is not available: git fetch origin tag pre-rust-python-legacy");
     std::process::exit(1);
 }
 
