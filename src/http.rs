@@ -7,6 +7,8 @@ use std::io::{Read, Write};
 use std::net::{TcpListener, TcpStream};
 use std::path::PathBuf;
 use std::collections::HashMap;
+use crate::waits::Waits;
+use std::sync::atomic::AtomicBool;
 use std::sync::{Arc, Mutex, OnceLock};
 use std::time::Duration;
 
@@ -101,6 +103,7 @@ pub fn serve(
     banner: Banner,
 ) -> Result<(), String> {
     let engine = Engine::open(storage.as_deref(), project.as_deref(), namespace)?;
+    let waits = Arc::new(Waits::new(storage, project, namespace));
     let token = if no_auth {
         None
     } else {
@@ -141,8 +144,9 @@ pub fn serve(
         let Ok(stream) = stream else { continue };
         let token = token.clone();
         let engine = engine.clone();
+        let waits = waits.clone();
         std::thread::spawn(move || {
-            let _ = dispatch_connection(stream, engine, token);
+            let _ = dispatch_connection(stream, engine, waits, token);
         });
     }
     Ok(())
@@ -151,6 +155,7 @@ pub fn serve(
 fn dispatch_connection(
     mut stream: TcpStream,
     engine: Arc<Mutex<Engine>>,
+    waits: Arc<Waits>,
     token: Option<String>,
 ) -> Result<(), String> {
     let _ = stream.set_read_timeout(Some(Duration::from_secs(30)));
@@ -218,10 +223,10 @@ fn dispatch_connection(
         sse_release(&ip);
         return result;
     }
-    let mut engine = engine.lock().map_err(|e| e.to_string())?;
-    handle_locked(
+    handle_request(
         &mut stream,
-        &mut engine,
+        &engine,
+        &waits,
         token.as_deref(),
         method,
         path,
@@ -267,9 +272,12 @@ fn serve_events(
     Ok(())
 }
 
-fn handle_locked(
+/// Answers one request. The shared engine is locked only while a call
+/// uses it; a waiting `/call` runs on its own engine (see `waits`).
+fn handle_request(
     stream: &mut TcpStream,
-    engine: &mut Engine,
+    shared: &Mutex<Engine>,
+    waits: &Waits,
     token: Option<&str>,
     method: &str,
     path: &str,
@@ -319,16 +327,19 @@ fn handle_locked(
     if method == "GET" && path == "/health" {
         let body = json::dumps(&json::obj(vec![
             ("status", json::s("ok")),
-            ("tools_version", json::s(&engine.schema.tools_version)),
+            (
+                "tools_version",
+                json::s(&shared.lock().map_err(|e| e.to_string())?.schema.tools_version),
+            ),
         ]));
         return write_json(stream, 200, body.as_bytes());
     }
     if method == "GET" && path == "/tools" {
-        let body = json::dumps(&mcp::schemas_for_http(engine));
+        let body = json::dumps(&mcp::schemas_for_http(&*shared.lock().map_err(|e| e.to_string())?));
         return write_json(stream, 200, body.as_bytes());
     }
     if method == "GET" && path == "/api/dashboard-data" {
-        let body = json::dumps(&engine.dashboard());
+        let body = json::dumps(&shared.lock().map_err(|e| e.to_string())?.dashboard());
         return write_json(stream, 200, body.as_bytes());
     }
     if method == "POST" && path == "/call" {
@@ -380,7 +391,16 @@ fn handle_locked(
                 b"{\"error\": \"'arguments' must be a JSON object\"}",
             );
         }
-        match engine.call(tool, &arguments) {
+        let outcome = if crate::engine::blocks(tool, &arguments) {
+            if !waits.admit() {
+                let body = json::dumps(&json::obj(vec![("error", json::s(Waits::refusal()))]));
+                return write_json(stream, 503, body.as_bytes());
+            }
+            waits.run(tool, &arguments, Arc::new(AtomicBool::new(false)))
+        } else {
+            shared.lock().map_err(|e| e.to_string())?.call(tool, &arguments)
+        };
+        match outcome {
             Ok(value) => {
                 let body = json::dumps(&json::obj(vec![("result", value)]));
                 write_json(stream, 200, body.as_bytes())

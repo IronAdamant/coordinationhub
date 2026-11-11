@@ -656,6 +656,9 @@ fn render_deregister(value: &Value) {
             .and_then(Value::as_i64)
             .unwrap_or(0)
     );
+    if let Some(expired) = value.get("locks_expired").and_then(Value::as_array) {
+        println!("  Locks already expired: {}", expired.len());
+    }
 }
 
 fn render_agents(value: &Value) {

@@ -7,6 +7,32 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.2.0] - 2026-11-11
+
+From Specula's M5 lanes (about fifteen lane reports). `MIGRATION.md` lists each difference from 0.8.0; `tests/m5_fixes.rs` has a test for each.
+
+### Added
+- `heartbeat` renews the caller's locks that have less than half their TTL left, and reports `locks_renewed`, `locks_expiring` (TTL shorter than the next heartbeat) and `locks_expired` (ran out before a heartbeat could renew them)
+- `get_notifications` with `agent_id` reports that agent's `locks_expiring` (under half their TTL) and `locks_expired`
+- `list_agents` names the agents it hides for being quiet (`stale_hidden`, with a `hint`)
+- Every wait is capped at 600 s and replies `wait_capped_s` when the asked timeout was longer; `COORDINATIONHUB_MAX_WAIT_S` sets a lower cap
+- MCP `notifications/cancelled` stops a running wait, which then sends no response
+- `COORDINATIONHUB_LOCK_WAIT_S` (default 30): how long a call waits for the store's file lock before failing with `store busy`
+- Tool descriptions say when to use each tool
+
+### Changed
+- `release_lock` and `refresh_lock` of a lock whose TTL ran out answer `reason: "expired"` with `expired_at`, the current holder (`locked_by`) if another agent took the file, and an `error` sentence; 1.1 answered `not_locked` or `not_owner`, or released the dead row as if it were held
+- `deregister_agent` counts only live locks in `locks_released` and lists lapsed ones in `locks_expired`; `admin_locks` `release_by_agent` likewise (`released`, `expired`)
+- A heartbeat from an agent the reaper marked stopped makes it active again (`revived: true`) instead of answering `agent_stopped`; a deregistered agent still gets `agent_stopped`
+- Waiting calls run on their own thread and engine in `serve-mcp` and `serve`, so a long poll no longer holds up other agents' calls
+- `tools_version` is `1.2.0`
+
+### Fixed
+- Lock lapses were silent: the reaper deleted expired locks without a trace, so a lane learned of it only from a puzzling release reply. Each expiry is now recorded (`lock.expired` event) and reported to its holder
+- `heartbeat`, `update_task_status` and other calls could hang until the client's 1800 s idle timeout behind another agent's long poll on the same server, because the stdio server answered one call at a time
+- `list_agents` returned `[]` while lanes worked: after 600 s without a heartbeat (a long build) the reaper marked each lane stopped, and every later heartbeat was refused
+- A call that failed to read the journal kept the store's file lock until that server's next call, stalling every other process; the lock is released at once. The file lock wait is bounded, and the Windows lock call passes a full `OVERLAPPED`
+
 ## [1.1.1] - 2026-11-05
 
 From the Specula live test (B12).

@@ -373,7 +373,7 @@ impl Store {
         std::fs::create_dir_all(dir).map_err(|e| e.to_string())?;
         let path = dir.join("coordination.jsonl");
         let lock =
-            FileLock::exclusive(&dir.join("coordination.lock")).map_err(|e| e.to_string())?;
+            FileLock::exclusive(&dir.join("coordination.lock")).map_err(|e| busy(&dir.join("coordination.lock"), e))?;
         let (state, offset) = load_journal(&path)?;
         drop(lock);
         let mut store = Self {
@@ -397,8 +397,18 @@ impl Store {
             .parent()
             .unwrap_or_else(|| Path::new("."))
             .join("coordination.lock");
-        let lock = FileLock::exclusive(&lock_path).map_err(|e| e.to_string())?;
+        let lock = FileLock::exclusive(&lock_path).map_err(|e| busy(&lock_path, e))?;
         self.lock = Some(lock);
+        // On a failed read the file lock goes at once: holding it until this
+        // process's next call would stall every other process on the store.
+        let result = self.catch_up_locked();
+        if result.is_err() {
+            self.lock = None;
+        }
+        result
+    }
+
+    fn catch_up_locked(&mut self) -> Result<(), String> {
         if self.clean {
             if self.catch_up()? {
                 self.remember();
@@ -1983,6 +1993,20 @@ fn decode_ce(v: &Value) -> Result<ClaimEvent, String> {
         action: req_str(v, "action")?,
         at: num_f(v, "at"),
     })
+}
+
+/// The error for a store lock that could not be taken: who to blame and
+/// what to do.
+fn busy(lock_path: &Path, err: std::io::Error) -> String {
+    if err.kind() == std::io::ErrorKind::TimedOut {
+        format!(
+            "store busy: another process has held {} for {} s; retry the call. If it keeps failing, a stuck coordinationhub process holds the lock: stop it, or point this server at another --storage-dir",
+            lock_path.display(),
+            util::lock_wait_s()
+        )
+    } else {
+        format!("cannot lock {}: {err}", lock_path.display())
+    }
 }
 
 pub fn home_storage() -> PathBuf {

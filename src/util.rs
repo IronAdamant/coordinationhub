@@ -381,8 +381,35 @@ impl FileLock {
             .read(true)
             .write(true)
             .open(path)?;
-        lock_exclusive(&file)?;
-        Ok(Self { file })
+        // Poll a non-blocking lock instead of blocking in the kernel, so a
+        // process that never lets go cannot hang this one: after
+        // `lock_wait_s()` the call fails with `TimedOut`.
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs_f64(lock_wait_s());
+        let mut pause = std::time::Duration::from_micros(200);
+        loop {
+            match try_lock_exclusive(&file) {
+                Ok(true) => return Ok(Self { file }),
+                Ok(false) => {}
+                Err(err) => return Err(err),
+            }
+            let now = std::time::Instant::now();
+            if now >= deadline {
+                return Err(Error::new(std::io::ErrorKind::TimedOut, "store lock wait timed out"));
+            }
+            std::thread::sleep(pause.min(deadline - now));
+            pause = (pause * 2).min(std::time::Duration::from_millis(20));
+        }
+    }
+}
+
+/// How long a call waits for the store's file lock before giving up: 30 s,
+/// or `COORDINATIONHUB_LOCK_WAIT_S`.
+pub fn lock_wait_s() -> f64 {
+    let wait = env_f64("COORDINATIONHUB_LOCK_WAIT_S", 30.0);
+    if wait > 0.0 {
+        wait
+    } else {
+        30.0
     }
 }
 
@@ -392,15 +419,20 @@ impl Drop for FileLock {
     }
 }
 
+/// Ok(true) when the lock was taken, Ok(false) when another holder has it.
 #[cfg(unix)]
-fn lock_exclusive(file: &File) -> Result<(), Error> {
+fn try_lock_exclusive(file: &File) -> Result<bool, Error> {
     use std::os::unix::io::AsRawFd;
     const LOCK_EX: i32 = 2;
-    let rc = unsafe { flock(file.as_raw_fd(), LOCK_EX) };
+    const LOCK_NB: i32 = 4;
+    let rc = unsafe { flock(file.as_raw_fd(), LOCK_EX | LOCK_NB) };
     if rc == 0 {
-        Ok(())
-    } else {
-        Err(Error::last_os_error())
+        return Ok(true);
+    }
+    let err = Error::last_os_error();
+    match err.kind() {
+        std::io::ErrorKind::WouldBlock | std::io::ErrorKind::Interrupted => Ok(false),
+        _ => Err(err),
     }
 }
 
@@ -421,23 +453,51 @@ unsafe extern "C" {
     fn flock(fd: i32, op: i32) -> i32;
 }
 
+/// Windows `OVERLAPPED`: LockFileEx reads the lock offset from it.
 #[cfg(windows)]
-fn lock_exclusive(file: &File) -> Result<(), Error> {
+#[repr(C)]
+struct Overlapped {
+    internal: usize,
+    internal_high: usize,
+    offset: u32,
+    offset_high: u32,
+    event: *mut std::ffi::c_void,
+}
+
+/// Ok(true) when the lock was taken, Ok(false) when another holder has it.
+#[cfg(windows)]
+fn try_lock_exclusive(file: &File) -> Result<bool, Error> {
     use std::os::windows::io::AsRawHandle;
+    const LOCKFILE_FAIL_IMMEDIATELY: u32 = 1;
+    const LOCKFILE_EXCLUSIVE_LOCK: u32 = 2;
+    const ERROR_LOCK_VIOLATION: i32 = 33;
+    let mut overlapped = Overlapped {
+        internal: 0,
+        internal_high: 0,
+        offset: 0,
+        offset_high: 0,
+        event: std::ptr::null_mut(),
+    };
+    // SAFETY: the handle is open for the life of `file`, and `overlapped`
+    // is a valid OVERLAPPED that outlives this synchronous call.
     let rc = unsafe {
         LockFileEx(
             file.as_raw_handle() as *mut std::ffi::c_void,
-            2,
+            LOCKFILE_EXCLUSIVE_LOCK | LOCKFILE_FAIL_IMMEDIATELY,
             0,
             1,
             0,
-            &mut std::mem::zeroed(),
+            &mut overlapped as *mut Overlapped as *mut std::ffi::c_void,
         )
     };
-    if rc == 0 {
-        Err(Error::last_os_error())
+    if rc != 0 {
+        return Ok(true);
+    }
+    let err = Error::last_os_error();
+    if err.raw_os_error() == Some(ERROR_LOCK_VIOLATION) {
+        Ok(false)
     } else {
-        Ok(())
+        Err(err)
     }
 }
 

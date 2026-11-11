@@ -69,6 +69,21 @@ Each item was found in a multi-agent run (a planner and two workers on one store
 - **Windows output.** Text is UTF-8 with LF line endings, and MCP frames end with LF. When its output is piped, 0.8.0 on Windows writes the ANSI code page (and fails on characters outside it) and CRLF, unless `PYTHONUTF8=1` is set.
 - **MCP framing.** The stdio server also accepts `Content-Length:` framed requests, besides the newline-delimited JSON 0.8.0 accepts.
 
+### Changed in 1.2.0 for agents
+
+Each item was found by Specula's M5 lanes and has a test in `tests/m5_fixes.rs`; the parity harness checks the 0.8.0 side of each.
+
+- **Heartbeats renew locks.** `heartbeat` gives every live lock of the caller with less than half its TTL left a fresh TTL (`locked_at` becomes now). 0.8.0 left locks to run out during long builds whatever the agent did. The reply adds, only when non-empty: `locks_renewed` (count), `locks_expiring` (`document_path`, `expires_in_s`: locks whose TTL is shorter than `next_heartbeat_in`), `locks_expired` (`document_path`, `expired_at`) and a `hint`. With nothing to report the reply is 0.8.0's.
+- **Lapsed locks are reported.** When a lock's TTL runs out, the hub records a `lock.expired` event as it drops the row (on reap, release, refresh, heartbeat or deregistration). The holder's `release_lock` and `refresh_lock` then answer `{"released"|"refreshed": false, "reason": "expired", "expired_at", "locked_by"?, "error"}` once, where 0.8.0 answered `not_locked` or `not_owner`, or released the expired row as if it were held. A second call gets 0.8.0's `not_locked`. Taking the lock again, releasing it, `release_by_agent` or deregistration clears the report.
+- **`deregister_agent`** counts only live locks in `locks_released` and lists lapsed ones in `locks_expired` (omitted when empty); 0.8.0 counted every row it deleted. `admin_locks` `release_by_agent` likewise returns `released` (live) and `expired` (omitted when empty).
+- **`get_notifications` with `agent_id`** adds that agent's `locks_expiring` (live locks under half their TTL) and `locks_expired`, when there are any. 0.8.0 used `agent_id` only as the long-poll waiter's name.
+- **A quiet agent comes back.** A heartbeat from an agent the reaper marked stopped (no heartbeat for the stale timeout) makes it active and replies `revived: true`; 0.8.0 answered `agent_stopped` for ever after. A deregistered agent still gets `agent_stopped`. The reaper records an `agent.reaped` event to tell the two apart.
+- **`list_agents`** with `active_only` (the default) adds `stale_hidden` (ids) and a `hint` when it leaves out agents that never deregistered but are quiet: active with a heartbeat older than `stale_timeout`, or marked stopped by the reaper.
+- **Waits are capped and concurrent.** Every wait (`get_notifications` with `timeout_s`, `wait_for_task`, `wait_for_locks`, `await_agent`, `await_subagent_registration`, `await_subagent_stopped`, `wait_for_broadcast_acks`, `wait_for_handoff` completion, `acquire_lock` with `retry`) lasts at most 600 s, or `COORDINATIONHUB_MAX_WAIT_S` when lower; a reply whose timeout was cut carries `wait_capped_s`. 0.8.0 waited as long as asked. In `serve-mcp` and `serve` waits run on their own thread and engine, so other calls are answered meanwhile, and `notifications/cancelled` stops one (no response is sent, as MCP specifies). At most 64 waits run at once per server; a 65th is refused with a sentence saying so.
+- **Store lock.** A call waits at most 30 s (`COORDINATIONHUB_LOCK_WAIT_S`) for the journal's file lock and then fails with `store busy: ...` naming the lock file and what to do; before, it waited indefinitely.
+- **Readable output.** `release-lock` and `refresh-lock` print the `error` sentence under `FAILED: expired`; `deregister` adds `Locks already expired: N` when there were any.
+- **Descriptions.** Tool descriptions say when to use each tool (for example `acquire_lock`: before editing a file other agents may also edit) and that waits are capped. `tools_version` is `1.2.0`.
+
 ## Config snippets
 
 See the README for Claude Code, Cursor and Grok Build. Point `command` at the Rust binary and pass `serve-mcp`.

@@ -19,6 +19,7 @@ pub mod json;
 pub mod mcp;
 pub mod util;
 pub mod validate;
+pub mod waits;
 
 pub use engine::Engine;
 pub use json::Value;

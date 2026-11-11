@@ -14,7 +14,7 @@ pub fn load_schema() -> Schema {
     let tools_version = value
         .get("tools_version")
         .and_then(Value::as_str)
-        .unwrap_or("1.1.0")
+        .unwrap_or("1.2.0")
         .to_string();
     let mut tools = Vec::new();
     if let Some(Value::Object(pairs)) = value.get("tools") {
