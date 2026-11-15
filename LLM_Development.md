@@ -1,5 +1,9 @@
 # LLM_Development.md — CoordinationHub
 
+## 2026-11-15: notes no longer name an unannounced workspace
+
+- The 1.1.1 and 1.2.0 notes named a workspace that is not public yet (changelog, migration list, this log, and two test-module comments). They now say "a large Rust workspace". The version entries stay, and the program's behaviour is unchanged.
+
 ## 2026-11-15 — 1.3.0 part C: documents, release tooling, clippy
 
 - `AGENTS.md` still described the Python package (SQLite, WAL, `BEGIN IMMEDIATE`, pytest, "no message passing"), so agents working here were sent to files that do not exist. It is rewritten from `src/` at 1.3.0 and kept under 12 KB; `CLAUDE.md` now points to it instead of repeating the module map. `tests/doc_paths.rs` reads inline code spans and link targets outside fences in `AGENTS.md`, `CLAUDE.md` and `COMPLETE_PROJECT_DOCUMENTATION.md` and fails on a path not in the tree (28 such mentions in the old `AGENTS.md`). Spans that look like paths but are not (files the program writes, MCP method names) are listed in its `NOT_PATHS`. `AGENTS.md` keeps its `agent-tools` examples in `text` fences: `tests/tool_groups.rs` checks that this repo's own server is not switched by them.
@@ -31,15 +35,15 @@ Part B:
 - The five readable-output bugs came from 0.8.0's renderers reading keys their replies never had. `dashboard` text builds its lists from `list_agents`, `list_locks` and `query_tasks`.
 - `examples/parity.rs`: the region refusals moved from the shared CLI sequence to `region_rules`, and help of `--replica` / `--force-refresh` is compared without its description (`tests/common::without_no_effect_help` does the same for the goldens, which keep 0.8.0's text).
 
-## 2026-11-11 — 1.2.0 lock lapses, waits, quiet agents (Specula M5)
+## 2026-11-11: 1.2.0 lock lapses, waits, quiet agents (a large Rust workspace)
 
-- Root causes, from Specula's own journal (1214 lines, all lanes in one server process): every lane was reaped as stale about ten minutes after registering (cargo builds outlast the 600 s window) and every later heartbeat was refused, so `list_agents` showed `[]`; about 100 of 129 locks were deleted by the housekeeping reaper after their 7200 s TTL with no record, so releases answered `not_locked` / `not_owner` and renderfollow's deregistration counted 1 of 12. The stdio server handled one request at a time with the engine mutex held through waits, so one lane's long poll stalled every other lane's heartbeat and `update_task_status` (all lanes share the lead session's server).
+- Root causes, from a large Rust workspace's journal (1214 lines, all lanes in one server process): every lane was reaped as stale about ten minutes after registering (cargo builds outlast the 600 s window) and every later heartbeat was refused, so `list_agents` showed `[]`; about 100 of 129 locks were deleted by the housekeeping reaper after their 7200 s TTL with no record, so releases answered `not_locked` / `not_owner` and one lane's deregistration counted 1 of 12. The stdio server handled one request at a time with the engine mutex held through waits, so one lane's long poll stalled every other lane's heartbeat and `update_task_status` (all lanes share the lead session's server).
 - Lapses are `lock.expired` hub events (no new journal table, which a 1.1 binary on the same store would refuse); `act_lock::lapses` folds the agent's lock events. `take_locks` is the one place that drops rows and records expiries.
 - `heartbeat` renews locks under half their TTL; `last_lifecycle` (registered/deregistered/reaped/revived events) decides whether a stopped agent may be revived.
 - `waits.rs`: waits run on pooled engines over the same store; `Engine::pause` checks a cancel flag every 100 ms; `blocking()` caps timeouts at `max_wait_s()`. `tests/common` now sends MCP calls one at a time, as agents do.
 - `FileLock` polls a non-blocking lock up to `lock_wait_s()`; `Store::begin` drops the lock when the catch-up read fails; the Windows `LockFileEx` call gets a real `OVERLAPPED`.
 
-## 2026-11-05 — 1.1.1 lease fixes (Specula B12)
+## 2026-11-05: 1.1.1 lease fixes (a live test on a large Rust workspace)
 
 - Deregistration matched the lease name `coordinator`; the stored name is `COORDINATOR_LEADER` (`act_board::COORDINATOR`, now shared). 0.8.0 released the lease, so this restores parity; the harness's new `lease-holder` scenario fails on 1.1.0.
 - `leader()` returns only a live lease and `refresh` refuses an expired one. 0.8.0 showed and renewed lapsed leases although its `get_lease_holder` docstring says otherwise; listed in `MIGRATION.md`. `tests/lease_lifecycle.rs` covers MCP and the three CLI leader views.

@@ -1,5 +1,5 @@
 //! The coordinator lease after its holder leaves or its TTL runs out
-//! (B12 from the Specula live test, 1.1.1).
+//! (B12 from a live test on a large Rust workspace, 1.1.1).
 
 mod common;
 

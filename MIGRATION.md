@@ -71,7 +71,7 @@ Each item was found in a multi-agent run (a planner and two workers on one store
 
 ### Changed in 1.2.0 for agents
 
-Each item was found by Specula's M5 lanes and has a test in `tests/m5_fixes.rs`; the parity harness checks the 0.8.0 side of each.
+Each item was found on a large Rust workspace and has a test in `tests/m5_fixes.rs`; the parity harness checks the 0.8.0 side of each.
 
 - **Heartbeats renew locks.** `heartbeat` gives every live lock of the caller with less than half its TTL left a fresh TTL (`locked_at` becomes now). 0.8.0 left locks to run out during long builds whatever the agent did. The reply adds, only when non-empty: `locks_renewed` (count), `locks_expiring` (`document_path`, `expires_in_s`: locks whose TTL is shorter than `next_heartbeat_in`), `locks_expired` (`document_path`, `expired_at`) and a `hint`. With nothing to report the reply is 0.8.0's.
 - **Lapsed locks are reported.** When a lock's TTL runs out, the hub records a `lock.expired` event as it drops the row (on reap, release, refresh, heartbeat or deregistration). The holder's `release_lock` and `refresh_lock` then answer `{"released"|"refreshed": false, "reason": "expired", "expired_at", "locked_by"?, "error"}` once, where 0.8.0 answered `not_locked` or `not_owner`, or released the expired row as if it were held. A second call gets 0.8.0's `not_locked`. Taking the lock again, releasing it, `release_by_agent` or deregistration clears the report.

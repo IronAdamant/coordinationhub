@@ -1,4 +1,4 @@
-//! 1.2.0 fixes from Specula's M5 lanes, each listed in MIGRATION.md: locks
+//! 1.2.0 fixes from a large Rust workspace, each listed in MIGRATION.md: locks
 //! that lapse are reported as expired, heartbeats renew held locks, a quiet
 //! agent comes back on its next heartbeat, waits are capped and never hold
 //! up other calls, and the store lock cannot hang a call.
