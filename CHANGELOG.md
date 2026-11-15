@@ -95,7 +95,7 @@ Part C: documents, release tooling and clippy; the tool's behaviour does not cha
 
 ## [1.2.0] - 2026-11-11
 
-From Specula's M5 lanes (about fifteen lane reports). `MIGRATION.md` lists each difference from 0.8.0; `tests/m5_fixes.rs` has a test for each.
+From a large Rust workspace (about fifteen lane reports). `MIGRATION.md` lists each difference from 0.8.0; `tests/m5_fixes.rs` has a test for each.
 
 ### Added
 - `heartbeat` renews the caller's locks that have less than half their TTL left, and reports `locks_renewed`, `locks_expiring` (TTL shorter than the next heartbeat) and `locks_expired` (ran out before a heartbeat could renew them)
@@ -122,7 +122,7 @@ From Specula's M5 lanes (about fifteen lane reports). `MIGRATION.md` lists each 
 
 ## [1.1.1] - 2026-11-05
 
-From the Specula live test (B12).
+From a live test on a large Rust workspace (B12).
 
 ### Fixed
 - `deregister_agent` releases the coordinator lease its agent holds (`lease_released: true`), as 0.8.0 does. It matched the lease name `coordinator` instead of the stored `COORDINATOR_LEADER`, so the lease stayed held until its TTL ran out
