@@ -290,6 +290,8 @@ fn run_tool_command(command: &str, flags: Flags) -> i32 {
         Ok(value) => {
             let shown = if command == "list-pending-spawns" {
                 json::obj(vec![("spawns", value)])
+            } else if command == "dashboard" && !flags.json {
+                dashboard_lists(&mut engine, &flags)
             } else {
                 value
             };
@@ -315,6 +317,30 @@ fn run_tool_command(command: &str, flags: Flags) -> i32 {
             1
         }
     }
+}
+
+/// The lists the readable `dashboard` shows. 0.8.0 read `agents`, `locks`
+/// and `tasks` lists from `status`, which returns counts, so it always
+/// printed zero; `--json` still prints the `status` reply.
+fn dashboard_lists(engine: &mut Engine, flags: &Flags) -> Value {
+    let stale = flag(flags, "stale_timeout")
+        .and_then(|v| v.parse().ok())
+        .unwrap_or(600.0);
+    let mut list = |tool: &str, args: Value, key: &str| {
+        engine
+            .call_cli(tool, &args)
+            .ok()
+            .and_then(|value| value.get(key).cloned())
+            .unwrap_or_else(|| json::arr(vec![]))
+    };
+    let agents = list(
+        "list_agents",
+        json::obj(vec![("active_only", json::b(true)), ("stale_timeout", json::f(stale))]),
+        "agents",
+    );
+    let locks = list("list_locks", json::obj(vec![]), "locks");
+    let tasks = list("query_tasks", json::obj(vec![("query_type", json::s("all"))]), "tasks");
+    json::obj(vec![("agents", agents), ("locks", locks), ("tasks", tasks)])
 }
 
 fn command_args(
@@ -710,7 +736,20 @@ fn run_init(flags: Flags) -> i32 {
         .map(|p| p.display().to_string())
         .unwrap_or_else(|_| "coordinationhub".into());
     let command = format!("{exe} hook");
-    if let Err(err) = std::fs::write(&hooks, hook_config(&command)) {
+    let config = hook_config(&command);
+    // An existing file that differs (edited by hand, or another binary's
+    // path) is kept as hooks.json.bak before it is replaced.
+    if let Ok(old) = std::fs::read(&hooks) {
+        if old != config.as_bytes() {
+            let backup = hooks.with_extension("json.bak");
+            if let Err(err) = std::fs::write(&backup, &old) {
+                eprintln!("Error: could not back up {} to {}: {err}", hooks.display(), backup.display());
+                return 1;
+            }
+            println!("Previous hooks file kept at {}", backup.display());
+        }
+    }
+    if let Err(err) = std::fs::write(&hooks, config) {
         eprintln!("Error: {err}");
         return 1;
     }
@@ -810,8 +849,15 @@ fn run_watch(flags: Flags) -> i32 {
         .or_else(|| flag(&flags, "poll_interval"))
         .and_then(|value| value.parse().ok())
         .unwrap_or(5.0);
+    // Clear the screen only on a terminal, and not when NO_COLOR is set
+    // (https://no-color.org): piped output stays plain text.
+    use std::io::IsTerminal;
+    let clear = std::io::stdout().is_terminal()
+        && std::env::var_os("NO_COLOR").map(|v| v.is_empty()).unwrap_or(true);
     loop {
-        print!("\x1b[2J\x1b[H");
+        if clear {
+            print!("\x1b[2J\x1b[H");
+        }
         let _ = run_tool_command("agent-tree", flags.clone());
         let mut engine = match Engine::open(
             flags.storage.as_deref(),
@@ -1077,7 +1123,7 @@ fn run_doctor(flags: Flags) -> i32 {
                 ("all_ok", json::b(all_ok)),
             ]))
         );
-        return 0;
+        return if all_ok { 0 } else { 1 };
     }
     for (name, ok, message) in &checks {
         println!("  [{}] {name}: {message}", if *ok { "OK  " } else { "FAIL" });
@@ -1087,7 +1133,12 @@ fn run_doctor(flags: Flags) -> i32 {
     } else {
         println!("\nSome checks failed. Run 'coordinationhub init' to fix setup issues.");
     }
-    0
+    // 0.8.0 exited 0 either way; a failed check now exits 1.
+    if all_ok {
+        0
+    } else {
+        1
+    }
 }
 
 fn run_hook(flags: Flags) -> i32 {
