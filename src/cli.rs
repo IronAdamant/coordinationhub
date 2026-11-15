@@ -884,7 +884,8 @@ fn run_watch(flags: Flags) -> i32 {
 fn run_auto_dashboard(flags: Flags) -> i32 {
     // 0.8.0: exit quietly when host:port answers; otherwise start
     // `serve-sse --no-browser` detached, logging to
-    // ~/.coordinationhub/dashboard.log. Auth stays on.
+    // ~/.coordinationhub/dashboard.log. Auth stays on. The server outlives
+    // this process by design, so there is nothing to wait for.
     use std::net::ToSocketAddrs;
     let host = flag(&flags, "host").unwrap_or("127.0.0.1");
     let port: u16 = flag(&flags, "port").and_then(|v| v.parse().ok()).unwrap_or(9898);
@@ -903,11 +904,9 @@ fn run_auto_dashboard(flags: Flags) -> i32 {
     if std::fs::create_dir_all(&log_dir).is_err() {
         return 0;
     }
-    let Ok(log) = std::fs::OpenOptions::new()
-        .create(true)
-        .append(true)
-        .open(log_dir.join("dashboard.log"))
-    else {
+    // The banner in this log holds the auth token: the file is the
+    // owner's alone (mode 0600 on Unix, fixed on a file left wider).
+    let Ok(log) = http::open_private_log(&log_dir.join("dashboard.log")) else {
         return 0;
     };
     let Ok(log_err) = log.try_clone() else {
