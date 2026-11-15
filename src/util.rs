@@ -576,7 +576,8 @@ unsafe extern "system" {
     ) -> i32;
 }
 
-/// Row count for an SQLite `LIMIT ?`: a negative limit has no upper bound.
+/// Row count for a `limit` argument. A negative limit has no upper bound,
+/// as it had in 0.8.0, which passed it to SQLite's `LIMIT ?`.
 pub fn sql_limit(limit: i64) -> usize {
     if limit < 0 {
         usize::MAX

@@ -1147,7 +1147,7 @@ fn dep_value(dep: &Dependency) -> Value {
     ])
 }
 
-/// A lease TTL as the caller passed it. Python echoes the number it was
+/// A lease TTL as the caller passed it. 0.8.0 echoes the number it was
 /// given, so an int stays an int and a float stays a float. The default
 /// is the float 10.0.
 pub fn lease_ttl(ttl: Option<&Value>) -> (f64, Value) {
