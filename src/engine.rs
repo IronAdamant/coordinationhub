@@ -80,6 +80,7 @@ impl Engine {
         } else {
             args.clone()
         };
+        validate::check_numbers(&args).map_err(|err| format!("Input validation error: {err}"))?;
         if tool == "who" {
             if let Err(err) = who_arguments(&args) {
                 return Err(format!("Input validation error: who: {err}"));
