@@ -395,10 +395,13 @@ fn a_failed_read_releases_the_store_lock() {
     call(&mut s, reg("x"));
     let journal = hub.store.join("coordination.jsonl");
     let mut file = std::fs::OpenOptions::new().append(true).open(&journal).unwrap();
-    file.write_all(b"{not json\n").unwrap();
+    // A bad record with a good one after it: not a torn tail (1.3.0 cuts
+    // those off and carries on), so the read fails.
+    file.write_all(b"{not json\n{\"t\":\"del\",\"table\":\"none\",\"id\":\"x\"}\n").unwrap();
     drop(file);
     let (text, is_error) = tool_text(&s.call("heartbeat", args(vec![("agent_id", json::s("x"))])));
     assert!(is_error, "{text}");
+    assert!(text.contains("cannot be read") && text.contains("To recover"), "{text}");
     let started = Instant::now();
     let lock = coordinationhub::util::FileLock::exclusive(&hub.store.join("coordination.lock"));
     assert!(lock.is_ok() && started.elapsed() < Duration::from_secs(2));

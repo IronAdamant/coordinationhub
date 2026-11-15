@@ -1087,6 +1087,7 @@ fn doctor_checks(storage: &std::path::Path) -> Vec<(String, bool, String)> {
         }
     };
     checks.push(("schema_version".into(), schema.0, schema.1));
+    checks.push(("journal_tail".into(), true, crate::db::torn_report(storage)));
     let binary_ok = std::env::current_exe().map(|path| path.is_file()).unwrap_or(true);
     checks.push((
         "hook_command".into(),

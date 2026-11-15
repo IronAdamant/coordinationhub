@@ -17,6 +17,7 @@ pub mod house;
 pub mod http;
 pub mod json;
 pub mod mcp;
+pub mod rand;
 pub mod util;
 pub mod validate;
 pub mod waits;
