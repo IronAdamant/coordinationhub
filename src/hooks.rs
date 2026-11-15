@@ -78,7 +78,7 @@ fn raw_id(event: &Value) -> Option<&str> {
 }
 
 fn subagent_type(event: &Value) -> String {
-    event
+    let kind = event
         .get("agent_type")
         .and_then(Value::as_str)
         .or_else(|| {
@@ -87,24 +87,98 @@ fn subagent_type(event: &Value) -> String {
                 .and_then(|v| v.get("subagent_type"))
                 .and_then(Value::as_str)
         })
-        .unwrap_or("agent")
-        .to_string()
+        .unwrap_or("agent");
+    // The type becomes part of an agent ID: one printable line, kept short.
+    let kind: String = kind
+        .chars()
+        .map(|ch| if ch.is_control() || matches!(ch, '\u{2028}' | '\u{2029}') { '_' } else { ch })
+        .take(64)
+        .collect();
+    if kind.is_empty() {
+        "agent".into()
+    } else {
+        kind
+    }
+}
+
+/// The hub agent registered for this IDE's raw subagent ID, if any.
+fn mapped(engine: &Engine, raw: &str) -> Option<String> {
+    engine
+        .store
+        .state
+        .agents
+        .iter()
+        .find(|agent| {
+            agent.raw_ide_id.as_deref() == Some(raw) && agent.ide_vendor.as_deref() == Some(PREFIX)
+        })
+        .map(|agent| agent.agent_id.clone())
+}
+
+/// The first `{parent}.{kind}.{n}` no agent has used, as 0.8.0's
+/// `subagent_id` counted them.
+fn next_child_id(engine: &Engine, parent: &str, kind: &str) -> String {
+    (0..)
+        .map(|n| format!("{parent}.{kind}.{n}"))
+        .find(|id| engine.store.state.agent(id).is_none())
+        .unwrap_or_else(|| format!("{parent}.{kind}.0"))
+}
+
+/// The child agent for a subagent's raw IDE ID: the one already tied to
+/// it, or a new `{parent}.{kind}.{n}` registered under the session agent
+/// in the same journal transaction, so two subagents starting at once get
+/// two IDs. Returns the ID and whether it was registered just now.
+fn child_for_raw(engine: &mut Engine, session: &str, raw: &str, kind: &str) -> (String, bool) {
+    let _ = engine.store.begin();
+    let known = mapped(engine, raw);
+    engine.store.end();
+    if let Some(found) = known {
+        return (found, false);
+    }
+    let parent = session_agent(session);
+    ensure(engine, &parent, None, None);
+    let _ = engine.store.begin();
+    // Looked up again under the journal lock: another hook process may
+    // have registered this subagent meanwhile.
+    if let Some(found) = mapped(engine, raw) {
+        engine.store.end();
+        return (found, false);
+    }
+    let child = next_child_id(engine, &parent, kind);
+    let root = engine.project_root.clone();
+    let worktree = root.as_ref().map(|path| util::path_str(path)).unwrap_or_default();
+    let url = std::env::var("COORDINATIONHUB_COORDINATION_URL")
+        .unwrap_or_else(|_| "http://localhost:9877".into());
+    let _ = act_identity::register(
+        &mut engine.store.state,
+        &child,
+        Some(&parent),
+        &worktree,
+        Some(raw),
+        Some(PREFIX),
+        engine.graph.is_some(),
+        &url,
+    );
+    let _ = engine.store.commit();
+    engine.store.end();
+    (child, true)
 }
 
 fn ensure(engine: &mut Engine, agent_id: &str, parent: Option<&str>, raw: Option<&str>) {
     let _ = engine.store.begin();
-    let active = engine
+    let existing = engine
         .store
         .state
         .agent(agent_id)
-        .map(|agent| agent.status == "active")
-        .unwrap_or(false);
-    if active {
+        .map(|agent| (agent.status == "active", agent.parent_id.clone()));
+    if let Some((true, _)) = existing {
         let _ = act_identity::heartbeat(&mut engine.store.state, agent_id);
         let _ = engine.store.commit();
         engine.store.end();
         return;
     }
+    // Registering a known agent again keeps its parent unless one is given.
+    let kept = existing.and_then(|(_, parent)| parent);
+    let parent = parent.or(kept.as_deref());
     let root = engine.project_root.clone();
     let worktree = root
         .as_ref()
@@ -126,26 +200,15 @@ fn ensure(engine: &mut Engine, agent_id: &str, parent: Option<&str>, raw: Option
     engine.store.end();
 }
 
-fn resolve(engine: &mut Engine, session: &str, raw: Option<&str>) -> String {
-    if let Some(raw) = raw {
-        let _ = engine.store.begin();
-        let mapped = engine
-            .store
-            .state
-            .agents
-            .iter()
-            .find(|agent| {
-                agent.raw_ide_id.as_deref() == Some(raw)
-                    && agent.ide_vendor.as_deref() == Some(PREFIX)
-            })
-            .map(|agent| agent.agent_id.clone());
-        engine.store.end();
-        if let Some(mapped) = mapped {
-            return mapped;
-        }
-        return raw.to_string();
+/// The hub agent an event acts as: the session agent, or for a subagent's
+/// event (it carries the subagent's raw ID) that subagent's child agent,
+/// registered now if its SubagentStart was missed. A raw ID is never used
+/// as an agent ID, so a subagent never shows up as a root agent.
+fn resolve(engine: &mut Engine, event: &Value, session: &str) -> String {
+    match raw_id(event) {
+        Some(raw) => child_for_raw(engine, session, raw, &subagent_type(event)).0,
+        None => session_agent(session),
     }
-    session_agent(session)
 }
 
 fn on_prompt(engine: &mut Engine, session: &str, prompt: &str) {
@@ -179,7 +242,7 @@ fn on_pre_write(engine: &mut Engine, event: &Value, session: &str) -> Option<Val
     else {
         return None;
     };
-    let agent = resolve(engine, session, raw_id(event));
+    let agent = resolve(engine, event, session);
     ensure(engine, &agent, None, raw_id(event));
     let _ = engine.call(
         "admin_locks",
@@ -223,14 +286,37 @@ fn on_pre_write(engine: &mut Engine, event: &Value, session: &str) -> Option<Val
         json::obj(vec![
             ("hookEventName", json::s("PreToolUse")),
             ("permissionDecision", json::s("deny")),
-            (
-                "permissionDecisionReason",
-                json::s(format!(
-                    "[CoordinationHub] File locked by {holder}. Use 'coordinationhub release-lock {path} {holder}' to force."
-                )),
-            ),
+            ("permissionDecisionReason", json::s(denied_reason(path, &result))),
         ]),
     )]))
+}
+
+/// Why a write was refused, and what the blocked agent can do. It never
+/// suggests releasing or stealing the holder's lock: `release-lock` trusts
+/// the agent ID it is given, so that would break another agent's work.
+fn denied_reason(path: &str, result: &Value) -> String {
+    let next = "Do not edit it now. Message the holder (send_message), wait for the lock (wait_for_locks, or acquire_lock with retry=true), or work on another file meanwhile.";
+    if let Some(scope) = result.get("scope_violation") {
+        let why = scope
+            .get("message")
+            .and_then(Value::as_str)
+            .unwrap_or("the file is outside your declared scope");
+        return format!(
+            "[CoordinationHub] {path} was not locked: {why}. Widen your scope with update_agent_status, or work inside it."
+        );
+    }
+    let holder = result
+        .get("locked_by")
+        .and_then(Value::as_str)
+        .unwrap_or("another agent");
+    let until = match result.get("expires_at").and_then(Value::as_f64) {
+        Some(at) => {
+            let left = (at - util::now()).max(0.0).round() as i64;
+            format!(" until {} (about {left} s from now, unless renewed)", util::local_stamp(at))
+        }
+        None => String::new(),
+    };
+    format!("[CoordinationHub] {path} is locked by {holder}{until}. {next}")
 }
 
 fn on_post_write(engine: &mut Engine, event: &Value, session: &str) {
@@ -241,7 +327,7 @@ fn on_post_write(engine: &mut Engine, event: &Value, session: &str) {
     else {
         return;
     };
-    let agent = resolve(engine, session, raw_id(event));
+    let agent = resolve(engine, event, session);
     let _ = engine.call(
         "notify_change",
         &json::obj(vec![
@@ -287,8 +373,9 @@ fn stash(engine: &mut Engine, event: &Value, session: &str) {
         id: format!("hook:{tool_use}"),
         parent_agent_id: session.to_string(),
         subagent_type: Some(kind.into()),
-        description: Some(description.into()),
-        prompt: Some(prompt.into()),
+        // Redacted like a user prompt: these rows sit in the shared journal.
+        description: Some(redact(description)),
+        prompt: Some(redact(prompt)),
         created_at: util::now(),
         consumed_at: None,
         status: "pending".into(),
@@ -333,53 +420,23 @@ fn on_subagent_start(engine: &mut Engine, event: &Value, session: &str) {
             .get("tool_input")
             .and_then(|v| v.get("description"))
             .and_then(Value::as_str)
-            .map(|s| s.to_string())
+            .map(redact)
     });
-    let raw = raw_id(event).map(|s| s.to_string());
-    if let Some(raw) = &raw {
-        let _ = engine.store.begin();
-        let existing = engine
-            .store
-            .state
-            .agents
-            .iter()
-            .find(|agent| {
-                agent.raw_ide_id.as_deref() == Some(raw.as_str())
-                    && agent.ide_vendor.as_deref() == Some(PREFIX)
-            })
-            .map(|agent| agent.agent_id.clone());
-        engine.store.end();
-        if let Some(existing) = existing {
-            let _ = engine.call(
-                "heartbeat",
-                &json::obj(vec![("agent_id", json::s(&existing))]),
-            );
-            if let Some(task) = &description {
-                if !task.is_empty() {
-                    let _ = engine.call(
-                        "update_agent_status",
-                        &json::obj(vec![
-                            ("agent_id", json::s(&existing)),
-                            ("current_task", json::s(task)),
-                        ]),
-                    );
-                }
+    let child = match raw_id(event) {
+        Some(raw) => {
+            let (child, fresh) = child_for_raw(engine, session, raw, &kind);
+            if !fresh {
+                // Seen before (a background agent fires SubagentStart twice).
+                let _ = engine.call("heartbeat", &json::obj(vec![("agent_id", json::s(&child))]));
             }
-            let _ = engine.call(
-                "report_subagent_spawned",
-                &json::obj(vec![
-                    ("parent_agent_id", json::s(&parent)),
-                    ("child_agent_id", json::s(existing)),
-                    ("subagent_type", json::s(&kind)),
-                    ("source", json::s(PREFIX)),
-                    ("caller_agent_id", json::s(&parent)),
-                ]),
-            );
-            return;
+            child
         }
-    }
-    let child = format!("{parent}.{kind}.0");
-    ensure(engine, &child, Some(&parent), raw.as_deref());
+        None => {
+            let child = format!("{parent}.{kind}.0");
+            ensure(engine, &child, Some(&parent), None);
+            child
+        }
+    };
     if let Some(task) = description {
         if !task.is_empty() {
             let _ = engine.call(
@@ -394,21 +451,32 @@ fn on_subagent_start(engine: &mut Engine, event: &Value, session: &str) {
     let _ = engine.call(
         "report_subagent_spawned",
         &json::obj(vec![
-            ("parent_agent_id", json::s(parent)),
+            ("parent_agent_id", json::s(&parent)),
             ("child_agent_id", json::s(child)),
             ("subagent_type", json::s(kind)),
             ("source", json::s(PREFIX)),
-            ("caller_agent_id", json::s(session_agent(session))),
+            ("caller_agent_id", json::s(&parent)),
         ]),
     );
 }
 
+/// Deregisters the child of the subagent that stopped: the one tied to its
+/// raw ID, so a sibling of the same type keeps running. An unknown raw ID
+/// stops nothing.
 fn on_subagent_stop(engine: &mut Engine, event: &Value, session: &str) {
     let parent = session_agent(session);
-    let mut child = resolve(engine, session, raw_id(event));
-    if child == parent {
-        child = format!("{parent}.{}.0", subagent_type(event));
-    }
+    let child = match raw_id(event) {
+        Some(raw) => {
+            let _ = engine.store.begin();
+            let found = mapped(engine, raw);
+            engine.store.end();
+            match found {
+                Some(child) => child,
+                None => return,
+            }
+        }
+        None => format!("{parent}.{}.0", subagent_type(event)),
+    };
     let _ = engine.call(
         "deregister_agent",
         &json::obj(vec![("agent_id", json::s(child))]),
@@ -416,7 +484,7 @@ fn on_subagent_stop(engine: &mut Engine, event: &Value, session: &str) {
 }
 
 fn on_index(engine: &mut Engine, event: &Value, session: &str) {
-    let agent = resolve(engine, session, raw_id(event));
+    let agent = resolve(engine, event, session);
     let input = event.get("tool_input");
     let mut paths = Vec::new();
     if let Some(path) = input
@@ -446,7 +514,7 @@ fn on_index(engine: &mut Engine, event: &Value, session: &str) {
 }
 
 fn on_claim(engine: &mut Engine, event: &Value, session: &str) {
-    let agent = resolve(engine, session, raw_id(event));
+    let agent = resolve(engine, event, session);
     ensure(engine, &agent, None, raw_id(event));
     let input = event.get("tool_input");
     let step = input
@@ -697,7 +765,8 @@ fn email_token(chars: &[char], index: usize) -> Option<(usize, &'static str)> {
 
 fn hex_token(chars: &[char], index: usize) -> Option<(usize, &'static str)> {
     let mut end = index;
-    while end < chars.len() && chars[end].is_ascii_hexdigit() && (chars[end].is_ascii_lowercase() || chars[end].is_ascii_digit()) {
+    // Any case: an upper- or mixed-case hex secret is as secret.
+    while end < chars.len() && chars[end].is_ascii_hexdigit() {
         end += 1;
     }
     if end - index < 32 || !edge(chars, index, end) {
