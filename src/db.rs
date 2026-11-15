@@ -1,4 +1,29 @@
-//! On-disk journal. One JSON snapshot, rewritten under an exclusive file lock.
+//! On-disk journal: `coordination.jsonl`, an append-only log with one JSON
+//! record per line (`put` a row, `del` a row, `ids` the id counters).
+//!
+//! Every call takes the exclusive file lock (`coordination.lock`), reads
+//! the records other engines and processes appended since it last looked,
+//! applies its change in memory and appends the rows that differ. Nothing
+//! is rewritten in place, with two exceptions, both under the same lock:
+//!
+//! - A final record that cannot be read is moved out into a dated file
+//!   beside the journal (`read_records`): `.torn` for a write a dying
+//!   process left unfinished, `.unreadable` for a complete line that is
+//!   not a record. So no append ever lands on a partial line, and the hub
+//!   never stops on its last record.
+//! - A journal that has grown large against the live rows is replaced by a
+//!   snapshot, one record per row, through a synced temporary file and a
+//!   rename (`Store::compact`). Each compaction makes the lock file one
+//!   byte longer; an engine holding an offset into the old file sees that
+//!   count move and reloads, whatever the new file's length. The snapshot's
+//!   first line also carries a generation id, checked whenever the journal
+//!   is opened.
+//!
+//! Numbers are stored finite (`json::finite`); a journal 1.2.0 wrote
+//! `Infinity` or `NaN` into is read, repaired and rewritten.
+//!
+//! Durability: a commit is one `write` and, by default, no `fsync`; set
+//! `COORDINATIONHUB_FSYNC=1` to sync after each commit.
 
 use crate::json::{self, Value};
 use crate::util::{self, FileLock};
@@ -335,9 +360,27 @@ pub struct Store {
     pub path: PathBuf,
     pub state: State,
     digests: Digests,
+    /// Bytes of the journal this state has applied; always a line boundary.
     offset: u64,
     lock: Option<FileLock>,
     clean: bool,
+    /// How many times the journal has been replaced by a snapshot, as
+    /// last seen: the length of the lock file, which every compaction
+    /// makes one byte longer. An engine holding an offset into an older
+    /// file sees the count move and reloads, whatever the new length.
+    epoch: u64,
+    /// The id on the journal's first line (empty before the first
+    /// compaction). Checked whenever the journal is opened, so a file
+    /// replaced by other means (a restore, a hand repair) is noticed too.
+    generation: String,
+    /// Records in the journal up to `offset`.
+    lines: u64,
+    /// Journal length from which `commit` next prunes and considers
+    /// compaction.
+    maintain_at: u64,
+    /// The journal held a number 1.2.0 wrote as `Infinity` or `NaN`; the
+    /// next commit rewrites the file so it is strict JSON again.
+    rewrite_due: bool,
 }
 
 #[derive(Default)]
@@ -374,15 +417,21 @@ impl Store {
         let path = dir.join("coordination.jsonl");
         let lock =
             FileLock::exclusive(&dir.join("coordination.lock")).map_err(|e| busy(&dir.join("coordination.lock"), e))?;
-        let (state, offset) = load_journal(&path)?;
+        let loaded = load_journal(&path)?;
+        let epoch = lock.size();
         drop(lock);
         let mut store = Self {
             path,
-            state,
+            state: loaded.state,
             digests: Digests::default(),
-            offset,
+            offset: loaded.offset,
             lock: None,
             clean: true,
+            epoch,
+            generation: loaded.generation,
+            lines: loaded.lines,
+            maintain_at: compact_min_bytes().unwrap_or(u64::MAX),
+            rewrite_due: loaded.repaired,
         };
         store.remember();
         Ok(store)
@@ -428,53 +477,106 @@ impl Store {
         self.lock = None;
     }
 
+    /// A number that differs whenever the journal has changed: its length,
+    /// mixed with the generation so a compaction always moves it.
     pub fn event_cursor(&self) -> u64 {
-        self.offset
+        if self.generation.is_empty() {
+            self.offset
+        } else {
+            self.offset ^ (hash_str(&self.generation) << 44)
+        }
     }
 
+    /// Reads what other engines and processes appended since this one last
+    /// looked. Runs under the exclusive file lock. True when state changed.
+    ///
+    /// The journal is opened only when something happened to it. When the
+    /// compaction count and the length are what this engine last saw,
+    /// nobody wrote, and the call costs two metadata lookups. (Opening a
+    /// file that was just written makes a virus scanner read it again:
+    /// some 20 ms a call on Windows.)
     fn catch_up(&mut self) -> Result<bool, String> {
-        if !self.path.is_file() {
-            return Ok(false);
-        }
-        let len = std::fs::metadata(&self.path)
-            .map_err(|e| e.to_string())?
-            .len();
-        if len < self.offset {
-            let (state, offset) = load_journal(&self.path)?;
-            self.state = state;
-            self.offset = offset;
+        use std::io::{Read, Seek, SeekFrom};
+        let epoch = self.lock.as_ref().map(FileLock::size).unwrap_or(self.epoch);
+        let len = match std::fs::metadata(&self.path) {
+            Ok(meta) => meta.len(),
+            Err(err) if err.kind() == std::io::ErrorKind::NotFound => return Ok(false),
+            Err(err) => return Err(format!("cannot read {}: {err}", self.path.display())),
+        };
+        // The journal was replaced by a snapshot when the compaction count
+        // moved. Length cannot show that: a compacted file may be longer
+        // than the offset an idle engine still holds.
+        if epoch != self.epoch || len < self.offset {
+            // The count is kept only once the reload worked, so a failed
+            // one is tried again on the next call.
+            self.reload()?;
+            self.epoch = epoch;
             return Ok(true);
         }
         if len == self.offset {
             return Ok(false);
         }
-        use std::io::{Read, Seek, SeekFrom};
-        let mut file = std::fs::File::open(&self.path).map_err(|e| e.to_string())?;
+        let mut file = std::fs::File::open(&self.path)
+            .map_err(|err| format!("cannot open {}: {err}", self.path.display()))?;
+        // The file is open anyway: its first line must still carry the
+        // generation this state was read from.
+        let mut head = [0_u8; GENERATION_HEAD];
+        let mut got = 0;
+        while got < head.len() {
+            match file.read(&mut head[got..]).map_err(|e| e.to_string())? {
+                0 => break,
+                n => got += n,
+            }
+        }
+        if generation_of(&head[..got]) != self.generation {
+            drop(file);
+            return self.reload();
+        }
         file.seek(SeekFrom::Start(self.offset))
             .map_err(|e| e.to_string())?;
-        let mut buf = String::new();
-        file.read_to_string(&mut buf).map_err(|e| e.to_string())?;
-        let mut consumed = 0usize;
-        for line in buf.split_inclusive('\n') {
-            if !line.ends_with('\n') {
-                break;
-            }
-            consumed += line.len();
-            let trimmed = line.trim();
-            if trimmed.is_empty() {
-                continue;
-            }
-            let value = json::parse(trimmed)?;
-            apply_line(&mut self.state, &value)?;
-        }
-        self.offset += consumed as u64;
-        Ok(consumed > 0)
+        let mut buf = Vec::with_capacity((len - self.offset) as usize);
+        file.read_to_end(&mut buf).map_err(|e| e.to_string())?;
+        drop(file);
+        let mut progress = Progress::default();
+        let source = Source { path: &self.path, base: self.offset, lines_before: self.lines, mend: true };
+        let result = read_records(&source, &buf, &mut self.state, &mut progress);
+        // Keep what was read before a bad line, so it is not applied twice.
+        self.offset += progress.bytes;
+        self.lines += progress.lines;
+        self.rewrite_due |= progress.repaired;
+        result?;
+        Ok(progress.bytes > 0)
+    }
+
+    /// Drops this engine's state and reads the whole journal again.
+    fn reload(&mut self) -> Result<bool, String> {
+        let loaded = load_journal(&self.path)?;
+        self.state = loaded.state;
+        self.offset = loaded.offset;
+        self.generation = loaded.generation;
+        self.lines = loaded.lines;
+        self.rewrite_due |= loaded.repaired;
+        Ok(true)
     }
 
     pub fn commit(&mut self) -> Result<(), String> {
         let held = self.lock.is_some();
         if !held {
             self.begin()?;
+        }
+        let result = self.commit_locked();
+        if !held {
+            self.end();
+        }
+        result
+    }
+
+    fn commit_locked(&mut self) -> Result<(), String> {
+        // A large journal: drop events past their retention first, so the
+        // compaction below (or the plain append) carries the deletions.
+        let due = self.offset >= self.maintain_at;
+        if due {
+            crate::house::prune(&mut self.state, util::now());
         }
         let lines = self.changed_lines();
         if !lines.is_empty() {
@@ -485,22 +587,123 @@ impl Store {
                 .open(&self.path)
                 .map_err(|e| e.to_string())?;
             // One write per commit: fewer system calls, and the call's lines
-            // land together.
+            // land together. `begin` left the file ending on a line
+            // boundary, so the batch never lands on a partial record.
             let mut batch = String::with_capacity(lines.iter().map(|line| line.len() + 1).sum());
             for line in &lines {
                 batch.push_str(line);
                 batch.push('\n');
             }
             file.write_all(batch.as_bytes()).map_err(|e| e.to_string())?;
-            file.flush().map_err(|e| e.to_string())?;
-            self.offset = std::fs::metadata(&self.path)
-                .map_err(|e| e.to_string())?
-                .len();
+            if fsync_enabled() {
+                file.sync_data().map_err(|e| e.to_string())?;
+            }
+            self.offset = file.metadata().map_err(|e| e.to_string())?.len();
+            self.lines += lines.len() as u64;
         }
         self.clean = true;
-        if !held {
-            self.end();
+        if self.rewrite_due || (due && self.lines > 2 * (self.rows() + COMPACT_SLACK)) {
+            // Best effort: a rename another program blocks leaves the
+            // journal as it was, still correct, and the next check retries.
+            if let Err(err) = self.compact() {
+                eprintln!("coordinationhub: journal not compacted ({err}); it stays as it is and will be retried");
+            }
         }
+        if due {
+            let step = compact_min_bytes().map(|min| (min / 4).max(1)).unwrap_or(u64::MAX);
+            self.maintain_at = self.offset.saturating_add(step);
+        }
+        Ok(())
+    }
+
+    /// Live rows across every table: what a snapshot would hold.
+    fn rows(&self) -> u64 {
+        let s = &self.state;
+        (s.agents.len()
+            + s.lineage.len()
+            + s.descendants.len()
+            + s.locks.len()
+            + s.conflicts.len()
+            + s.notifications.len()
+            + s.responsibilities.len()
+            + s.ownership.len()
+            + s.messages.len()
+            + s.tasks.len()
+            + s.intents.len()
+            + s.handoffs.len()
+            + s.handoff_acks.len()
+            + s.failures.len()
+            + s.leases.len()
+            + s.dependencies.len()
+            + s.spawns.len()
+            + s.broadcasts.len()
+            + s.broadcast_acks.len()
+            + s.broadcast_targets.len()
+            + s.claims.len()
+            + s.claim_events.len()
+            + s.hub_events.len()) as u64
+    }
+
+    /// Journal records and live rows, for tests and diagnostics.
+    pub fn journal_shape(&self) -> (u64, u64) {
+        (self.lines, self.rows())
+    }
+
+    /// Rewrites the journal as one record per live row, under the exclusive
+    /// lock the caller holds (`begin` first). The snapshot goes to a
+    /// temporary file that is synced and then renamed over the journal, so
+    /// a reader sees the old file or the new one, never half of either.
+    /// Before the rename the lock file grows by one byte, which is how
+    /// every other engine learns the journal was replaced (see `catch_up`);
+    /// the snapshot's first line also carries a new generation id.
+    pub fn compact(&mut self) -> Result<(), String> {
+        use std::io::Write;
+        if self.lock.is_none() {
+            return Err("compact needs the store lock: call begin first".into());
+        }
+        let generation = new_generation();
+        // With no digests every row counts as changed: the lines are the
+        // whole state, and the digests end up matching it again.
+        self.digests = Digests::default();
+        let lines = self.changed_lines();
+        let mut text = String::with_capacity(lines.iter().map(|line| line.len() + 1).sum::<usize>() + 96);
+        text.push_str(&generation_line(&generation));
+        text.push('\n');
+        for line in &lines {
+            text.push_str(line);
+            text.push('\n');
+        }
+        let temp = self.path.with_file_name(format!("coordination.jsonl.compact-{}", std::process::id()));
+        let lock = self.lock.as_mut();
+        let written = (|| -> std::io::Result<()> {
+            let mut file = std::fs::File::create(&temp)?;
+            file.write_all(text.as_bytes())?;
+            file.sync_all()?;
+            drop(file);
+            // Count first: a count with no rename after it only makes the
+            // others reload once; a rename with no count would go unseen.
+            if let Some(lock) = lock {
+                lock.grow()?;
+            }
+            replace_file(&temp, &self.path)
+        })();
+        self.epoch = self.lock.as_ref().map(FileLock::size).unwrap_or(self.epoch);
+        if let Err(err) = written {
+            let _ = std::fs::remove_file(&temp);
+            return Err(format!("cannot replace {}: {err}", self.path.display()));
+        }
+        sync_dir(&self.path);
+        if self.rewrite_due {
+            eprintln!(
+                "coordinationhub: {} held numbers that are not JSON (Infinity or NaN, which 1.2.0 could write). They were replaced by finite values and the journal was rewritten; no other record changed.",
+                self.path.display()
+            );
+        }
+        self.offset = text.len() as u64;
+        self.lines = lines.len() as u64 + 1;
+        self.generation = generation;
+        self.rewrite_due = false;
+        self.clean = true;
         Ok(())
     }
 
@@ -1150,31 +1353,448 @@ fn hash_ids(ids: &Ids) -> u64 {
     ])
 }
 
-fn load_journal(path: &Path) -> Result<(State, u64), String> {
+/// What a full read of the journal gives.
+struct Loaded {
+    state: State,
+    offset: u64,
+    generation: String,
+    lines: u64,
+    repaired: bool,
+}
+
+/// How far `read_records` got: kept up to date line by line, so the
+/// caller knows what was applied even when a later line fails.
+#[derive(Default)]
+struct Progress {
+    bytes: u64,
+    lines: u64,
+    repaired: bool,
+    /// Records that held a number 1.2.0 wrote as `Infinity` or `NaN`.
+    repaired_lines: u64,
+    /// With `Source::mend` off: what the store would mend at the end.
+    tail: Option<Tail>,
+}
+
+/// The first line of a compacted journal. It is a `del` on a table no
+/// version has, which 1.2.0 and earlier skip, so they still read the file.
+const GENERATION_PREFIX: &str = "{\"t\":\"del\",\"table\":\"generation\",\"id\":\"";
+
+/// Bytes of the journal's head that hold the whole generation line.
+const GENERATION_HEAD: usize = 128;
+
+/// Compaction is considered only when the journal has this many records
+/// more than twice the live rows, so a small store is never rewritten.
+const COMPACT_SLACK: u64 = 64;
+
+fn generation_line(id: &str) -> String {
+    format!("{GENERATION_PREFIX}{id}\"}}")
+}
+
+/// The generation id on the journal's first line, or "" when the journal
+/// was never compacted.
+fn generation_of(head: &[u8]) -> String {
+    let Some(rest) = head.strip_prefix(GENERATION_PREFIX.as_bytes()) else {
+        return String::new();
+    };
+    let end = rest.iter().position(|byte| *byte == b'"').unwrap_or(rest.len());
+    String::from_utf8_lossy(&rest[..end]).into_owned()
+}
+
+/// A new id: the clock, the process and eight random bytes (a counter when
+/// the system has none; uniqueness is all that is needed here).
+fn new_generation() -> String {
+    static COUNTER: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+    let nanos = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_nanos())
+        .unwrap_or(0);
+    let tail = crate::rand::hex(8).unwrap_or_else(|_| {
+        format!("{:016x}", COUNTER.fetch_add(1, std::sync::atomic::Ordering::SeqCst))
+    });
+    format!("{nanos:x}-{:x}-{tail}", std::process::id())
+}
+
+/// The journal size from which a commit prunes old events and considers
+/// compaction: `COORDINATIONHUB_COMPACT_MIN_BYTES`, 1 MiB by default.
+/// `None` (the variable set to 0) turns both off.
+fn compact_min_bytes() -> Option<u64> {
+    let min = std::env::var("COORDINATIONHUB_COMPACT_MIN_BYTES")
+        .ok()
+        .and_then(|value| value.trim().parse::<u64>().ok())
+        .unwrap_or(1 << 20);
+    (min > 0).then_some(min)
+}
+
+/// `COORDINATIONHUB_FSYNC=1`: `sync_data` after every commit. Off by
+/// default; see the README for the trade-off.
+fn fsync_enabled() -> bool {
+    static FLAG: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    *FLAG.get_or_init(|| {
+        let flag = std::env::var("COORDINATIONHUB_FSYNC").unwrap_or_default();
+        matches!(flag.trim().to_ascii_lowercase().as_str(), "1" | "true" | "yes" | "on")
+    })
+}
+
+/// Makes a rename durable where a directory can be synced (Unix).
+fn sync_dir(journal: &Path) {
+    #[cfg(unix)]
+    if let Some(dir) = journal.parent() {
+        if let Ok(handle) = std::fs::File::open(dir) {
+            let _ = handle.sync_all();
+        }
+    }
+    #[cfg(not(unix))]
+    let _ = journal;
+}
+
+/// Renames `from` over `to`. Windows refuses while another program (a
+/// virus scanner, an indexer) has `to` open for an instant, so a refusal
+/// is retried a few times, about a tenth of a second in all.
+fn replace_file(from: &Path, to: &Path) -> std::io::Result<()> {
+    let mut wait = std::time::Duration::from_millis(2);
+    for _ in 0..6 {
+        match std::fs::rename(from, to) {
+            Err(err) if err.kind() == std::io::ErrorKind::PermissionDenied => {
+                std::thread::sleep(wait);
+                wait *= 2;
+            }
+            other => return other,
+        }
+    }
+    std::fs::rename(from, to)
+}
+
+fn load_journal(path: &Path) -> Result<Loaded, String> {
+    let mut state = State::default();
+    let mut progress = Progress::default();
     if !path.is_file() {
         std::fs::OpenOptions::new()
             .create(true)
             .append(true)
             .open(path)
             .map_err(|e| e.to_string())?;
-        return Ok((State::default(), 0));
+        return Ok(Loaded { state, offset: 0, generation: String::new(), lines: 0, repaired: false });
     }
-    let state = replay(path)?;
-    let offset = std::fs::metadata(path).map_err(|e| e.to_string())?.len();
-    Ok((state, offset))
+    let buf = std::fs::read(path).map_err(|e| format!("cannot read {}: {e}", path.display()))?;
+    let generation = generation_of(&buf[..buf.len().min(GENERATION_HEAD)]);
+    let source = Source { path, base: 0, lines_before: 0, mend: true };
+    read_records(&source, &buf, &mut state, &mut progress)?;
+    Ok(Loaded {
+        state,
+        offset: progress.bytes,
+        generation,
+        lines: progress.lines,
+        repaired: progress.repaired,
+    })
 }
 
-fn replay(path: &Path) -> Result<State, String> {
-    let text = std::fs::read_to_string(path).map_err(|e| e.to_string())?;
-    let mut state = State::default();
-    for line in text.lines() {
-        let line = line.trim();
-        if line.is_empty() {
+/// Where `read_records` reads from, and whether it may mend the file.
+struct Source<'a> {
+    path: &'a Path,
+    /// Byte of the journal at which the buffer starts.
+    base: u64,
+    /// Lines of the journal before the buffer.
+    lines_before: u64,
+    /// True for the store itself. False for `doctor`, which only looks:
+    /// what the store would mend is reported in `Progress::tail` instead.
+    mend: bool,
+}
+
+/// What is wrong with the end of the journal.
+#[derive(Clone, Debug, PartialEq)]
+enum Tail {
+    /// The last record has no line feed and is not JSON: a write that did
+    /// not finish. Its size in bytes.
+    Unfinished(usize),
+    /// The last line is complete (it ends with a line feed) but cannot be
+    /// read. Its size in bytes, and why.
+    Unreadable(usize, String),
+    /// The last record is whole but has no line feed.
+    NoLineFeed,
+}
+
+/// Applies the journal records in `buf` to `state`. The caller holds the
+/// exclusive file lock.
+///
+/// The hub must not stop working because of its last record, so a final
+/// record that cannot be read is moved out of the journal into a dated
+/// file beside it and reading carries on: `.torn` for a write that did not
+/// finish (no line feed), `.unreadable` for a complete line that is not a
+/// record. A final record that is whole but has no line feed gets one.
+/// Either way the file ends on a line boundary afterwards, so no append
+/// lands on a partial line. A bad record with records after it is an error
+/// naming the line; nothing is changed.
+fn read_records(source: &Source, buf: &[u8], state: &mut State, progress: &mut Progress) -> Result<(), String> {
+    let path = source.path;
+    let mut pos = 0;
+    while pos < buf.len() {
+        let (line, next, terminated) = match buf[pos..].iter().position(|byte| *byte == b'\n') {
+            Some(at) => (&buf[pos..pos + at], pos + at + 1, true),
+            None => (&buf[pos..], buf.len(), false),
+        };
+        let number = source.lines_before + progress.lines + 1;
+        if line.iter().all(u8::is_ascii_whitespace) {
+            // A blank line (or spaces after the last record) holds nothing.
+            progress.lines += u64::from(terminated);
+            progress.bytes = next as u64;
+            pos = next;
             continue;
         }
-        apply_line(&mut state, &json::parse(line)?)?;
+        let parsed = std::str::from_utf8(line)
+            .map_err(|_| "it is not UTF-8".to_string())
+            .and_then(|text| json::parse_journal(text.trim()));
+        match parsed {
+            Ok((value, repaired)) => {
+                // The line feed goes in before the record is applied: if
+                // it cannot be written, nothing was applied, the offset
+                // stays before the record, and the next call does both.
+                // Applied first, the record would be applied again then.
+                if !terminated && source.mend {
+                    append_line_feed(path)?;
+                }
+                apply_line(state, &value).map_err(|err| bad_line(path, number, &err))?;
+                progress.repaired |= repaired;
+                progress.repaired_lines += u64::from(repaired);
+                progress.lines += 1;
+                if !terminated {
+                    progress.bytes = next as u64 + u64::from(source.mend);
+                    if !source.mend {
+                        progress.tail = Some(Tail::NoLineFeed);
+                    }
+                    return Ok(());
+                }
+                progress.bytes = next as u64;
+                pos = next;
+            }
+            Err(err) => {
+                let last = buf[next..].iter().all(u8::is_ascii_whitespace);
+                if !last {
+                    return Err(bad_line(path, number, &err));
+                }
+                let rest = &buf[pos..];
+                let tail = if terminated {
+                    Tail::Unreadable(rest.len(), err)
+                } else {
+                    Tail::Unfinished(rest.len())
+                };
+                if source.mend {
+                    set_tail_aside(path, source.base + pos as u64, rest, &tail)?;
+                } else {
+                    progress.tail = Some(tail);
+                }
+                progress.bytes = pos as u64;
+                return Ok(());
+            }
+        }
     }
-    Ok(state)
+    Ok(())
+}
+
+fn bad_line(path: &Path, number: u64, err: &str) -> String {
+    format!(
+        "journal {} line {number} cannot be read: {err}. It is not the final record (an unreadable final record is moved to a .torn or .unreadable file), so nothing was changed. To recover: stop every coordinationhub process on this store, move line {number} out of the file (or correct it), then run 'coordinationhub doctor'",
+        path.display()
+    )
+}
+
+fn append_line_feed(path: &Path) -> Result<(), String> {
+    use std::io::Write;
+    std::fs::OpenOptions::new()
+        .append(true)
+        .open(path)
+        .and_then(|mut file| file.write_all(b"\n"))
+        .map_err(|err| format!("cannot end the last record of {} with a line feed: {err}", path.display()))
+}
+
+/// Saves `rest` (the journal's bytes from `keep` on) in a dated file
+/// beside the journal, `.torn` or `.unreadable` by what `tail` says it is,
+/// then shortens the journal to `keep` bytes. The copy is written and
+/// synced first: if it cannot be, the journal is left alone.
+fn set_tail_aside(path: &Path, keep: u64, rest: &[u8], tail: &Tail) -> Result<(), String> {
+    use std::io::Write;
+    let kind = match tail {
+        Tail::Unreadable(..) => "unreadable",
+        _ => "torn",
+    };
+    let stamp = utc_stamp(util::now());
+    let mut saved = path.with_file_name(format!("coordination.jsonl.{stamp}.{kind}"));
+    let mut serial = 1;
+    while saved.exists() {
+        saved = path.with_file_name(format!("coordination.jsonl.{stamp}-{serial}.{kind}"));
+        serial += 1;
+    }
+    let fail = |what: &str, err: std::io::Error| {
+        format!(
+            "the last record of {} cannot be read and {what} failed: {err}. Nothing was changed; make the storage directory writable and retry",
+            path.display()
+        )
+    };
+    std::fs::File::create(&saved)
+        .and_then(|mut file| {
+            file.write_all(rest)?;
+            file.sync_all()
+        })
+        .map_err(|err| fail("saving a copy of it", err))?;
+    std::fs::OpenOptions::new()
+        .write(true)
+        .open(path)
+        .and_then(|file| {
+            file.set_len(keep)?;
+            file.sync_all()
+        })
+        .map_err(|err| fail("taking it out of the journal", err))?;
+    match tail {
+        Tail::Unreadable(size, why) => eprintln!(
+            "coordinationhub: the last line of {} is complete but is not a record this hub can read ({size} bytes: {why}). It was moved out of the journal and kept in {}; the hub carries on with every record before it. A finished write does not look like this: something else wrote that line, so look at the file.",
+            path.display(),
+            saved.display()
+        ),
+        _ => eprintln!(
+            "coordinationhub: the last record of {} was incomplete ({} bytes, a write that did not finish). It was cut off and kept in {}; the hub carries on with every record before it.",
+            path.display(),
+            rest.len(),
+            saved.display()
+        ),
+    }
+    Ok(())
+}
+
+fn kept_files(dir: &Path, ending: &str) -> Vec<PathBuf> {
+    let mut found: Vec<PathBuf> = std::fs::read_dir(dir)
+        .map(|entries| {
+            entries
+                .filter_map(|entry| entry.ok())
+                .map(|entry| entry.path())
+                .filter(|path| {
+                    path.file_name()
+                        .and_then(|name| name.to_str())
+                        .map(|name| name.starts_with("coordination.jsonl.") && name.ends_with(ending))
+                        .unwrap_or(false)
+                })
+                .collect()
+        })
+        .unwrap_or_default();
+    found.sort();
+    found
+}
+
+/// The `.torn` files beside the journal in `dir` (writes that did not
+/// finish), oldest first.
+pub fn torn_files(dir: &Path) -> Vec<PathBuf> {
+    kept_files(dir, ".torn")
+}
+
+/// The `.unreadable` files beside the journal in `dir` (complete final
+/// lines that were not records), oldest first.
+pub fn unreadable_files(dir: &Path) -> Vec<PathBuf> {
+    kept_files(dir, ".unreadable")
+}
+
+/// `doctor`'s line about final records that were moved out of the
+/// journal: none, or what each was and where it is kept.
+pub fn torn_report(dir: &Path) -> String {
+    let names = |files: &[PathBuf]| -> String {
+        files
+            .iter()
+            .filter_map(|path| path.file_name().map(|name| name.to_string_lossy().into_owned()))
+            .collect::<Vec<_>>()
+            .join(", ")
+    };
+    let (torn, unreadable) = (torn_files(dir), unreadable_files(dir));
+    if torn.is_empty() && unreadable.is_empty() {
+        return "no final record was ever moved out of the journal".into();
+    }
+    let mut parts = Vec::new();
+    if !torn.is_empty() {
+        parts.push(format!(
+            "{} unfinished write(s) were cut off the end of the journal and kept as {}",
+            torn.len(),
+            names(&torn)
+        ));
+    }
+    if !unreadable.is_empty() {
+        parts.push(format!(
+            "{} complete final line(s) that were not readable records were moved out of the journal and kept as {}",
+            unreadable.len(),
+            names(&unreadable)
+        ));
+    }
+    format!(
+        "{}, in {}. The hub carried on; delete a file once you have looked at it",
+        parts.join("; "),
+        dir.display()
+    )
+}
+
+/// What `doctor` learns about the journal: whether the hub can open it,
+/// and what the next call will mend.
+pub struct JournalCheck {
+    /// False only for what the hub itself refuses.
+    pub ok: bool,
+    pub message: String,
+}
+
+/// Reads the journal in `dir` exactly as the store does (the same reader,
+/// under the store's lock) without changing it.
+pub fn check_journal(dir: &Path) -> JournalCheck {
+    let path = dir.join("coordination.jsonl");
+    let lock_path = dir.join("coordination.lock");
+    let _lock = match FileLock::exclusive(&lock_path) {
+        Ok(lock) => lock,
+        Err(err) => return JournalCheck { ok: false, message: busy(&lock_path, err) },
+    };
+    let buf = match std::fs::read(&path) {
+        Ok(buf) => buf,
+        Err(err) => return JournalCheck { ok: false, message: format!("journal unreadable: {err}") },
+    };
+    let source = Source { path: &path, base: 0, lines_before: 0, mend: false };
+    let mut progress = Progress::default();
+    if let Err(err) = read_records(&source, &buf, &mut State::default(), &mut progress) {
+        return JournalCheck { ok: false, message: err };
+    }
+    if progress.repaired_lines == 0 && progress.tail.is_none() {
+        return JournalCheck { ok: true, message: "journal parses; schema is current".into() };
+    }
+    let mut notes = vec![format!("journal opens ({} records)", progress.lines)];
+    if progress.repaired_lines > 0 {
+        notes.push(format!(
+            "{} record(s) hold numbers that are not JSON (Infinity or NaN, which 1.2.0 could write): the hub reads them, and the next coordinationhub command on this store replaces them with finite values and rewrites the journal",
+            progress.repaired_lines
+        ));
+    }
+    match progress.tail {
+        Some(Tail::Unfinished(size)) => notes.push(format!(
+            "the last record is an unfinished write ({size} bytes): the next command cuts it off and keeps it in a .torn file"
+        )),
+        Some(Tail::Unreadable(size, why)) => notes.push(format!(
+            "the last line is complete but is not a readable record ({size} bytes: {why}): the next command moves it to an .unreadable file"
+        )),
+        Some(Tail::NoLineFeed) => notes.push("the last record has no line feed: the next command adds it".into()),
+        None => {}
+    }
+    JournalCheck { ok: true, message: notes.join("; ") }
+}
+
+/// `20261115T093000Z` for an epoch time: a file-name-safe UTC stamp.
+fn utc_stamp(epoch: f64) -> String {
+    let secs = epoch.max(0.0) as i64;
+    let (days, rest) = (secs.div_euclid(86_400), secs.rem_euclid(86_400));
+    // Civil date from a day count (Howard Hinnant's algorithm).
+    let z = days + 719_468;
+    let era = z.div_euclid(146_097);
+    let doe = z.rem_euclid(146_097);
+    let yoe = (doe - doe / 1_460 + doe / 36_524 - doe / 146_096) / 365;
+    let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
+    let mp = (5 * doy + 2) / 153;
+    let day = doy - (153 * mp + 2) / 5 + 1;
+    let month = if mp < 10 { mp + 3 } else { mp - 9 };
+    let year = yoe + era * 400 + i64::from(month <= 2);
+    format!(
+        "{year:04}{month:02}{day:02}T{:02}{:02}{:02}Z",
+        rest / 3600,
+        rest % 3600 / 60,
+        rest % 60
+    )
 }
 
 fn apply_line(state: &mut State, value: &Value) -> Result<(), String> {
@@ -1426,8 +2046,8 @@ fn encode_agent(row: &Agent) -> Value {
         ("parent_id", json::opt_string(&row.parent_id)),
         ("worktree_root", json::s(&row.worktree_root)),
         ("pid", json::i(row.pid)),
-        ("started_at", json::f(row.started_at)),
-        ("last_heartbeat", json::f(row.last_heartbeat)),
+        ("started_at", num(row.started_at)),
+        ("last_heartbeat", num(row.last_heartbeat)),
         ("status", json::s(&row.status)),
         ("raw_ide_id", json::opt_string(&row.raw_ide_id)),
         ("ide_vendor", json::opt_string(&row.ide_vendor)),
@@ -1439,7 +2059,7 @@ fn encode_lineage(row: &Lineage) -> Value {
     json::obj(vec![
         ("parent_id", json::s(&row.parent_id)),
         ("child_id", json::s(&row.child_id)),
-        ("spawned_at", json::f(row.spawned_at)),
+        ("spawned_at", num(row.spawned_at)),
     ])
 }
 
@@ -1448,7 +2068,7 @@ fn encode_desc(row: &Descendant) -> Value {
         ("ancestor_id", json::s(&row.ancestor_id)),
         ("descendant_id", json::s(&row.descendant_id)),
         ("depth", json::i(row.depth)),
-        ("registered_at", json::f(row.registered_at)),
+        ("registered_at", num(row.registered_at)),
     ])
 }
 
@@ -1457,8 +2077,8 @@ fn encode_lock(row: &Lock) -> Value {
         ("id", json::i(row.id)),
         ("document_path", json::s(&row.document_path)),
         ("locked_by", json::s(&row.locked_by)),
-        ("locked_at", json::f(row.locked_at)),
-        ("lock_ttl", json::f(row.lock_ttl)),
+        ("locked_at", num(row.locked_at)),
+        ("lock_ttl", num(row.lock_ttl)),
         ("lock_type", json::s(&row.lock_type)),
         ("region_start", json::opt_i(row.region_start)),
         ("region_end", json::opt_i(row.region_end)),
@@ -1475,7 +2095,7 @@ fn encode_conflict(row: &Conflict) -> Value {
         ("conflict_type", json::s(&row.conflict_type)),
         ("resolution", json::s(&row.resolution)),
         ("details_json", json::opt_string(&row.details_json)),
-        ("created_at", json::f(row.created_at)),
+        ("created_at", num(row.created_at)),
     ])
 }
 
@@ -1486,7 +2106,7 @@ fn encode_note(row: &Notification) -> Value {
         ("change_type", json::s(&row.change_type)),
         ("agent_id", json::s(&row.agent_id)),
         ("worktree_root", json::opt_string(&row.worktree_root)),
-        ("created_at", json::f(row.created_at)),
+        ("created_at", num(row.created_at)),
     ])
 }
 
@@ -1499,7 +2119,7 @@ fn encode_resp(row: &Responsibility) -> Value {
         ("responsibilities", json::opt_string(&row.responsibilities)),
         ("current_task", json::opt_string(&row.current_task)),
         ("scope", json::opt_string(&row.scope)),
-        ("updated_at", json::f(row.updated_at)),
+        ("updated_at", num(row.updated_at)),
     ])
 }
 
@@ -1507,7 +2127,7 @@ fn encode_own(row: &Ownership) -> Value {
     json::obj(vec![
         ("document_path", json::s(&row.document_path)),
         ("assigned_agent_id", json::s(&row.assigned_agent_id)),
-        ("assigned_at", json::f(row.assigned_at)),
+        ("assigned_at", num(row.assigned_at)),
         ("last_claimed_by", json::opt_string(&row.last_claimed_by)),
         ("task_description", json::opt_string(&row.task_description)),
     ])
@@ -1520,11 +2140,11 @@ fn encode_msg(row: &Message) -> Value {
         ("to_agent_id", json::s(&row.to_agent_id)),
         ("message_type", json::s(&row.message_type)),
         ("payload_json", json::opt_string(&row.payload_json)),
-        ("created_at", json::f(row.created_at)),
+        ("created_at", num(row.created_at)),
         (
             "read_at",
             match row.read_at {
-                Some(n) => json::f(n),
+                Some(n) => num(n),
                 None => json::null(),
             },
         ),
@@ -1542,8 +2162,8 @@ fn encode_task(row: &Task) -> Value {
         ),
         ("description", json::s(&row.description)),
         ("status", json::s(&row.status)),
-        ("created_at", json::f(row.created_at)),
-        ("updated_at", json::f(row.updated_at)),
+        ("created_at", num(row.created_at)),
+        ("updated_at", num(row.updated_at)),
         ("depends_on", json::s(&row.depends_on)),
         ("blocked_by", json::opt_string(&row.blocked_by)),
         ("summary", json::opt_string(&row.summary)),
@@ -1557,8 +2177,8 @@ fn encode_intent(row: &Intent) -> Value {
         ("agent_id", json::s(&row.agent_id)),
         ("document_path", json::s(&row.document_path)),
         ("intent", json::s(&row.intent)),
-        ("declared_at", json::f(row.declared_at)),
-        ("ttl", json::f(row.ttl)),
+        ("declared_at", num(row.declared_at)),
+        ("ttl", num(row.ttl)),
     ])
 }
 
@@ -1570,7 +2190,7 @@ fn encode_handoff(row: &Handoff) -> Value {
         ("document_path", json::opt_string(&row.document_path)),
         ("handoff_type", json::s(&row.handoff_type)),
         ("status", json::s(&row.status)),
-        ("created_at", json::f(row.created_at)),
+        ("created_at", num(row.created_at)),
         ("acknowledged_at", opt_f(row.acknowledged_at)),
         ("completed_at", opt_f(row.completed_at)),
     ])
@@ -1580,7 +2200,7 @@ fn encode_hack(row: &HandoffAck) -> Value {
     json::obj(vec![
         ("handoff_id", json::i(row.handoff_id)),
         ("agent_id", json::s(&row.agent_id)),
-        ("acknowledged_at", json::f(row.acknowledged_at)),
+        ("acknowledged_at", num(row.acknowledged_at)),
     ])
 }
 
@@ -1591,8 +2211,8 @@ fn encode_fail(row: &Failure) -> Value {
         ("error", json::opt_string(&row.error)),
         ("attempt", json::i(row.attempt)),
         ("max_retries", json::i(row.max_retries)),
-        ("first_attempt_at", json::f(row.first_attempt_at)),
-        ("last_attempt_at", json::f(row.last_attempt_at)),
+        ("first_attempt_at", num(row.first_attempt_at)),
+        ("last_attempt_at", num(row.last_attempt_at)),
         ("dead_letter_at", opt_f(row.dead_letter_at)),
         ("status", json::s(&row.status)),
     ])
@@ -1602,9 +2222,9 @@ fn encode_lease(row: &Lease) -> Value {
     json::obj(vec![
         ("lease_name", json::s(&row.lease_name)),
         ("holder_id", json::s(&row.holder_id)),
-        ("acquired_at", json::f(row.acquired_at)),
-        ("ttl", json::f(row.ttl)),
-        ("expires_at", json::f(row.expires_at)),
+        ("acquired_at", num(row.acquired_at)),
+        ("ttl", num(row.ttl)),
+        ("expires_at", num(row.expires_at)),
     ])
 }
 
@@ -1620,7 +2240,7 @@ fn encode_dep(row: &Dependency) -> Value {
         ("condition", json::s(&row.condition)),
         ("satisfied", json::i(row.satisfied)),
         ("satisfied_at", opt_f(row.satisfied_at)),
-        ("created_at", json::f(row.created_at)),
+        ("created_at", num(row.created_at)),
     ])
 }
 
@@ -1631,7 +2251,7 @@ fn encode_spawn(row: &Spawn) -> Value {
         ("subagent_type", json::opt_string(&row.subagent_type)),
         ("description", json::opt_string(&row.description)),
         ("prompt", json::opt_string(&row.prompt)),
-        ("created_at", json::f(row.created_at)),
+        ("created_at", num(row.created_at)),
         ("consumed_at", opt_f(row.consumed_at)),
         ("status", json::s(&row.status)),
         ("source", json::s(&row.source)),
@@ -1646,9 +2266,9 @@ fn encode_bc(row: &Broadcast) -> Value {
         ("from_agent_id", json::s(&row.from_agent_id)),
         ("document_path", json::opt_string(&row.document_path)),
         ("message", json::opt_string(&row.message)),
-        ("created_at", json::f(row.created_at)),
-        ("ttl", json::f(row.ttl)),
-        ("expires_at", json::f(row.expires_at)),
+        ("created_at", num(row.created_at)),
+        ("ttl", num(row.ttl)),
+        ("expires_at", num(row.expires_at)),
         ("expected_count", json::i(row.expected_count)),
     ])
 }
@@ -1657,7 +2277,7 @@ fn encode_back(row: &BroadcastAck) -> Value {
     json::obj(vec![
         ("broadcast_id", json::i(row.broadcast_id)),
         ("agent_id", json::s(&row.agent_id)),
-        ("acknowledged_at", json::f(row.acknowledged_at)),
+        ("acknowledged_at", num(row.acknowledged_at)),
     ])
 }
 
@@ -1673,9 +2293,9 @@ fn encode_claim(row: &Claim) -> Value {
         ("id", json::i(row.id)),
         ("agent_id", json::s(&row.agent_id)),
         ("area", json::s(&row.area)),
-        ("claimed_at", json::f(row.claimed_at)),
-        ("ttl", json::f(row.ttl)),
-        ("expires_at", json::f(row.expires_at)),
+        ("claimed_at", num(row.claimed_at)),
+        ("ttl", num(row.ttl)),
+        ("expires_at", num(row.expires_at)),
         ("note", json::opt_string(&row.note)),
     ])
 }
@@ -1694,7 +2314,7 @@ fn encode_hub(row: &HubEvent) -> Value {
         ("id", json::i(row.id)),
         ("topic", json::s(&row.topic)),
         ("payload", json::s(&row.payload)),
-        ("created_at", json::f(row.created_at)),
+        ("created_at", num(row.created_at)),
     ])
 }
 
@@ -1705,13 +2325,18 @@ fn encode_ce(row: &ClaimEvent) -> Value {
         ("from_agent_id", json::opt_string(&row.from_agent_id)),
         ("to_agent_id", json::opt_string(&row.to_agent_id)),
         ("action", json::s(&row.action)),
-        ("at", json::f(row.at)),
+        ("at", num(row.at)),
     ])
+}
+
+/// A stored number: always finite, so the journal stays strict JSON.
+fn num(value: f64) -> Value {
+    json::f(json::finite(value))
 }
 
 fn opt_f(value: Option<f64>) -> Value {
     match value {
-        Some(n) => json::f(n),
+        Some(n) => num(n),
         None => json::null(),
     }
 }
@@ -1729,14 +2354,16 @@ fn opt_str(value: &Value, key: &str) -> Option<String> {
         .and_then(Value::as_str)
         .map(|s| s.to_string())
 }
+/// A stored number, read back finite: a row 1.2.0 wrote with `Infinity`
+/// (a lock TTL of `1e400`, say) becomes the largest number 1.3.0 accepts.
 fn num_f(value: &Value, key: &str) -> f64 {
-    value.get(key).and_then(Value::as_f64).unwrap_or(0.0)
+    value.get(key).and_then(Value::as_f64).map(json::finite).unwrap_or(0.0)
 }
 fn num_i(value: &Value, key: &str) -> i64 {
     value.get(key).and_then(Value::as_i64).unwrap_or(0)
 }
 fn opt_num(value: &Value, key: &str) -> Option<f64> {
-    value.get(key).and_then(Value::as_f64)
+    value.get(key).and_then(Value::as_f64).map(json::finite)
 }
 fn opt_num_i(value: &Value, key: &str) -> Option<i64> {
     match value.get(key) {
@@ -2021,4 +2648,61 @@ pub fn resolve_storage(storage_dir: Option<&Path>, project_root: Option<&Path>) 
         return util::soft_resolve(root).join(".coordinationhub");
     }
     home_storage()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn utc_stamps_are_calendar_dates() {
+        assert_eq!(utc_stamp(0.0), "19700101T000000Z");
+        assert_eq!(utc_stamp(951_782_400.0), "20000229T000000Z");
+        assert_eq!(utc_stamp(1_794_731_900.55), "20261115T083820Z");
+        assert_eq!(utc_stamp(4_102_444_799.0), "20991231T235959Z");
+        assert_eq!(utc_stamp(-5.0), "19700101T000000Z");
+    }
+
+    #[test]
+    fn the_generation_is_read_from_the_first_line_only() {
+        let line = generation_line("1a-2b-3c");
+        assert_eq!(generation_of(line.as_bytes()), "1a-2b-3c");
+        assert_eq!(generation_of(format!("{line}\n{{\"t\":\"ids\"}}").as_bytes()), "1a-2b-3c");
+        assert_eq!(generation_of(b"{\"t\":\"put\",\"table\":\"agents\"}"), "");
+        assert_eq!(generation_of(b""), "");
+        // The line is a record every version reads: a `del` on a table
+        // none of them has.
+        let record = json::parse(&line).unwrap();
+        assert_eq!(record.get("t").and_then(Value::as_str), Some("del"));
+        let mut state = State::default();
+        apply_line(&mut state, &record).unwrap();
+        assert_eq!(state, State::default());
+        // Two ids never match, and a whole line fits the head that is read.
+        assert_ne!(new_generation(), new_generation());
+        assert!(generation_line(&new_generation()).len() < GENERATION_HEAD);
+    }
+
+    #[test]
+    fn stored_numbers_are_finite() {
+        let lock = Lock {
+            id: 1,
+            document_path: "x".into(),
+            locked_by: "a".into(),
+            locked_at: f64::NAN,
+            lock_ttl: f64::INFINITY,
+            lock_type: "exclusive".into(),
+            region_start: None,
+            region_end: None,
+            worktree_root: None,
+        };
+        let text = json::dumps(&encode_lock(&lock));
+        assert!(!text.contains("Infinity") && !text.contains("NaN"), "{text}");
+        let back = decode_lock(&json::parse(&text).unwrap()).unwrap();
+        assert_eq!(back.lock_ttl, json::MAX_NUMBER);
+        assert_eq!(back.locked_at, 0.0);
+        // And what 1.2.0 wrote reads back finite.
+        let (old, repaired) = json::parse_journal(&text.replace("1000000000000000.0", "Infinity")).unwrap();
+        assert!(repaired);
+        assert_eq!(decode_lock(&old).unwrap().lock_ttl, json::MAX_NUMBER);
+    }
 }

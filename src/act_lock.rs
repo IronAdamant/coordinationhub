@@ -286,7 +286,7 @@ fn scope_violation(
     if raw.is_empty() {
         return None;
     }
-    let Ok(parsed) = json::parse(raw) else {
+    let Ok(parsed) = json::parse_stored(raw) else {
         return None;
     };
     let Some(items) = parsed.as_array() else {
@@ -657,7 +657,7 @@ pub fn lapses(state: &State, agent_id: &str) -> Vec<Lapse> {
         {
             continue;
         }
-        let Ok(payload) = json::parse(&event.payload) else {
+        let Ok(payload) = json::parse_stored(&event.payload) else {
             continue;
         };
         if payload.get("agent_id").and_then(Value::as_str) != Some(agent_id) {

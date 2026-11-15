@@ -80,6 +80,7 @@ impl Engine {
         } else {
             args.clone()
         };
+        validate::check_numbers(&args).map_err(|err| format!("Input validation error: {err}"))?;
         if tool == "who" {
             if let Err(err) = who_arguments(&args) {
                 return Err(format!("Input validation error: who: {err}"));
@@ -172,7 +173,7 @@ impl Engine {
                             if let Value::Object(pairs) = &mut value {
                                 pairs.push((
                                     "responsibilities".into(),
-                                    json::parse(&encoded).unwrap_or_else(|_| json::arr(vec![])),
+                                    json::parse_stored(&encoded).unwrap_or_else(|_| json::arr(vec![])),
                                 ));
                                 pairs.push(("role".into(), json::s(&agent.role)));
                                 pairs.push(("graph_agent_id".into(), json::s(graph_id)));

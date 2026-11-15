@@ -267,7 +267,7 @@ pub fn context_bundle(
         let responsibilities = resp
             .responsibilities
             .as_deref()
-            .and_then(|raw| json::parse(raw).ok())
+            .and_then(|raw| json::parse_stored(raw).ok())
             .unwrap_or_else(|| json::arr(vec![]));
         bundle.push(("responsibilities", responsibilities));
         bundle.push(("role", json::opt_string(&resp.role)));
@@ -426,7 +426,7 @@ pub fn last_lifecycle(state: &State, agent_id: &str) -> Option<&'static str> {
         if !event.payload.contains(&needle) {
             continue;
         }
-        let Ok(payload) = json::parse(&event.payload) else {
+        let Ok(payload) = json::parse_stored(&event.payload) else {
             continue;
         };
         if payload.get("agent_id").and_then(Value::as_str) == Some(agent_id) {

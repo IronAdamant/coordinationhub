@@ -8,16 +8,19 @@
   * { box-sizing: border-box; margin: 0; padding: 0; }
   body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background: #0f1117; color: #e6e8ed; min-height: 100vh; }
   header { background: #1a1d27; border-bottom: 1px solid #2d3148; padding: 12px 24px; display: flex; justify-content: space-between; align-items: center; gap: 16px; }
-  header .brand h1 { font-size: 18px; font-weight: 600; color: #8b5cf6; }
+  header .brand h1 { font-size: 18px; font-weight: 600; color: #a78bfa; }
   header .brand p { font-size: 12px; color: #94a3b8; margin-top: 2px; }
-  header .status { font-size: 12px; color: #6b7280; text-align: right; }
+  header .status { font-size: 12px; color: #9ca3af; text-align: right; }
   .dashboard { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; padding: 16px; }
   .panel { background: #1a1d27; border: 1px solid #2d3148; border-radius: 8px; padding: 16px; }
-  .panel h2 { font-size: 13px; font-weight: 600; color: #8b5cf6; text-transform: uppercase; letter-spacing: 0.05em; margin-bottom: 4px; }
-  .panel .panel-blurb { font-size: 12px; color: #6b7280; margin-bottom: 10px; padding-bottom: 8px; border-bottom: 1px solid #2d3148; }
+  .panel h2 { font-size: 13px; font-weight: 600; color: #a78bfa; text-transform: uppercase; letter-spacing: 0.05em; margin-bottom: 4px; }
+  .panel .panel-blurb { font-size: 12px; color: #9ca3af; margin-bottom: 10px; padding-bottom: 8px; border-bottom: 1px solid #2d3148; }
   .panel.full-width { grid-column: 1 / -1; }
-  .legend { font-size: 11px; color: #6b7280; display: inline-flex; gap: 10px; flex-wrap: wrap; margin-left: 8px; }
-  .legend .chip { display: inline-block; padding: 1px 6px; border-radius: 8px; font-size: 10px; }
+  .legend { font-size: 12px; color: #9ca3af; display: inline-flex; gap: 10px; flex-wrap: wrap; margin-left: 8px; }
+  .legend .chip { display: inline-block; padding: 1px 6px; border-radius: 8px; font-size: 12px; }
+
+  .notice { background: #fbbf24; color: #1a1d27; font-size: 14px; font-weight: 600; padding: 10px 24px; border-bottom: 1px solid #2d3148; }
+  .notice[hidden] { display: none; }
 
   /* Agent Tree */
   .agent-tree-container { position: relative; height: 340px; overflow: hidden; cursor: grab; user-select: none; }
@@ -30,15 +33,15 @@
     font-size: 14px; font-weight: 600; line-height: 1; padding: 0;
     display: flex; align-items: center; justify-content: center;
   }
-  .tree-controls button:hover { background: #2a2d3a; color: #e6e8ed; border-color: #4b5563; }
-  .tree-controls .zoom-level { font-size: 11px; color: #6b7280; margin-right: 6px; align-self: center; min-width: 32px; text-align: right; }
+  .tree-controls button:hover { background: #2a2d3a; color: #e6e8ed; border-color: #949cab; }
+  .tree-controls .zoom-level { font-size: 12px; color: #9ca3af; margin-right: 6px; align-self: center; min-width: 32px; text-align: right; }
 
   /* Task Board */
   .task-table { width: 100%; border-collapse: collapse; font-size: 13px; }
-  .task-table th { text-align: left; color: #6b7280; font-weight: 500; padding: 6px 8px; border-bottom: 1px solid #2d3148; }
+  .task-table th { text-align: left; color: #9ca3af; font-weight: 500; padding: 6px 8px; border-bottom: 1px solid #2d3148; }
   .task-table td { padding: 6px 8px; border-bottom: 1px solid #1e212d; }
   .task-table tr:hover { background: #1e212d; }
-  .status-badge { display: inline-block; padding: 2px 8px; border-radius: 10px; font-size: 11px; font-weight: 600; }
+  .status-badge { display: inline-block; padding: 2px 8px; border-radius: 10px; font-size: 12px; font-weight: 600; }
   .status-pending { background: #1e293b; color: #94a3b8; }
   .status-in_progress { background: #1c2b1e; color: #4ade80; }
   .status-completed { background: #1c2b1e; color: #4ade80; border: 1px solid #2d5a36; }
@@ -48,17 +51,17 @@
   /* Work Intents */
   .intent-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 8px; }
   .intent-card { background: #1e212d; border: 1px solid #2d3148; border-radius: 6px; padding: 10px; font-size: 12px; }
-  .intent-card .intent-agent { color: #8b5cf6; font-weight: 600; }
+  .intent-card .intent-agent { color: #a78bfa; font-weight: 600; }
   .intent-card .intent-file { color: #94a3b8; margin-top: 4px; font-family: monospace; }
   .intent-card .intent-desc { color: #e6e8ed; margin-top: 4px; }
-  .intent-card .intent-ttl { color: #6b7280; font-size: 11px; margin-top: 4px; }
+  .intent-card .intent-ttl { color: #9ca3af; font-size: 12px; margin-top: 4px; }
 
   /* Handoffs */
   .handoff-list { display: flex; flex-direction: column; gap: 8px; }
   .handoff-item { background: #1e212d; border: 1px solid #2d3148; border-radius: 6px; padding: 10px; font-size: 12px; }
-  .handoff-item .handoff-id { color: #8b5cf6; font-weight: 600; }
+  .handoff-item .handoff-id { color: #a78bfa; font-weight: 600; }
   .handoff-item .handoff-route { color: #94a3b8; margin-top: 4px; }
-  .handoff-item .handoff-status { display: inline-block; padding: 2px 8px; border-radius: 10px; font-size: 11px; font-weight: 600; margin-top: 4px; }
+  .handoff-item .handoff-status { display: inline-block; padding: 2px 8px; border-radius: 10px; font-size: 12px; font-weight: 600; margin-top: 4px; }
   .handoff-pending { background: #1e293b; color: #94a3b8; }
   .handoff-acknowledged { background: #1c2b1e; color: #4ade80; }
   .handoff-completed { background: #1c2b1e; color: #4ade80; border: 1px solid #2d5a36; }
@@ -68,9 +71,9 @@
   .dep-list { display: flex; flex-direction: column; gap: 6px; font-size: 12px; }
   .dep-item { background: #1e212d; border: 1px solid #2d3148; border-radius: 6px; padding: 8px 10px; display: flex; align-items: center; gap: 8px; }
   .dep-item .dep-from { color: #f87171; font-weight: 600; }
-  .dep-item .dep-arrow { color: #6b7280; }
+  .dep-item .dep-arrow { color: #9ca3af; }
   .dep-item .dep-to { color: #4ade80; font-weight: 600; }
-  .dep-item .dep-condition { color: #6b7280; font-size: 11px; }
+  .dep-item .dep-condition { color: #9ca3af; font-size: 12px; }
   .dep-item .dep-sat { font-weight: 600; }
   .dep-sat-yes { color: #4ade80; }
   .dep-sat-no { color: #f87171; }
@@ -79,21 +82,21 @@
   .lock-list { display: flex; flex-direction: column; gap: 4px; font-size: 12px; }
   .lock-item { background: #1e212d; border: 1px solid #2d3148; border-radius: 4px; padding: 6px 8px; font-family: monospace; display: flex; justify-content: space-between; }
   .lock-item .lock-path { color: #94a3b8; }
-  .lock-item .lock-agent { color: #8b5cf6; font-size: 11px; }
-  .lock-item .lock-type { font-size: 11px; padding: 1px 6px; border-radius: 8px; }
+  .lock-item .lock-agent { color: #a78bfa; font-size: 12px; }
+  .lock-item .lock-type { font-size: 12px; padding: 1px 6px; border-radius: 8px; }
   .lock-exclusive { background: #2d1e1e; color: #f87171; }
   .lock-shared { background: #1e293b; color: #94a3b8; }
 
   /* Empty states */
-  .empty { color: #4b5563; font-size: 12px; font-style: italic; margin-top: 8px; }
-  .timestamp { font-size: 11px; color: #4b5563; margin-top: 8px; }
+  .empty { color: #949cab; font-size: 12px; font-style: italic; margin-top: 8px; }
+  .timestamp { font-size: 12px; color: #949cab; margin-top: 8px; }
 
   /* SVG node styles */
   .agent-node rect { fill: #1e212d; stroke: #2d3148; stroke-width: 1.5; rx: 6; }
   .agent-node text { fill: #e6e8ed; font-size: 12px; font-family: -apple-system, sans-serif; }
   .agent-node .status-dot { stroke: none; }
   .agent-node .status-active { fill: #4ade80; }
-  .agent-node .status-stopped { fill: #6b7280; }
+  .agent-node .status-stopped { fill: #9ca3af; }
   .agent-node .status-unknown { fill: #f87171; }
   .agent-edge { stroke: #2d3148; stroke-width: 1.5; fill: none; }
 </style>
@@ -106,26 +109,27 @@
   </div>
   <div class="status" id="timestamp">Loading&hellip;</div>
 </header>
+<div class="notice" id="notice" role="status" aria-live="polite" hidden></div>
 
-<div class="dashboard">
+<main class="dashboard">
   <!-- Agent Tree -->
   <div class="panel full-width">
     <h2>Agent Tree
       <span class="legend">
         <span><span class="chip" style="background:#1c2b1e;color:#4ade80;">&#9679;</span> active (heartbeat &lt; 10min)</span>
-        <span><span class="chip" style="background:#2a2d3a;color:#6b7280;">&#9679;</span> stopped</span>
+        <span><span class="chip" style="background:#2a2d3a;color:#9ca3af;">&#9679;</span> stopped</span>
         <span><span class="chip" style="background:#2d1e1e;color:#f87171;">&#9679;</span> stale / unknown</span>
       </span>
     </h2>
     <div class="panel-blurb">Each box is one agent. Parent&rarr;child edges show spawn lineage. The small grey line under the agent ID is the agent's current task. Drag to pan, mouse-wheel to zoom, or use the controls.</div>
     <div class="agent-tree-container" id="agent-tree-container">
       <div class="tree-controls">
-        <span class="zoom-level" id="tree-zoom-level">100%</span>
-        <button id="tree-zoom-out" title="Zoom out" type="button">&minus;</button>
-        <button id="tree-fit" title="Fit tree to view" type="button">&#9974;</button>
-        <button id="tree-zoom-in" title="Zoom in" type="button">+</button>
+        <span class="zoom-level" id="tree-zoom-level" aria-label="Zoom level">100%</span>
+        <button id="tree-zoom-out" title="Zoom out" aria-label="Zoom out" type="button">&minus;</button>
+        <button id="tree-fit" title="Fit tree to view" aria-label="Fit tree to view" type="button">&#9974;</button>
+        <button id="tree-zoom-in" title="Zoom in" aria-label="Zoom in" type="button">+</button>
       </div>
-      <svg id="agent-tree-svg" preserveAspectRatio="xMidYMid meet"></svg>
+      <svg id="agent-tree-svg" role="img" aria-label="Agent tree: one box per agent, lines from parent to child" preserveAspectRatio="xMidYMid meet"></svg>
     </div>
   </div>
 
@@ -178,76 +182,185 @@
     <div class="lock-list" id="lock-list"></div>
     <div class="timestamp" id="lock-timestamp"></div>
   </div>
-</div>
+</main>
 
 <script>
 (function() {
   var POLL_INTERVAL = 5000;
 
   // Agent-tree pan + zoom state — initialised here so any function that
-  // runs early (e.g. the very first SSE-delivered render) sees a live
+  // runs early (e.g. the very first stream-delivered render) sees a live
   // object rather than ``undefined`` from a hoisted-but-unassigned ``var``.
   var treeState = { zoom: null, panX: 0, panY: 0 };
   var treeContentBox = { w: 0, h: 0, viewW: 0, viewH: 0 };
   var ZOOM_MIN = 0.2, ZOOM_MAX = 4.0;
   var apiBase = '/api';
-  var es = null;
-  var useSSE = true;
+  // No word from the server for this long (it sends a keepalive every two
+  // seconds) means the connection is gone: say so on the page.
+  var STALE_AFTER = 12000;
+  var token = null;          // the access token, kept for this tab only
+  var needsToken = false;    // the server answered 401
+  var streaming = false;     // the event stream is open
+  var streamAbort = null;
+  var lastContact = 0;       // when the server last sent anything
+  var lastUpdate = null;     // when data was last drawn
+  var problem = '';
+  var offline = false;       // the last plain request failed outright
 
-  function fetchJSON(url) {
-    return fetch(url).then(function(r) {
+  // The token arrives in the URL fragment (#token=...), which a browser
+  // never sends to a server. Keep it for this tab (session storage) and
+  // take it out of the address bar. The page itself never contains it.
+  (function readToken() {
+    var match = /(?:^#|&)token=([^&]*)/.exec(window.location.hash || '');
+    if (match) {
+      try { token = decodeURIComponent(match[1]); } catch (e) { token = match[1]; }
+      try { window.sessionStorage.setItem('coordhub-token', token); } catch (e) { /* storage blocked: memory only */ }
+      try {
+        window.history.replaceState(null, '', window.location.pathname + window.location.search);
+      } catch (e) { window.location.hash = ''; }
+    } else {
+      try { token = window.sessionStorage.getItem('coordhub-token'); } catch (e) { token = null; }
+    }
+  })();
+
+  // Every request carries the token in an Authorization header.
+  function request(url, signal) {
+    var options = { headers: {}, cache: 'no-store', credentials: 'omit' };
+    if (token) options.headers['Authorization'] = 'Bearer ' + token;
+    if (signal) options.signal = signal;
+    return fetch(url, options).then(function(r) {
+      if (r.status === 401) {
+        needsToken = true;
+        throw new Error('the server asked for the access token');
+      }
       if (!r.ok) throw new Error('HTTP ' + r.status);
-      return r.json();
+      needsToken = false;
+      return r;
     });
   }
 
   function onDashboardData(data) {
-    document.getElementById('timestamp').textContent = 'Last updated: ' + new Date().toLocaleTimeString() + (es ? ' (SSE)' : ' (poll)');
+    lastContact = Date.now();
+    lastUpdate = new Date();
+    problem = '';
+    offline = false;
     renderAgentTree(data);
     renderTasks(data);
     renderIntents(data);
     renderHandoffs(data);
     renderDependencies(data);
     renderLocks(data);
+    showState();
   }
 
-  function startSSE() {
-    if (es) es.close();
-    es = new EventSource('/events');
-    es.onmessage = function(evt) {
-      try {
-        var data = JSON.parse(evt.data);
-        onDashboardData(data);
-      } catch (e) { /* ignore parse errors */ }
-    };
-    es.onerror = function() {
-      useSSE = false;
-      es.close();
-      es = null;
-      // T7.36: the 5 s polling fallback already kicked in when useSSE
-      // flipped to false, so we're not in a dead zone — but 30 s is
-      // too conservative for the SSE retry. 5 s keeps parity with the
-      // fallback poll interval so a transient server restart doesn't
-      // leave the user on slow-poll for half a minute.
-      setTimeout(startSSE, 5000);
-    };
+  // The header line, and a banner whenever the data may be out of date:
+  // no token, or the server has gone quiet. The banner names the time of
+  // the last update.
+  function showState() {
+    var when = lastUpdate ? lastUpdate.toLocaleTimeString() : '';
+    var message = '';
+    if (needsToken) {
+      message = (token
+        ? 'The server refused this page’s access token (a new one is made each time the server starts).'
+        : 'This dashboard needs its access token.') +
+        ' Open the dashboard URL that “coordinationhub serve-sse” printed; it ends in #token=…';
+    } else if (offline || (lastContact && Date.now() - lastContact > STALE_AFTER)) {
+      message = 'Not connected to the server' + (problem ? ' (' + problem + ')' : '') + '. Retrying every 5 seconds.';
+    }
+    if (message) {
+      message += when
+        ? ' The data below was last updated at ' + when + ' (' + ageAgo(lastUpdate.getTime() / 1000) + ') and may be out of date.'
+        : ' No data has been loaded yet.';
+    }
+    var notice = document.getElementById('notice');
+    notice.textContent = message;
+    notice.hidden = !message;
+    document.getElementById('timestamp').textContent = when
+      ? 'Last updated: ' + when + (message ? ' (stale)' : (streaming ? ' (live)' : ' (poll)'))
+      : (message ? 'No data' : 'Loading…');
+  }
+
+  function handleFrame(frame) {
+    var lines = frame.split('\n');
+    var data = [];
+    for (var i = 0; i < lines.length; i++) {
+      if (lines[i].indexOf('data:') === 0) data.push(lines[i].slice(5).replace(/^ /, ''));
+    }
+    if (data.length === 0) return;  // a comment: the keepalive
+    try {
+      onDashboardData(JSON.parse(data.join('\n')));
+    } catch (e) {
+      problem = 'the server sent data this page could not read';
+      showState();
+    }
+  }
+
+  // The event stream, read with fetch and a stream reader: EventSource
+  // cannot send an Authorization header. False when this browser cannot
+  // stream; polling then does the work.
+  function startStream() {
+    if (!window.fetch || !window.ReadableStream || !window.TextDecoder) return false;
+    streamAbort = window.AbortController ? new AbortController() : null;
+    request('/events', streamAbort ? streamAbort.signal : null).then(function(r) {
+      if (!r.body || !r.body.getReader) throw new Error('this browser cannot read a stream');
+      var reader = r.body.getReader();
+      var decoder = new TextDecoder();
+      var buffer = '';
+      streaming = true;
+      lastContact = Date.now();
+      function pump() {
+        return reader.read().then(function(part) {
+          if (part.done) throw new Error('the server closed the stream');
+          lastContact = Date.now();
+          buffer += decoder.decode(part.value, { stream: true });
+          var cut;
+          while ((cut = buffer.indexOf('\n\n')) >= 0) {
+            handleFrame(buffer.slice(0, cut));
+            buffer = buffer.slice(cut + 2);
+          }
+          return pump();
+        });
+      }
+      return pump();
+    }).catch(function(err) {
+      streaming = false;
+      streamAbort = null;
+      problem = (err && err.message) || 'connection lost';
+      showState();
+      // Ask once, now, whether the server is still there: the banner
+      // should not wait for the next poll.
+      if (!needsToken) poll();
+      setTimeout(startStream, POLL_INTERVAL);
+    });
+    return true;
   }
 
   function poll() {
-    fetchJSON(apiBase + '/dashboard-data')
+    request(apiBase + '/dashboard-data')
+      .then(function(r) { return r.json(); })
       .then(onDashboardData)
-      .catch(function(e) { console.error('Poll error:', e); });
+      .catch(function(err) {
+        problem = (err && err.message) || 'request failed';
+        offline = !needsToken;
+        showState();
+      });
   }
 
-  startSSE();
-  if (!useSSE) poll();  // fallback polling if SSE unavailable
+  if (!startStream()) poll();
+  // Fallback polling while the stream is down or unavailable.
   setInterval(function() {
-    if (!useSSE) poll();
+    if (!streaming) poll();
   }, POLL_INTERVAL);
+  // Once a second: refresh the banner, and drop a stream that went silent
+  // (a sleeping laptop, a dead server) so it reconnects.
+  setInterval(function() {
+    if (streaming && streamAbort && Date.now() - lastContact > STALE_AFTER) streamAbort.abort();
+    showState();
+  }, 1000);
 
   function escapeHTML(str) {
     if (str === null || str === undefined) return '';
-    return String(str).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+    return String(str).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#39;');
   }
 
   function ageAgo(ts) {
@@ -406,12 +519,12 @@
       rects.push('  <circle class="status-dot ' + statusCls + '" cx="14" cy="16" r="5"/>');
       rects.push('  <text x="28" y="21" font-weight="600" fill="#e6e8ed">' + escapeHTML(idText) + '</text>');
       if (taskText) {
-        rects.push('  <text x="12" y="44" font-size="10.5" fill="#94a3b8">' + escapeHTML(taskText) + '</text>');
+        rects.push('  <text x="12" y="44" font-size="12" fill="#94a3b8">' + escapeHTML(taskText) + '</text>');
       } else {
-        rects.push('  <text x="12" y="44" font-size="10.5" font-style="italic" fill="#4b5563">(no current task)</text>');
+        rects.push('  <text x="12" y="44" font-size="12" font-style="italic" fill="#949cab">(no current task)</text>');
       }
       if (a.lock_count) {
-        rects.push('  <text x="' + (NODE_W - 12) + '" y="61" font-size="9.5" fill="#6b7280" text-anchor="end">' + a.lock_count + ' lock' + (a.lock_count > 1 ? 's' : '') + '</text>');
+        rects.push('  <text x="' + (NODE_W - 12) + '" y="61" font-size="12" fill="#9ca3af" text-anchor="end">' + a.lock_count + ' lock' + (a.lock_count > 1 ? 's' : '') + '</text>');
       }
       rects.push('</g>');
     }
@@ -423,7 +536,7 @@
 
   // ---- Agent tree pan + zoom ----
   // (treeState / treeContentBox / ZOOM_MIN / ZOOM_MAX are declared at the
-  // top of this IIFE so render functions called from the first SSE event
+  // top of this IIFE so render functions called from the first stream event
   // see a live object instead of ``undefined``.)
 
   function applyTreeTransform() {
@@ -530,7 +643,7 @@
       for (var i = 0; i < tasks.length; i++) {
         var t = tasks[i];
         html.push('<tr>');
-        html.push('<td style="font-family:monospace;font-size:11px;color:#8b5cf6;">' + escapeHTML(t.id) + '</td>');
+        html.push('<td style="font-family:monospace;font-size: 12px;color:#a78bfa;">' + escapeHTML(t.id) + '</td>');
         html.push('<td>' + statusBadge(t.status) + '</td>');
         html.push('<td style="color:#94a3b8;">' + escapeHTML(t.assigned_agent_id || '\u2014') + '</td>');
         html.push('<td style="color:#e6e8ed;">' + escapeHTML(t.description || '') + '</td>');
@@ -589,8 +702,8 @@
         html.push('<div class="handoff-item">');
         html.push('<span class="handoff-id">h#' + escapeHTML(String(h.id)) + '</span>');
         html.push('<div class="handoff-route">' + escapeHTML(h.from_agent_id) + ' \u2192 ' + escapeHTML(toAgents.join(', ')) + '</div>');
-        if (h.document_path) html.push('<div style="color:#6b7280;font-size:11px;">file: ' + escapeHTML(h.document_path) + '</div>');
-        html.push('<span class="handoff-status ' + satCls + '">' + escapeHTML(sat) + '</span>');
+        if (h.document_path) html.push('<div style="color:#9ca3af;font-size: 12px;">file: ' + escapeHTML(h.document_path) + '</div>');
+        html.push('<span class="handoff-status ' + escapeHTML(satCls) + '">' + escapeHTML(sat) + '</span>');
         html.push('</div>');
       }
       list.innerHTML = html.join('');
@@ -654,11 +767,11 @@
           html.push('<div class="lock-item">');
           html.push('<span class="lock-path">' + escapeHTML(path));
           if (crossing) {
-            html.push(' <span style="color:#fbbf24;font-size:11px;" title="this file is owned by ' + escapeHTML(l.owner_agent_id) + '">\u26a0 owned by ' + escapeHTML(l.owner_agent_id) + '</span>');
+            html.push(' <span style="color:#fbbf24;font-size: 12px;" title="this file is owned by ' + escapeHTML(l.owner_agent_id) + '">\u26a0 owned by ' + escapeHTML(l.owner_agent_id) + '</span>');
           }
           html.push('</span>');
           html.push('<div style="display:flex;gap:8px;align-items:center;">');
-          html.push('<span style="color:#4b5563;font-size:11px;">held ' + heldFor + ' \u00b7 TTL ' + ttlLeft + 's</span>');
+          html.push('<span style="color:#949cab;font-size: 12px;">held ' + heldFor + ' \u00b7 TTL ' + ttlLeft + 's</span>');
           html.push('<span class="lock-agent">' + escapeHTML(l.locked_by) + '</span>');
           html.push('<span class="lock-type ' + ltCls + '">' + escapeHTML(lt) + '</span>');
           html.push('</div></div>');

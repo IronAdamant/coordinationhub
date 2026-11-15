@@ -1,11 +1,12 @@
-//! Newline JSON-RPC MCP server. Also accepts a Content-Length header frame.
+//! Newline JSON-RPC MCP server. Also accepts a Content-Length header frame
+//! (any number of header lines, a blank line, then that many bytes).
 
 use crate::engine::Engine;
 use crate::groups::{EnvSwitches, Surface};
 use crate::json::{self, Value};
 use crate::validate;
 use crate::waits::Waits;
-use std::io::{self, BufRead, Write};
+use std::io::{self, BufRead, Read, Write};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
@@ -70,9 +71,18 @@ pub fn serve(
     let mut threads: Vec<std::thread::JoinHandle<()>> = Vec::new();
     loop {
         let message = match read_frame(&mut reader) {
-            Ok(Some(text)) => text,
-            Ok(None) => break,
-            Err(err) => return Err(err),
+            Ok(Frame::Message(text)) => text,
+            Ok(Frame::End) => break,
+            Ok(Frame::Refused(code, why, unread)) => {
+                // Not a message this server can use: say why and keep
+                // serving. An oversized body is skipped, never stored.
+                send(&out, &error_response(Value::Null, code, &why))?;
+                if unread > 0 && skip_body(&mut reader, unread).is_err() {
+                    break;
+                }
+                continue;
+            }
+            Err(err) => return Err(err.to_string()),
         };
         threads.retain(|thread| !thread.is_finished());
         if message.trim().is_empty() {
@@ -359,26 +369,178 @@ fn error_response(id: Value, code: i64, message: &str) -> Value {
     ])
 }
 
-fn read_frame(reader: &mut impl BufRead) -> Result<Option<String>, String> {
-    let mut header = String::new();
-    if reader.read_line(&mut header).map_err(|e| e.to_string())? == 0 {
-        return Ok(None);
+/// The largest message the stdio server reads, in bytes: the same cap as
+/// an HTTP `/call` body.
+pub const MAX_FRAME: usize = crate::http::MAX_BODY;
+
+/// The longest header line and the most header lines of one
+/// `Content-Length` frame.
+const MAX_HEADER_LINE: usize = 8 * 1024;
+const MAX_HEADER_LINES: usize = 32;
+
+/// What `read_frame` found on the stream.
+#[derive(Debug, PartialEq)]
+pub enum Frame {
+    /// One message, as text.
+    Message(String),
+    /// Something that is not a usable message: the JSON-RPC error code,
+    /// what is wrong, and how many body bytes the client announced that
+    /// are still unread (the caller answers first, then skips them).
+    Refused(i64, String, u64),
+    /// The client closed the stream.
+    End,
+}
+
+enum Line {
+    Text(Vec<u8>),
+    TooLong,
+    End,
+}
+
+/// One line of at most `cap` bytes, the line feed included. A longer line
+/// is read to its end and dropped, never kept in memory.
+fn read_line(reader: &mut impl BufRead, cap: usize) -> io::Result<Line> {
+    let mut line = Vec::new();
+    let mut too_long = false;
+    loop {
+        let available = match reader.fill_buf() {
+            Ok(bytes) => bytes,
+            Err(err) if err.kind() == io::ErrorKind::Interrupted => continue,
+            Err(err) => return Err(err),
+        };
+        if available.is_empty() {
+            return Ok(if too_long {
+                Line::TooLong
+            } else if line.is_empty() {
+                Line::End
+            } else {
+                Line::Text(line)
+            });
+        }
+        let (take, done) = match available.iter().position(|byte| *byte == b'\n') {
+            Some(at) => (at + 1, true),
+            None => (available.len(), false),
+        };
+        if !too_long {
+            if line.len() + take > cap {
+                too_long = true;
+                line = Vec::new();
+            } else {
+                line.extend_from_slice(&available[..take]);
+            }
+        }
+        reader.consume(take);
+        if done {
+            return Ok(if too_long { Line::TooLong } else { Line::Text(line) });
+        }
     }
-    if header.to_ascii_lowercase().starts_with("content-length:") {
-        let len: usize = header
-            .split(':')
-            .nth(1)
-            .unwrap_or("0")
-            .trim()
-            .parse()
-            .map_err(|_| "bad content length".to_string())?;
-        let mut blank = String::new();
-        reader.read_line(&mut blank).map_err(|e| e.to_string())?;
-        let mut buf = vec![0_u8; len];
-        std::io::Read::read_exact(reader, &mut buf).map_err(|e| e.to_string())?;
-        return Ok(Some(String::from_utf8_lossy(&buf).into_owned()));
+}
+
+/// Reads one message: a line of JSON, or a `Content-Length` frame (header
+/// lines in any order up to a blank line, then exactly that many bytes).
+/// Nothing larger than `MAX_FRAME` is ever allocated.
+pub fn read_frame(reader: &mut impl BufRead) -> io::Result<Frame> {
+    let first = match read_line(reader, MAX_FRAME)? {
+        Line::End => return Ok(Frame::End),
+        Line::TooLong => {
+            return Ok(Frame::Refused(
+                -32600,
+                format!("message is longer than {MAX_FRAME} bytes; send a smaller request"),
+                0,
+            ))
+        }
+        Line::Text(line) => line,
+    };
+    if !is_header(&first) {
+        return Ok(match String::from_utf8(first) {
+            Ok(text) => Frame::Message(text),
+            Err(_) => Frame::Refused(-32700, "message is not UTF-8".into(), 0),
+        });
     }
-    Ok(Some(header))
+    // A header block: every line up to the blank one.
+    let mut length: Option<Result<usize, String>> = None;
+    let mut line = first;
+    for _ in 0..MAX_HEADER_LINES {
+        let text = String::from_utf8_lossy(&line);
+        let text = text.trim();
+        if text.is_empty() {
+            return match length {
+                Some(Ok(len)) => read_body(reader, len),
+                Some(Err(why)) => Ok(Frame::Refused(-32600, why, 0)),
+                None => Ok(Frame::Refused(
+                    -32600,
+                    "frame has header lines but no Content-Length; send Content-Length: <bytes>, a blank line, then the JSON".into(),
+                    0,
+                )),
+            };
+        }
+        if let Some((name, value)) = text.split_once(':') {
+            if name.trim().eq_ignore_ascii_case("content-length") {
+                let value = value.trim();
+                length = Some(if !value.is_empty() && value.bytes().all(|byte| byte.is_ascii_digit()) {
+                    value.parse::<usize>().map_err(|_| {
+                        format!("Content-Length {value} is larger than the {MAX_FRAME} bytes a frame may have")
+                    })
+                } else {
+                    Err(format!(
+                        "Content-Length must be a whole number of bytes (got {})",
+                        json::dumps(&json::s(value.chars().take(40).collect::<String>()))
+                    ))
+                });
+            }
+        }
+        line = match read_line(reader, MAX_HEADER_LINE)? {
+            Line::End => return Ok(Frame::End),
+            Line::TooLong => {
+                return Ok(Frame::Refused(
+                    -32600,
+                    format!("frame header line is longer than {MAX_HEADER_LINE} bytes"),
+                    0,
+                ))
+            }
+            Line::Text(line) => line,
+        };
+    }
+    Ok(Frame::Refused(
+        -32600,
+        format!("frame has more than {MAX_HEADER_LINES} header lines"),
+        0,
+    ))
+}
+
+/// `Name: value` with a name of letters and hyphens. JSON never starts
+/// that way, so a line of JSON is never taken for a header.
+fn is_header(line: &[u8]) -> bool {
+    let Some(colon) = line.iter().position(|byte| *byte == b':') else {
+        return false;
+    };
+    colon > 0 && line[..colon].iter().all(|byte| byte.is_ascii_alphabetic() || *byte == b'-')
+}
+
+fn read_body(reader: &mut impl BufRead, len: usize) -> io::Result<Frame> {
+    if len > MAX_FRAME {
+        return Ok(Frame::Refused(
+            -32600,
+            format!("Content-Length {len} is larger than the {MAX_FRAME} bytes a frame may have; send a smaller request"),
+            len as u64,
+        ));
+    }
+    let mut buf = vec![0_u8; len];
+    match reader.read_exact(&mut buf) {
+        Ok(()) => {}
+        Err(err) if err.kind() == io::ErrorKind::UnexpectedEof => return Ok(Frame::End),
+        Err(err) => return Err(err),
+    }
+    Ok(match String::from_utf8(buf) {
+        Ok(text) => Frame::Message(text),
+        Err(_) => Frame::Refused(-32700, "frame body is not UTF-8".into(), 0),
+    })
+}
+
+/// Reads and drops `bytes` of an oversized body, without holding them, so
+/// the next frame starts where it should.
+pub fn skip_body(reader: &mut impl BufRead, bytes: u64) -> io::Result<()> {
+    io::copy(&mut reader.by_ref().take(bytes), &mut io::sink()).map(|_| ())
 }
 
 fn write_frame(out: &mut impl Write, value: &Value) -> Result<(), String> {

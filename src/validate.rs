@@ -14,7 +14,7 @@ pub fn load_schema() -> Schema {
     let tools_version = value
         .get("tools_version")
         .and_then(Value::as_str)
-        .unwrap_or("1.2.0")
+        .unwrap_or("1.3.0")
         .to_string();
     let mut tools = Vec::new();
     if let Some(Value::Object(pairs)) = value.get("tools") {
@@ -55,6 +55,39 @@ pub fn validate_tool(schema: &Schema, tool: &str, args: &Value) -> Result<(), St
     };
     let _ = tool;
     validate(args, params, "")
+}
+
+/// Refuses a number in a tool call that is not finite or lies beyond
+/// `json::MAX_NUMBER`, naming the field. It runs for every caller (MCP,
+/// HTTP and the CLI, whose `--ttl inf` argparse accepts), before the schema
+/// check, so no TTL, timeout or timestamp can make `now + ttl` overflow or
+/// reach the journal as `Infinity`.
+pub fn check_numbers(args: &Value) -> Result<(), String> {
+    fn walk(value: &Value, path: &str) -> Result<(), String> {
+        match value {
+            Value::Float(n) if !n.is_finite() || n.abs() > json::MAX_NUMBER => Err(out_of_range(path, &json::py_repr(value))),
+            Value::Int(n) if (*n as f64).abs() > json::MAX_NUMBER => Err(out_of_range(path, &n.to_string())),
+            Value::Array(items) => items
+                .iter()
+                .enumerate()
+                .try_for_each(|(index, item)| walk(item, &format!("{path}[{index}]"))),
+            Value::Object(pairs) => pairs.iter().try_for_each(|(key, item)| {
+                if path.is_empty() {
+                    walk(item, key)
+                } else {
+                    walk(item, &format!("{path}.{key}"))
+                }
+            }),
+            _ => Ok(()),
+        }
+    }
+    fn out_of_range(path: &str, got: &str) -> String {
+        let field = if path.is_empty() { "value" } else { path };
+        format!(
+            "{field} must be a finite number between -1e15 and 1e15 (got {got}); send a smaller value, for example 86400 for one day in seconds"
+        )
+    }
+    walk(args, "")
 }
 
 fn merged_enum(errors: &[String]) -> Option<String> {

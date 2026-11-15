@@ -64,9 +64,39 @@ An agent claims a task by assigning it to itself. The claim is checked and writt
 - **Talking**: direct messages, sibling broadcasts with acknowledgements, formal handoffs, change notifications, and wait tools that return as soon as the thing they wait for happens. MCP replies are compact JSON.
 - **Leadership**: one coordinator lease with a TTL; a refused lease names the holder and its expiry.
 - **Hooks**: `coordinationhub hook` (written by `init`) registers a session, locks a file before Write or Edit, and notifies and releases afterwards. Each subagent gets its own agent, `<session agent>.<type>.<n>`, tied to the IDE's id for it, so two subagents of one type running at once hold their own locks. A refused write names the holder, says until when, and suggests messaging the holder, waiting for the lock or working elsewhere. Subagent prompts are redacted (keys, tokens, emails, long hex strings) before they are stored. `init` keeps a differing `~/.coordinationhub/hooks.json` as `hooks.json.bak`.
-- **Dashboard**: `coordinationhub serve-sse` serves a live page at http://127.0.0.1:9898.
+- **Dashboard**: `coordinationhub serve-sse` serves a live page and opens it in the browser. See [HTTP server and dashboard](#http-server-and-dashboard).
 
 It works alongside [Relatum](https://github.com/IronAdamant/Relatum) (handoff documents), [stele-context](https://github.com/IronAdamant/stele-context) (code map), [Trammel](https://github.com/IronAdamant/Trammel) (plans) and [Chisel](https://github.com/IronAdamant/Chisel) (test impact); it does not duplicate them.
+
+## The store
+
+- **Requests are strict JSON.** One value, RFC 8259 numbers and strings, no duplicate object keys, at most 128 levels of nesting, and every number finite and between -1e15 and 1e15 (`1e400`, `NaN` and `Infinity` are refused, on the CLI too). The error names the field or the byte and what to send instead. An MCP frame or `/call` body is at most 1,000,000 bytes.
+- **An unreadable last record is moved out.** If a process dies while appending, the next call saves the incomplete final record in `coordination.jsonl.<UTC time>.torn` beside the journal, cuts it off, says so once on stderr and carries on. A final line that is complete but is not a record goes to a `.unreadable` file the same way, and the notice says that it was not an unfinished write. `coordinationhub doctor` lists both kinds. A bad record in the middle of the journal is an error that names the line and how to recover.
+- **`doctor` reads the journal as the hub does**, under the same lock, and changes nothing. It fails only on what the hub refuses; a journal the next command will mend (numbers 1.2.0 wrote as `Infinity`, an unfinished last record) is reported as such.
+- **What is stored stays readable.** Text stored by an earlier version (a message payload nested deeper than a request may be now, or with a repeated key) is read back with a tolerant reader: up to 320 levels, the last value of a repeated key. A payload that still cannot be shown as JSON is returned as its stored text, with `payload_unreadable` saying why; it is never replaced by `null`.
+- **Old events are dropped.** Hub events, change notifications and claim events older than seven days (`COORDINATIONHUB_EVENTS_MAX_AGE_S`; `0` keeps everything) are removed by the servers' housekeeping and by any call once the journal passes the compaction size. Each agent's last lifecycle event and every lock-lapse warning not yet delivered are kept, so `heartbeat` answers the same.
+- **The journal is compacted.** Once it is over 1 MiB (`COORDINATIONHUB_COMPACT_MIN_BYTES`; `0` turns it off) and holds more than twice as many records as live rows, it is rewritten as one record per row through a temporary file and a rename, under the store's lock. Every other server and process notices on its next call and reloads.
+- **Durability.** A call's records are appended in one write and, by default, not synced: a crashed process loses nothing, while a power cut or a crashed machine can lose the last calls (or leave the torn record described above). The store holds coordination state that expires and is re-established (registrations, locks, heartbeats), and a sync after every call costs a disk flush each time (a heartbeat over MCP took about 1.2 ms without and 2 to 5 ms with it on an SSD under Windows 11, measured on 15 November 2026; a hard disk or a network share costs more), so it is off by default. Set `COORDINATIONHUB_FSYNC=1` to sync after each commit when the task board is your record of work.
+- **A store 1.2.0 damaged opens.** 1.2.0 could write `Infinity` into the journal (a lock TTL of `1e400`) and then fail every command with `unexpected JSON byte I`. 1.3.0 reads such a journal, gives the rows large finite values, rewrites the file and says so once.
+
+## HTTP server and dashboard
+
+`coordinationhub serve` (port 9877) is the HTTP API; `coordinationhub serve-sse` (port 9898) adds the dashboard page. Both listen on 127.0.0.1 unless `--host` says otherwise.
+
+- **The token.** Without `--no-auth` every path except `/` and `/health` needs `Authorization: Bearer <token>`. The token is 16 bytes from the operating system's random generator (the server does not start if there are none), or the value of `--auth-token`. It is printed on the server's stdout, so whoever can read that terminal can call every tool. `auto-start-dashboard` sends that output to `~/.coordinationhub/dashboard.log`, which is created readable by its owner only (mode 0600 on Unix; on Windows the file has the permissions of your profile folder). A token passed with `--auth-token` is also visible in the process list.
+- **The dashboard.** `serve-sse` prints `Dashboard: http://127.0.0.1:9898/#token=<token>` and opens that address. The page itself never contains the token: its script reads it from the address, keeps it for that browser tab, removes it from the address bar and sends it with every request. Opened without the token, the page says to open the printed address. When the server stops answering or the data is old, the page shows a banner with the time of the last update.
+- **Who may call.** A request must name the server in `Host`: a loopback address or `localhost`, the `--host` value, or the address the connection arrived on, each with the port. Anything else is answered `421`. A request with an `Origin` header other than the server's own address is answered `403`. `POST /call` needs `Content-Type: application/json`, else `415`. Together these stop another web page, or a DNS name pointed at 127.0.0.1, from using the hub.
+- **Other answers.** `401` without the token, `400` for a malformed request or JSON (the body says what is wrong), `404` for an unknown path or tool, `411` without `Content-Length`, `413` for a body over 1,000,000 bytes, `431` for headers over 64 KiB, `400` at once for a head whose lines end with a bare line feed instead of CRLF, `408` for a head that is not complete within 5 seconds of connecting or a body within 30 seconds after that, `501` for `Transfer-Encoding`, `429` for a fifth event stream from one address, and `503` when 256 connections are open (`COORDINATIONHUB_MAX_CONNECTIONS`) or 64 waits are running.
+- **Beyond this machine.** `--no-auth` with a `--host` that is not a loopback address is refused. A non-loopback `--host` with auth prints a warning: the token then crosses the network unencrypted.
+
+- **Limits.** A connection holds one of the 256 slots from the moment it is accepted. Its request head must be complete within 5 seconds and a `/call` body within 30 seconds after that, or the connection is answered `408` and its slot is free again; so a client that opens many sockets and sends nothing useful can delay others by 5 seconds at most per round, and `/health` and the dashboard recover by themselves. An event stream lasts at most 600 seconds and a waiting `/call` at most 600 seconds.
+
+## Known limits
+
+- **A very busy store still grows within the retention window.** Compaction counts every retained event and notification as a live row, so a journal that is mostly events younger than seven days is not rewritten; lower `COORDINATIONHUB_EVENTS_MAX_AGE_S` on such a store.
+- **A compaction that fails after it was counted** (the lock file grows before the rename) makes the other processes reload once for nothing. The other order could hide a compaction from them.
+- **Linux needs glibc 2.25 or newer** (2017), or musl 1.1.20, for `getrandom`. An older C library cannot link the binary.
+- **Relative lock paths** resolve against the process's working directory, not `--project-root`.
 
 ## Performance
 
@@ -169,5 +199,10 @@ cargo run --release --example bench -- target/release/coordinationhub --python p
 | `COORDINATIONHUB_COORDINATION_URL` | URL included in a registration reply |
 | `COORDINATIONHUB_HOUSEKEEPING` | `0` stops the background reaping of stale agents, expired locks and lapsed claims in `serve` and `serve-mcp` |
 | `COORDINATIONHUB_AGENTS_STALE_TIMEOUT_S` | Heartbeat age after which an agent is stale (default 600) |
+| `COORDINATIONHUB_EVENTS_MAX_AGE_S` | How long events and notifications are kept, in seconds (default 604800, seven days; `0` keeps everything) |
+| `COORDINATIONHUB_HOUSEKEEPING_EVENTS_INTERVAL_S` | How often a server's housekeeping drops old events (default 600) |
+| `COORDINATIONHUB_COMPACT_MIN_BYTES` | Journal size from which old events are dropped on a call and the journal may be compacted (default 1048576; `0` turns both off) |
+| `COORDINATIONHUB_FSYNC` | `1` syncs the journal to disk after every commit (default off) |
+| `COORDINATIONHUB_MAX_CONNECTIONS` | HTTP connections served at once before `503` (default 256) |
 | `COORDINATIONHUB_MAX_DESCRIPTION` and the other `COORDINATIONHUB_MAX_*` caps | Field length caps, as in 0.8.0 |
 | `COORDINATIONHUB_SPAWN_TTL_SECONDS`, `COORDINATIONHUB_MAX_PENDING_SPAWNS` | Pending sub-agent spawn lifetime and cap |

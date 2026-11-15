@@ -25,9 +25,10 @@ cargo run --release --example update_dispatch_floor -- --root <python tree>  # e
 ## Layout
 
 - `src/engine.rs`: tool dispatch (`Engine::call` for MCP with schema checks, `call_cli` for the CLI) over the journal.
-- `src/db.rs`: the append-only `coordination.jsonl` journal and its file lock; every call locks, reads new lines, applies, appends.
+- `src/db.rs`: the append-only `coordination.jsonl` journal and its file lock; every call locks, reads new lines, applies, appends. It also moves an unreadable last record out (kept in a `.torn` or `.unreadable` file), repairs numbers 1.2.0 wrote as `Infinity`, and compacts a large journal into a snapshot; the lock file's length counts compactions so other engines reload.
+- `src/json.rs`: the strict JSON parser (depth 128, finite numbers, no duplicate keys) and the writers; `parse_journal` reads journal lines (`Infinity` / `NaN` allowed) and `parse_stored` reads JSON text kept inside rows (also deeper nesting and repeated keys): use them, never `parse`, for anything read back from the store. `src/rand.rs`: the operating system's random bytes through FFI. `src/house.rs`: housekeeping and event retention.
 - `src/act_*.rs`: tool behaviour (identity, locks, board: tasks/messages/handoffs/leases/spawns, views: status, scan, assessment).
-- `src/mcp.rs` (stdio JSON-RPC), `src/http.rs` (dashboard, `/call`, SSE), `src/hooks.rs` (`coordinationhub hook`).
+- `src/mcp.rs` (stdio JSON-RPC), `src/http.rs` (dashboard, `/call`, SSE; Host, Origin and Content-Type checks; the auth token), `src/hooks.rs` (`coordinationhub hook`). `assets/dashboard.html` is one self-contained page; `tests/common/dashboard_harness.js` runs its script under `node` when the tests find one.
 - `src/cli.rs`, `src/cli_cmds.rs`, `src/cli_text.rs`: CLI dispatch, argument mapping, readable output.
 - `src/argparse.rs` + `src/cli_catalog.rs`: a port of CPython 3.12 argparse over tables introspected from the 0.8.0 parser (prefixes, choices, int/float errors, help wrapped to `COLUMNS`). Regenerate the catalog from the 0.8.0 parser rather than hand-editing it; the only hand-written rows are the 1.1.0 additions (`-V/--version`, `assign-task --force`) and, since 1.3.0, the `--replica` / `--force-refresh` help (`NO_EFFECT`), marked in the file.
 - `src/validate.rs`: tool argument checks against `assets/tools.json`.

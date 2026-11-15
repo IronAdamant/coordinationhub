@@ -598,7 +598,7 @@ pub fn agent_status(state: &State, agent_id: &str) -> Value {
         .find(|row| row.agent_id == agent_id);
     let responsibilities = resp
         .and_then(|row| row.responsibilities.as_deref())
-        .and_then(|raw| json::parse(raw).ok())
+        .and_then(|raw| json::parse_stored(raw).ok())
         .unwrap_or_else(|| json::arr(vec![]));
     let owned: Vec<&Ownership> = state
         .ownership
@@ -740,7 +740,7 @@ fn build_node(
         .find(|row| row.agent_id == agent_id);
     let responsibilities = resp
         .and_then(|row| row.responsibilities.as_deref())
-        .and_then(|raw| json::parse(raw).ok())
+        .and_then(|raw| json::parse_stored(raw).ok())
         .unwrap_or_else(|| json::arr(vec![]));
     let mut locks = Vec::new();
     for lock in state
@@ -902,7 +902,7 @@ pub fn file_map(state: &State, agent_id: Option<&str>) -> Value {
                 .find(|resp| resp.agent_id == row.assigned_agent_id);
             let responsibilities = resp
                 .and_then(|item| item.responsibilities.as_deref())
-                .and_then(|raw| json::parse(raw).ok())
+                .and_then(|raw| json::parse_stored(raw).ok())
                 .unwrap_or_else(|| json::arr(vec![]));
             json::obj(vec![
                 ("document_path", json::s(&row.document_path)),
@@ -1858,7 +1858,7 @@ pub fn dashboard(state: &State) -> Value {
                             ("status", json::s(&task.status)),
                             (
                                 "depends_on",
-                                json::parse(&task.depends_on)
+                                json::parse_stored(&task.depends_on)
                                     .unwrap_or_else(|_| json::arr(vec![])),
                             ),
                             ("blocked_by", json::opt_string(&task.blocked_by)),
@@ -1948,7 +1948,7 @@ pub fn dashboard(state: &State) -> Value {
                             ("from_agent_id", json::s(&row.from_agent_id)),
                             (
                                 "to_agents",
-                                json::parse(&row.to_agents).unwrap_or_else(|_| json::arr(vec![])),
+                                json::parse_stored(&row.to_agents).unwrap_or_else(|_| json::arr(vec![])),
                             ),
                             ("document_path", json::opt_string(&row.document_path)),
                             ("handoff_type", json::s(&row.handoff_type)),
