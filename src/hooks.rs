@@ -6,6 +6,7 @@ use crate::db::Spawn;
 use crate::engine::Engine;
 use crate::json::{self, Value};
 use crate::util;
+use std::fmt::Write as _;
 
 const PREFIX: &str = "cc";
 
@@ -235,13 +236,10 @@ fn on_prompt(engine: &mut Engine, session: &str, prompt: &str) {
 }
 
 fn on_pre_write(engine: &mut Engine, event: &Value, session: &str) -> Option<Value> {
-    let Some(path) = event
+    let path = event
         .get("tool_input")
         .and_then(|v| v.get("file_path"))
-        .and_then(Value::as_str)
-    else {
-        return None;
-    };
+        .and_then(Value::as_str)?;
     let agent = resolve(engine, event, session);
     ensure(engine, &agent, None, raw_id(event));
     let _ = engine.call(
@@ -778,10 +776,10 @@ fn hex_token(chars: &[char], index: usize) -> Option<(usize, &'static str)> {
 fn sha256_hex(text: &str) -> String {
     let mut hash = Sha256::new();
     hash.update(text.as_bytes());
-    hash.finish()
-        .iter()
-        .map(|byte| format!("{byte:02x}"))
-        .collect()
+    hash.finish().iter().fold(String::with_capacity(64), |mut out, byte| {
+        let _ = write!(out, "{byte:02x}");
+        out
+    })
 }
 
 struct Sha256 {

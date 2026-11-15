@@ -119,6 +119,8 @@ fn lock_alive(lock: &Lock, now: f64) -> bool {
     lock.locked_at + lock.lock_ttl > now
 }
 
+// One parameter per `acquire_lock` argument plus the retry attempt number.
+#[allow(clippy::too_many_arguments)]
 pub fn acquire(
     state: &mut State,
     document_path: &str,
@@ -132,7 +134,7 @@ pub fn acquire(
     attempt: i64,
 ) -> Value {
     let norm = normalize_path(document_path, project_root);
-    let worktree = project_root.map(|p| util::path_str(p));
+    let worktree = project_root.map(util::path_str);
     let now = util::now();
     if let Some(pos) = state.locks.iter().position(|lock| {
         lock.document_path == norm
@@ -289,9 +291,7 @@ fn scope_violation(
     let Ok(parsed) = json::parse_stored(raw) else {
         return None;
     };
-    let Some(items) = parsed.as_array() else {
-        return None;
-    };
+    let items = parsed.as_array()?;
     if items.is_empty() {
         return None;
     }
@@ -350,7 +350,7 @@ fn ownership_warning(
         "allowed",
         Some(details),
     );
-    let worktree = project_root.map(|p| util::path_str(p));
+    let worktree = project_root.map(util::path_str);
     record_notification(state, norm, "boundary_crossing", agent_id, worktree);
     Some(json::obj(vec![
         ("owned_by", json::s(&owner)),
@@ -475,7 +475,7 @@ pub fn release(
     let owned: Vec<i64> = own.iter().map(|(id, _)| *id).collect();
     let count = owned.len() as i64;
     state.locks.retain(|lock| !owned.contains(&lock.id));
-    let worktree = project_root.map(|p| util::path_str(p));
+    let worktree = project_root.map(util::path_str);
     record_notification(state, &norm, "unlocked", agent_id, worktree);
     state.record_event(
         "lock.released",
@@ -885,7 +885,7 @@ pub fn notify(
     project_root: Option<&Path>,
 ) -> Value {
     let norm = normalize_path(document_path, project_root);
-    let worktree = project_root.map(|p| util::path_str(p));
+    let worktree = project_root.map(util::path_str);
     let result = record_notification(state, &norm, change_type, agent_id, worktree);
     let created_at = result.get("created_at").and_then(Value::as_f64).unwrap_or(util::now());
     let notification_id = result.get("notification_id").and_then(Value::as_i64).unwrap_or(0);

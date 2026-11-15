@@ -374,7 +374,7 @@ fn editing_the_block_mid_session_updates_the_list() {
             let done = value.get("id").is_some();
             replies.push(value);
             if done {
-                return replies;
+                break replies;
             }
         }
     };

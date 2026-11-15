@@ -342,9 +342,15 @@ pub fn dict_display_keys(stmts: &[Stmt], name: &str) -> Option<Vec<Option<String
     None
 }
 
+/// One `key: value` entry of a dict display as token slices.
+pub type DictItem<'a> = (Option<&'a [Tok]>, &'a [Tok]);
+
+/// An import name and the name it is bound to (`a as b` -> `("a", "b")`).
+pub type ImportedName = (String, String);
+
 /// The `(key, value)` token slices of a dict display (`None` key for
 /// `**mapping`); `None` if `toks` is not a dict display.
-pub fn dict_items(toks: &[Tok]) -> Option<Vec<(Option<&[Tok]>, &[Tok])>> {
+pub fn dict_items(toks: &[Tok]) -> Option<Vec<DictItem<'_>>> {
     let toks = strip_parens(toks);
     if toks.len() < 2 || !toks[0].is_op("{") || matching(toks, 0) != Some(toks.len() - 1) {
         return None;
@@ -772,10 +778,11 @@ fn part_binding(part: &[Tok], name: &str) -> Option<Binding> {
             for target in targets {
                 if simple_name(target) == Some(name) {
                     hit = Some(Binding::Expr(value.to_vec()));
-                } else if target.iter().any(|t| t.is_name(name)) && strip_parens(target).len() > 1 {
-                    if split_top(strip_parens(target), ",").len() > 1 {
-                        hit = Some(Binding::Opaque("a tuple-unpacking assignment"));
-                    }
+                } else if target.iter().any(|t| t.is_name(name))
+                    && strip_parens(target).len() > 1
+                    && split_top(strip_parens(target), ",").len() > 1
+                {
+                    hit = Some(Binding::Opaque("a tuple-unpacking assignment"));
                 }
             }
             hit
@@ -809,7 +816,7 @@ fn part_binding(part: &[Tok], name: &str) -> Option<Binding> {
 }
 
 /// `from <dots><module> import a [as b], ...` -> (level, module, [(orig, bound)]).
-pub fn parse_import_from(toks: &[Tok]) -> Option<(usize, Option<String>, Vec<(String, String)>)> {
+pub fn parse_import_from(toks: &[Tok]) -> Option<(usize, Option<String>, Vec<ImportedName>)> {
     let mut i = 1;
     let mut level = 0;
     while let Some(t) = toks.get(i) {

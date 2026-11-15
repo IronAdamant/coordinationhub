@@ -965,6 +965,8 @@ pub fn clear_intent(
     ])
 }
 
+// One parameter per `manage_dependencies` argument, as the tool schema lists them.
+#[allow(clippy::too_many_arguments)]
 pub fn manage_deps(
     state: &mut State,
     mode: &str,
@@ -1621,6 +1623,8 @@ pub fn stop_requested(state: &State, agent_id: &str) -> Value {
     ])
 }
 
+// One parameter per `broadcast` argument, as the tool schema lists them.
+#[allow(clippy::too_many_arguments)]
 pub fn broadcast(
     state: &mut State,
     agent_id: &str,
@@ -1723,7 +1727,7 @@ pub fn broadcast(
     if let Some(path) = document_path {
         if !live.is_empty() {
             let norm = normalize_path(path, project_root);
-            let worktree = project_root.map(|root| util::path_str(root));
+            let worktree = project_root.map(util::path_str);
             for lock in &state.locks {
                 if lock.document_path == norm
                     && live.iter().any(|id| id == &lock.locked_by)

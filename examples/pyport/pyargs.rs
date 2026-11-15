@@ -176,9 +176,7 @@ impl Parser {
         while let Some((index, arg)) = iter.next() {
             if arg == "--" {
                 pattern.push(b'-');
-                for _ in iter.by_ref() {
-                    pattern.push(b'A');
-                }
+                pattern.resize(pattern.len() + iter.len(), b'A');
                 break;
             }
             match self.parse_optional(arg) {

@@ -343,10 +343,11 @@ fn dashboard_lists(engine: &mut Engine, flags: &Flags) -> Value {
     json::obj(vec![("agents", agents), ("locks", locks), ("tasks", tasks)])
 }
 
-fn command_args(
-    command: &str,
-    flags: &Flags,
-) -> Result<Option<(String, Value, Option<fn(&Value)>)>, String> {
+/// A command mapped to its tool: the tool name, its arguments, and the
+/// command's `render_*` function (`run_tool_command` does not use it).
+type ToolCall = (String, Value, Option<fn(&Value)>);
+
+fn command_args(command: &str, flags: &Flags) -> Result<Option<ToolCall>, String> {
     let pos = &flags.positionals;
     let pair = match command {
         "status" => (
