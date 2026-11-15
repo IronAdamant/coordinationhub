@@ -12,6 +12,8 @@
 //! must match at least one entry; a trailing `/` must be a directory.
 //! `NOT_PATHS` lists the spans that look like paths but name something
 //! else: files the program writes at run time and MCP method names.
+//! Spans under `target/` name build output, which is not in the tree (it
+//! exists only after a build), so they are not checked.
 
 use std::path::Path;
 
@@ -75,6 +77,7 @@ fn is_path(span: &str) -> bool {
         || span.starts_with('/')
         || span.starts_with('-')
         || NOT_PATHS.contains(&span)
+        || span.starts_with("target/")
         || !span.chars().all(|c| c.is_ascii_alphanumeric() || "_./*-".contains(c))
     {
         return false;
@@ -163,7 +166,7 @@ fn a_missing_path_is_reported_and_the_rest_is_not() {
 Module `src/engine.rs`, the `src/act_*.rs` files, the `examples/` folder, `Cargo.toml`.
 Gone: `coordinationhub/db.py`, `src/nope_*.rs`, `no_such_guide.md`, `Cargo.toml/` and [old](docs/gone/index.md#top).
 Not paths: `cargo test --release`, `json::parse`, `tools/list`, `coordination.jsonl`, `/call`, `--json`,
-`1.83.0`, `<python tree>`, [site](https://example.com/a.md).
+`1.83.0`, `<python tree>`, `target/release/never-built.exe`, [site](https://example.com/a.md).
 ```text
 `fenced/not/checked.rs`
 ```
