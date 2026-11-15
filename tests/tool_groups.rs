@@ -280,6 +280,31 @@ fn agents_md_block_chooses_the_groups() {
     assert_eq!(instructions.lines().count(), 1);
 }
 
+/// The single-agent setting AGENTS.md and README.md document: with one
+/// agent there is nothing to lock or message, and `tools core` leaves only
+/// the core tools; the others answer with how to turn them back on.
+#[test]
+fn the_solo_setting_leaves_only_core() {
+    let text = "```agent-tools\ncoordinationhub: tools core\n```\n";
+    let (_, replies) = session_with(
+        &[],
+        Some(text),
+        &[("acquire_lock", json::obj(vec![("document_path", json::s("a.md")), ("agent_id", json::s("x"))]))],
+    );
+    assert_eq!(sorted(names(&replies)), sorted(group("core")));
+    let instructions = replies[0].get("result").unwrap().get("instructions").and_then(Value::as_str).unwrap();
+    assert!(
+        instructions.starts_with("CoordinationHub tool groups on: core; off: locks, tasks, messages, spawn, agents, diagnostics."),
+        "{instructions}"
+    );
+    let (text, is_error) = tool_text(&replies[2]);
+    assert!(is_error);
+    assert_eq!(
+        text,
+        r#"tool "acquire_lock" is disabled (group "locks") by AGENTS.md agent-tools; add "locks" to the "coordinationhub: tools" line to enable"#
+    );
+}
+
 #[test]
 fn a_missing_block_or_an_example_inside_another_fence_changes_nothing() {
     let (_, plain) = session(&[], &[]);
@@ -374,7 +399,7 @@ fn editing_the_block_mid_session_updates_the_list() {
             let done = value.get("id").is_some();
             replies.push(value);
             if done {
-                return replies;
+                break replies;
             }
         }
     };

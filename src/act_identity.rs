@@ -49,6 +49,8 @@ pub fn check_agent_ids(args: &Value) -> Result<(), String> {
     Ok(())
 }
 
+// One parameter per `register_agent` argument plus the engine's context values.
+#[allow(clippy::too_many_arguments)]
 pub fn register(
     state: &mut State,
     agent_id: &str,

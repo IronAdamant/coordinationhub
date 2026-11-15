@@ -965,6 +965,8 @@ pub fn clear_intent(
     ])
 }
 
+// One parameter per `manage_dependencies` argument, as the tool schema lists them.
+#[allow(clippy::too_many_arguments)]
 pub fn manage_deps(
     state: &mut State,
     mode: &str,
@@ -1145,7 +1147,7 @@ fn dep_value(dep: &Dependency) -> Value {
     ])
 }
 
-/// A lease TTL as the caller passed it. Python echoes the number it was
+/// A lease TTL as the caller passed it. 0.8.0 echoes the number it was
 /// given, so an int stays an int and a float stays a float. The default
 /// is the float 10.0.
 pub fn lease_ttl(ttl: Option<&Value>) -> (f64, Value) {
@@ -1621,6 +1623,8 @@ pub fn stop_requested(state: &State, agent_id: &str) -> Value {
     ])
 }
 
+// One parameter per `broadcast` argument, as the tool schema lists them.
+#[allow(clippy::too_many_arguments)]
 pub fn broadcast(
     state: &mut State,
     agent_id: &str,
@@ -1723,7 +1727,7 @@ pub fn broadcast(
     if let Some(path) = document_path {
         if !live.is_empty() {
             let norm = normalize_path(path, project_root);
-            let worktree = project_root.map(|root| util::path_str(root));
+            let worktree = project_root.map(util::path_str);
             for lock in &state.locks {
                 if lock.document_path == norm
                     && live.iter().any(|id| id == &lock.locked_by)

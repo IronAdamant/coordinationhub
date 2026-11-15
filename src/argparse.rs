@@ -333,9 +333,7 @@ impl Parser {
         while let Some((index, arg)) = iter.next() {
             if arg == "--" {
                 pattern.push(b'-');
-                for _ in iter.by_ref() {
-                    pattern.push(b'A');
-                }
+                pattern.resize(pattern.len() + iter.len(), b'A');
                 break;
             }
             match self.parse_optional(arg) {
@@ -1408,7 +1406,7 @@ fn finish(raw: String) -> String {
             continue;
         }
         if newlines > 0 {
-            collapsed.push_str(if newlines >= 3 { "\n\n" } else if newlines == 2 { "\n\n" } else { "\n" });
+            collapsed.push_str(if newlines >= 2 { "\n\n" } else { "\n" });
             newlines = 0;
         }
         collapsed.push(ch);

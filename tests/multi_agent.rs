@@ -305,5 +305,5 @@ fn planner_and_two_workers_share_one_hub() {
     println!("total ms excluding the wait: {total:.1}; agents: {:?}", ["planner", "w1", "w2"]);
     let bytes: usize = log.iter().map(|row| row.bytes).sum();
     println!("total reply text bytes over {} calls: {bytes}", log.len());
-    let _ = log.iter().map(|row| row.agent).count();
+    assert!(log.iter().all(|row| ["planner", "w1", "w2"].contains(&row.agent)));
 }

@@ -29,7 +29,7 @@ impl Engine {
         project_root: Option<&Path>,
         namespace: &str,
     ) -> Result<Self, String> {
-        let detected = project_root.map(|p| util::soft_resolve(p)).or_else(|| {
+        let detected = project_root.map(util::soft_resolve).or_else(|| {
             util::detect_project_root(
                 &std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")),
             )

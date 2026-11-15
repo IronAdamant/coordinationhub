@@ -32,7 +32,7 @@ pub fn local_stamp(epoch: f64) -> String {
         if unsafe { localtime_r(&secs, &mut tm) }.is_null() {
             return utc_stamp(secs);
         }
-        return format!(
+        format!(
             "{:04}-{:02}-{:02} {:02}:{:02}:{:02}",
             tm.tm_year + 1900,
             tm.tm_mon + 1,
@@ -40,7 +40,7 @@ pub fn local_stamp(epoch: f64) -> String {
             tm.tm_hour,
             tm.tm_min,
             tm.tm_sec
-        );
+        )
     }
     // Windows: kernel32 converts with the active time zone's rules for
     // that date, which is what the C runtime's localtime does. kernel32 is
@@ -147,9 +147,7 @@ pub fn env_f64(name: &str, default: f64) -> f64 {
 }
 
 pub fn truncate(text: Option<String>, max_chars: i64) -> Option<String> {
-    let Some(text) = text else {
-        return None;
-    };
+    let text = text?;
     let max_chars = max_chars.max(0) as usize;
     let count = text.chars().count();
     if count <= max_chars {
@@ -406,6 +404,7 @@ impl FileLock {
         }
         let file = std::fs::OpenOptions::new()
             .create(true)
+            .truncate(false)
             .read(true)
             .write(true)
             .open(path)?;
@@ -528,7 +527,7 @@ fn try_lock_exclusive(file: &File) -> Result<bool, Error> {
     // is a valid OVERLAPPED that outlives this synchronous call.
     let rc = unsafe {
         LockFileEx(
-            file.as_raw_handle() as *mut std::ffi::c_void,
+            file.as_raw_handle(),
             LOCKFILE_EXCLUSIVE_LOCK | LOCKFILE_FAIL_IMMEDIATELY,
             0,
             1,
@@ -550,7 +549,7 @@ fn try_lock_exclusive(file: &File) -> Result<bool, Error> {
 #[cfg(windows)]
 fn unlock(file: &File) -> Result<(), Error> {
     use std::os::windows::io::AsRawHandle;
-    let rc = unsafe { UnlockFile(file.as_raw_handle() as *mut std::ffi::c_void, 0, 0, 1, 0) };
+    let rc = unsafe { UnlockFile(file.as_raw_handle(), 0, 0, 1, 0) };
     if rc == 0 {
         Err(Error::last_os_error())
     } else {
@@ -577,7 +576,8 @@ unsafe extern "system" {
     ) -> i32;
 }
 
-/// Row count for an SQLite `LIMIT ?`: a negative limit has no upper bound.
+/// Row count for a `limit` argument. A negative limit has no upper bound,
+/// as it had in 0.8.0, which passed it to SQLite's `LIMIT ?`.
 pub fn sql_limit(limit: i64) -> usize {
     if limit < 0 {
         usize::MAX

@@ -493,7 +493,7 @@ pub fn scan(
     let mut scanned = 0_i64;
     let mut owned = 0_i64;
     let mut files = Vec::new();
-    let _ = walk_files(&root, &skip, &exts, 0, &mut files);
+    walk_files(&root, &skip, &exts, 0, &mut files);
     let now = util::now();
     for file in files {
         scanned += 1;
@@ -867,7 +867,7 @@ fn render_node(node: &Value, lines: &mut Vec<String>, prefix: &str, is_root: boo
         render_node(
             child,
             lines,
-            &child_prefix,
+            child_prefix,
             false,
             index + 1 == children.len(),
         );
@@ -1078,7 +1078,7 @@ pub fn assess(
         let scores = score_trace(trace, graph);
         for (index, metric) in metrics.iter().enumerate() {
             totals[index] += scores
-                .get(*metric)
+                .get(metric)
                 .and_then(Value::as_f64)
                 .unwrap_or(0.0);
         }

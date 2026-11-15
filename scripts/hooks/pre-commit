@@ -1,5 +1,8 @@
 #!/bin/sh
-# Auto-regenerate machine-owned docs before each local commit.
+# Quick checks before each local commit; scripts/install-hooks.sh installs
+# this file as .git/hooks/pre-commit. CI runs these and the rest (tests on
+# six platforms, clippy, the parity harness and the benchmark gate).
 set -e
-cargo run --quiet --release --example gen_docs
-git add README.md CLAUDE.md COMPLETE_PROJECT_DOCUMENTATION.md LLM_Development.md wiki-local/spec-project.md
+cargo run --quiet --locked --release --example check_zero_deps
+cargo run --quiet --locked --release --example check_no_todos
+cargo test --quiet --locked --release --test doc_paths

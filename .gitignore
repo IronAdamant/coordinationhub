@@ -19,7 +19,7 @@ target/
 .stele-context/
 .trammel/
 .coordinationhub/
-# Wikifier runtime staging cache (health matrix, journal, and library.md ARE tracked)
+# Wikifier runtime staging cache
 .wikifier_staging/
 
 # Scratch / planning artifacts

@@ -201,27 +201,31 @@ impl Lexer {
                     _ => {}
                 }
                 let (top_col, top_alt) = *indents.last().expect("indent stack");
-                if col == top_col {
-                    if alt != top_alt {
-                        return err("inconsistent use of tabs and spaces in indentation", self.line);
+                match col.cmp(&top_col) {
+                    std::cmp::Ordering::Equal => {
+                        if alt != top_alt {
+                            return err("inconsistent use of tabs and spaces in indentation", self.line);
+                        }
                     }
-                } else if col > top_col {
-                    if alt <= top_alt {
-                        return err("inconsistent use of tabs and spaces in indentation", self.line);
+                    std::cmp::Ordering::Greater => {
+                        if alt <= top_alt {
+                            return err("inconsistent use of tabs and spaces in indentation", self.line);
+                        }
+                        indents.push((col, alt));
+                        self.push(Kind::Indent, "", self.line);
                     }
-                    indents.push((col, alt));
-                    self.push(Kind::Indent, "", self.line);
-                } else {
-                    while indents.len() > 1 && col < indents.last().expect("indent").0 {
-                        indents.pop();
-                        self.push(Kind::Dedent, "", self.line);
-                    }
-                    let (top_col, top_alt) = *indents.last().expect("indent stack");
-                    if col != top_col {
-                        return err("unindent does not match any outer indentation level", self.line);
-                    }
-                    if alt != top_alt {
-                        return err("inconsistent use of tabs and spaces in indentation", self.line);
+                    std::cmp::Ordering::Less => {
+                        while indents.len() > 1 && col < indents.last().expect("indent").0 {
+                            indents.pop();
+                            self.push(Kind::Dedent, "", self.line);
+                        }
+                        let (top_col, top_alt) = *indents.last().expect("indent stack");
+                        if col != top_col {
+                            return err("unindent does not match any outer indentation level", self.line);
+                        }
+                        if alt != top_alt {
+                            return err("inconsistent use of tabs and spaces in indentation", self.line);
+                        }
                     }
                 }
             }

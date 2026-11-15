@@ -1,5 +1,14 @@
 # LLM_Development.md — CoordinationHub
 
+## 2026-11-15 — 1.3.0 part C: documents, release tooling, clippy
+
+- `AGENTS.md` still described the Python package (SQLite, WAL, `BEGIN IMMEDIATE`, pytest, "no message passing"), so agents working here were sent to files that do not exist. It is rewritten from `src/` at 1.3.0 and kept under 12 KB; `CLAUDE.md` now points to it instead of repeating the module map. `tests/doc_paths.rs` reads inline code spans and link targets outside fences in `AGENTS.md`, `CLAUDE.md` and `COMPLETE_PROJECT_DOCUMENTATION.md` and fails on a path not in the tree (28 such mentions in the old `AGENTS.md`). Spans that look like paths but are not (files the program writes, MCP method names) are listed in its `NOT_PATHS`. `AGENTS.md` keeps its `agent-tools` examples in `text` fences: `tests/tool_groups.rs` checks that this repo's own server is not switched by them.
+- The solo setting is `coordinationhub: tools core` (`the_solo_setting_leaves_only_core`).
+- Tool counts come from the code: 53 keys under `tools` in `assets/tools.json`, plus `who` from `Engine` (`tool_count` is schemas + 1), 54 in `GROUPS`.
+- Deleted the Python-era generated files (105 files), the finished HA/spawner plan and the root coordination specs (the loader tries `coordination_spec.yaml` first and answers with the ruamel.yaml error, so the JSON was never read; keeping only the JSON would have started loading it for every agent on this repo). The ruamel.yaml / `pip install` text in that error is a 0.8.0 reply and stays for parity.
+- `scripts/release.sh` follows Trammel's: checks only, then prints the tag command. Version places: `Cargo.toml`, `Cargo.lock`, `assets/tools.json` `tools_version`, the fallback in `validate::load_schema`, the `--version` goldens, `CHANGELOG.md`.
+- Clippy: 34 warnings (one only on Unix: a needless `return` in `util::local_stamp`, so check with `--target x86_64-unknown-linux-gnu` too). Five individual `#[allow]`s with a reason. `examples/pyport/` had five; they were fixed there because `--all-targets` covers it, and `gen_docs`, `propose_stale_phrases` and `update_dispatch_floor` gave byte-identical output on the 0.8.0 tree before and after.
+
 ## 2026-11-15 — 1.3.0: wire, security, storage (part A); region locks, hook subagent IDs, CLI output (part B)
 
 Part A, from the same audit:

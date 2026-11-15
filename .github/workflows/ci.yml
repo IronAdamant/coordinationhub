@@ -31,6 +31,21 @@ jobs:
       - name: No leftover markers
         run: cargo run --locked --release --example check_no_todos
 
+  clippy:
+    name: clippy (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: dtolnay/rust-toolchain@ae1d787cccfc25e920bb60bcd7666e8217f9a191 # 1.83.0 branch; installs Rust 1.83.0
+        with:
+          components: clippy
+      - name: Clippy, warnings are errors
+        run: cargo clippy --locked --all-targets -- -D warnings
+
   python-legacy:
     name: python-legacy still runs
     runs-on: ubuntu-latest

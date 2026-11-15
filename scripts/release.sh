@@ -1,166 +1,92 @@
 #!/usr/bin/env bash
+# Release check for CoordinationHub. Run it on main after the version bump
+# is merged. It checks the tree and prints the tag command; it does not
+# commit, tag, push or publish anything.
 #
-# CoordinationHub Release Helper
+# Usage: scripts/release.sh X.Y.Z [--skip-checks]
 #
-# Usage:
-#   ./scripts/release.sh                # Auto-bump patch version
-#   ./scripts/release.sh 0.7.13         # Use specific version
-#   ./scripts/release.sh --changelog    # Force changelog entry prompt
+# Checks, in order:
+#   1. X.Y.Z is a version, and the tag vX.Y.Z does not exist yet.
+#   2. The checkout is on main, has no changes, and matches origin/main.
+#   3. Every place that keeps the version says X.Y.Z: Cargo.toml,
+#      Cargo.lock, assets/tools.json (tools_version), the fallback in
+#      src/validate.rs, and a "## [X.Y.Z]" heading in CHANGELOG.md.
+#   4. Unless --skip-checks: cargo test, clippy with -D warnings,
+#      check_zero_deps and check_no_todos pass.
+# parity and bench need Python 0.8.0 and run in CI (parity harness,
+# benchmark-gate); the merged pull request must be green there.
 #
-# This script:
-#   1. Runs pre-release validation (tests + docs check)
-#   2. Bumps version in coordinationhub/__init__.py
-#   3. Regenerates documentation
-#   4. Optionally creates/updates CHANGELOG.md
-#   5. Commits, tags, and pushes (triggering the release workflow)
-#
-
+# Pushing the tag runs .github/workflows/release.yml, which refuses a tag
+# that differs from Cargo.toml, builds five binaries, writes SHA256SUMS and
+# publishes the GitHub Release.
 set -euo pipefail
 
-# Colors
-RED='\033[0;31m'
-GREEN='\033[0;32m'
-YELLOW='\033[1;33m'
-BLUE='\033[0;34m'
-NC='\033[0m' # No Color
+ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+cd "$ROOT"
 
-VERSION=""
-FORCE_CHANGELOG=false
-
-# Parse arguments
-for arg in "$@"; do
-  case $arg in
-    --changelog)
-      FORCE_CHANGELOG=true
-      shift
-      ;;
-    *)
-      if [[ -z "$VERSION" ]]; then
-        VERSION="$arg"
-      fi
-      ;;
-  esac
-done
-
-echo -e "${BLUE}=== CoordinationHub Release Helper ===${NC}"
-echo
-
-# --- 1. Pre-flight checks ---
-echo -e "${YELLOW}Running pre-release validation...${NC}"
-
-echo "→ Checking documentation is up to date..."
-if ! cargo run --quiet --release --example gen_docs -- --check >/dev/null 2>&1; then
-  echo -e "${RED}ERROR: Documentation is out of date.${NC}"
-  echo "Please run: cargo run --release --example gen_docs"
-  echo "Then commit the changes before releasing."
-  exit 1
-fi
-echo -e "   ${GREEN}✓ Documentation is clean${NC}"
-
-echo "→ Running full test suite..."
-if ! python -m pytest tests/ -q --tb=no; then
-  echo -e "${RED}ERROR: Tests failed. Fix them before releasing.${NC}"
-  exit 1
-fi
-echo -e "   ${GREEN}✓ All tests passed${NC}"
-
-echo
-
-# --- 2. Determine version ---
-if [[ -z "$VERSION" ]]; then
-  CURRENT=$(python -c "
-import sys
-sys.path.insert(0, '.')
-import coordinationhub
-print(coordinationhub.__version__)
-" 2>/dev/null || echo "0.0.0")
-
-  IFS='.' read -r MAJOR MINOR PATCH <<< "$CURRENT"
-  NEW_PATCH=$((PATCH + 1))
-  VERSION="${MAJOR}.${MINOR}.${NEW_PATCH}"
-  echo -e "Auto-bumping version: ${CURRENT} → ${GREEN}${VERSION}${NC}"
-else
-  echo -e "Using specified version: ${GREEN}${VERSION}${NC}"
-fi
-
-# --- 3. Update version ---
-# Replace only the __version__ line; overwriting the whole file would
-# destroy the module docstring, re-exports, and __all__.
-sed -i "s/^__version__ = \".*\"\$/__version__ = \"${VERSION}\"/" coordinationhub/__init__.py
-grep -q "^__version__ = \"${VERSION}\"\$" coordinationhub/__init__.py || {
-  echo -e "${RED}ERROR: failed to update __version__ in coordinationhub/__init__.py${NC}"
+fail() {
+  echo "error: $*" >&2
   exit 1
 }
-echo -e "${GREEN}✓ Updated version to $VERSION${NC}"
 
-# --- 4. Regenerate docs ---
-echo "→ Regenerating documentation..."
-cargo run --quiet --release --example gen_docs
-echo -e "${GREEN}✓ Documentation regenerated${NC}"
-
-# --- 5. Changelog handling ---
-CHANGELOG_ENTRY=""
-
-if [[ "$FORCE_CHANGELOG" == true ]] || [[ ! -f CHANGELOG.md ]]; then
-  echo
-  echo -e "${YELLOW}Would you like to add a changelog entry for v${VERSION}? (y/N)${NC}"
-  read -r -n 1 -s REPLY
-  echo
-  if [[ $REPLY =~ ^[Yy]$ ]]; then
-    echo "Enter a short summary for this release (one line):"
-    read -r SUMMARY
-    if [[ -n "$SUMMARY" ]]; then
-      DATE=$(date +%Y-%m-%d)
-      CHANGELOG_ENTRY="## [${VERSION}] - ${DATE}\n\n${SUMMARY}\n"
-    fi
-  fi
+V="${1:-}"
+SKIP_CHECKS=false
+if [ "${2:-}" = "--skip-checks" ]; then
+  SKIP_CHECKS=true
+elif [ -n "${2:-}" ]; then
+  fail "unknown option ${2}; usage: scripts/release.sh X.Y.Z [--skip-checks]"
+fi
+if ! printf '%s\n' "$V" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+$'; then
+  fail "give the version as X.Y.Z (got \"$V\"); usage: scripts/release.sh X.Y.Z [--skip-checks]"
 fi
 
-# --- 6. Update or create CHANGELOG.md ---
-if [[ -n "$CHANGELOG_ENTRY" ]]; then
-  if [[ ! -f CHANGELOG.md ]]; then
-    echo -e "# Changelog\n\nAll notable changes to this project will be documented in this file.\n" > CHANGELOG.md
-  fi
-  
-  # Prepend new entry after the header
-  TEMP_FILE=$(mktemp)
-  {
-    head -n 2 CHANGELOG.md
-    echo -e "$CHANGELOG_ENTRY"
-    tail -n +3 CHANGELOG.md
-  } > "$TEMP_FILE"
-  mv "$TEMP_FILE" CHANGELOG.md
-  
-  echo -e "${GREEN}✓ Added entry to CHANGELOG.md${NC}"
-  git add CHANGELOG.md
+# 1. The tag must be new.
+if git rev-parse -q --verify "refs/tags/v$V" >/dev/null; then
+  fail "tag v$V already exists locally; pick the next version"
+fi
+git fetch --quiet origin main --tags
+if git ls-remote --exit-code --tags origin "refs/tags/v$V" >/dev/null 2>&1; then
+  fail "tag v$V already exists on origin; pick the next version"
 fi
 
-# --- 7. Commit changes ---
-echo
-echo -e "${YELLOW}Staging changes...${NC}"
-git add coordinationhub/__init__.py AGENTS.md COMPLETE_PROJECT_DOCUMENTATION.md LLM_Development.md wiki-local/spec-project.md
+# 2. A clean main that matches origin/main.
+branch="$(git rev-parse --abbrev-ref HEAD)"
+[ "$branch" = "main" ] || fail "on branch $branch; run git checkout main && git pull first"
+[ -z "$(git status --porcelain)" ] || fail "the tree has changes; commit or stash them first (git status)"
+[ "$(git rev-parse HEAD)" = "$(git rev-parse origin/main)" ] \
+  || fail "main is not origin/main; run git pull (or push the merge) first"
+echo "OK: clean main at $(git rev-parse --short HEAD), tag v$V is free"
 
-if git diff --cached --quiet; then
-  echo -e "${YELLOW}No changes to commit.${NC}"
+# 3. Every version agrees.
+cargo_version="$(grep -m1 '^version = ' Cargo.toml | cut -d'"' -f2)"
+lock_version="$(grep -A1 '^name = "coordinationhub"$' Cargo.lock | grep -m1 '^version = ' | cut -d'"' -f2)"
+tools_version="$(grep -m1 '"tools_version"' assets/tools.json | cut -d'"' -f4)"
+fallback_version="$(grep -m1 'unwrap_or("[0-9]' src/validate.rs | cut -d'"' -f2)"
+bad=""
+[ "$cargo_version" = "$V" ] || bad="$bad\n  Cargo.toml version is $cargo_version"
+[ "$lock_version" = "$V" ] || bad="$bad\n  Cargo.lock coordinationhub version is $lock_version (run cargo build after editing Cargo.toml)"
+[ "$tools_version" = "$V" ] || bad="$bad\n  assets/tools.json tools_version is $tools_version"
+[ "$fallback_version" = "$V" ] || bad="$bad\n  src/validate.rs tools_version fallback is $fallback_version"
+grep -q "^## \[$V\]" CHANGELOG.md || bad="$bad\n  CHANGELOG.md has no \"## [$V]\" heading"
+if [ -n "$bad" ]; then
+  printf "error: the version is not %s everywhere:%b\nFix these in a pull request, merge it, then rerun.\n" "$V" "$bad" >&2
+  exit 1
+fi
+echo "OK: Cargo.toml, Cargo.lock, assets/tools.json, src/validate.rs and CHANGELOG.md say $V"
+
+# 4. The checks CI runs that need no Python.
+if [ "$SKIP_CHECKS" = true ]; then
+  echo "SKIPPED: tests and checks (--skip-checks)"
 else
-  git commit -m "chore: prepare v${VERSION}"
-  echo -e "${GREEN}✓ Committed version bump and docs${NC}"
+  cargo test --locked --release
+  cargo clippy --locked --all-targets -- -D warnings
+  cargo run --quiet --locked --release --example check_zero_deps
+  cargo run --quiet --locked --release --example check_no_todos
+  echo "OK: tests, clippy, check_zero_deps and check_no_todos pass"
 fi
 
-# --- 8. Tag and push ---
 echo
-echo -e "${YELLOW}Creating tag v${VERSION}...${NC}"
-git tag -f "v${VERSION}"
-
-echo -e "${YELLOW}Pushing main and tag v${VERSION}...${NC}"
-git push origin main
-git push --force origin "v${VERSION}"
-
-echo
-echo -e "${GREEN}✅ Release v${VERSION} prepared and pushed successfully!${NC}"
-echo
-echo "The GitHub Actions workflow 'Release (GitHub + PyPI)' has been triggered."
-echo "Monitor progress here:"
-echo "  https://github.com/IronAdamant/coordinationhub/actions"
-echo
-echo "Both the GitHub Release and PyPI publish should complete automatically."
+echo "Next, when CI on this commit is green, tag it and push the tag:"
+echo "  git tag -a v$V -m \"CoordinationHub $V\" && git push origin v$V"
+echo "The tag runs Release: five binaries, SHA256SUMS and the GitHub Release."
+echo "This script did not tag or push anything."

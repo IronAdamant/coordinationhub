@@ -95,9 +95,7 @@ fn merged_enum(errors: &[String]) -> Option<String> {
     let mut path = None;
     let mut got = None;
     for err in errors {
-        let Some(rest) = err.split(" must be one of ").nth(1) else {
-            return None;
-        };
+        let rest = err.split(" must be one of ").nth(1)?;
         let (list, sample) = rest.split_once(" (got ")?;
         let field = err.split(" must be one of ").next()?.trim();
         if path.get_or_insert(field.to_string()) != field {

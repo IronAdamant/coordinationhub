@@ -2,7 +2,7 @@
 
 A shared board for coding agents working on the same project. It records who is working, who holds which file, which tasks are open, claimed, done or handed off, and lets agents message and wait on each other. Agents use it through MCP (stdio) or the command line; a small HTTP server shows a live dashboard.
 
-It is one Rust binary built from the standard library only: no crates, nothing to install at run time. It replaces the Python 0.8.0 program (kept at the tag `pre-rust-python-legacy`) with the same tools, commands and replies; `MIGRATION.md` lists the deliberate differences. Version 1.1.0 makes task claims safe under concurrency, adds explicit handoff tools and sends compact replies; 1.2.0 keeps locks alive while their holder heartbeats, reports lapsed locks, and stops long waits from holding up other calls (see the changelog). `coordinationhub --version` prints the installed version.
+It is one Rust binary built from the standard library only: no crates, nothing to install at run time. It replaces the Python 0.8.0 program (kept at the tag `pre-rust-python-legacy`) with the same tools, commands and replies; `MIGRATION.md` lists the deliberate differences. Version 1.1.0 makes task claims safe under concurrency, adds explicit handoff tools and sends compact replies; 1.2.0 keeps locks alive while their holder heartbeats, reports lapsed locks, and stops long waits from holding up other calls; 1.3.0 reads requests as strict JSON, recovers from an unfinished journal write, drops old events and compacts the journal, and hardens the HTTP server and its token (see the changelog). `coordinationhub --version` prints the installed version.
 
 ## Install
 
@@ -132,7 +132,7 @@ The MCP server exposes 54 tools in seven groups. An agent that only needs part o
 "env": {"COORDINATIONHUB_DISABLE": "spawn,diagnostics"}
 ```
 
-A lean set for agents that coordinate files, tasks and messages (24 tools, about half the schema text: 18.9 KB of `tools/list` instead of 38.1 KB):
+A lean set for agents that coordinate files, tasks and messages (24 tools with `core`, about half the schema text: a `tools/list` reply of 19,660 bytes instead of 39,097, measured on 1.3.0):
 
 ```json
 "env": {"COORDINATIONHUB_TOOLS": "acquire_lock,release_lock,list_locks,who,acquire_coordinator_lease,manage_leases,create_task,assign_task,update_task_status,get_available_tasks,query_tasks,wait_for_task,send_message,manage_messages,get_notifications,broadcast,acknowledge_handoff,complete_handoff,wait_for_handoff"}
@@ -140,7 +140,7 @@ A lean set for agents that coordinate files, tasks and messages (24 tools, about
 
 ### Choosing groups
 
-CoordinationHub's MCP tools come in groups, and the agent working on a project picks the ones it needs. Put one line per tool in the first fenced block whose info string is `agent-tools` in the project's `AGENTS.md` (project root: `--project-root`, `COORDINATIONHUB_PROJECT_ROOT`, the nearest folder with `.git`, else the current directory). Use `coordinationhub: tools <groups>` to keep only those (plus `core`) or `coordinationhub: disable <groups>` to hide some. The server rereads the file on the next request and the client refetches the tool list, so no restart is needed. `COORDINATIONHUB_TOOLS` / `COORDINATIONHUB_DISABLE` in the client's `env` override the matching line. A mistake in the file is reported in the `initialize` instructions and by `status`; it never stops the server.
+CoordinationHub's MCP tools come in groups, and the agent working on a project picks the ones it needs. Put one line per agent tool (`coordinationhub:`, `trammel:` and so on) in the first fenced block whose info string is `agent-tools` in the project's `AGENTS.md` (project root: `--project-root`, `COORDINATIONHUB_PROJECT_ROOT`, the nearest folder with `.git`, else the current directory). Use `coordinationhub: tools <groups>` to keep only those (plus `core`) or `coordinationhub: disable <groups>` to hide some. The server rereads the file on the next request and the client refetches the tool list, so no restart is needed. `COORDINATIONHUB_TOOLS` / `COORDINATIONHUB_DISABLE` in the client's `env` override the matching line. A mistake in the file is reported in the `initialize` instructions and by `status`; it never stops the server.
 
 CoordinationHub is the suite's owner for `locks`, `tasks` and `messages`. When it runs, keep those here and switch them off in the other tools; when it does not need them, switch them off here instead.
 
@@ -162,11 +162,13 @@ trammel: disable locks
 chisel: disable locks
 ```
 
-One agent working alone:
+One agent working alone (solo): with one agent there is nothing to lock and no one to message or hand work to, so keep only the core tools (register, heartbeat, deregister, list agents, status):
 
 ```agent-tools
-coordinationhub: tools tasks
+coordinationhub: tools core
 ```
+
+When a second agent joins, add the groups back (`coordinationhub: tools locks, tasks, messages`); until then a call to a hidden tool answers with the line to change.
 
 ## Exit codes
 
@@ -175,7 +177,7 @@ coordinationhub: tools tasks
 | 0 | Done |
 | 1 | An error: the reply or message says what went wrong. Also `load-spec` that loaded nothing, `validate-spec` of an invalid or missing spec, and `doctor` with a failed check |
 | 2 | Bad command line (usage error), or a bad `COORDINATIONHUB_TOOLS` / `COORDINATIONHUB_DISABLE` for `serve-mcp` |
-| 3 | Not found: `assign-task` of a task that does not exist, `cancel-spawn` of an unknown or consumed spawn, `request-subagent-deregistration` of an agent that is not active |
+| 3 | Not found: `assign-task` of a task that does not exist, `cancel-spawn` of an unknown or consumed spawn (with `--json` it prints the reply and exits 0), `request-subagent-deregistration` of an agent that is not active |
 | 4 | Refused because another agent holds it: `acquire-lock` not granted, `assign-task` of a task assigned to someone else, `refresh-coordinator-lease` refused |
 
 `watch` clears the screen between refreshes only when its output is a terminal and `NO_COLOR` is unset. `--replica` and `--force-refresh` are accepted for 0.8.0 scripts and have no effect.
@@ -184,12 +186,13 @@ coordinationhub: tools tasks
 
 ```bash
 cargo test --release
+cargo clippy --all-targets -- -D warnings
 git fetch origin tag pre-rust-python-legacy && python -m pip install "mcp==1.30.0"
 cargo run --release --example parity -- target/release/coordinationhub --python python3.12
 cargo run --release --example bench -- target/release/coordinationhub --python python3.12
 ```
 
-`PARITY.md` explains the comparison with 0.8.0, `MIGRATION.md` lists the differences, `BENCHMARKS.md` has the timings, and `CHANGELOG.md` the releases.
+On Windows the binary path is `target/release/coordinationhub.exe`. `AGENTS.md` is the guide for working on this repository, `PARITY.md` explains the comparison with 0.8.0, `MIGRATION.md` lists the differences, `BENCHMARKS.md` has the timings, `RELEASING.md` the release steps, and `CHANGELOG.md` the releases.
 
 ## Environment
 
@@ -198,7 +201,11 @@ cargo run --release --example bench -- target/release/coordinationhub --python p
 | `COORDINATIONHUB_STORAGE_DIR`, `COORDINATIONHUB_PROJECT_ROOT` | Store and project for `serve-mcp` when the flags are not given |
 | `COORDINATIONHUB_COORDINATION_URL` | URL included in a registration reply |
 | `COORDINATIONHUB_HOUSEKEEPING` | `0` stops the background reaping of stale agents, expired locks and lapsed claims in `serve` and `serve-mcp` |
+| `COORDINATIONHUB_HOUSEKEEPING_AGENTS_INTERVAL_S` | How often a server's housekeeping reaps stale agents, expired locks and lapsed claims (default 30) |
 | `COORDINATIONHUB_AGENTS_STALE_TIMEOUT_S` | Heartbeat age after which an agent is stale (default 600) |
+| `COORDINATIONHUB_LOCK_WAIT_S` | How long a call waits for the store's file lock before `store busy` (default 30) |
+| `COORDINATIONHUB_MAX_WAIT_S` | A lower cap for waiting calls than the default 600 seconds |
+| `COORDINATIONHUB_TOOLS`, `COORDINATIONHUB_DISABLE` | MCP tool groups for `serve-mcp` (see [Tool groups](#tool-groups)) |
 | `COORDINATIONHUB_EVENTS_MAX_AGE_S` | How long events and notifications are kept, in seconds (default 604800, seven days; `0` keeps everything) |
 | `COORDINATIONHUB_HOUSEKEEPING_EVENTS_INTERVAL_S` | How often a server's housekeeping drops old events (default 600) |
 | `COORDINATIONHUB_COMPACT_MIN_BYTES` | Journal size from which old events are dropped on a call and the journal may be compacted (default 1048576; `0` turns both off) |

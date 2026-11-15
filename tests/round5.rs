@@ -329,6 +329,8 @@ fn paths_inside_the_project_stay_relative_before_the_file_exists() {
 }
 
 #[test]
+// The literal is Python's repr of the float, the text this test checks for.
+#[allow(clippy::excessive_precision)]
 fn python_number_text() {
     use coordinationhub::argparse::{py_float, py_float_repr, py_int};
     assert_eq!(py_float_repr(6.151199340820312e-05), "6.151199340820312e-05");
