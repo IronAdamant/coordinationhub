@@ -9,10 +9,12 @@
           "agent_id": {
             "type": "string",
             "minLength": 1,
-            "description": "Unique agent identifier (e.g. hub.12345.0)"
+            "maxLength": 256,
+            "description": "Unique agent identifier (e.g. hub.12345.0): one line, at most 256 characters, no control characters"
           },
           "parent_id": {
             "type": "string",
+            "maxLength": 256,
             "description": "Parent agent ID if this is a spawned sub-agent (omit for root agents)"
           },
           "graph_agent_id": {
@@ -103,7 +105,7 @@
       }
     },
     "acquire_lock": {
-      "description": "Before editing a file other agents may also edit (shared modules, lib.rs, Cargo.toml), lock it so nobody overwrites your change; grep cannot tell you who is about to edit a file. Pass region_start/region_end to lock only some lines; shared locks allow concurrent readers. If another agent holds it the reply names them (or force=true steals it and records a conflict). The TTL (default 300 s) is renewed by your heartbeats, so pick it for a stretch without heartbeats, not for the whole task. retry=true waits with backoff (at most 600 s).",
+      "description": "Before editing a file other agents may also edit (shared modules, lib.rs, Cargo.toml), lock it so nobody overwrites your change; grep cannot tell you who is about to edit a file. Pass region_start and region_end (inclusive, 1-based line numbers, both or neither) to lock only those lines: 10-20 and 20-30 overlap on line 20. Shared locks allow concurrent readers. If another agent holds it the reply names them (or force=true steals it and records a conflict). The TTL (default 300 s) is renewed by your heartbeats, so pick it for a stretch without heartbeats, not for the whole task. retry=true waits with backoff (at most 600 s).",
       "parameters": {
         "type": "object",
         "properties": {
@@ -152,11 +154,11 @@
           },
           "region_start": {
             "type": "integer",
-            "description": "Start line of the region to lock (omit for whole-file lock)"
+            "description": "First line of the region, inclusive and 1-based (needs region_end; omit both for the whole file)"
           },
           "region_end": {
             "type": "integer",
-            "description": "End line of the region to lock (omit for whole-file lock)"
+            "description": "Last line of the region, inclusive and 1-based (needs region_start; omit both for the whole file)"
           }
         },
         "required": [
@@ -166,7 +168,7 @@
       }
     },
     "release_lock": {
-      "description": "Release your lock as soon as your edit of a shared file is done. reason 'expired' means the TTL ran out before this call (expired_at says when; locked_by names any new holder): nothing was released, and you should check the file before relying on your lock. Pass region_start/region_end for a region lock.",
+      "description": "Release your lock as soon as your edit of a shared file is done. reason 'expired' means the TTL ran out before this call (expired_at says when; locked_by names any new holder): nothing was released, and you should check the file before relying on your lock. Pass the same region_start/region_end (inclusive, 1-based) for a region lock.",
       "parameters": {
         "type": "object",
         "properties": {
@@ -180,11 +182,11 @@
           },
           "region_start": {
             "type": "integer",
-            "description": "Start line of the region to lock (omit for whole-file lock)"
+            "description": "First line of the region, inclusive and 1-based (needs region_end; omit both for the whole file)"
           },
           "region_end": {
             "type": "integer",
-            "description": "End line of the region to lock (omit for whole-file lock)"
+            "description": "Last line of the region, inclusive and 1-based (needs region_start; omit both for the whole file)"
           }
         },
         "required": [
@@ -194,7 +196,7 @@
       }
     },
     "refresh_lock": {
-      "description": "Extend one lock's TTL (or change it) without releasing it. heartbeat already renews all your locks under half their TTL; use this to give one lock a longer TTL. reason 'expired' means it ran out first: acquire_lock again.",
+      "description": "Extend one lock's TTL (or change it) without releasing it. heartbeat already renews all your locks under half their TTL; use this to give one lock a longer TTL. For a region lock pass its region_start/region_end (inclusive, 1-based). reason 'expired' means it ran out first: acquire_lock again.",
       "parameters": {
         "type": "object",
         "properties": {
@@ -213,11 +215,11 @@
           },
           "region_start": {
             "type": "integer",
-            "description": "Start line of the region to lock (omit for whole-file lock)"
+            "description": "First line of the region, inclusive and 1-based (needs region_end; omit both for the whole file)"
           },
           "region_end": {
             "type": "integer",
-            "description": "End line of the region to lock (omit for whole-file lock)"
+            "description": "Last line of the region, inclusive and 1-based (needs region_start; omit both for the whole file)"
           }
         },
         "required": [
@@ -252,7 +254,7 @@
           },
           "force_refresh": {
             "type": "boolean",
-            "description": "If true, re-warm the in-memory cache from SQLite before reading. Default false."
+            "description": "Accepted for 0.8.0 callers; has no effect (every call reads the current journal)."
           }
         }
       }
@@ -540,7 +542,7 @@
       }
     },
     "load_coordination_spec": {
-      "description": "Reload the coordination spec from disk. Returns whether a graph was found and loaded, plus the graph's agent list.",
+      "description": "Reload the coordination spec from disk. Returns whether a graph was found and loaded, plus the graph's agent list. The spec is JSON and at most 1 MiB; loaded false comes with error or errors saying why.",
       "parameters": {
         "type": "object",
         "properties": {
@@ -553,7 +555,7 @@
       }
     },
     "scan_project": {
-      "description": "Perform a file ownership scan of the worktree_root. For every tracked file (.py, .md, .json, .yaml, .txt, .toml), upserts an entry into the file_ownership table. Returns the count of files scanned and owned.",
+      "description": "Perform a file ownership scan of the worktree_root. For every tracked file (default extensions .py, .rs, .md, .json, .yaml, .yml, .txt, .toml; build and cache folders such as target, node_modules and .git are skipped, and directory symlinks are not followed), records an owner in the file ownership map. Returns the count of files scanned and owned.",
       "parameters": {
         "type": "object",
         "properties": {
@@ -628,7 +630,7 @@
       }
     },
     "run_assessment": {
-      "description": "Run an assessment suite or score the current live session. If suite_path is provided, loads the JSON suite file and scores it. If suite_path is omitted, synthesizes a live session trace from DB state (agents, notifications, lineage) — no hand-authored suite required. Stores results in SQLite and returns a Markdown or JSON report.",
+      "description": "Run an assessment suite or score the current live session. If suite_path is provided, loads the JSON suite file and scores it. If suite_path is omitted, synthesizes a live session trace from the hub's state (agents, notifications, lineage) — no hand-authored suite required. Records the scores in the hub journal and returns a Markdown or JSON report. A suite file may be at most 16 MiB.",
       "parameters": {
         "type": "object",
         "properties": {
@@ -649,7 +651,7 @@
           },
           "scope": {
             "type": "string",
-            "description": "'project' (default) restricts to the current worktree; 'all' scores every agent in the DB",
+            "description": "'project' (default) restricts to the current worktree; 'all' scores every agent in the hub",
             "default": "project"
           }
         }

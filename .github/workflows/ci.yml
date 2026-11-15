@@ -5,6 +5,9 @@ on:
     branches: [main]
   pull_request:
 
+permissions:
+  contents: read
+
 jobs:
   test:
     name: test (${{ matrix.os }})
@@ -14,8 +17,8 @@ jobs:
       matrix:
         os: [ubuntu-latest, ubuntu-24.04-arm, macos-latest, macos-15-intel, windows-latest, windows-11-arm]
     steps:
-      - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@1.83.0
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: dtolnay/rust-toolchain@ae1d787cccfc25e920bb60bcd7666e8217f9a191 # 1.83.0 branch; installs Rust 1.83.0
       - name: Test
         run: cargo test --locked --release
       - name: Multi-agent workflow timings
@@ -32,12 +35,12 @@ jobs:
     name: python-legacy still runs
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
           fetch-depth: 0
       - name: Fetch the Python tree
         run: git fetch --force origin tag pre-rust-python-legacy
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
         with:
           python-version: "3.12"
       - name: Install and import
@@ -52,11 +55,11 @@ jobs:
     name: parity harness
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
           fetch-depth: 0
-      - uses: dtolnay/rust-toolchain@1.83.0
-      - uses: actions/setup-python@v5
+      - uses: dtolnay/rust-toolchain@ae1d787cccfc25e920bb60bcd7666e8217f9a191 # 1.83.0 branch; installs Rust 1.83.0
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
         with:
           python-version: "3.12"
       - name: Fetch the Python tree
