@@ -1,4 +1,5 @@
-//! Each MCP tool answers, including the additive `who` tool.
+//! Each MCP tool answers, including the additive `who` tool. Every call
+//! checks its reply: a success names what it did, a refusal says why.
 
 use coordinationhub::json::{self, Value};
 use coordinationhub::Engine;
@@ -14,15 +15,50 @@ fn engine(name: &str) -> (Engine, PathBuf) {
     (engine, dir)
 }
 
-fn call(engine: &mut Engine, tool: &str, args: Value) -> Value {
-    engine
+/// Calls a tool that must succeed and checks the named reply fields.
+fn expect(engine: &mut Engine, tool: &str, args: Value, fields: &[(&str, Value)]) -> Value {
+    let reply = engine
         .call(tool, &args)
-        .unwrap_or_else(|err| json::obj(vec![("error", json::s(err))]))
+        .unwrap_or_else(|err| panic!("{tool} failed: {err}"));
+    for (key, want) in fields {
+        assert_eq!(
+            reply.get(key),
+            Some(want),
+            "{tool}: field {key} in {}",
+            json::dumps(&reply)
+        );
+    }
+    reply
+}
+
+/// Calls a tool that must be refused and returns the error text.
+fn refused(engine: &mut Engine, tool: &str, args: Value) -> String {
+    match engine.call(tool, &args) {
+        Ok(reply) => panic!("{tool} should be refused, got {}", json::dumps(&reply)),
+        Err(err) => err,
+    }
+}
+
+fn len(reply: &Value, key: &str) -> usize {
+    reply
+        .get(key)
+        .and_then(Value::as_array)
+        .map(|items| items.len())
+        .unwrap_or_else(|| panic!("no list {key} in {}", json::dumps(reply)))
+}
+
+fn yes() -> Value {
+    json::b(true)
+}
+
+fn no() -> Value {
+    json::b(false)
 }
 
 #[test]
 fn every_tool_returns_json() {
     let (mut engine, dir) = engine("all");
+    let e = &mut engine;
     let tools = [
         "register_agent",
         "heartbeat",
@@ -77,110 +113,80 @@ fn every_tool_returns_json() {
         "who",
     ];
     assert_eq!(tools.len(), 51);
-    let _ = call(
-        &mut engine,
+    expect(e, "register_agent", json::obj(vec![("agent_id", json::s("root"))]), &[("agent_id", json::s("root"))]);
+    expect(
+        e,
         "register_agent",
-        json::obj(vec![("agent_id", json::s("root"))]),
+        json::obj(vec![("agent_id", json::s("child")), ("parent_id", json::s("root"))]),
+        &[("agent_id", json::s("child")), ("parent_id", json::s("root"))],
     );
-    let _ = call(
-        &mut engine,
-        "register_agent",
-        json::obj(vec![
-            ("agent_id", json::s("child")),
-            ("parent_id", json::s("root")),
-        ]),
-    );
-    let _ = call(
-        &mut engine,
-        "heartbeat",
-        json::obj(vec![("agent_id", json::s("root"))]),
-    );
-    let _ = call(&mut engine, "list_agents", json::obj(vec![]));
-    let _ = call(
-        &mut engine,
+    expect(e, "heartbeat", json::obj(vec![("agent_id", json::s("root"))]), &[("updated", yes())]);
+    let listed = expect(e, "list_agents", json::obj(vec![]), &[]);
+    assert_eq!(len(&listed, "agents"), 2);
+    let relations = expect(
+        e,
         "get_agent_relations",
-        json::obj(vec![
-            ("agent_id", json::s("child")),
-            ("mode", json::s("siblings")),
-        ]),
+        json::obj(vec![("agent_id", json::s("child")), ("mode", json::s("siblings"))]),
+        &[("mode", json::s("siblings"))],
     );
-    let _ = call(
-        &mut engine,
-        "acquire_lock",
-        json::obj(vec![
-            ("document_path", json::s("a.txt")),
-            ("agent_id", json::s("root")),
-        ]),
-    );
-    let _ = call(
-        &mut engine,
-        "refresh_lock",
-        json::obj(vec![
-            ("document_path", json::s("a.txt")),
-            ("agent_id", json::s("root")),
-        ]),
-    );
-    let _ = call(
-        &mut engine,
+    assert_eq!(len(&relations, "siblings"), 0);
+    let file = json::obj(vec![("document_path", json::s("a.txt")), ("agent_id", json::s("root"))]);
+    expect(e, "acquire_lock", file.clone(), &[("acquired", yes()), ("locked_by", json::s("root"))]);
+    expect(e, "refresh_lock", file.clone(), &[("refreshed", yes())]);
+    expect(
+        e,
         "get_lock_status",
         json::obj(vec![("document_path", json::s("a.txt"))]),
+        &[("locked", yes()), ("locked_by", json::s("root"))],
     );
-    let _ = call(&mut engine, "list_locks", json::obj(vec![]));
-    let _ = call(
-        &mut engine,
+    expect(e, "list_locks", json::obj(vec![]), &[("count", json::i(1))]);
+    expect(
+        e,
         "notify_change",
         json::obj(vec![
             ("document_path", json::s("a.txt")),
             ("change_type", json::s("modified")),
             ("agent_id", json::s("root")),
         ]),
+        &[("recorded", yes())],
     );
-    let _ = call(&mut engine, "get_notifications", json::obj(vec![]));
-    let _ = call(
-        &mut engine,
-        "release_lock",
-        json::obj(vec![
-            ("document_path", json::s("a.txt")),
-            ("agent_id", json::s("root")),
-        ]),
-    );
-    let _ = call(
-        &mut engine,
-        "admin_locks",
-        json::obj(vec![("action", json::s("reap_expired"))]),
-    );
-    let _ = call(&mut engine, "get_conflicts", json::obj(vec![]));
-    let _ = call(&mut engine, "get_contention_hotspots", json::obj(vec![]));
-    let status = call(&mut engine, "status", json::obj(vec![]));
+    let notes = expect(e, "get_notifications", json::obj(vec![]), &[]);
+    assert!(len(&notes, "notifications") >= 2, "{}", json::dumps(&notes));
+    expect(e, "release_lock", file.clone(), &[("released", yes()), ("count", json::i(1))]);
+    expect(e, "admin_locks", json::obj(vec![("action", json::s("reap_expired"))]), &[("reaped", json::i(0))]);
+    let conflicts = expect(e, "get_conflicts", json::obj(vec![]), &[]);
+    assert_eq!(len(&conflicts, "conflicts"), 0);
+    expect(e, "get_contention_hotspots", json::obj(vec![]), &[("total", json::i(0))]);
+    let status = expect(e, "status", json::obj(vec![]), &[]);
     assert!(status.get("tools").and_then(Value::as_i64).unwrap() >= 50);
-    let _ = call(
-        &mut engine,
+    expect(
+        e,
         "send_message",
         json::obj(vec![
             ("from_agent_id", json::s("root")),
             ("to_agent_id", json::s("child")),
             ("message_type", json::s("note")),
         ]),
+        &[("sent", yes())],
     );
-    let _ = call(
-        &mut engine,
+    expect(
+        e,
         "manage_messages",
-        json::obj(vec![
-            ("action", json::s("get")),
-            ("agent_id", json::s("child")),
-        ]),
+        json::obj(vec![("action", json::s("get")), ("agent_id", json::s("child"))]),
+        &[("count", json::i(1))],
     );
-    let _ = call(
-        &mut engine,
+    expect(
+        e,
         "create_task",
         json::obj(vec![
             ("task_id", json::s("t")),
             ("parent_agent_id", json::s("root")),
             ("description", json::s("work")),
         ]),
+        &[("created", yes()), ("task_id", json::s("t"))],
     );
-    let _ = call(
-        &mut engine,
+    expect(
+        e,
         "create_subtask",
         json::obj(vec![
             ("task_id", json::s("t.1")),
@@ -188,44 +194,42 @@ fn every_tool_returns_json() {
             ("parent_agent_id", json::s("root")),
             ("description", json::s("part")),
         ]),
+        &[("created", yes()), ("parent_task_id", json::s("t"))],
     );
-    let _ = call(
-        &mut engine,
+    expect(
+        e,
         "assign_task",
-        json::obj(vec![
-            ("task_id", json::s("t")),
-            ("assigned_agent_id", json::s("child")),
-        ]),
+        json::obj(vec![("task_id", json::s("t")), ("assigned_agent_id", json::s("child"))]),
+        &[("assigned", yes())],
     );
-    let _ = call(
-        &mut engine,
+    expect(
+        e,
         "update_task_status",
-        json::obj(vec![
-            ("task_id", json::s("t.1")),
-            ("status", json::s("completed")),
-        ]),
+        json::obj(vec![("task_id", json::s("t.1")), ("status", json::s("completed"))]),
+        &[("updated", yes()), ("status", json::s("completed")), ("prior_status", json::s("pending"))],
     );
-    let _ = call(
-        &mut engine,
+    let tree = expect(
+        e,
         "query_tasks",
-        json::obj(vec![
-            ("query_type", json::s("tree")),
-            ("root_task_id", json::s("t")),
-        ]),
+        json::obj(vec![("query_type", json::s("tree")), ("root_task_id", json::s("t"))]),
+        &[("id", json::s("t"))],
     );
-    let _ = call(&mut engine, "get_available_tasks", json::obj(vec![]));
-    let _ = call(
-        &mut engine,
+    assert_eq!(len(&tree, "subtasks"), 1);
+    expect(e, "get_available_tasks", json::obj(vec![]), &[("count", json::i(1))]);
+    expect(
+        e,
         "wait_for_task",
         json::obj(vec![("task_id", json::s("t.1")), ("timeout_s", json::i(0))]),
+        &[("status", json::s("completed")), ("timed_out", no())],
     );
-    let _ = call(
-        &mut engine,
+    expect(
+        e,
         "task_failures",
         json::obj(vec![("action", json::s("list_dead_letter"))]),
+        &[("count", json::i(0))],
     );
-    let _ = call(
-        &mut engine,
+    expect(
+        e,
         "manage_work_intents",
         json::obj(vec![
             ("action", json::s("declare")),
@@ -233,227 +237,209 @@ fn every_tool_returns_json() {
             ("document_path", json::s("a.txt")),
             ("intent", json::s("edit")),
         ]),
+        &[("recorded", yes())],
     );
-    let _ = call(
-        &mut engine,
+    expect(
+        e,
         "manage_dependencies",
         json::obj(vec![
             ("mode", json::s("declare")),
             ("dependent_agent_id", json::s("child")),
             ("depends_on_agent_id", json::s("root")),
         ]),
+        &[("declared", yes())],
     );
-    let _ = call(
-        &mut engine,
+    expect(
+        e,
         "acquire_coordinator_lease",
         json::obj(vec![("agent_id", json::s("root"))]),
+        &[("acquired", yes()), ("holder_id", json::s("root"))],
     );
-    let _ = call(
-        &mut engine,
+    // `leader` is not a manage_leases action; the refusal lists the real ones.
+    let err = refused(e, "manage_leases", json::obj(vec![("action", json::s("leader"))]));
+    assert!(err.contains("'leader' is not one of"), "{err}");
+    assert!(err.contains("'get'"), "{err}");
+    let leader = expect(
+        e,
         "manage_leases",
-        json::obj(vec![("action", json::s("leader"))]),
+        json::obj(vec![("action", json::s("get")), ("agent_id", json::s("root"))]),
+        &[],
     );
-    let _ = call(
-        &mut engine,
+    assert_eq!(
+        leader.get("leader").and_then(|l| l.get("holder_id")),
+        Some(&json::s("root")),
+        "{}",
+        json::dumps(&leader)
+    );
+    expect(
+        e,
         "spawn_subagent",
-        json::obj(vec![
-            ("parent_agent_id", json::s("root")),
-            ("subagent_type", json::s("Explore")),
-        ]),
+        json::obj(vec![("parent_agent_id", json::s("root")), ("subagent_type", json::s("Explore"))]),
+        &[("stashed", yes()), ("spawn_id", json::s("root.Explore.0"))],
     );
-    let _ = call(
-        &mut engine,
-        "get_pending_spawns",
-        json::obj(vec![("parent_agent_id", json::s("root"))]),
-    );
-    let _ = call(
-        &mut engine,
+    let pending = expect(e, "get_pending_spawns", json::obj(vec![("parent_agent_id", json::s("root"))]), &[]);
+    assert_eq!(pending.as_array().map(|items| items.len()), Some(1), "{}", json::dumps(&pending));
+    expect(
+        e,
         "report_subagent_spawned",
         json::obj(vec![
             ("parent_agent_id", json::s("root")),
             ("subagent_type", json::s("Explore")),
             ("child_agent_id", json::s("child")),
         ]),
+        &[("reported", yes()), ("spawn_id", json::s("root.Explore.0"))],
     );
-    let _ = call(
-        &mut engine,
+    expect(
+        e,
         "is_subagent_stop_requested",
         json::obj(vec![("agent_id", json::s("child"))]),
+        &[("stop_requested", no())],
     );
-    let _ = call(
-        &mut engine,
+    expect(
+        e,
         "request_subagent_deregistration",
-        json::obj(vec![
-            ("parent_agent_id", json::s("root")),
-            ("child_agent_id", json::s("child")),
-        ]),
+        json::obj(vec![("parent_agent_id", json::s("root")), ("child_agent_id", json::s("child"))]),
+        &[("requested", yes())],
     );
-    let _ = call(
-        &mut engine,
+    expect(
+        e,
         "await_subagent_registration",
         json::obj(vec![
             ("parent_agent_id", json::s("root")),
             ("subagent_type", json::s("Explore")),
             ("timeout", json::i(0)),
         ]),
+        &[("registered", yes())],
     );
-    let _ = call(
-        &mut engine,
+    expect(
+        e,
         "await_subagent_stopped",
-        json::obj(vec![
-            ("child_agent_id", json::s("missing")),
-            ("timeout", json::i(0)),
-        ]),
+        json::obj(vec![("child_agent_id", json::s("missing")), ("timeout", json::i(0))]),
+        &[("stopped", yes())],
     );
-    let _ = call(
-        &mut engine,
+    // An ack broadcast needs a sibling to wait for.
+    expect(
+        e,
+        "register_agent",
+        json::obj(vec![("agent_id", json::s("sib")), ("parent_id", json::s("root"))]),
+        &[("agent_id", json::s("sib"))],
+    );
+    let sent = expect(
+        e,
         "broadcast",
         json::obj(vec![
             ("agent_id", json::s("child")),
-            ("require_ack", json::b(true)),
+            ("require_ack", yes()),
             ("message", json::s("go")),
         ]),
+        &[("pending_acks", json::arr(vec![json::s("sib")]))],
     );
-    let _ = call(
-        &mut engine,
+    let broadcast_id = sent.get("broadcast_id").cloned().unwrap();
+    expect(
+        e,
         "acknowledge_broadcast",
-        json::obj(vec![
-            ("broadcast_id", json::i(1)),
-            ("agent_id", json::s("root")),
-        ]),
+        json::obj(vec![("broadcast_id", broadcast_id.clone()), ("agent_id", json::s("sib"))]),
+        &[("acknowledged", yes())],
     );
-    let _ = call(
-        &mut engine,
+    expect(
+        e,
         "wait_for_broadcast_acks",
-        json::obj(vec![
-            ("broadcast_id", json::i(1)),
-            ("timeout_s", json::i(0)),
-        ]),
+        json::obj(vec![("broadcast_id", broadcast_id), ("timeout_s", json::i(0))]),
+        &[("timed_out", no()), ("acknowledged_by", json::arr(vec![json::s("sib")]))],
     );
-    let _ = call(
-        &mut engine,
+    let handoff = expect(
+        e,
         "broadcast",
         json::obj(vec![
             ("agent_id", json::s("root")),
             ("handoff_targets", json::arr(vec![json::s("child")])),
         ]),
+        &[("to_agents", json::arr(vec![json::s("child")]))],
     );
-    let _ = call(
-        &mut engine,
+    let handoff_id = handoff.get("handoff_id").cloned().unwrap();
+    expect(
+        e,
         "wait_for_handoff",
-        json::obj(vec![
-            ("handoff_id", json::i(1)),
-            ("mode", json::s("status")),
-        ]),
+        json::obj(vec![("handoff_id", handoff_id), ("mode", json::s("status"))]),
+        &[("status", json::s("pending")), ("from_agent_id", json::s("root"))],
     );
-    let _ = call(
-        &mut engine,
+    let free = expect(
+        e,
         "wait_for_locks",
         json::obj(vec![
             ("agent_id", json::s("root")),
             ("document_paths", json::arr(vec![json::s("a.txt")])),
             ("timeout_s", json::i(0)),
         ]),
+        &[("timed_out", json::arr(vec![]))],
     );
-    let _ = call(
-        &mut engine,
+    assert_eq!(len(&free, "released"), 1);
+    expect(
+        e,
         "await_agent",
-        json::obj(vec![
-            ("agent_id", json::s("child")),
-            ("timeout_s", json::i(0)),
-        ]),
+        json::obj(vec![("agent_id", json::s("child")), ("timeout_s", json::i(0))]),
+        &[("awaited", no()), ("status", json::s("timeout"))],
     );
-    let _ = call(
-        &mut engine,
+    expect(
+        e,
         "update_agent_status",
-        json::obj(vec![
-            ("agent_id", json::s("root")),
-            ("current_task", json::s("port")),
-        ]),
+        json::obj(vec![("agent_id", json::s("root")), ("current_task", json::s("port"))]),
+        &[("updated", yes())],
     );
-    let _ = call(
-        &mut engine,
+    expect(
+        e,
         "get_agent_status",
         json::obj(vec![("agent_id", json::s("root"))]),
+        &[("current_task", json::s("port")), ("active_locks", json::arr(vec![]))],
     );
-    let _ = call(
-        &mut engine,
-        "get_agent_tree",
-        json::obj(vec![("agent_id", json::s("root"))]),
+    let tree = expect(e, "get_agent_tree", json::obj(vec![("agent_id", json::s("root"))]), &[]);
+    assert_eq!(
+        tree.get("root").and_then(|root| root.get("agent_id")),
+        Some(&json::s("root")),
+        "{}",
+        json::dumps(&tree)
     );
-    let _ = call(&mut engine, "get_file_agent_map", json::obj(vec![]));
-    let _ = call(&mut engine, "scan_project", json::obj(vec![]));
-    let missing = call(
-        &mut engine,
+    expect(e, "get_file_agent_map", json::obj(vec![]), &[("total", json::i(0))]);
+    expect(e, "scan_project", json::obj(vec![]), &[("scanned", json::i(0))]);
+    let missing = expect(
+        e,
         "load_coordination_spec",
         json::obj(vec![("path", json::s("no-such.json"))]),
-    );
-    assert_eq!(missing.get("loaded").and_then(Value::as_bool), Some(false));
-    let _ = call(
-        &mut engine,
-        "run_assessment",
-        json::obj(vec![("format", json::s("json"))]),
-    );
-    let claimed = call(
-        &mut engine,
-        "who",
-        json::obj(vec![
-            ("action", json::s("claim")),
-            ("agent_id", json::s("root")),
-            ("area", json::s("parser")),
-        ]),
-    );
-    assert_eq!(claimed.get("claimed").and_then(Value::as_bool), Some(true));
-    let blocked = call(
-        &mut engine,
-        "who",
-        json::obj(vec![
-            ("action", json::s("claim")),
-            ("agent_id", json::s("child")),
-            ("area", json::s("parser")),
-        ]),
-    );
-    assert_eq!(blocked.get("claimed").and_then(Value::as_bool), Some(false));
-    let picture = call(
-        &mut engine,
-        "who",
-        json::obj(vec![("action", json::s("status"))]),
+        &[("loaded", no())],
     );
     assert!(
-        picture
-            .get("claims")
-            .and_then(Value::as_array)
-            .unwrap()
-            .len()
-            >= 1
+        missing.get("error").and_then(Value::as_str).unwrap().contains("no-such.json"),
+        "{}",
+        json::dumps(&missing)
     );
-    let handed = call(
-        &mut engine,
-        "who",
+    expect(
+        e,
+        "run_assessment",
+        json::obj(vec![("format", json::s("json"))]),
+        &[("suite_name", json::s("live_session"))],
+    );
+    let claim = |action: &str, agent: &str| {
         json::obj(vec![
-            ("action", json::s("handoff")),
-            ("agent_id", json::s("root")),
+            ("action", json::s(action)),
+            ("agent_id", json::s(agent)),
             ("area", json::s("parser")),
-            ("to_agent_id", json::s("child")),
-        ]),
-    );
-    assert_eq!(
-        handed.get("handed_off").and_then(Value::as_bool),
-        Some(true)
-    );
-    let _ = call(
-        &mut engine,
-        "who",
-        json::obj(vec![
-            ("action", json::s("release")),
-            ("agent_id", json::s("child")),
-            ("area", json::s("parser")),
-        ]),
-    );
-    let _ = call(
-        &mut engine,
+        ])
+    };
+    expect(e, "who", claim("claim", "root"), &[("claimed", yes())]);
+    expect(e, "who", claim("claim", "child"), &[("claimed", no())]);
+    let picture = expect(e, "who", json::obj(vec![("action", json::s("status"))]), &[]);
+    assert!(len(&picture, "claims") >= 1);
+    let mut handing = claim("handoff", "root");
+    if let Value::Object(pairs) = &mut handing {
+        pairs.push(("to_agent_id".into(), json::s("child")));
+    }
+    expect(e, "who", handing, &[("handed_off", yes()), ("to_agent_id", json::s("child"))]);
+    expect(e, "who", claim("release", "child"), &[("released", yes())]);
+    expect(
+        e,
         "deregister_agent",
         json::obj(vec![("agent_id", json::s("root"))]),
+        &[("deregistered", yes()), ("children_orphaned", json::i(2)), ("lease_released", yes())],
     );
     let _ = std::fs::remove_dir_all(&dir);
 }

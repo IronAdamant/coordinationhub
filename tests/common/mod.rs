@@ -216,3 +216,31 @@ pub fn tool_text(result: &Value) -> (String, bool) {
     let is_error = result.get("isError").and_then(Value::as_bool).unwrap_or(false);
     (text, is_error)
 }
+
+/// Help text with the descriptions of `--replica` and `--force-refresh`
+/// left out. 0.8.0 described a SQLite replica; since 1.3.0 both say they
+/// have no effect (MIGRATION.md). Everything else must still match.
+pub fn without_no_effect_help(text: &str) -> String {
+    let mut out = String::new();
+    let mut skipping = false;
+    for line in text.split_inclusive('\n') {
+        let trimmed = line.trim_start();
+        if skipping {
+            if !trimmed.trim().is_empty() && !trimmed.starts_with('-') && line.starts_with("    ") {
+                continue;
+            }
+            skipping = false;
+        }
+        let entry = line.starts_with("  -") && !line.starts_with("   ");
+        let flag = ["--replica", "--force-refresh"]
+            .iter()
+            .find(|flag| entry && (trimmed.starts_with(&format!("{flag} ")) || trimmed.trim_end() == **flag));
+        if let Some(flag) = flag {
+            out.push_str(&format!("  {flag}\n"));
+            skipping = true;
+            continue;
+        }
+        out.push_str(line);
+    }
+    out
+}

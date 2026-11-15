@@ -739,7 +739,17 @@ fn argparse_errors_and_help_match_python_0_8_0() {
         hub.run(&["register", "lute", "--parent-id", "viola"]);
         let args = common::split(case.args);
         let out = hub.run_bare(&args, case.columns);
-        if (out.code, out.stdout.as_str(), out.stderr.as_str()) != (case.rc, case.stdout, case.stderr) {
+        // The goldens keep 0.8.0's text; only the help of the two no-op
+        // flags differs, and it must say so.
+        let stdout = common::without_no_effect_help(&out.stdout);
+        let want = common::without_no_effect_help(case.stdout);
+        if want != case.stdout && !out.stdout.contains("No effect since") {
+            failures.push(format!(
+                "{}: the --replica help does not say it has no effect:\n{}",
+                case.args, out.stdout
+            ));
+        }
+        if (out.code, stdout.as_str(), out.stderr.as_str()) != (case.rc, want.as_str(), case.stderr) {
             failures.push(format!(
                 "{} (COLUMNS {:?}): rc {} want {}\nstdout:\n{}\nwant:\n{}\nstderr:\n{}\nwant:\n{}",
                 case.args, case.columns, out.code, case.rc, out.stdout, case.stdout, out.stderr, case.stderr
