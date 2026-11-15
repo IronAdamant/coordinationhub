@@ -505,8 +505,11 @@ impl Store {
         // moved. Length cannot show that: a compacted file may be longer
         // than the offset an idle engine still holds.
         if epoch != self.epoch || len < self.offset {
+            // The count is kept only once the reload worked, so a failed
+            // one is tried again on the next call.
+            self.reload()?;
             self.epoch = epoch;
-            return self.reload();
+            return Ok(true);
         }
         if len == self.offset {
             return Ok(false);

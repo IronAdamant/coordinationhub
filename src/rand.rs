@@ -11,7 +11,7 @@
 //! `fill` fails closed: on any error the buffer's contents are unspecified
 //! and the caller must not use them. There is no clock or counter fallback.
 
-use std::io::{Error, ErrorKind};
+use std::io::Error;
 
 /// Fills `buf` with random bytes, or says why the system gave none.
 pub fn fill(buf: &mut [u8]) -> Result<(), Error> {
@@ -45,7 +45,7 @@ fn os_fill(buf: &mut [u8]) -> Result<(), Error> {
         // bytes, and the length fits in a u32.
         let ok = unsafe { SystemFunction036(chunk.as_mut_ptr(), chunk.len() as u32) };
         if ok == 0 {
-            return Err(Error::new(ErrorKind::Other, "RtlGenRandom failed"));
+            return Err(Error::other("RtlGenRandom failed"));
         }
     }
     Ok(())
@@ -67,7 +67,7 @@ fn os_fill(buf: &mut [u8]) -> Result<(), Error> {
         }
         let err = Error::last_os_error();
         match err.kind() {
-            ErrorKind::Interrupted => continue,
+            std::io::ErrorKind::Interrupted => continue,
             // A kernel older than 3.17 has no getrandom(2).
             _ if err.raw_os_error() == Some(ENOSYS) => return dev_urandom(buf),
             _ => return Err(err),
@@ -108,7 +108,7 @@ fn dev_urandom(buf: &mut [u8]) -> Result<(), Error> {
 #[cfg(not(any(unix, windows)))]
 fn os_fill(_buf: &mut [u8]) -> Result<(), Error> {
     Err(Error::new(
-        ErrorKind::Unsupported,
+        std::io::ErrorKind::Unsupported,
         "no operating system random generator is known for this platform",
     ))
 }

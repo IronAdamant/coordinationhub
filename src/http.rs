@@ -281,15 +281,15 @@ pub fn serve(
     crate::house::spawn(engine.clone());
     let open = Arc::new(AtomicUsize::new(0));
     let limit = max_connections();
+    let turned_away = turn_away(limit);
     for stream in listener.incoming() {
-        let Ok(mut stream) = stream else { continue };
-        // One thread per connection, and at most `limit` of them: past
-        // that the answer is 503 from this thread, without a new one.
+        let Ok(stream) = stream else { continue };
+        // One thread per connection, and at most `limit` of them. One
+        // more is handed to the single thread that answers 503; when that
+        // thread's queue is full too, the connection is just closed.
         if open.fetch_add(1, Ordering::SeqCst) >= limit {
             open.fetch_sub(1, Ordering::SeqCst);
-            let _ = stream.set_write_timeout(Some(Duration::from_secs(1)));
-            let body = error_body(&format!("server busy: {limit} connections are open; retry in a moment"));
-            let _ = respond(&mut stream, 503, "application/json", body.as_bytes(), &["Retry-After: 1"]);
+            let _ = turned_away.try_send(stream);
             continue;
         }
         let slot = Slot(open.clone());
@@ -303,6 +303,22 @@ pub fn serve(
         });
     }
     Ok(())
+}
+
+/// Starts the thread that answers `503` to connections over the limit,
+/// one at a time, and returns its queue (64 waiting at most). The accept
+/// loop never writes to a refused connection itself, so a client that
+/// does not read cannot hold up the connections that are served.
+fn turn_away(limit: usize) -> std::sync::mpsc::SyncSender<TcpStream> {
+    let (queue, refused) = std::sync::mpsc::sync_channel::<TcpStream>(64);
+    let body = error_body(&format!("server busy: {limit} connections are open; retry in a moment"));
+    let _ = std::thread::Builder::new().spawn(move || {
+        for mut stream in refused {
+            let _ = stream.set_write_timeout(Some(Duration::from_secs(1)));
+            let _ = finish(&mut stream, 503, "application/json", body.as_bytes(), &["Retry-After: 1"]);
+        }
+    });
+    queue
 }
 
 /// One of the `limit` connection slots; freed when the connection ends.
@@ -787,8 +803,11 @@ fn respond(stream: &mut TcpStream, status: u16, kind: &str, body: &[u8], extra: 
         header.push_str("\r\n");
     }
     header.push_str(&format!("Content-Length: {}\r\nConnection: close\r\n\r\n", body.len()));
-    stream.write_all(header.as_bytes())?;
-    stream.write_all(body)?;
+    // Head and body in one write, so a client never gets one without
+    // the other.
+    let mut message = header.into_bytes();
+    message.extend_from_slice(body);
+    stream.write_all(&message)?;
     stream.flush()
 }
 
@@ -801,7 +820,10 @@ fn finish(stream: &mut TcpStream, status: u16, kind: &str, body: &[u8], extra: &
     let _ = stream.set_read_timeout(Some(Duration::from_millis(250)));
     let mut sink = [0_u8; 8192];
     let mut drained = 0;
-    while drained <= MAX_BODY {
+    // At most a megabyte and one second: a client that drips bytes
+    // cannot keep the connection.
+    let until = Instant::now() + Duration::from_secs(1);
+    while drained <= MAX_BODY && Instant::now() < until {
         match stream.read(&mut sink) {
             Ok(0) | Err(_) => break,
             Ok(n) => drained += n,
