@@ -13,6 +13,7 @@ From a line-by-line audit of 1.2.0. `MIGRATION.md` lists each difference from 0.
 
 Part A: wire, security and storage; `tests/wire_storage.rs` and `tests/http_security.rs` have a test for each.
 Part B: locks, hooks, CLI output and tests; `tests/locks_hooks_cli.rs` has a test for each.
+Part C: documents, release tooling and clippy; the tool's behaviour does not change.
 
 ### Security
 - The HTTP auth token comes from the operating system's random generator on every platform, and `serve` / `serve-sse` do not start without it; on Windows 1.0 to 1.2 used the clock (a timestamp followed by sixteen zeros). Tokens are compared in constant time
@@ -79,6 +80,18 @@ Part B: locks, hooks, CLI output and tests; `tests/locks_hooks_cli.rs` has a tes
 ### Documented
 - README: CLI exit codes; a quiet (reaped) agent keeps its locks until their TTL runs out
 - README: the store (strict JSON, torn records, retention, compaction, durability) and the HTTP server (where the token is and who can read it, status codes)
+- `AGENTS.md` is rewritten for the Rust tree (it described the Python package, SQLite, WAL and pytest): module map, how the store works, the checks a pull request must pass, the hard rules, and tool groups with the single-agent setting `coordinationhub: tools core` (also in README, which suggested `tools tasks`). `CLAUDE.md` points to it. `tests/doc_paths.rs` fails when `AGENTS.md`, `CLAUDE.md` or `COMPLETE_PROJECT_DOCUMENTATION.md` names a path that is not in the tree
+- Tool counts: 54 MCP tools, the 53 schemas in `assets/tools.json` plus `who` (`COMPLETE_PROJECT_DOCUMENTATION.md` said 50)
+- `SECURITY_FIXES.md` lists the 1.3.0 security and storage fixes with the Rust file for each; the 0.8.0 audit stays as history
+- `RELEASING.md` and `scripts/release.sh` describe the real release: bump the version (every place is listed), merge, tag `vX.Y.Z` on main, and `release.yml` builds and publishes. The script checks the tree and prints the tag command; it no longer runs pytest, edits a Python file, tags or pushes. `scripts/hooks/pre-commit` runs the std-only checks instead of the Python doc generator
+
+### Removed
+- Files generated from the Python tree: `docs/wiki/` (90 files), `wiki-local/` (3), `journal/` (2), `library.md`, `file_health.json`, `file_health.md`, `pending_updates.md`, `monitored_paths.txt`, `exclude_patterns.txt`; and `scripts/check_stale_drift.sh`, which ran the Python-tree doc tools on this tree. They remain at the tag `pre-rust-python-legacy`
+- `IMPLEMENTATION_PLAN_HA_SPAWNER.md`: the coordinator lease and the spawn registry it planned are in the Rust tree; its read-replica stage is not needed (every process reads the journal; `--replica` has no effect)
+- `coordination_spec.yaml` and `coordination_spec.json` at the root: nothing read them (the YAML hid the JSON, and YAML is not read)
+
+### Build
+- `cargo clippy --all-targets -- -D warnings` is clean on Rust 1.83 and runs in CI on Linux, macOS and Windows (34 warnings fixed without changing a reply)
 
 ## [1.2.0] - 2026-11-11
 
