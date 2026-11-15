@@ -1,5 +1,5 @@
 {
-  "tools_version": "1.2.0",
+  "tools_version": "1.3.0",
   "tools": {
     "register_agent": {
       "description": "Join the hub at the start of your work, before taking locks or tasks: returns who else is active, which files are locked and recent changes. Pass worktree_root when you work in your own git worktree.",
@@ -457,7 +457,7 @@
         "properties": {
           "since": {
             "type": "number",
-            "description": "Unix timestamp to poll from",
+            "description": "Unix timestamp to poll from. Rows older than seven days are dropped (COORDINATIONHUB_EVENTS_MAX_AGE_S)",
             "default": null
           },
           "exclude_agent": {

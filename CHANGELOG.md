@@ -7,9 +7,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-## [1.3.0]
+## [1.3.0] - 2026-11-15
 
-Part B: locks, hooks, CLI output and tests. `MIGRATION.md` lists each difference from 0.8.0; `tests/locks_hooks_cli.rs` has a test for each.
+From a line-by-line audit of 1.2.0. `MIGRATION.md` lists each difference from 0.8.0.
+
+Part A: wire, security and storage; `tests/wire_storage.rs` and `tests/http_security.rs` have a test for each.
+Part B: locks, hooks, CLI output and tests; `tests/locks_hooks_cli.rs` has a test for each.
+
+### Security
+- The HTTP auth token comes from the operating system's random generator on every platform, and `serve` / `serve-sse` do not start without it; on Windows 1.0 to 1.2 used the clock (a timestamp followed by sixteen zeros). Tokens are compared in constant time
+- The dashboard page no longer contains the token (it was in a `<meta>` tag that `GET /` served without credentials). `serve-sse` prints and opens `http://host:port/#token=<token>`; the page reads the fragment, keeps the token for the tab and sends it as a bearer header
+- HTTP requests must name the server in `Host` (`421` otherwise), must not carry another site's `Origin` (`403`), and `POST /call` must be `application/json` (`415`): another web page or a DNS name pointed at 127.0.0.1 can no longer use the hub
+- `--no-auth` with a non-loopback `--host` is refused; a non-loopback `--host` with auth prints a warning
+- A request nested 100,000 deep no longer overflows the stack and kills `serve-mcp` or `serve-sse`: nesting is limited to 128 levels
+- At most 256 HTTP connections are served at once (`COORDINATIONHUB_MAX_CONNECTIONS`), then `503`
+- An MCP `Content-Length` frame is capped at 1,000,000 bytes instead of allocating whatever the header says
+- `~/.coordinationhub/dashboard.log`, which holds the token, is created with mode 0600 on Unix and an existing file is set to it
 
 ### Fixed
 - Region locks are inclusive and 1-based (10-20 and 20-30 conflict on line 20); a region with one end, a start after its end or a line below 1 is refused with the field and the rule, in every lock tool and the CLI
@@ -22,6 +35,14 @@ Part B: locks, hooks, CLI output and tests. `MIGRATION.md` lists each difference
 - `load-spec`, `validate-spec` and `doctor` exit 1 on failure
 - `watch` writes no escape codes to a pipe or with `NO_COLOR`
 - `check_zero_deps` also refuses target-specific, workspace and underscore-spelled dependency tables and a `package.build` script
+- A number that is not finite can no longer reach the journal: `"ttl": 1e400` made 1.2.0 write `Infinity`, after which every command failed with `unexpected JSON byte I`. Such numbers are refused (MCP, HTTP and the CLI's `--ttl inf`), every number in a tool call must lie between -1e15 and 1e15, and replies never contain `NaN` or `Infinity`
+- A store 1.2.0 damaged that way opens with no hand edit: the rows get finite values and the journal is rewritten once
+- An incomplete or unparseable last journal record (a write that did not finish) is cut off and kept in `coordination.jsonl.<UTC time>.torn` instead of failing every command; no record is ever appended onto a partial line. A bad record in the middle is an error naming the line and the recovery step
+- JSON is read strictly: `01`, `1.`, `-.5`, raw control characters in strings, trailing bytes and duplicate object keys (named in the error) are refused
+- MCP `Content-Length` frames with more than one header line work; a bad frame or bytes that are not UTF-8 get a JSON-RPC error instead of ending the server
+- HTTP requests are read as bytes to their exact `Content-Length`: a body with a blank line in it is no longer cut, a character split across packets is no longer corrupted, and the body is parsed once
+- The dashboard shows data while auth is on (it sent no token before), keeps its `<!DOCTYPE html>`, and shows a banner with the time of the last update when the server is unreachable or the data is stale
+- The browser opener's child process is waited for
 
 ### Changed
 - `register_agent` refuses IDs over 256 characters or with control characters or line breaks
@@ -32,9 +53,21 @@ Part B: locks, hooks, CLI output and tests. `MIGRATION.md` lists each difference
 - `get_agent_status` adds `locks` with each lock's type, region and expiry
 - `tests/surface.rs` checks every reply instead of discarding it
 - CI workflows run with `contents: read` and pin third-party actions to commit SHAs
+- Hub events, change notifications and claim events older than seven days (`COORDINATIONHUB_EVENTS_MAX_AGE_S`) are dropped by housekeeping and by calls on a large journal; each agent's last lifecycle event and open lock-lapse warnings are kept
+- A journal over 1 MiB (`COORDINATIONHUB_COMPACT_MIN_BYTES`) with more than twice as many records as live rows is rewritten as a snapshot; other servers and processes on the store reload on their next call. A 1.2.0 process sharing the store may not (see `MIGRATION.md`)
+- `/events` builds the dashboard only when the store has changed and sends a keepalive every 2 s instead of every 0.2 s
+- HTTP errors: `411` without `Content-Length`, `431` for oversized headers, `408` for a slow request, `501` for `Transfer-Encoding`; `Invalid JSON` says why
+- Dashboard page: text contrast at least 4.5:1, fonts at least 12 px, labelled zoom buttons, a `main` landmark
+- `tools_version` is `1.3.0`
+- Tests bind port 0 instead of fixed ports
+
+### Added
+- `COORDINATIONHUB_FSYNC=1` syncs the journal after each commit (off by default; the README explains the trade-off)
+- `doctor` lists torn records that were cut off the journal (`journal_tail`)
 
 ### Documented
 - README: CLI exit codes; a quiet (reaped) agent keeps its locks until their TTL runs out
+- README: the store (strict JSON, torn records, retention, compaction, durability) and the HTTP server (where the token is and who can read it, status codes)
 
 ## [1.2.0] - 2026-11-11
 
