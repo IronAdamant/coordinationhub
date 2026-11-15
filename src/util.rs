@@ -27,8 +27,10 @@ pub fn local_stamp(epoch: f64) -> String {
             fn localtime_r(timep: *const i64, result: *mut Tm) -> *mut Tm;
         }
         let mut tm = unsafe { std::mem::zeroed::<Tm>() };
-        unsafe {
-            localtime_r(&secs, &mut tm);
+        // NULL means the time could not be converted (out of range, or no
+        // time zone data); `tm` is then undefined, so show UTC instead.
+        if unsafe { localtime_r(&secs, &mut tm) }.is_null() {
+            return utc_stamp(secs);
         }
         return format!(
             "{:04}-{:02}-{:02} {:02}:{:02}:{:02}",
@@ -72,7 +74,9 @@ pub fn local_stamp(epoch: f64) -> String {
             ) -> i32;
         }
         const EPOCH_DIFFERENCE_SECS: i64 = 11_644_473_600;
-        let ticks = ((secs + EPOCH_DIFFERENCE_SECS).max(0) as u64) * 10_000_000;
+        let Some(ticks) = (secs.saturating_add(EPOCH_DIFFERENCE_SECS).max(0) as u64).checked_mul(10_000_000) else {
+            return utc_stamp(secs);
+        };
         let file_time = FileTime {
             low: ticks as u32,
             high: (ticks >> 32) as u32,
@@ -80,7 +84,9 @@ pub fn local_stamp(epoch: f64) -> String {
         let mut universal = SystemTimeParts::default();
         let mut local = SystemTimeParts::default();
         unsafe {
-            FileTimeToSystemTime(&file_time, &mut universal);
+            if FileTimeToSystemTime(&file_time, &mut universal) == 0 {
+                return utc_stamp(secs);
+            }
             if SystemTimeToTzSpecificLocalTime(std::ptr::null(), &universal, &mut local) == 0 {
                 local = universal;
             }
@@ -91,6 +97,28 @@ pub fn local_stamp(epoch: f64) -> String {
             local.year, local.month, local.day, local.hour, local.minute, local.second
         )
     }
+}
+
+/// `secs` since the Unix epoch as a UTC `YYYY-MM-DD HH:MM:SS` stamp, for
+/// when the local conversion fails. Civil-from-days (H. Hinnant).
+pub fn utc_stamp(secs: i64) -> String {
+    let days = secs.div_euclid(86_400);
+    let rest = secs.rem_euclid(86_400);
+    let z = days + 719_468;
+    let era = z.div_euclid(146_097);
+    let doe = z.rem_euclid(146_097);
+    let yoe = (doe - doe / 1460 + doe / 36_524 - doe / 146_096) / 365;
+    let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
+    let mp = (5 * doy + 2) / 153;
+    let day = doy - (153 * mp + 2) / 5 + 1;
+    let month = if mp < 10 { mp + 3 } else { mp - 9 };
+    let year = yoe + era * 400 + i64::from(month <= 2);
+    format!(
+        "{year:04}-{month:02}-{day:02} {:02}:{:02}:{:02} UTC",
+        rest / 3600,
+        rest % 3600 / 60,
+        rest % 60
+    )
 }
 
 pub fn now() -> f64 {
