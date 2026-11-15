@@ -664,7 +664,7 @@ fn payloads_an_older_version_stored_stay_readable() {
         }
         // An event payload with a repeated key and a number that is not
         // finite: the lifecycle reader must still see it.
-        engine.store.state.record_event("agent.reaped", json::s("placeholder"));
+        engine.store.state.record_event("agent.reaped", json::s("replaced below"));
         engine.store.state.hub_events.last_mut().unwrap().payload =
             "{\"agent_id\": \"a1\", \"agent_id\": \"a1\", \"at\": Infinity}".to_string();
         engine.store.commit().unwrap();
