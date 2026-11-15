@@ -441,6 +441,24 @@ pub fn lock_wait_s() -> f64 {
     }
 }
 
+impl FileLock {
+    /// The lock file's length in bytes. The journal counts its compactions
+    /// here (one byte each, see `db::Store::compact`): the lock file is
+    /// open on every call anyway and is never read for its content, so
+    /// this is the cheapest exact signal that the journal was replaced.
+    pub fn size(&self) -> u64 {
+        self.file.metadata().map(|meta| meta.len()).unwrap_or(0)
+    }
+
+    /// Makes the lock file one byte longer. Only the holder calls this.
+    pub fn grow(&mut self) -> Result<(), Error> {
+        use std::io::{Seek, SeekFrom, Write};
+        self.file.seek(SeekFrom::End(0))?;
+        self.file.write_all(b"c")?;
+        self.file.flush()
+    }
+}
+
 impl Drop for FileLock {
     fn drop(&mut self) {
         let _ = unlock(&self.file);

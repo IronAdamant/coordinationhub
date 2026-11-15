@@ -11,8 +11,11 @@
 //!   lands on a partial line.
 //! - A journal that has grown large against the live rows is replaced by a
 //!   snapshot, one record per row, through a synced temporary file and a
-//!   rename (`Store::compact`). Its first line carries a generation id that
-//!   tells an engine holding an offset into the old file to reload.
+//!   rename (`Store::compact`). Each compaction makes the lock file one
+//!   byte longer; an engine holding an offset into the old file sees that
+//!   count move and reloads, whatever the new file's length. The snapshot's
+//!   first line also carries a generation id, checked whenever the journal
+//!   is opened.
 //!
 //! Numbers are stored finite (`json::finite`); a journal 1.2.0 wrote
 //! `Infinity` or `NaN` into is read, repaired and rewritten.
@@ -359,10 +362,14 @@ pub struct Store {
     offset: u64,
     lock: Option<FileLock>,
     clean: bool,
+    /// How many times the journal has been replaced by a snapshot, as
+    /// last seen: the length of the lock file, which every compaction
+    /// makes one byte longer. An engine holding an offset into an older
+    /// file sees the count move and reloads, whatever the new length.
+    epoch: u64,
     /// The id on the journal's first line (empty before the first
-    /// compaction). A compaction writes a new one, so an engine holding an
-    /// offset into the old file sees the change and reloads, whatever the
-    /// new file's length.
+    /// compaction). Checked whenever the journal is opened, so a file
+    /// replaced by other means (a restore, a hand repair) is noticed too.
     generation: String,
     /// Records in the journal up to `offset`.
     lines: u64,
@@ -409,6 +416,7 @@ impl Store {
         let lock =
             FileLock::exclusive(&dir.join("coordination.lock")).map_err(|e| busy(&dir.join("coordination.lock"), e))?;
         let loaded = load_journal(&path)?;
+        let epoch = lock.size();
         drop(lock);
         let mut store = Self {
             path,
@@ -417,6 +425,7 @@ impl Store {
             offset: loaded.offset,
             lock: None,
             clean: true,
+            epoch,
             generation: loaded.generation,
             lines: loaded.lines,
             maintain_at: compact_min_bytes().unwrap_or(u64::MAX),
@@ -478,18 +487,34 @@ impl Store {
 
     /// Reads what other engines and processes appended since this one last
     /// looked. Runs under the exclusive file lock. True when state changed.
+    ///
+    /// The journal is opened only when something happened to it. When the
+    /// compaction count and the length are what this engine last saw,
+    /// nobody wrote, and the call costs two metadata lookups. (Opening a
+    /// file that was just written makes a virus scanner read it again:
+    /// some 20 ms a call on Windows.)
     fn catch_up(&mut self) -> Result<bool, String> {
         use std::io::{Read, Seek, SeekFrom};
-        let mut file = match std::fs::File::open(&self.path) {
-            Ok(file) => file,
+        let epoch = self.lock.as_ref().map(FileLock::size).unwrap_or(self.epoch);
+        let len = match std::fs::metadata(&self.path) {
+            Ok(meta) => meta.len(),
             Err(err) if err.kind() == std::io::ErrorKind::NotFound => return Ok(false),
-            Err(err) => return Err(format!("cannot open {}: {err}", self.path.display())),
+            Err(err) => return Err(format!("cannot read {}: {err}", self.path.display())),
         };
-        let len = file.metadata().map_err(|e| e.to_string())?.len();
-        // The journal was replaced (compacted, or repaired by hand) when its
-        // first line no longer carries the generation this state was read
-        // from. Length cannot show that: a compacted file may be longer
+        // The journal was replaced by a snapshot when the compaction count
+        // moved. Length cannot show that: a compacted file may be longer
         // than the offset an idle engine still holds.
+        if epoch != self.epoch || len < self.offset {
+            self.epoch = epoch;
+            return self.reload();
+        }
+        if len == self.offset {
+            return Ok(false);
+        }
+        let mut file = std::fs::File::open(&self.path)
+            .map_err(|err| format!("cannot open {}: {err}", self.path.display()))?;
+        // The file is open anyway: its first line must still carry the
+        // generation this state was read from.
         let mut head = [0_u8; GENERATION_HEAD];
         let mut got = 0;
         while got < head.len() {
@@ -498,18 +523,9 @@ impl Store {
                 n => got += n,
             }
         }
-        if generation_of(&head[..got]) != self.generation || len < self.offset {
+        if generation_of(&head[..got]) != self.generation {
             drop(file);
-            let loaded = load_journal(&self.path)?;
-            self.state = loaded.state;
-            self.offset = loaded.offset;
-            self.generation = loaded.generation;
-            self.lines = loaded.lines;
-            self.rewrite_due |= loaded.repaired;
-            return Ok(true);
-        }
-        if len == self.offset {
-            return Ok(false);
+            return self.reload();
         }
         file.seek(SeekFrom::Start(self.offset))
             .map_err(|e| e.to_string())?;
@@ -524,6 +540,17 @@ impl Store {
         self.rewrite_due |= progress.repaired;
         result?;
         Ok(progress.bytes > 0)
+    }
+
+    /// Drops this engine's state and reads the whole journal again.
+    fn reload(&mut self) -> Result<bool, String> {
+        let loaded = load_journal(&self.path)?;
+        self.state = loaded.state;
+        self.offset = loaded.offset;
+        self.generation = loaded.generation;
+        self.lines = loaded.lines;
+        self.rewrite_due |= loaded.repaired;
+        Ok(true)
     }
 
     pub fn commit(&mut self) -> Result<(), String> {
@@ -617,12 +644,17 @@ impl Store {
     }
 
     /// Rewrites the journal as one record per live row, under the exclusive
-    /// lock the caller holds. The snapshot goes to a temporary file that is
-    /// synced and then renamed over the journal, so a reader sees the old
-    /// file or the new one, never half of either. Its first line carries a
-    /// new generation id (see `catch_up`).
+    /// lock the caller holds (`begin` first). The snapshot goes to a
+    /// temporary file that is synced and then renamed over the journal, so
+    /// a reader sees the old file or the new one, never half of either.
+    /// Before the rename the lock file grows by one byte, which is how
+    /// every other engine learns the journal was replaced (see `catch_up`);
+    /// the snapshot's first line also carries a new generation id.
     pub fn compact(&mut self) -> Result<(), String> {
         use std::io::Write;
+        if self.lock.is_none() {
+            return Err("compact needs the store lock: call begin first".into());
+        }
         let generation = new_generation();
         // With no digests every row counts as changed: the lines are the
         // whole state, and the digests end up matching it again.
@@ -636,13 +668,20 @@ impl Store {
             text.push('\n');
         }
         let temp = self.path.with_file_name(format!("coordination.jsonl.compact-{}", std::process::id()));
+        let lock = self.lock.as_mut();
         let written = (|| -> std::io::Result<()> {
             let mut file = std::fs::File::create(&temp)?;
             file.write_all(text.as_bytes())?;
             file.sync_all()?;
             drop(file);
+            // Count first: a count with no rename after it only makes the
+            // others reload once; a rename with no count would go unseen.
+            if let Some(lock) = lock {
+                lock.grow()?;
+            }
             replace_file(&temp, &self.path)
         })();
+        self.epoch = self.lock.as_ref().map(FileLock::size).unwrap_or(self.epoch);
         if let Err(err) = written {
             let _ = std::fs::remove_file(&temp);
             return Err(format!("cannot replace {}: {err}", self.path.display()));

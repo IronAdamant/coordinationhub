@@ -385,7 +385,11 @@ fn requests_must_be_strict_json() {
     // Nothing above registered an agent; a well-formed request still works.
     let agents = s.ok("list_agents", "{}");
     assert_eq!(agents.get("agents").and_then(Value::as_array).map(|rows| rows.len()), Some(0));
-    s.ok("register_agent", r#"{"agent_id":"a\tb"}"#);
+    // The same control character written as an escape is fine.
+    s.ok("register_agent", r#"{"agent_id":"a"}"#);
+    s.ok("create_task", r#"{"task_id":"t","parent_agent_id":"a","description":"tab\there"}"#);
+    drop(s);
+    assert_eq!(open(&hub).store.state.tasks[0].description, "tab\there");
 }
 
 // ---------------------------------------------------------------- A4
