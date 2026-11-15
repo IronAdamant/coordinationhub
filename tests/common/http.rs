@@ -8,6 +8,7 @@ use std::io::{BufRead, BufReader, Read, Write};
 use std::net::TcpStream;
 use std::process::{Child, Command, Stdio};
 use std::sync::mpsc::{channel, Receiver};
+use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 pub struct HttpServer {
@@ -16,6 +17,7 @@ pub struct HttpServer {
     lines: Receiver<String>,
     /// Every stdout line read so far, banner first.
     pub seen: Vec<String>,
+    errors: Arc<Mutex<String>>,
 }
 
 impl HttpServer {
@@ -50,7 +52,20 @@ impl HttpServer {
                 }
             }
         });
-        let mut server = HttpServer { child, port: 0, lines, seen: Vec::new() };
+        // stderr is collected as it comes, so a warning can be read while
+        // the server runs and a refusal after it exits.
+        let errors = Arc::new(Mutex::new(String::new()));
+        let stderr = child.stderr.take().expect("piped stderr");
+        let sink = errors.clone();
+        let reading = std::thread::spawn(move || {
+            for line in BufReader::new(stderr).lines() {
+                let Ok(line) = line else { break };
+                let mut text = sink.lock().unwrap();
+                text.push_str(&line);
+                text.push('\n');
+            }
+        });
+        let mut server = HttpServer { child, port: 0, lines, seen: Vec::new(), errors };
         match server.line_with("Starting ", Duration::from_secs(30)) {
             Some(line) => {
                 let digits: String = line
@@ -65,14 +80,22 @@ impl HttpServer {
             }
             None => {
                 let _ = server.child.kill();
-                let mut text = String::new();
-                if let Some(mut stderr) = server.child.stderr.take() {
-                    let _ = stderr.read_to_string(&mut text);
-                }
                 let _ = server.child.wait();
-                Err(text)
+                let _ = reading.join();
+                Err(server.stderr())
             }
         }
+    }
+
+    /// Everything the server has written to stderr so far.
+    pub fn stderr(&self) -> String {
+        self.errors.lock().unwrap().clone()
+    }
+
+    /// Stops the server (as Ctrl+C would) and waits for it to exit.
+    pub fn stop(&mut self) {
+        let _ = self.child.kill();
+        let _ = self.child.wait();
     }
 
     /// The first stdout line containing `needle`, waiting up to `limit`.
