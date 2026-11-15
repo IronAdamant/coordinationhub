@@ -4,11 +4,14 @@
 //! up other calls, and the store lock cannot hang a call.
 
 mod common;
+#[path = "common/http.rs"]
+mod http_server;
 
 use common::{tool_text, Hub, Server};
+use http_server::HttpServer;
 use coordinationhub::json::{self, Value};
 use std::io::{Read, Write};
-use std::process::{Command, Stdio};
+use std::process::Command;
 use std::time::{Duration, Instant};
 
 fn reply(result: &Value) -> Value {
@@ -407,41 +410,27 @@ fn a_failed_read_releases_the_store_lock() {
 #[test]
 fn http_waits_do_not_hold_up_other_calls() {
     let hub = Hub::new("http");
-    let mut child = Command::new(env!("CARGO_BIN_EXE_coordinationhub"))
-        .args(["serve", "--port", "9874", "--no-auth", "--storage-dir"])
-        .arg(&hub.store)
-        .arg("--project-root")
-        .arg(&hub.project)
-        .env("COORDINATIONHUB_HOUSEKEEPING", "0")
-        .stdout(Stdio::null())
-        .stderr(Stdio::null())
-        .spawn()
-        .unwrap();
-    let post = |body: &str| -> String {
-        let mut sock = None;
-        for _ in 0..50 {
-            if let Ok(stream) = std::net::TcpStream::connect("127.0.0.1:9874") {
-                sock = Some(stream);
-                break;
-            }
-            std::thread::sleep(Duration::from_millis(100));
-        }
-        let mut sock = sock.expect("server did not start");
+    // Port 0: the system picks a free port and the banner names it.
+    let server = HttpServer::start(
+        "serve",
+        &[
+            "--no-auth",
+            "--storage-dir",
+            &hub.store.display().to_string(),
+            "--project-root",
+            &hub.project.display().to_string(),
+        ],
+        &[],
+    );
+    server.call(r#"{"tool":"register_agent","arguments":{"agent_id":"h"}}"#, &[]);
+    let (port, host) = (server.port, server.host());
+    let waiter = std::thread::spawn(move || {
+        let mut sock = std::net::TcpStream::connect(("127.0.0.1", port)).unwrap();
+        let body = r#"{"tool":"get_notifications","arguments":{"timeout_s":3}}"#;
         let request = format!(
-            "POST /call HTTP/1.1\r\nHost: x\r\nContent-Type: application/json\r\nContent-Length: {}\r\n\r\n{body}",
+            "POST /call HTTP/1.1\r\nHost: {host}\r\nContent-Type: application/json\r\nContent-Length: {}\r\n\r\n{body}",
             body.len()
         );
-        sock.write_all(request.as_bytes()).unwrap();
-        sock.set_read_timeout(Some(Duration::from_secs(10))).unwrap();
-        let mut out = String::new();
-        let _ = sock.read_to_string(&mut out);
-        out
-    };
-    post(r#"{"tool":"register_agent","arguments":{"agent_id":"h"}}"#);
-    let waiter = std::thread::spawn(move || {
-        let mut sock = std::net::TcpStream::connect("127.0.0.1:9874").unwrap();
-        let body = r#"{"tool":"get_notifications","arguments":{"timeout_s":3}}"#;
-        let request = format!("POST /call HTTP/1.1\r\nHost: x\r\nContent-Length: {}\r\n\r\n{body}", body.len());
         sock.write_all(request.as_bytes()).unwrap();
         let mut out = String::new();
         let _ = sock.read_to_string(&mut out);
@@ -449,10 +438,9 @@ fn http_waits_do_not_hold_up_other_calls() {
     });
     std::thread::sleep(Duration::from_millis(300));
     let started = Instant::now();
-    let answer = post(r#"{"tool":"heartbeat","arguments":{"agent_id":"h"}}"#);
+    let answer = server.call(r#"{"tool":"heartbeat","arguments":{"agent_id":"h"}}"#, &[]);
     assert!(answer.contains("\"updated\": true"), "{answer}");
     assert!(started.elapsed() < Duration::from_secs(2), "{:?}", started.elapsed());
-    assert!(waiter.join().unwrap().contains("timed_out"));
-    let _ = child.kill();
-    let _ = child.wait();
+    let waited = waiter.join().unwrap();
+    assert!(waited.contains("timed_out"), "{waited}");
 }

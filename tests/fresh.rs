@@ -3,11 +3,11 @@
 use coordinationhub::hooks;
 use coordinationhub::json::{self, Value};
 use coordinationhub::Engine;
-use std::io::{Read, Write};
-use std::net::TcpStream;
+#[path = "common/http.rs"]
+mod http_server;
+
 use std::path::PathBuf;
-use std::process::{Command, Stdio};
-use std::time::Duration;
+use std::process::Command;
 
 fn engine(name: &str) -> (Engine, PathBuf) {
     let dir = std::env::temp_dir().join(format!(
@@ -291,32 +291,15 @@ fn lock_conflict_exits_four() {
 
 #[test]
 fn events_require_a_token() {
-    let bin = env!("CARGO_BIN_EXE_coordinationhub");
     let dir = std::env::temp_dir().join(format!("chub-http-{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&dir);
     std::fs::create_dir_all(&dir).unwrap();
-    let mut child = Command::new(bin)
-        .args([
-            "serve",
-            "--storage-dir",
-            &dir.to_string_lossy(),
-            "--port",
-            "9871",
-            "--auth-token",
-            "maple-token",
-        ])
-        .env("COORDINATIONHUB_HOUSEKEEPING", "0")
-        .stdout(Stdio::null())
-        .stderr(Stdio::null())
-        .spawn()
-        .unwrap();
-    std::thread::sleep(Duration::from_millis(200));
-    let mut sock = TcpStream::connect("127.0.0.1:9871").unwrap();
-    sock.write_all(b"GET /events HTTP/1.1\r\nHost: 127.0.0.1\r\n\r\n").unwrap();
-    sock.set_read_timeout(Some(Duration::from_secs(2))).unwrap();
-    let mut buf = [0_u8; 400];
-    let n = sock.read(&mut buf).unwrap_or(0);
-    let text = String::from_utf8_lossy(&buf[..n]);
+    // Port 0: the system picks a free port and the banner names it.
+    let server = http_server::HttpServer::start(
+        "serve",
+        &["--storage-dir", &dir.to_string_lossy(), "--auth-token", "maple-token"],
+        &[],
+    );
+    let text = server.get("/events", &[]);
     assert!(text.contains("401"), "{text}");
-    let _ = child.kill();
 }
