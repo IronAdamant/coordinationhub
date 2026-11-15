@@ -499,7 +499,7 @@ fn a_torn_final_record_is_cut_off_and_kept() {
 }
 
 #[test]
-fn a_tail_cut_inside_a_character_or_not_json_is_torn_too() {
+fn an_unreadable_last_record_is_moved_out_and_named_for_what_it_is() {
     // A multi-byte character split by the cut: the tail is not UTF-8.
     let hub = Hub::new("torn-utf8");
     assert_eq!(hub.run(&["register", "a"]).code, 0);
@@ -511,16 +511,215 @@ fn a_tail_cut_inside_a_character_or_not_json_is_torn_too() {
     assert_eq!(journal_text(&hub), before);
     assert_eq!(std::fs::read(&torn_files(&hub)[0]).unwrap(), tail);
 
-    // A whole line that is not JSON, with only blank space after it.
-    let hub = Hub::new("torn-line");
+    // A whole line that is not a record, with only blank space after it:
+    // moved out as well, but named for what it is, not as a torn write.
+    let hub = Hub::new("unreadable-line");
     assert_eq!(hub.run(&["register", "a"]).code, 0);
     let before = journal_text(&hub);
-    append(&journal(&hub), b"{not json\n\n  \n");
+    append(&journal(&hub), b"garbage\n\n  \n");
     let out = hub.run(&["heartbeat", "a"]);
     assert_eq!(out.code, 0, "{}", out.stderr);
+    assert!(out.stderr.contains("is complete but is not a record this hub can read"), "{}", out.stderr);
+    assert!(out.stderr.contains(".unreadable"), "{}", out.stderr);
+    assert!(!out.stderr.contains("did not finish"), "a whole line was called an unfinished write: {}", out.stderr);
     assert!(journal_text(&hub).starts_with(&before));
     assert_strict(&hub);
-    assert_eq!(std::fs::read(&torn_files(&hub)[0]).unwrap(), b"{not json\n\n  \n");
+    assert!(torn_files(&hub).is_empty(), "a whole line was filed as a torn write");
+    let kept = coordinationhub::db::unreadable_files(&hub.store);
+    assert_eq!(kept.len(), 1, "{kept:?}");
+    assert_eq!(std::fs::read(&kept[0]).unwrap(), b"garbage\n\n  \n");
+    // doctor says which kind each kept file is.
+    let doctor = hub.run(&["doctor"]).stdout;
+    let line = doctor.lines().find(|line| line.contains("journal_tail")).unwrap_or("");
+    assert!(line.contains("1 complete final line(s) that were not readable records"), "{doctor}");
+    assert!(!line.contains("unfinished write"), "{doctor}");
+}
+
+/// `doctor` reads the journal as the hub does. 1.3.0's first build said
+/// `[FAIL] schema_version ... Infinity is not a JSON number` about a store
+/// the hub opens and repairs, while the hub's own error sends people to
+/// `doctor`.
+#[test]
+fn doctor_agrees_with_the_hub_about_the_journal() {
+    // A store 1.2.0 bricked: the hub opens it, so doctor does not fail,
+    // says what is in it and what happens next, and changes nothing.
+    let hub = Hub::new("doctor-bricked");
+    std::fs::write(journal(&hub), BRICKED).unwrap();
+    let out = hub.run(&["doctor"]);
+    assert_eq!(out.code, 0, "{}{}", out.stdout, out.stderr);
+    let line = out.stdout.lines().find(|line| line.contains("schema_version")).unwrap_or("");
+    assert!(line.contains("[OK  ]"), "{}", out.stdout);
+    assert!(line.contains("3 record(s) hold numbers that are not JSON (Infinity or NaN"), "{line}");
+    assert!(line.contains("the next coordinationhub command on this store replaces them"), "{line}");
+    assert_eq!(journal_text(&hub), BRICKED, "doctor changed the journal");
+    assert_eq!(hub.run(&["status"]).code, 0);
+    let after = hub.run(&["doctor"]).stdout;
+    assert!(after.contains("[OK  ] schema_version: journal parses; schema is current"), "{after}");
+
+    // An unfinished last record: reported, not failed, and left for the
+    // next command to cut off.
+    let hub = Hub::new("doctor-torn");
+    assert_eq!(hub.run(&["register", "a"]).code, 0);
+    append(&journal(&hub), b"{\"t\":\"put\",\"table\":\"locks\",\"row\":{\"id\": 9");
+    let pending = journal_text(&hub);
+    let out = hub.run(&["doctor"]);
+    assert_eq!(out.code, 0, "{}", out.stdout);
+    let line = out.stdout.lines().find(|line| line.contains("schema_version")).unwrap_or("");
+    assert!(line.contains("[OK  ]") && line.contains("the last record is an unfinished write (41 bytes)"), "{line}");
+    assert!(line.contains(".torn"), "{line}");
+    assert_eq!(journal_text(&hub), pending, "doctor changed the journal");
+    assert!(torn_files(&hub).is_empty());
+
+    // What the hub refuses, doctor fails, with the hub's own words.
+    let hub = Hub::new("doctor-bad");
+    assert_eq!(hub.run(&["register", "a"]).code, 0);
+    let lines = journal_text(&hub).lines().count();
+    append(&journal(&hub), b"garbage\n{\"t\":\"del\",\"table\":\"locks\",\"id\":\"9\"}\n");
+    let refused = hub.run(&["status"]);
+    assert_ne!(refused.code, 0);
+    let out = hub.run(&["doctor"]);
+    assert_eq!(out.code, 1, "{}", out.stdout);
+    let line = out.stdout.lines().find(|line| line.contains("schema_version")).unwrap_or("");
+    assert!(line.contains("[FAIL]"), "{}", out.stdout);
+    assert!(line.contains(&format!("line {} cannot be read", lines + 1)), "{line}");
+    assert!(refused.stderr.contains(&format!("line {} cannot be read", lines + 1)), "{}", refused.stderr);
+}
+
+/// A whole last record without a line feed is applied exactly once, even
+/// when the line feed cannot be written at first. Applied before the write
+/// (as 1.3.0's first build did), every failed call applied it again, and
+/// the acknowledgement tables, which are appended to, grew a row each time.
+#[test]
+fn a_last_record_without_a_line_feed_is_applied_exactly_once() {
+    let hub = Hub::new("once");
+    let mut engine = open(&hub);
+    call(&mut engine, "register_agent", r#"{"agent_id":"a"}"#);
+    // Another writer leaves a whole record with no line feed.
+    append(
+        &journal(&hub),
+        b"{\"t\":\"put\",\"table\":\"handoff_acks\",\"row\":{\"handoff_id\": 1, \"agent_id\": \"a\", \"acknowledged_at\": 5.0}}",
+    );
+    // While the journal cannot be written, the line feed cannot be added.
+    let writable = std::fs::metadata(journal(&hub)).unwrap().permissions();
+    let mut locked = writable.clone();
+    locked.set_readonly(true);
+    std::fs::set_permissions(journal(&hub), locked).unwrap();
+    let blocked = std::fs::OpenOptions::new().append(true).open(journal(&hub)).is_err();
+    let mut failures = 0;
+    for _ in 0..3 {
+        if let Err(err) = engine.call("list_agents", &json::obj(vec![])) {
+            assert!(err.contains("cannot end the last record"), "{err}");
+            failures += 1;
+        }
+    }
+    #[allow(clippy::permissions_set_readonly_false)]
+    {
+        let mut restored = writable;
+        restored.set_readonly(false);
+        std::fs::set_permissions(journal(&hub), restored).unwrap();
+    }
+    // (A process that may write any file, root in a container, is never
+    // blocked; the count below must hold either way.)
+    assert_eq!(failures, if blocked { 3 } else { 0 });
+    assert!(engine.store.state.handoff_acks.len() <= 1, "{:?}", engine.store.state.handoff_acks);
+    call(&mut engine, "list_agents", "{}");
+    assert_eq!(engine.store.state.handoff_acks.len(), 1, "{:?}", engine.store.state.handoff_acks);
+    call(&mut engine, "heartbeat", r#"{"agent_id":"a"}"#);
+    assert_strict(&hub);
+    assert_eq!(open(&hub).store.state.handoff_acks.len(), 1);
+}
+
+/// What an older version stored must stay readable. 1.2.0 stored a
+/// payload with a repeated key or 300 levels of nesting; read back with
+/// the strict request parser, both came out as `"payload": null`, with no
+/// warning.
+#[test]
+fn payloads_an_older_version_stored_stay_readable() {
+    let hub = Hub::new("stored");
+    let deep = |levels: usize| format!("{{\"deep\": {}{}}}", "[".repeat(levels), "]".repeat(levels));
+    let stored: Vec<(&str, String)> = vec![
+        ("repeated", "{\"k\": 1, \"k\": 2}".to_string()),
+        ("deep", deep(300)),
+        ("plain", "{\"note\": \"hello\"}".to_string()),
+        ("too-deep", deep(400)),
+        ("not-finite", "{\"big\": Infinity}".to_string()),
+        ("not-json", "{oops".to_string()),
+    ];
+    {
+        let mut engine = open(&hub);
+        call(&mut engine, "register_agent", r#"{"agent_id":"a1"}"#);
+        call(&mut engine, "register_agent", r#"{"agent_id":"a2"}"#);
+        engine.store.begin().unwrap();
+        for (kind, text) in &stored {
+            let id = engine.store.state.next("messages");
+            engine.store.state.messages.push(coordinationhub::db::Message {
+                id,
+                from_agent_id: "a1".into(),
+                to_agent_id: "a2".into(),
+                message_type: kind.to_string(),
+                payload_json: Some(text.clone()),
+                created_at: 1_794_000_000.0 + id as f64,
+                read_at: None,
+            });
+        }
+        // An event payload with a repeated key and a number that is not
+        // finite: the lifecycle reader must still see it.
+        engine.store.state.record_event("agent.reaped", json::s("placeholder"));
+        engine.store.state.hub_events.last_mut().unwrap().payload =
+            "{\"agent_id\": \"a1\", \"agent_id\": \"a1\", \"at\": Infinity}".to_string();
+        engine.store.commit().unwrap();
+        engine.store.end();
+    }
+    // A fresh process, over the CLI and over MCP.
+    let cli = hub.run(&["get-messages", "a2", "--json"]);
+    assert_eq!(cli.code, 0, "{}", cli.stderr);
+    let mut s = Raw::start(&hub, &[]);
+    let (mcp, is_error) = tool_text(&s.call_text("manage_messages", r#"{"action":"get","agent_id":"a2"}"#));
+    assert!(!is_error, "{mcp}");
+    for (how, text) in [("cli", cli.stdout.as_str()), ("mcp", mcp.as_str())] {
+        // The reply nests deeper than a request may: read it as stored text.
+        let reply = json::parse_stored(text).unwrap_or_else(|err| panic!("{how}: {err}"));
+        let messages = reply.get("messages").and_then(Value::as_array).unwrap();
+        assert_eq!(messages.len(), stored.len(), "{how}");
+        let of = |kind: &str| {
+            messages
+                .iter()
+                .find(|row| row.get("message_type").and_then(Value::as_str) == Some(kind))
+                .unwrap_or_else(|| panic!("{how}: no {kind} message"))
+        };
+        for row in messages {
+            assert_ne!(row.get("payload"), Some(&Value::Null), "{how}: a stored payload came back null: {}", json::dumps(row));
+        }
+        // A repeated key: the last value, as 0.8.0 kept.
+        assert_eq!(of("repeated").get("payload"), Some(&json::obj(vec![("k", json::i(2))])), "{how}");
+        assert_eq!(of("plain").get("payload"), Some(&json::obj(vec![("note", json::s("hello"))])), "{how}");
+        // 300 levels: all of them.
+        let mut level = of("deep").get("payload").and_then(|payload| payload.get("deep")).unwrap();
+        let mut levels = 0;
+        while let Some(inner) = level.as_array() {
+            levels += 1;
+            match inner.first() {
+                Some(next) => level = next,
+                None => break,
+            }
+        }
+        assert_eq!(levels, 300, "{how}");
+        for kind in ["repeated", "plain", "deep"] {
+            assert!(of(kind).get("payload_unreadable").is_none(), "{how}: {kind}");
+        }
+        // What cannot be shown as JSON comes back as its stored text, with
+        // the reason beside it.
+        for (kind, why) in [("too-deep", "nested deeper than 320 levels"), ("not-finite", "not finite"), ("not-json", "object key must be a string")] {
+            let row = of(kind);
+            let text = &stored.iter().find(|(name, _)| *name == kind).unwrap().1;
+            assert_eq!(row.get("payload").and_then(Value::as_str), Some(text.as_str()), "{how}: {kind}");
+            let note = row.get("payload_unreadable").and_then(Value::as_str).unwrap_or("");
+            assert!(note.contains(why) && note.contains("its text as stored"), "{how}: {kind}: {note}");
+        }
+    }
+    drop(s);
+    let engine = open(&hub);
+    assert_eq!(act_identity::last_lifecycle(&engine.store.state, "a1"), Some("agent.reaped"));
 }
 
 /// A last record that is whole but lost its line feed (a hand edit, say)

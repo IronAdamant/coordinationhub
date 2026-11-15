@@ -158,7 +158,7 @@ fn needed_events(state: &State) -> HashSet<i64> {
 
 /// The `agent_id` of an event payload, with the parsed payload.
 fn payload_agent(payload: &str) -> Option<(String, Value)> {
-    let value = json::parse(payload).ok()?;
+    let value = json::parse_stored(payload).ok()?;
     let agent = value.get("agent_id").and_then(Value::as_str)?.to_string();
     Some((agent, value))
 }

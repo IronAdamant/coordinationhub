@@ -1072,18 +1072,11 @@ fn doctor_checks(storage: &std::path::Path) -> Vec<(String, bool, String)> {
     let schema = if !journal.is_file() {
         (false, "journal not found (run a session first or use 'init')".to_string())
     } else {
-        match std::fs::read_to_string(&journal) {
-            Err(err) => (false, format!("journal unreadable: {err}")),
-            Ok(text) => match text
-                .lines()
-                .enumerate()
-                .filter(|(_, line)| !line.trim().is_empty())
-                .find_map(|(index, line)| json::parse(line).err().map(|err| (index + 1, err)))
-            {
-                Some((line, err)) => (false, format!("journal line {line} does not parse: {err}")),
-                None => (true, "journal parses; schema is current".to_string()),
-            },
-        }
+        // The store's own reader, under the store's lock: doctor fails
+        // only on what the hub itself refuses, and says what the next
+        // command will mend.
+        let check = crate::db::check_journal(storage);
+        (check.ok, check.message)
     };
     checks.push(("schema_version".into(), schema.0, schema.1));
     checks.push(("journal_tail".into(), true, crate::db::torn_report(storage)));

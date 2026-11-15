@@ -56,8 +56,38 @@ pub const MAX_BODY: usize = 1_000_000;
 /// The largest request head (request line and headers), in bytes.
 pub const MAX_HEAD: usize = 64 * 1024;
 
-/// A whole request must arrive within this long.
-const REQUEST_DEADLINE: Duration = Duration::from_secs(30);
+/// A request's head (request line and headers) must be complete within
+/// this long of the connection being accepted. It is short on purpose: a
+/// connection holds one of the server's slots while its head is awaited,
+/// and a local client that opens many sockets and sends a byte on each
+/// would otherwise hold every slot for as long as it liked.
+pub const HEAD_DEADLINE: Duration = Duration::from_secs(5);
+
+/// Once the head is in, the body of a `POST /call` may take this long.
+pub const BODY_DEADLINE: Duration = Duration::from_secs(30);
+
+/// When a read must be done by, and what to say when it is not.
+#[derive(Clone, Copy)]
+struct Deadline {
+    at: Instant,
+    late: &'static str,
+}
+
+impl Deadline {
+    fn head(accepted: Instant) -> Deadline {
+        Deadline {
+            at: accepted + HEAD_DEADLINE,
+            late: "the request head did not arrive within 5 seconds of connecting",
+        }
+    }
+
+    fn body(head_done: Instant) -> Deadline {
+        Deadline {
+            at: head_done + BODY_DEADLINE,
+            late: "the request body did not arrive within 30 seconds",
+        }
+    }
+}
 
 /// Connections served at once unless `COORDINATIONHUB_MAX_CONNECTIONS`
 /// says otherwise; one more is answered 503.
@@ -361,18 +391,18 @@ fn refuse<T>(status: u16, why: impl Into<String>) -> Result<T, Refusal> {
 }
 
 /// One `read` that gives up at `deadline`.
-fn read_some(stream: &mut TcpStream, buf: &mut [u8], deadline: Instant) -> Result<usize, Refusal> {
+fn read_some(stream: &mut TcpStream, buf: &mut [u8], deadline: Deadline) -> Result<usize, Refusal> {
     loop {
-        let left = deadline.saturating_duration_since(Instant::now());
+        let left = deadline.at.saturating_duration_since(Instant::now());
         if left.is_zero() {
-            return refuse(408, "the request did not arrive within 30 seconds");
+            return refuse(408, deadline.late);
         }
         let _ = stream.set_read_timeout(Some(left));
         match stream.read(buf) {
             Ok(n) => return Ok(n),
             Err(err) if err.kind() == std::io::ErrorKind::Interrupted => continue,
             Err(err) if matches!(err.kind(), std::io::ErrorKind::WouldBlock | std::io::ErrorKind::TimedOut) => {
-                return refuse(408, "the request did not arrive within 30 seconds");
+                return refuse(408, deadline.late);
             }
             Err(_) => return Err(Refusal::Closed),
         }
@@ -381,7 +411,7 @@ fn read_some(stream: &mut TcpStream, buf: &mut [u8], deadline: Instant) -> Resul
 
 /// Reads up to the blank line that ends the head, however the bytes are
 /// split across packets, and parses the request line and headers.
-fn read_head(stream: &mut TcpStream, deadline: Instant) -> Result<Head, Refusal> {
+fn read_head(stream: &mut TcpStream, deadline: Deadline) -> Result<Head, Refusal> {
     let mut buf: Vec<u8> = Vec::with_capacity(2048);
     let mut chunk = [0_u8; 8192];
     let end = loop {
@@ -394,9 +424,24 @@ fn read_head(stream: &mut TcpStream, deadline: Instant) -> Result<Head, Refusal>
             }
             return refuse(400, "the connection closed before the request head ended (a blank line was expected)");
         }
+        let fresh = buf.len();
         buf.extend_from_slice(&chunk[..got]);
-        if let Some(at) = buf[from..].windows(4).position(|window| window == b"\r\n\r\n") {
-            break from + at;
+        let end = buf[from..]
+            .windows(4)
+            .position(|window| window == b"\r\n\r\n")
+            .map(|at| from + at);
+        // HTTP lines end with CRLF. A head whose lines end with a bare
+        // line feed never shows the blank line looked for above, so it
+        // would sit here until the deadline: refuse it at the first one.
+        let head_end = end.unwrap_or(buf.len());
+        if (fresh..head_end).any(|at| buf[at] == b'\n' && (at == 0 || buf[at - 1] != b'\r')) {
+            return refuse(
+                400,
+                "the request head has a line that ends with a bare line feed; HTTP lines end with CRLF (\\r\\n)",
+            );
+        }
+        if let Some(end) = end {
+            break end;
         }
         if buf.len() > MAX_HEAD {
             return refuse(431, format!("request head exceeds {MAX_HEAD} bytes"));
@@ -449,7 +494,7 @@ fn read_head(stream: &mut TcpStream, deadline: Instant) -> Result<Head, Refusal>
 
 /// Reads exactly the `Content-Length` bytes of the body: no more than
 /// `MAX_BODY`, and UTF-8.
-fn read_body(stream: &mut TcpStream, head: &mut Head, deadline: Instant) -> Result<String, Refusal> {
+fn read_body(stream: &mut TcpStream, head: &mut Head, deadline: Deadline) -> Result<String, Refusal> {
     if head.header("transfer-encoding").is_some() {
         return refuse(501, "Transfer-Encoding is not supported; send the body with Content-Length");
     }
@@ -567,8 +612,7 @@ fn dispatch_connection(
     config: &Config,
 ) -> Result<(), String> {
     let _ = stream.set_write_timeout(Some(Duration::from_secs(30)));
-    let deadline = Instant::now() + REQUEST_DEADLINE;
-    let mut head = match read_head(&mut stream, deadline) {
+    let mut head = match read_head(&mut stream, Deadline::head(Instant::now())) {
         Ok(head) => head,
         Err(Refusal::Closed) => return Ok(()),
         Err(Refusal::Status(status, why)) => {
@@ -623,6 +667,7 @@ fn dispatch_connection(
         sse_release(&ip);
         return result;
     }
+    let deadline = Deadline::body(Instant::now());
     let (status, kind, body, extra) = match answer(&mut stream, &engine, &waits, &mut head, deadline) {
         Ok(reply) => reply,
         Err(Refusal::Closed) => return Ok(()),
@@ -703,7 +748,7 @@ fn answer(
     shared: &Mutex<Engine>,
     waits: &Waits,
     head: &mut Head,
-    deadline: Instant,
+    deadline: Deadline,
 ) -> Result<Reply, Refusal> {
     let locked = || {
         shared

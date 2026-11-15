@@ -261,6 +261,73 @@ fn connections_are_capped() {
     }
 }
 
+/// One local client used to be able to hold every slot: 260 sockets that
+/// each sent one byte kept `/health` at 503 for 30 seconds. A head now has
+/// five seconds to arrive, so the slots come back by themselves.
+#[test]
+fn slow_heads_give_their_slots_back_within_seconds() {
+    let hub = Hub::new("slow-heads");
+    let dirs = dirs(&hub);
+    let mut args: Vec<&str> = dirs.iter().map(String::as_str).collect();
+    args.push("--no-auth");
+    let server = HttpServer::start("serve", &args, &[("COORDINATIONHUB_MAX_CONNECTIONS", "3")]);
+    let started = Instant::now();
+    let mut slow: Vec<_> = (0..3)
+        .map(|_| {
+            let mut stream = server.connect();
+            stream.write_all(b"G").unwrap();
+            stream
+        })
+        .collect();
+    std::thread::sleep(Duration::from_millis(300));
+    assert_eq!(status(&server.get("/health", &[])), 503, "the slots are not all held");
+    // The slow sockets stay open and silent. The server lets go of them.
+    loop {
+        if status(&server.get("/health", &[])) == 200 {
+            break;
+        }
+        assert!(
+            started.elapsed() < Duration::from_secs(12),
+            "/health was still refused {:?} after the slow sockets connected",
+            started.elapsed()
+        );
+        std::thread::sleep(Duration::from_millis(200));
+    }
+    assert!(started.elapsed() >= Duration::from_secs(4), "the slots came back before the head deadline");
+    // The dashboard page is served again too, and each slow socket was
+    // told why it was dropped.
+    assert_eq!(status(&server.get("/", &[])), 200);
+    for stream in &mut slow {
+        let mut response = String::new();
+        let _ = stream.read_to_string(&mut response);
+        assert_eq!(status(&response), 408, "{response}");
+        assert!(error_of(&response).contains("did not arrive within 5 seconds"), "{response}");
+    }
+}
+
+/// A head whose lines end with a bare line feed never contains the blank
+/// CRLF line the server waits for; it used to get no reply and hold its
+/// connection until the deadline. It is answered 400 at once.
+#[test]
+fn a_head_with_bare_line_feeds_is_refused_at_once() {
+    let hub = Hub::new("bare-lf");
+    let server = open_api(&hub);
+    for request in [
+        format!("GET /health HTTP/1.1\nHost: {}\n\n", server.host()),
+        format!("GET /health HTTP/1.1\r\nHost: {}\n\r\n", server.host()),
+        "GET /health HTTP/1.1\n".to_string(),
+    ] {
+        let started = Instant::now();
+        let response = server.raw(request.as_bytes());
+        assert_eq!(status(&response), 400, "{request:?}: {response}");
+        assert!(error_of(&response).contains("bare line feed"), "{response}");
+        assert!(started.elapsed() < Duration::from_secs(3), "{request:?} took {:?}", started.elapsed());
+    }
+    // A line feed inside a body is not the head's business.
+    let body = "{\"tool\":\"status\",\n\"arguments\":{}}";
+    assert_eq!(status(&server.call(body, &[])), 200);
+}
+
 // ---------------------------------------------------------------- A5
 
 fn post_head(server: &HttpServer, length: usize) -> String {

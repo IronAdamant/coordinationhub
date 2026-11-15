@@ -43,6 +43,11 @@ Part B: locks, hooks, CLI output and tests; `tests/locks_hooks_cli.rs` has a tes
 - HTTP requests are read as bytes to their exact `Content-Length`: a body with a blank line in it is no longer cut, a character split across packets is no longer corrupted, and the body is parsed once
 - The dashboard shows data while auth is on (it sent no token before), keeps its `<!DOCTYPE html>`, and shows a banner with the time of the last update when the server is unreachable or the data is stale
 - The browser opener's child process is waited for
+- What an older version stored stays readable: a message payload 1.2.0 stored with a repeated key or 300 levels of nesting is returned (last key wins, up to 320 levels) instead of `null`; one that cannot be shown as JSON comes back as its stored text with `payload_unreadable`
+- `doctor` reads the journal with the store's reader under the store's lock: it no longer fails a store the hub opens and repairs, and says what the next command will mend
+- A complete final journal line that is not a record goes to a `.unreadable` file and is reported as that, not as an unfinished write
+- A whole final record without a line feed is applied exactly once, also when the line feed cannot be written at first
+- An HTTP request head with bare line feeds is answered `400` at once instead of holding its connection until the deadline
 
 ### Changed
 - `register_agent` refuses IDs over 256 characters or with control characters or line breaks
@@ -56,7 +61,8 @@ Part B: locks, hooks, CLI output and tests; `tests/locks_hooks_cli.rs` has a tes
 - Hub events, change notifications and claim events older than seven days (`COORDINATIONHUB_EVENTS_MAX_AGE_S`) are dropped by housekeeping and by calls on a large journal; each agent's last lifecycle event and open lock-lapse warnings are kept
 - A journal over 1 MiB (`COORDINATIONHUB_COMPACT_MIN_BYTES`) with more than twice as many records as live rows is rewritten as a snapshot; other servers and processes on the store reload on their next call. A 1.2.0 process sharing the store may not (see `MIGRATION.md`)
 - `/events` builds the dashboard only when the store has changed and sends a keepalive every 2 s instead of every 0.2 s
-- HTTP errors: `411` without `Content-Length`, `431` for oversized headers, `408` for a slow request, `501` for `Transfer-Encoding`; `Invalid JSON` says why
+- HTTP errors: `411` without `Content-Length`, `431` for oversized headers, `501` for `Transfer-Encoding`; `Invalid JSON` says why
+- An HTTP request head must be complete within 5 seconds of connecting and a body within 30 seconds after that (`408`), so sockets that send nothing cannot hold the connection slots
 - Dashboard page: text contrast at least 4.5:1, fonts at least 12 px, labelled zoom buttons, a `main` landmark
 - `tools_version` is `1.3.0`
 - Tests bind port 0 instead of fixed ports
@@ -64,6 +70,11 @@ Part B: locks, hooks, CLI output and tests; `tests/locks_hooks_cli.rs` has a tes
 ### Added
 - `COORDINATIONHUB_FSYNC=1` syncs the journal after each commit (off by default; the README explains the trade-off)
 - `doctor` lists torn records that were cut off the journal (`journal_tail`)
+
+### Known limits
+- Compaction counts retained events as live rows, so a very busy store still grows within the seven-day window
+- The lock file grows before the compaction's rename, so a failed rename makes other processes reload once
+- Linux needs glibc 2.25 or newer (or musl 1.1.20) for `getrandom`
 
 ### Documented
 - README: CLI exit codes; a quiet (reaped) agent keeps its locks until their TTL runs out

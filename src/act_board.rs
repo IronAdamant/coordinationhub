@@ -305,7 +305,7 @@ fn record_failure(state: &mut State, task_id: &str, error: Option<String>) -> Va
 }
 
 fn task_value(task: &Task) -> Value {
-    let depends = json::parse(&task.depends_on).unwrap_or_else(|_| json::arr(vec![]));
+    let depends = json::parse_stored(&task.depends_on).unwrap_or_else(|_| json::arr(vec![]));
     json::obj(vec![
         ("id", json::s(&task.id)),
         ("parent_agent_id", json::s(&task.parent_agent_id)),
@@ -581,7 +581,7 @@ pub fn available_tasks(state: &State, agent_id: Option<&str>, unassigned_only: b
 }
 
 fn deps_done(state: &State, task: &Task) -> bool {
-    let Ok(Value::Array(items)) = json::parse(&task.depends_on) else {
+    let Ok(Value::Array(items)) = json::parse_stored(&task.depends_on) else {
         return true;
     };
     items.iter().filter_map(Value::as_str).all(|id| {
@@ -806,12 +806,21 @@ pub fn get_messages(
 }
 
 fn message_value(row: &Message) -> Value {
-    let payload = row
-        .payload_json
-        .as_deref()
-        .and_then(|raw| json::parse(raw).ok())
-        .unwrap_or(Value::Null);
-    json::obj(vec![
+    // The payload is stored JSON text, possibly written by an older
+    // version: read it with the stored-text reader, never the request
+    // parser. Text that cannot be shown as JSON is returned as it is, with
+    // `payload_unreadable` saying why; it is never dropped.
+    let (payload, unreadable) = match row.payload_json.as_deref() {
+        None => (Value::Null, None),
+        Some(raw) => match json::stored_document(raw) {
+            Ok(value) => (value, None),
+            Err(why) => (
+                json::s(raw),
+                Some(format!("the stored payload is not shown as JSON: {why}. `payload` is its text as stored")),
+            ),
+        },
+    };
+    let mut message = json::obj(vec![
         ("id", json::i(row.id)),
         ("from_agent_id", json::s(&row.from_agent_id)),
         ("to_agent_id", json::s(&row.to_agent_id)),
@@ -825,7 +834,11 @@ fn message_value(row: &Message) -> Value {
             },
         ),
         ("payload", payload),
-    ])
+    ]);
+    if let (Some(why), Value::Object(pairs)) = (unreadable, &mut message) {
+        pairs.push(("payload_unreadable".into(), json::s(why)));
+    }
+    message
 }
 
 pub fn mark_read(
@@ -1867,7 +1880,7 @@ pub fn ack_handoff(state: &mut State, handoff_id: i64, agent_id: &str) -> Value 
             ("handoff_id", json::i(handoff_id)),
         ]);
     };
-    let targets = json::parse(&state.handoffs[pos].to_agents)
+    let targets = json::parse_stored(&state.handoffs[pos].to_agents)
         .ok()
         .and_then(|v| {
             v.as_array().map(|items| {
@@ -1956,7 +1969,7 @@ pub fn explain_handoff(state: &State, handoff_id: i64, agent_id: Option<&str>, r
         Some(row) if reason == "not_recipient" => format!(
             "{} is not a recipient of handoff {handoff_id}; its recipients are {}",
             agent_id.unwrap_or(""),
-            json::parse(&row.to_agents)
+            json::parse_stored(&row.to_agents)
                 .ok()
                 .and_then(|v| {
                     v.as_array().map(|items| {
@@ -1974,7 +1987,7 @@ pub fn explain_handoff(state: &State, handoff_id: i64, agent_id: Option<&str>, r
                 .iter()
                 .filter(|ack| ack.handoff_id == handoff_id)
                 .count();
-            let expected = json::parse(&row.to_agents)
+            let expected = json::parse_stored(&row.to_agents)
                 .ok()
                 .and_then(|v| v.as_array().map(|items| items.len()))
                 .unwrap_or(0);
@@ -2009,7 +2022,7 @@ pub fn handoff_record(row: &Handoff) -> Value {
         ("from_agent_id", json::s(&row.from_agent_id)),
         (
             "to_agents",
-            json::parse(&row.to_agents).unwrap_or_else(|_| json::arr(vec![])),
+            json::parse_stored(&row.to_agents).unwrap_or_else(|_| json::arr(vec![])),
         ),
         ("document_path", json::opt_string(&row.document_path)),
         ("handoff_type", json::s(&row.handoff_type)),
@@ -2103,7 +2116,7 @@ pub fn handoff_rows(state: &State, status: Option<&str>, from: Option<&str>, lim
                 ("from_agent_id", json::s(&row.from_agent_id)),
                 (
                     "to_agents",
-                    json::parse(&row.to_agents).unwrap_or_else(|_| json::s(&row.to_agents)),
+                    json::parse_stored(&row.to_agents).unwrap_or_else(|_| json::s(&row.to_agents)),
                 ),
                 ("document_path", json::opt_string(&row.document_path)),
                 ("handoff_type", json::s(&row.handoff_type)),

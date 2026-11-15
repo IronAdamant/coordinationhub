@@ -12,6 +12,8 @@ Part A, from the same audit:
 - `rand.rs`: `SystemFunction036` (advapi32, which std already links on GNU and MSVC, so no import library or `dlltool` is needed), `getrandom` on Linux, `getentropy` on macOS. No fallback to the clock.
 - The dashboard page reads the token from the URL fragment and streams `/events` with `fetch`, because `EventSource` cannot send a header. `tests/common/dashboard_harness.js` runs the page's script under `node` with a stub DOM; that is how the page is tested without a browser.
 
+- After review: stored JSON text (message payloads, event payloads, `depends_on`, `to_agents`, responsibilities) is read with `json::parse_stored` (320 levels, last key wins, non-finite tolerated), never with the request parser; `json::stored_document` returns the reason when a payload cannot be shown, and `message_value` then returns the text with `payload_unreadable`. `db::check_journal` runs `read_records` with `mend: false` for `doctor`. `read_records` appends a missing line feed before it applies the record, so a failed write leaves nothing applied. `http.rs` has two deadlines (`HEAD_DEADLINE` 5 s, `BODY_DEADLINE` 30 s) and refuses a bare line feed in a head at once.
+
 Part B:
 
 - From a line-by-line audit of 1.2.0. `act_lock::regions_overlap` compared half-open ranges with `unwrap_or(0)`, so a start without an end overlapped nothing; regions are now inclusive and 1-based, and `check_region_args` (called from `Engine::invoke` for MCP and CLI alike, before waits) refuses malformed ones. Stored odd rows go through `span`, which only widens them.

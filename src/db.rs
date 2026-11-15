@@ -6,9 +6,11 @@
 //! applies its change in memory and appends the rows that differ. Nothing
 //! is rewritten in place, with two exceptions, both under the same lock:
 //!
-//! - A final record that a dying process left incomplete is cut off and
-//!   kept in a dated `.torn` file (`read_records`), so no append ever
-//!   lands on a partial line.
+//! - A final record that cannot be read is moved out into a dated file
+//!   beside the journal (`read_records`): `.torn` for a write a dying
+//!   process left unfinished, `.unreadable` for a complete line that is
+//!   not a record. So no append ever lands on a partial line, and the hub
+//!   never stops on its last record.
 //! - A journal that has grown large against the live rows is replaced by a
 //!   snapshot, one record per row, through a synced temporary file and a
 //!   rename (`Store::compact`). Each compaction makes the lock file one
@@ -536,7 +538,8 @@ impl Store {
         file.read_to_end(&mut buf).map_err(|e| e.to_string())?;
         drop(file);
         let mut progress = Progress::default();
-        let result = read_records(&self.path, &buf, self.offset, self.lines, &mut self.state, &mut progress);
+        let source = Source { path: &self.path, base: self.offset, lines_before: self.lines, mend: true };
+        let result = read_records(&source, &buf, &mut self.state, &mut progress);
         // Keep what was read before a bad line, so it is not applied twice.
         self.offset += progress.bytes;
         self.lines += progress.lines;
@@ -1366,6 +1369,10 @@ struct Progress {
     bytes: u64,
     lines: u64,
     repaired: bool,
+    /// Records that held a number 1.2.0 wrote as `Infinity` or `NaN`.
+    repaired_lines: u64,
+    /// With `Source::mend` off: what the store would mend at the end.
+    tail: Option<Tail>,
 }
 
 /// The first line of a compacted journal. It is a `del` on a table no
@@ -1470,7 +1477,8 @@ fn load_journal(path: &Path) -> Result<Loaded, String> {
     }
     let buf = std::fs::read(path).map_err(|e| format!("cannot read {}: {e}", path.display()))?;
     let generation = generation_of(&buf[..buf.len().min(GENERATION_HEAD)]);
-    read_records(path, &buf, 0, 0, &mut state, &mut progress)?;
+    let source = Source { path, base: 0, lines_before: 0, mend: true };
+    read_records(&source, &buf, &mut state, &mut progress)?;
     Ok(Loaded {
         state,
         offset: progress.bytes,
@@ -1480,32 +1488,51 @@ fn load_journal(path: &Path) -> Result<Loaded, String> {
     })
 }
 
-/// Applies the journal records in `buf`, which starts at byte `base` of
-/// the journal, after `lines_before` earlier records. The caller holds the
+/// Where `read_records` reads from, and whether it may mend the file.
+struct Source<'a> {
+    path: &'a Path,
+    /// Byte of the journal at which the buffer starts.
+    base: u64,
+    /// Lines of the journal before the buffer.
+    lines_before: u64,
+    /// True for the store itself. False for `doctor`, which only looks:
+    /// what the store would mend is reported in `Progress::tail` instead.
+    mend: bool,
+}
+
+/// What is wrong with the end of the journal.
+#[derive(Clone, Debug, PartialEq)]
+enum Tail {
+    /// The last record has no line feed and is not JSON: a write that did
+    /// not finish. Its size in bytes.
+    Unfinished(usize),
+    /// The last line is complete (it ends with a line feed) but cannot be
+    /// read. Its size in bytes, and why.
+    Unreadable(usize, String),
+    /// The last record is whole but has no line feed.
+    NoLineFeed,
+}
+
+/// Applies the journal records in `buf` to `state`. The caller holds the
 /// exclusive file lock.
 ///
-/// A final record that is cut short or is not JSON is a torn write (a
-/// process died mid-append): its bytes are saved beside the journal in a
-/// dated `.torn` file, cut off the journal, and reading carries on. A final
-/// record that is whole but has no line feed gets one. Either way the file
-/// ends on a line boundary afterwards, so no append lands on a partial
-/// line. A bad record with records after it is not a torn tail; that is an
-/// error naming the line.
-fn read_records(
-    path: &Path,
-    buf: &[u8],
-    base: u64,
-    lines_before: u64,
-    state: &mut State,
-    progress: &mut Progress,
-) -> Result<(), String> {
+/// The hub must not stop working because of its last record, so a final
+/// record that cannot be read is moved out of the journal into a dated
+/// file beside it and reading carries on: `.torn` for a write that did not
+/// finish (no line feed), `.unreadable` for a complete line that is not a
+/// record. A final record that is whole but has no line feed gets one.
+/// Either way the file ends on a line boundary afterwards, so no append
+/// lands on a partial line. A bad record with records after it is an error
+/// naming the line; nothing is changed.
+fn read_records(source: &Source, buf: &[u8], state: &mut State, progress: &mut Progress) -> Result<(), String> {
+    let path = source.path;
     let mut pos = 0;
     while pos < buf.len() {
         let (line, next, terminated) = match buf[pos..].iter().position(|byte| *byte == b'\n') {
             Some(at) => (&buf[pos..pos + at], pos + at + 1, true),
             None => (&buf[pos..], buf.len(), false),
         };
-        let number = lines_before + progress.lines + 1;
+        let number = source.lines_before + progress.lines + 1;
         if line.iter().all(u8::is_ascii_whitespace) {
             // A blank line (or spaces after the last record) holds nothing.
             progress.lines += u64::from(terminated);
@@ -1518,12 +1545,22 @@ fn read_records(
             .and_then(|text| json::parse_journal(text.trim()));
         match parsed {
             Ok((value, repaired)) => {
+                // The line feed goes in before the record is applied: if
+                // it cannot be written, nothing was applied, the offset
+                // stays before the record, and the next call does both.
+                // Applied first, the record would be applied again then.
+                if !terminated && source.mend {
+                    append_line_feed(path)?;
+                }
                 apply_line(state, &value).map_err(|err| bad_line(path, number, &err))?;
                 progress.repaired |= repaired;
+                progress.repaired_lines += u64::from(repaired);
                 progress.lines += 1;
                 if !terminated {
-                    append_line_feed(path)?;
-                    progress.bytes = next as u64 + 1;
+                    progress.bytes = next as u64 + u64::from(source.mend);
+                    if !source.mend {
+                        progress.tail = Some(Tail::NoLineFeed);
+                    }
                     return Ok(());
                 }
                 progress.bytes = next as u64;
@@ -1534,7 +1571,17 @@ fn read_records(
                 if !last {
                     return Err(bad_line(path, number, &err));
                 }
-                cut_torn_tail(path, base + pos as u64, &buf[pos..])?;
+                let rest = &buf[pos..];
+                let tail = if terminated {
+                    Tail::Unreadable(rest.len(), err)
+                } else {
+                    Tail::Unfinished(rest.len())
+                };
+                if source.mend {
+                    set_tail_aside(path, source.base + pos as u64, rest, &tail)?;
+                } else {
+                    progress.tail = Some(tail);
+                }
                 progress.bytes = pos as u64;
                 return Ok(());
             }
@@ -1545,7 +1592,7 @@ fn read_records(
 
 fn bad_line(path: &Path, number: u64, err: &str) -> String {
     format!(
-        "journal {} line {number} cannot be read: {err}. It is not an incomplete final record (those are cut off and kept in a .torn file), so nothing was changed. To recover: stop every coordinationhub process on this store, move line {number} out of the file (or correct it), then run 'coordinationhub doctor'",
+        "journal {} line {number} cannot be read: {err}. It is not the final record (an unreadable final record is moved to a .torn or .unreadable file), so nothing was changed. To recover: stop every coordinationhub process on this store, move line {number} out of the file (or correct it), then run 'coordinationhub doctor'",
         path.display()
     )
 }
@@ -1559,27 +1606,32 @@ fn append_line_feed(path: &Path) -> Result<(), String> {
         .map_err(|err| format!("cannot end the last record of {} with a line feed: {err}", path.display()))
 }
 
-/// Saves `torn` (the journal's bytes from `keep` on) in a dated `.torn`
-/// file, then shortens the journal to `keep` bytes. The copy is written
-/// and synced first: if it cannot be, the journal is left alone.
-fn cut_torn_tail(path: &Path, keep: u64, torn: &[u8]) -> Result<(), String> {
+/// Saves `rest` (the journal's bytes from `keep` on) in a dated file
+/// beside the journal, `.torn` or `.unreadable` by what `tail` says it is,
+/// then shortens the journal to `keep` bytes. The copy is written and
+/// synced first: if it cannot be, the journal is left alone.
+fn set_tail_aside(path: &Path, keep: u64, rest: &[u8], tail: &Tail) -> Result<(), String> {
     use std::io::Write;
+    let kind = match tail {
+        Tail::Unreadable(..) => "unreadable",
+        _ => "torn",
+    };
     let stamp = utc_stamp(util::now());
-    let mut saved = path.with_file_name(format!("coordination.jsonl.{stamp}.torn"));
+    let mut saved = path.with_file_name(format!("coordination.jsonl.{stamp}.{kind}"));
     let mut serial = 1;
     while saved.exists() {
-        saved = path.with_file_name(format!("coordination.jsonl.{stamp}-{serial}.torn"));
+        saved = path.with_file_name(format!("coordination.jsonl.{stamp}-{serial}.{kind}"));
         serial += 1;
     }
     let fail = |what: &str, err: std::io::Error| {
         format!(
-            "the last record of {} is incomplete and {what} failed: {err}. Nothing was changed; make the storage directory writable and retry",
+            "the last record of {} cannot be read and {what} failed: {err}. Nothing was changed; make the storage directory writable and retry",
             path.display()
         )
     };
     std::fs::File::create(&saved)
         .and_then(|mut file| {
-            file.write_all(torn)?;
+            file.write_all(rest)?;
             file.sync_all()
         })
         .map_err(|err| fail("saving a copy of it", err))?;
@@ -1590,18 +1642,24 @@ fn cut_torn_tail(path: &Path, keep: u64, torn: &[u8]) -> Result<(), String> {
             file.set_len(keep)?;
             file.sync_all()
         })
-        .map_err(|err| fail("cutting it off", err))?;
-    eprintln!(
-        "coordinationhub: the last record of {} was incomplete ({} bytes, a write that did not finish). It was cut off and kept in {}; the hub carries on with every record before it.",
-        path.display(),
-        torn.len(),
-        saved.display()
-    );
+        .map_err(|err| fail("taking it out of the journal", err))?;
+    match tail {
+        Tail::Unreadable(size, why) => eprintln!(
+            "coordinationhub: the last line of {} is complete but is not a record this hub can read ({size} bytes: {why}). It was moved out of the journal and kept in {}; the hub carries on with every record before it. A finished write does not look like this: something else wrote that line, so look at the file.",
+            path.display(),
+            saved.display()
+        ),
+        _ => eprintln!(
+            "coordinationhub: the last record of {} was incomplete ({} bytes, a write that did not finish). It was cut off and kept in {}; the hub carries on with every record before it.",
+            path.display(),
+            rest.len(),
+            saved.display()
+        ),
+    }
     Ok(())
 }
 
-/// The `.torn` files beside the journal in `dir`, oldest first.
-pub fn torn_files(dir: &Path) -> Vec<PathBuf> {
+fn kept_files(dir: &Path, ending: &str) -> Vec<PathBuf> {
     let mut found: Vec<PathBuf> = std::fs::read_dir(dir)
         .map(|entries| {
             entries
@@ -1610,7 +1668,7 @@ pub fn torn_files(dir: &Path) -> Vec<PathBuf> {
                 .filter(|path| {
                     path.file_name()
                         .and_then(|name| name.to_str())
-                        .map(|name| name.starts_with("coordination.jsonl.") && name.ends_with(".torn"))
+                        .map(|name| name.starts_with("coordination.jsonl.") && name.ends_with(ending))
                         .unwrap_or(false)
                 })
                 .collect()
@@ -1620,22 +1678,101 @@ pub fn torn_files(dir: &Path) -> Vec<PathBuf> {
     found
 }
 
-/// `doctor`'s line about torn records: none, or where each was kept.
+/// The `.torn` files beside the journal in `dir` (writes that did not
+/// finish), oldest first.
+pub fn torn_files(dir: &Path) -> Vec<PathBuf> {
+    kept_files(dir, ".torn")
+}
+
+/// The `.unreadable` files beside the journal in `dir` (complete final
+/// lines that were not records), oldest first.
+pub fn unreadable_files(dir: &Path) -> Vec<PathBuf> {
+    kept_files(dir, ".unreadable")
+}
+
+/// `doctor`'s line about final records that were moved out of the
+/// journal: none, or what each was and where it is kept.
 pub fn torn_report(dir: &Path) -> String {
-    let found = torn_files(dir);
-    if found.is_empty() {
-        return "no torn records were cut off the journal".into();
+    let names = |files: &[PathBuf]| -> String {
+        files
+            .iter()
+            .filter_map(|path| path.file_name().map(|name| name.to_string_lossy().into_owned()))
+            .collect::<Vec<_>>()
+            .join(", ")
+    };
+    let (torn, unreadable) = (torn_files(dir), unreadable_files(dir));
+    if torn.is_empty() && unreadable.is_empty() {
+        return "no final record was ever moved out of the journal".into();
     }
-    let names: Vec<String> = found
-        .iter()
-        .filter_map(|path| path.file_name().map(|name| name.to_string_lossy().into_owned()))
-        .collect();
+    let mut parts = Vec::new();
+    if !torn.is_empty() {
+        parts.push(format!(
+            "{} unfinished write(s) were cut off the end of the journal and kept as {}",
+            torn.len(),
+            names(&torn)
+        ));
+    }
+    if !unreadable.is_empty() {
+        parts.push(format!(
+            "{} complete final line(s) that were not readable records were moved out of the journal and kept as {}",
+            unreadable.len(),
+            names(&unreadable)
+        ));
+    }
     format!(
-        "{} incomplete final record(s) were cut off the journal and kept in {}: {}. The hub carried on; delete a file once you have looked at it",
-        found.len(),
-        dir.display(),
-        names.join(", ")
+        "{}, in {}. The hub carried on; delete a file once you have looked at it",
+        parts.join("; "),
+        dir.display()
     )
+}
+
+/// What `doctor` learns about the journal: whether the hub can open it,
+/// and what the next call will mend.
+pub struct JournalCheck {
+    /// False only for what the hub itself refuses.
+    pub ok: bool,
+    pub message: String,
+}
+
+/// Reads the journal in `dir` exactly as the store does (the same reader,
+/// under the store's lock) without changing it.
+pub fn check_journal(dir: &Path) -> JournalCheck {
+    let path = dir.join("coordination.jsonl");
+    let lock_path = dir.join("coordination.lock");
+    let _lock = match FileLock::exclusive(&lock_path) {
+        Ok(lock) => lock,
+        Err(err) => return JournalCheck { ok: false, message: busy(&lock_path, err) },
+    };
+    let buf = match std::fs::read(&path) {
+        Ok(buf) => buf,
+        Err(err) => return JournalCheck { ok: false, message: format!("journal unreadable: {err}") },
+    };
+    let source = Source { path: &path, base: 0, lines_before: 0, mend: false };
+    let mut progress = Progress::default();
+    if let Err(err) = read_records(&source, &buf, &mut State::default(), &mut progress) {
+        return JournalCheck { ok: false, message: err };
+    }
+    if progress.repaired_lines == 0 && progress.tail.is_none() {
+        return JournalCheck { ok: true, message: "journal parses; schema is current".into() };
+    }
+    let mut notes = vec![format!("journal opens ({} records)", progress.lines)];
+    if progress.repaired_lines > 0 {
+        notes.push(format!(
+            "{} record(s) hold numbers that are not JSON (Infinity or NaN, which 1.2.0 could write): the hub reads them, and the next coordinationhub command on this store replaces them with finite values and rewrites the journal",
+            progress.repaired_lines
+        ));
+    }
+    match progress.tail {
+        Some(Tail::Unfinished(size)) => notes.push(format!(
+            "the last record is an unfinished write ({size} bytes): the next command cuts it off and keeps it in a .torn file"
+        )),
+        Some(Tail::Unreadable(size, why)) => notes.push(format!(
+            "the last line is complete but is not a readable record ({size} bytes: {why}): the next command moves it to an .unreadable file"
+        )),
+        Some(Tail::NoLineFeed) => notes.push("the last record has no line feed: the next command adds it".into()),
+        None => {}
+    }
+    JournalCheck { ok: true, message: notes.join("; ") }
 }
 
 /// `20261115T093000Z` for an epoch time: a file-name-safe UTC stamp.

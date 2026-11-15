@@ -160,6 +160,53 @@ pub fn parse(input: &str) -> Result<Value, String> {
     parser.document()
 }
 
+/// Stored JSON text may nest this deep when it is read back. 1.2.0 and
+/// earlier stored whatever nesting a request had, so the limit is well
+/// above `MAX_DEPTH`. It still bounds the stack: a test reads, copies,
+/// writes and drops the deepest value on 256 KiB (1 MiB, the Windows main
+/// thread, in an unoptimised build). Deeper text is returned as text.
+pub const STORED_MAX_DEPTH: usize = 320;
+
+/// Reads JSON text that an earlier call, or an earlier version, stored in
+/// a row: a message payload, an event payload, a list of agents. Requests
+/// are held to `parse`; what is already in the store must stay readable,
+/// so this reader takes what older versions could write:
+///
+/// - nesting up to `STORED_MAX_DEPTH`;
+/// - a repeated object key, where the last value wins (as in 0.8.0);
+/// - `NaN`, `Infinity`, `-Infinity`, which come back as non-finite floats
+///   (`has_non_finite` finds them; the writers print them as `null`).
+///
+/// Everything else is as strict as `parse`.
+pub fn parse_stored(input: &str) -> Result<Value, String> {
+    let mut parser = Parser::new(input, true);
+    parser.max_depth = STORED_MAX_DEPTH;
+    parser.last_key_wins = true;
+    parser.document()
+}
+
+/// True when `value` holds a float that is not finite anywhere inside.
+pub fn has_non_finite(value: &Value) -> bool {
+    match value {
+        Value::Float(n) => !n.is_finite(),
+        Value::Array(items) => items.iter().any(has_non_finite),
+        Value::Object(pairs) => pairs.iter().any(|(_, item)| has_non_finite(item)),
+        _ => false,
+    }
+}
+
+/// A stored JSON document for a reply: the value, or, when it cannot be
+/// shown as JSON (it is not JSON, nests deeper than `STORED_MAX_DEPTH`, or
+/// holds a number that is not finite), the reason. The caller then returns
+/// the stored text itself and says so, instead of dropping the document.
+pub fn stored_document(raw: &str) -> Result<Value, String> {
+    let value = parse_stored(raw)?;
+    if has_non_finite(&value) {
+        return Err("it holds a number that is not finite (NaN or Infinity)".into());
+    }
+    Ok(value)
+}
+
 /// `parse` for a line of the journal. It differs in one way: the bare words
 /// `NaN`, `Infinity` and `-Infinity`, and a number too large for a double,
 /// are read instead of refused, because 1.2.0 could write them. The second
@@ -177,6 +224,9 @@ struct Parser<'a> {
     /// Journal mode: read the non-finite numbers 1.2.0 wrote.
     lenient: bool,
     repaired: bool,
+    max_depth: usize,
+    /// Stored text: a repeated key replaces the earlier value.
+    last_key_wins: bool,
 }
 
 impl<'a> Parser<'a> {
@@ -187,6 +237,8 @@ impl<'a> Parser<'a> {
             depth: 0,
             lenient,
             repaired: false,
+            max_depth: MAX_DEPTH,
+            last_key_wins: false,
         }
     }
 
@@ -222,9 +274,10 @@ impl<'a> Parser<'a> {
             b'f' => self.consume_lit(b"false", Value::Bool(false)),
             b'"' => Ok(Value::String(self.parse_string()?)),
             b'[' | b'{' => {
-                if self.depth >= MAX_DEPTH {
+                if self.depth >= self.max_depth {
                     return Err(self.fail(&format!(
-                        "JSON is nested deeper than {MAX_DEPTH} levels; flatten the value"
+                        "JSON is nested deeper than {} levels; flatten the value",
+                        self.max_depth
                     )));
                 }
                 self.depth += 1;
@@ -330,7 +383,7 @@ impl<'a> Parser<'a> {
                     found
                 }
             };
-            if duplicate {
+            if duplicate && !self.last_key_wins {
                 let mut shown = String::new();
                 write_string(&mut shown, &key, true);
                 return Err(self.fail(&format!(
@@ -343,7 +396,10 @@ impl<'a> Parser<'a> {
             }
             self.index += 1;
             let value = self.parse_value()?;
-            pairs.push((key, value));
+            match pairs.iter_mut().find(|(name, _)| duplicate && *name == key) {
+                Some(pair) => pair.1 = value,
+                None => pairs.push((key, value)),
+            }
             self.skip();
             match self.bytes.get(self.index) {
                 Some(&b',') => self.index += 1,
@@ -822,6 +878,58 @@ mod tests {
         // Nothing else is relaxed.
         assert!(parse_journal("{\"a\": Infinite}").is_err());
         assert!(parse_journal("{\"a\": 01}").is_err());
+    }
+
+    #[test]
+    fn stored_text_is_read_tolerantly() {
+        // What 1.2.0 stored for a payload with a repeated key: both pairs.
+        assert_eq!(parse_stored("{\"k\": 1, \"k\": 2}").unwrap(), obj(vec![("k", i(2))]));
+        assert_eq!(
+            parse_stored("{\"a\": 1, \"k\": 1, \"b\": 2, \"k\": {\"k\": 3, \"k\": 4}}").unwrap(),
+            obj(vec![("a", i(1)), ("k", obj(vec![("k", i(4))])), ("b", i(2))])
+        );
+        // Deeper than a request may be, up to the stored limit.
+        let deep = |n: usize| format!("{}{}", "[".repeat(n), "]".repeat(n));
+        assert!(parse(&deep(300)).is_err());
+        assert!(parse_stored(&deep(300)).is_ok());
+        assert!(parse_stored(&deep(STORED_MAX_DEPTH)).is_ok());
+        let message = parse_stored(&deep(STORED_MAX_DEPTH + 1)).unwrap_err();
+        assert!(message.contains("nested deeper than 320 levels"), "{message}");
+        assert!(parse_stored(&deep(100_000)).is_err());
+        // Numbers that are not finite are read and can be found.
+        let value = parse_stored("{\"a\": [1, {\"b\": Infinity}]}").unwrap();
+        assert!(has_non_finite(&value));
+        assert!(!has_non_finite(&parse_stored("{\"a\": [1, {\"b\": 2.5}]}").unwrap()));
+        assert!(stored_document("{\"a\": NaN}").unwrap_err().contains("not finite"));
+        assert_eq!(stored_document("{\"a\": 1}").unwrap(), obj(vec![("a", i(1))]));
+        // The grammar itself is not relaxed.
+        assert!(parse_stored("{\"a\": 01}").is_err());
+        assert!(parse_stored("{\"a\": 1} x").is_err());
+    }
+
+    /// The deepest stored value is parsed, checked, copied, written and
+    /// dropped on a small stack: 256 KiB, an eighth of a connection
+    /// thread's (1 MiB without optimisation: the smallest stack the hub
+    /// runs on, the main thread on Windows).
+    #[test]
+    fn the_deepest_stored_value_fits_a_small_stack() {
+        let text = format!("{}1{}", "{\"k\":[".repeat(STORED_MAX_DEPTH / 2), "]}".repeat(STORED_MAX_DEPTH / 2));
+        let worker = std::thread::Builder::new()
+            .stack_size(if cfg!(debug_assertions) { 1024 * 1024 } else { 256 * 1024 })
+            .spawn(move || {
+                let value = parse_stored(&text).unwrap();
+                assert!(!has_non_finite(&value));
+                let copy = value.clone();
+                assert_eq!(copy, value);
+                let written = dumps_tight(&copy);
+                assert_eq!(written, text);
+                // The other two writers walk it as well.
+                assert!(dumps(&value).len() > written.len());
+                assert!(dumps_pretty(&value).len() > written.len());
+                written.len()
+            })
+            .unwrap();
+        assert!(worker.join().unwrap() > STORED_MAX_DEPTH);
     }
 
     #[test]
