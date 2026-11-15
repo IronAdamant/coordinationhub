@@ -81,7 +81,9 @@ fn open_dashboard(host: &str, port: u16) {
         .stderr(std::process::Stdio::null())
         .spawn();
 }
-const MAX_BODY: usize = 1_000_000;
+/// The largest `/call` body, in bytes. The stdio server uses the same cap
+/// for one frame.
+pub const MAX_BODY: usize = 1_000_000;
 
 /// `serve` prints the API banner. `serve-sse` prints the dashboard banner
 /// and, unless `--no-browser`, opens the dashboard once `/health` answers.
