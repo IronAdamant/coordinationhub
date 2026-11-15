@@ -1,126 +1,46 @@
 # Releasing CoordinationHub
 
-This project uses a fully automated, secret-free release pipeline based on Git tags + GitHub OIDC Trusted Publishing.
+A release is a `vX.Y.Z` tag on `main`. Pushing the tag runs `.github/workflows/release.yml`, which builds the binaries and publishes the GitHub Release. Nothing is published to a package registry, and no token or secret is stored in the repository: the workflow uses the run's own `GITHUB_TOKEN`.
 
-## One-time setup (required)
+## 1. Bump the version in a pull request
 
-### 1. GitHub Environment + Trusted Publisher
+The version lives in these places; all of them must say X.Y.Z:
 
-1. Go to https://github.com/IronAdamant/coordinationhub/settings/environments
-2. Create a new environment named exactly **`pypi`**.
-3. (Optional but recommended) Add any required reviewers or wait timers for manual oversight.
+| Where | What |
+| --- | --- |
+| `Cargo.toml` | `version = "X.Y.Z"` under `[package]` |
+| `Cargo.lock` | the `coordinationhub` package's `version`; run `cargo build` after editing `Cargo.toml` and commit the result |
+| `assets/tools.json` | `"tools_version": "X.Y.Z"` (the HTTP `/health` and `/tools` replies show it) |
+| `src/validate.rs` | the `tools_version` fallback in `load_schema` |
+| `tests/argparse_goldens.rs` | the four `coordinationhub X.Y.Z` lines of the `--version` cases |
+| `CHANGELOG.md` | a `## [X.Y.Z] - YYYY-MM-DD` section |
 
-### 2. Register Trusted Publisher on PyPI
+`--version` itself prints `env!("CARGO_PKG_VERSION")` (`src/lib.rs`), so it follows `Cargo.toml`. Update `README.md`, `MIGRATION.md` and `LLM_Development.md` in the same pull request when the release changes behaviour.
 
-1. Go to https://pypi.org/manage/project/coordinationhub/settings/publishing/
-2. Click **"Add a trusted publisher"**.
-3. Choose **GitHub**.
-4. Fill in:
-   - **Repository**: `IronAdamant/coordinationhub`
-   - **Workflow name**: `release.yml` (this is the one that actually uploads)
-   - **Environment name**: `pypi`
-5. Save.
+Merge the pull request only when every CI job is green: tests on six platforms, clippy, `check_zero_deps`, `check_no_todos`, the parity harness against 0.8.0, and `benchmark-gate`.
 
-This allows the GitHub Actions OIDC token to be exchanged for a short-lived PyPI token **with no API token ever stored in the repo**.
+## 2. Check the tree
 
-## Normal release process (fully automatic) — Recommended
-
-The easiest way is to use the helper script:
+On an up-to-date `main`:
 
 ```bash
-# Option A: Let it auto-bump the patch version
-./scripts/release.sh
-
-# Option B: Specify an exact version
-./scripts/release.sh 0.7.13
+git checkout main && git pull
+scripts/release.sh X.Y.Z
 ```
 
-The script will:
-- Bump the version
-- Run the full test suite
-- Regenerate documentation
-- Commit, tag, and push
+The script checks that the tag is new, that `main` is clean and equal to `origin/main`, that `Cargo.toml`, `Cargo.lock`, `assets/tools.json`, `src/validate.rs` and `CHANGELOG.md` all say X.Y.Z, and runs `cargo test`, clippy, `check_zero_deps` and `check_no_todos` (skip those with `--skip-checks` when CI has just run them on the same commit). It prints the tag command. It does not commit, tag, push or publish anything.
 
-This will automatically trigger the `release.yml` workflow, which handles both the GitHub Release and PyPI publishing in one go.
-
----
-
-### Manual process (if you prefer doing it by hand)
+## 3. Tag and push
 
 ```bash
-# 1. Bump version
-vim coordinationhub/__init__.py
-
-# 2. Run tests + docs
-python -m pytest tests/ -q
-cargo run --release --example gen_docs
-
-# 3. Commit + push
-git add coordinationhub/__init__.py AGENTS.md COMPLETE_PROJECT_DOCUMENTATION.md ...
-git commit -m "chore: prepare v0.7.12"
-git push origin main
-
-# 4. Tag and push (triggers the release workflow)
-git tag v0.7.12
-git push origin v0.7.12
+git tag -a vX.Y.Z -m "CoordinationHub X.Y.Z" && git push origin vX.Y.Z
 ```
 
-What happens automatically:
+The Release workflow then:
 
-1. The `release.yml` workflow triggers on the `v*` tag.
-2. It builds the sdist + wheel.
-3. It creates a proper **GitHub Release** (visible on the Releases tab) and attaches the `.tar.gz` + `.whl` as downloadable assets.
-4. The `publish-pypi` job downloads those exact release assets and publishes them with the official `pypa/gh-action-pypi-publish` action (OIDC trusted publishing — the workflow's single, deliberate exception to the zero-third-party-actions rule, pinned to a commit SHA).
-5. The new version appears on https://pypi.org/project/coordinationhub/ within a few minutes.
+1. fails unless the tag equals `v` plus the `Cargo.toml` version;
+2. builds release binaries for Linux x64 and arm64, macOS x64 and arm64, and Windows x64 on Rust 1.83.0, each packed as a `.tar.gz`;
+3. writes `SHA256SUMS` and checks it;
+4. creates the GitHub Release for the tag with the archives and `SHA256SUMS`, or replaces the assets of one that already exists (a rerun).
 
-No `twine` commands, no API tokens, no manual steps after the tag push.
-
-If the PyPI half fails (e.g. a PyPI outage), re-run it later without re-tagging:
-
-```bash
-gh workflow run release.yml --ref main -f tag=v0.8.0
-```
-
-## Emergency / manual release
-
-If the automation fails, you can still:
-
-```bash
-python -m build
-twine upload dist/*          # requires your PyPI token in env or keyring
-```
-
-But the goal is to never need this.
-
-## Versioning policy
-
-- Version lives **only** in `coordinationhub/__init__.py` (`__version__`).
-- `pyproject.toml` uses `dynamic = ["version"]` + `tool.setuptools.dynamic.version = {attr = "coordinationhub.__version__"}`.
-- We follow semantic versioning (MAJOR.MINOR.PATCH). Most releases are PATCH.
-
-## Workflow files
-
-| Workflow | Trigger | Purpose |
-|----------|---------|---------|
-| `release.yml` | `push: tags: ['v*']` or `workflow_dispatch` (with a `tag` input) | Builds sdist + wheel using only pre-installed tools, creates a proper GitHub Release with the artifacts attached, then publishes those exact assets to PyPI via `pypa/gh-action-pypi-publish` (OIDC trusted publishing). Requires the `pypi` environment. This is the single source of truth for "a release happened". |
-| `test.yml` | `push` / `pull_request` to `main` | Full matrix (3.10–3.14), doc regeneration + auto-commit on main, `--check` on PRs from forks. |
-
-Both workflows follow the project's **zero third-party actions** rule — only `git`, `gh`, `python`, `curl`, and runtime-installed `build`/`pytest` — with one deliberate, SHA-pinned exception: the official PyPA publish action (maintainer decision, 2026-06-11).
-
-## How to test the new automation safely
-
-1. Do the one-time "pypi" environment + Trusted Publisher setup above.
-2. Make a tiny patch (e.g. a comment or doc fix) and bump to a new patch version.
-3. `git tag v0.7.10-rc1 && git push origin v0.7.10-rc1`
-4. Watch the Actions tab — you should see:
-   - `release.yml` create the GitHub Release with `.whl` + `.tar.gz` attached.
-   - the `publish-pypi` job run and succeed (it will appear on TestPyPI or real PyPI depending on your Trusted Publisher registration).
-
-You can delete the release and tag afterward if it was just a test.
-
-## Philosophy
-
-- One place to bump the version (`coordinationhub/__init__.py`).
-- One command to ship (`git tag && git push --tags`).
-- No secrets, no manual `twine upload`, no copy-pasting files.
-- Full audit trail: the GitHub Release page always has the exact artifacts that went to PyPI.
+Do not push a tag from a pull request branch. To redo a failed run, rerun the workflow from the Actions tab; moving a published tag is a last resort.
