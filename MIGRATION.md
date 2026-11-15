@@ -84,6 +84,32 @@ Each item was found by Specula's M5 lanes and has a test in `tests/m5_fixes.rs`;
 - **Readable output.** `release-lock` and `refresh-lock` print the `error` sentence under `FAILED: expired`; `deregister` adds `Locks already expired: N` when there were any.
 - **Descriptions.** Tool descriptions say when to use each tool (for example `acquire_lock`: before editing a file other agents may also edit) and that waits are capped. `tools_version` is `1.2.0`.
 
+### Changed in 1.3.0 for agents (locks, hooks, CLI output)
+
+Each item has a test in `tests/locks_hooks_cli.rs`; the parity harness checks the 0.8.0 side of the region rules.
+
+- **Region locks are inclusive and 1-based.** `region_start` and `region_end` are editor line numbers, both included, so 10-20 and 20-30 overlap on line 20 and conflict. 0.8.0 compared them as half-open ranges and let both agents hold line 20.
+- **A region needs both ends, each 1 or more, start not after end.** `acquire_lock`, `release_lock` and `refresh_lock` (MCP and CLI, also with `retry`) refuse anything else with `Input validation error: <tool>: <field> ...`, naming the field and the rule. 0.8.0 took a start without an end as a region ending at line 0 (so it overlapped nothing), and an inverted range blocked nothing. Lock rows already in a journal with such regions are read so they block more, never less: a start without an end runs to the end of the file, an inverted pair is read low to high.
+- **Subagents of one type get their own IDs.** The hook names a subagent `<session agent>.<type>.<n>` with the first free `n` and ties it to the IDE's raw subagent id; 0.8.0's port always used `.0`, so two parallel subagents shared one agent and the first `SubagentStop` deregistered it under the other. A stop deregisters only that subagent's agent, and a stop for an unknown raw id does nothing. A write from a subagent whose start was missed registers its agent then; a raw id is never used as an agent id (0.8.0 registered a root agent named by it). Events without a raw id still use `.0`.
+- **The lock-denied hook message** names the holder and the lock's expiry and says to message the holder, wait for the lock, or work on another file. 0.8.0 told the blocked agent to run `release-lock <path> <holder>`, which releases another agent's lock.
+- **Agent IDs.** `register_agent` refuses an `agent_id` or `parent_id` longer than 256 characters or containing a control character or line break (U+2028, U+2029), with the field and the position. 0.8.0 accepted any non-empty string. Other characters are allowed as before.
+- **Subagent prompts are redacted.** The `PreToolUse` `Agent` hook stores the subagent's `prompt` and `description` redacted like a user prompt; 0.8.0 stored them as given. Hex tokens of 32 or more characters are redacted in any case; 0.8.0 matched lower case only.
+- **`descendants_status`** in a registration reply follows the agents' current parents. After a deregistration or reap re-parents an agent, it is listed under its new ancestors at its new depth and no longer under the agent that left; 0.8.0 kept the rows written at registration.
+- **A quiet agent keeps its locks.** Unchanged since 1.2.0, and now stated: the reaper releases a quiet agent's `who` claims but not its locks, which run out with their TTL (a heartbeat revives the agent and renews them). `deregister_agent` releases locks at once.
+- **Readable output** of five commands shows the data. 0.8.0 read keys its replies do not have:
+  - `agent-tree` prints the tree; 0.8.0 printed `No agent tree available` (it looked for `tree`, the reply has `root`). `watch` shows the tree too. For an unknown agent it adds the error.
+  - `dashboard` lists the active agents, the locks and the tasks; 0.8.0 printed `Agents (0)`, `Locks (0)`, `Tasks (0)` from the `status` counts. `dashboard --json` still prints `status`.
+  - `agent-status` lists each lock as `path (type, lines a-b, expires <time>)`; 0.8.0 printed the count and a blank `()` line. The `get_agent_status` reply adds `locks` (path, type, expiry, region) beside `active_locks`.
+  - `load-spec` prints `Coordination spec NOT loaded` with the reason when nothing loaded; 0.8.0 printed `Loaded coordination spec`.
+  - `dead-letter-queue` prints when each task failed; 0.8.0 printed `failed at ` with nothing after it. The `task_failures` `list_dead_letter` rows carry every failure field as in 0.8.0 (`max_retries`, `first_attempt_at`, `last_attempt_at`, `dead_letter_at`, `orphan`), newest first.
+- **Exit codes.** `load-spec` that loaded nothing, `validate-spec` of an invalid or missing spec and `doctor` with a failed check (text and `--json`) exit 1; 0.8.0 exited 0. The README lists every exit code.
+- **`watch`** clears the screen only when stdout is a terminal and `NO_COLOR` is unset; 0.8.0 always wrote the escape codes.
+- **`--replica` and `--force-refresh`** are still accepted; their help says they have no effect since 1.0 (0.8.0 described a SQLite replica and cache). `list_locks`'s `force_refresh` argument says the same.
+- **`init`** keeps a differing `~/.coordinationhub/hooks.json` as `hooks.json.bak` and says so; 0.8.0 overwrote it.
+- **`scan_project`** also tracks `.rs` files by default, skips `target`, and does not follow directory symlinks. 0.8.0's defaults were for a Python project (a Rust project scanned no source file) and it followed symlinked directories.
+- **File size caps.** `load_coordination_spec` reads a spec of at most 1 MiB and `run_assessment` a suite of at most 16 MiB; a larger file is refused with its size and the limit. 0.8.0 read any size.
+- **Tool descriptions** no longer mention SQLite, WAL or Python, and say regions are inclusive and 1-based.
+
 ## Config snippets
 
 See the README for Claude Code, Cursor and Grok Build. Point `command` at the Rust binary and pass `serve-mcp`.
