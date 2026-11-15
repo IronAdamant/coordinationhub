@@ -608,10 +608,21 @@ pub fn task_failures(state: &mut State, action: &str, task_id: Option<&str>, lim
             retry_task(state, id)
         }
         "list_dead_letter" => {
-            let tasks: Vec<Value> = state
+            // 0.8.0's row (`SELECT f.*`): every failure column, newest dead
+            // letter first, and `orphan` when the task row is gone.
+            let mut rows: Vec<&crate::db::Failure> = state
                 .failures
                 .iter()
                 .filter(|row| row.status == "dead_letter")
+                .collect();
+            rows.sort_by(|a, b| {
+                b.dead_letter_at
+                    .unwrap_or(0.0)
+                    .partial_cmp(&a.dead_letter_at.unwrap_or(0.0))
+                    .unwrap_or(std::cmp::Ordering::Equal)
+            });
+            let tasks: Vec<Value> = rows
+                .into_iter()
                 .take(crate::util::sql_limit(limit))
                 .map(|row| {
                     json::obj(vec![
@@ -619,7 +630,15 @@ pub fn task_failures(state: &mut State, action: &str, task_id: Option<&str>, lim
                         ("task_id", json::s(&row.task_id)),
                         ("error", json::opt_string(&row.error)),
                         ("attempt", json::i(row.attempt)),
+                        ("max_retries", json::i(row.max_retries)),
+                        ("first_attempt_at", json::f(row.first_attempt_at)),
+                        ("last_attempt_at", json::f(row.last_attempt_at)),
+                        ("dead_letter_at", json::opt_f(row.dead_letter_at)),
                         ("status", json::s(&row.status)),
+                        (
+                            "orphan",
+                            json::b(!state.tasks.iter().any(|task| task.id == row.task_id)),
+                        ),
                     ])
                 })
                 .collect();

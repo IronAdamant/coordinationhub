@@ -10,6 +10,45 @@ use std::path::Path;
 pub const MAX_AGENTS: i64 = 10_000;
 pub const HEARTBEAT_INTERVAL: i64 = 30;
 
+/// The longest agent ID `register_agent` accepts, in characters.
+pub const MAX_AGENT_ID_CHARS: usize = 256;
+
+/// Agent IDs end up in other agents' context (lock-denied messages, trees,
+/// lists), so `register_agent` refuses one that is longer than
+/// `MAX_AGENT_ID_CHARS` or holds a control character or line break. Any
+/// other character is allowed, as before.
+pub fn check_agent_id(field: &str, id: &str) -> Result<(), String> {
+    let count = id.chars().count();
+    if count > MAX_AGENT_ID_CHARS {
+        return Err(format!(
+            "{field} is {count} characters long; the limit is {MAX_AGENT_ID_CHARS}. Use a shorter ID"
+        ));
+    }
+    if let Some((at, ch)) = id
+        .chars()
+        .enumerate()
+        .find(|(_, ch)| ch.is_control() || matches!(ch, '\u{2028}' | '\u{2029}'))
+    {
+        return Err(format!(
+            "{field} contains a control character or line break (U+{:04X} at character {}); an agent ID must be one line of printable text. Remove it and register again",
+            ch as u32,
+            at + 1
+        ));
+    }
+    Ok(())
+}
+
+/// `check_agent_id` for the IDs a `register_agent` call names.
+pub fn check_agent_ids(args: &Value) -> Result<(), String> {
+    for field in ["agent_id", "parent_id"] {
+        if let Some(id) = args.get(field).and_then(Value::as_str) {
+            check_agent_id(field, id)
+                .map_err(|err| format!("Input validation error: register_agent: {err}"))?;
+        }
+    }
+    Ok(())
+}
+
 pub fn register(
     state: &mut State,
     agent_id: &str,
@@ -248,29 +287,43 @@ pub fn context_bundle(
     json::obj(bundle)
 }
 
+/// The agents below `ancestor`, read from the agents' current `parent_id`
+/// links. The `descendants` rows are written when an agent registers and
+/// are never rewritten, so after a deregistration or reap re-parents
+/// children they still name the old ancestor and the old depths; walking
+/// the live links gives each moved agent its new place.
 fn descendants_status(state: &State, ancestor: &str) -> Value {
-    let mut rows: Vec<&Descendant> = state
-        .descendants
-        .iter()
-        .filter(|row| row.ancestor_id == ancestor)
-        .collect();
-    rows.sort_by(|a, b| {
-        a.depth
-            .cmp(&b.depth)
-            .then_with(|| a.descendant_id.cmp(&b.descendant_id))
-    });
+    let mut rows: Vec<(i64, String)> = Vec::new();
+    let mut seen = HashSet::from([ancestor.to_string()]);
+    let mut frontier = vec![ancestor.to_string()];
+    let mut depth = 0_i64;
+    while !frontier.is_empty() && depth < 100 {
+        depth += 1;
+        let mut next = Vec::new();
+        for agent in &state.agents {
+            let Some(parent) = agent.parent_id.as_deref() else {
+                continue;
+            };
+            if frontier.iter().any(|id| id == parent) && seen.insert(agent.agent_id.clone()) {
+                rows.push((depth, agent.agent_id.clone()));
+                next.push(agent.agent_id.clone());
+            }
+        }
+        frontier = next;
+    }
+    rows.sort();
     json::arr(
         rows.into_iter()
-            .map(|row| {
-                let agent = state.agent(&row.descendant_id);
+            .map(|(depth, descendant)| {
+                let agent = state.agent(&descendant);
                 let task = state
                     .responsibilities
                     .iter()
-                    .find(|resp| resp.agent_id == row.descendant_id)
+                    .find(|resp| resp.agent_id == descendant)
                     .and_then(|resp| resp.current_task.clone());
                 json::obj(vec![
-                    ("depth", json::i(row.depth)),
-                    ("agent_id", json::s(&row.descendant_id)),
+                    ("depth", json::i(depth)),
+                    ("agent_id", json::s(&descendant)),
                     (
                         "status",
                         json::s(agent.map(|a| a.status.as_str()).unwrap_or("unknown")),

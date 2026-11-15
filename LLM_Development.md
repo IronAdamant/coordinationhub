@@ -1,5 +1,13 @@
 # LLM_Development.md — CoordinationHub
 
+## 2026-11-15 — 1.3.0 part B: region locks, hook subagent IDs, CLI output
+
+- From a line-by-line audit of 1.2.0. `act_lock::regions_overlap` compared half-open ranges with `unwrap_or(0)`, so a start without an end overlapped nothing; regions are now inclusive and 1-based, and `check_region_args` (called from `Engine::invoke` for MCP and CLI alike, before waits) refuses malformed ones. Stored odd rows go through `span`, which only widens them.
+- `hooks.rs` built every child as `{parent}.{kind}.0` and `resolve` fell back to the raw id. `child_for_raw` now looks up or registers the child in one journal transaction (first free index, as 0.8.0's `subagent_id` counted), and `resolve` registers a missed child instead of a raw-id root. `ensure` keeps an agent's parent when it re-registers it.
+- `descendants_status` walks `parent_id` links: the `descendants` rows are append-only and the journal writer's fast path (`db.rs`, `changed_lines`) assumes so, so rewriting them on a re-parent would also need a `db.rs` change.
+- The five readable-output bugs came from 0.8.0's renderers reading keys their replies never had. `dashboard` text builds its lists from `list_agents`, `list_locks` and `query_tasks`.
+- `examples/parity.rs`: the region refusals moved from the shared CLI sequence to `region_rules`, and help of `--replica` / `--force-refresh` is compared without its description (`tests/common::without_no_effect_help` does the same for the goldens, which keep 0.8.0's text).
+
 ## 2026-11-11 — 1.2.0 lock lapses, waits, quiet agents (Specula M5)
 
 - Root causes, from Specula's own journal (1214 lines, all lanes in one server process): every lane was reaped as stale about ten minutes after registering (cargo builds outlast the 600 s window) and every later heartbeat was refused, so `list_agents` showed `[]`; about 100 of 129 locks were deleted by the housekeeping reaper after their 7200 s TTL with no record, so releases answered `not_locked` / `not_owner` and renderfollow's deregistration counted 1 of 12. The stdio server handled one request at a time with the engine mutex held through waits, so one lane's long poll stalled every other lane's heartbeat and `update_task_status` (all lanes share the lead session's server).

@@ -10,11 +10,62 @@ const DEFAULT_TTL: f64 = 300.0;
 /// A heartbeat renews a lock once less than this share of its TTL is left.
 pub const RENEW_FRACTION: f64 = 0.5;
 
+/// Regions are editor line numbers: 1-based and inclusive, so 10-20 and
+/// 20-30 share line 20. A lock without a region covers the whole file.
 pub fn regions_overlap(a0: Option<i64>, a1: Option<i64>, b0: Option<i64>, b1: Option<i64>) -> bool {
-    if a0.is_none() || b0.is_none() {
-        return true;
+    match (span(a0, a1), span(b0, b1)) {
+        (Some((s1, e1)), Some((s2, e2))) => s1 <= e2 && s2 <= e1,
+        _ => true,
     }
-    a0.unwrap_or(0) < b1.unwrap_or(0) && b0.unwrap_or(0) < a1.unwrap_or(0)
+}
+
+/// The lines a stored lock covers, or None for the whole file. New locks
+/// always have a valid pair (see `check_region`); rows written by 1.2.0 or
+/// earlier may not. Such a row is read so it can only block more, never
+/// less: a start without an end runs to the end of the file, an inverted
+/// pair is read low to high, and an end without a start is the whole file.
+fn span(start: Option<i64>, end: Option<i64>) -> Option<(i64, i64)> {
+    let start = start?;
+    let end = end.unwrap_or(i64::MAX);
+    Some((start.min(end), start.max(end)))
+}
+
+/// Checks a region given to acquire_lock, release_lock or refresh_lock:
+/// both ends or neither, each 1 or more, start not after end.
+pub fn check_region(start: Option<i64>, end: Option<i64>) -> Result<(), String> {
+    const RULE: &str = "a region is an inclusive, 1-based line range: region_start <= region_end, both 1 or more";
+    match (start, end) {
+        (None, None) => Ok(()),
+        (Some(_), None) => Err(format!(
+            "region_end is missing: {RULE}. Pass region_end too (region_end = region_start locks one line), or omit both to lock the whole file"
+        )),
+        (None, Some(_)) => Err(format!(
+            "region_start is missing: {RULE}. Pass region_start too, or omit both to lock the whole file"
+        )),
+        (Some(s), Some(_)) if s < 1 => Err(format!(
+            "region_start must be 1 or more (got {s}): {RULE}. Line 1 is the first line of the file"
+        )),
+        (Some(_), Some(e)) if e < 1 => Err(format!(
+            "region_end must be 1 or more (got {e}): {RULE}. Line 1 is the first line of the file"
+        )),
+        (Some(s), Some(e)) if s > e => Err(format!(
+            "region_start ({s}) is after region_end ({e}): {RULE}. Pass the lower line as region_start"
+        )),
+        _ => Ok(()),
+    }
+}
+
+/// The region check for the tools that take one, as an argument error.
+pub fn check_region_args(tool: &str, args: &Value) -> Result<(), String> {
+    if !matches!(tool, "acquire_lock" | "release_lock" | "refresh_lock") {
+        return Ok(());
+    }
+    let read = |key: &str| match args.get(key) {
+        None | Some(Value::Null) => None,
+        Some(other) => other.as_i64(),
+    };
+    check_region(read("region_start"), read("region_end"))
+        .map_err(|err| format!("Input validation error: {tool}: {err}"))
 }
 
 pub fn record_notification(

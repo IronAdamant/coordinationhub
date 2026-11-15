@@ -5,17 +5,20 @@ on:
   push:
     branches: [main]
 
+permissions:
+  contents: read
+
 jobs:
   benchmark-gate:
     name: benchmark-gate
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
           fetch-depth: 0
-      - uses: dtolnay/rust-toolchain@1.83.0
-      - uses: actions/setup-python@v5
+      - uses: dtolnay/rust-toolchain@ae1d787cccfc25e920bb60bcd7666e8217f9a191 # 1.83.0 branch; installs Rust 1.83.0
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
         with:
           python-version: "3.12"
       - name: Fetch the Python tree

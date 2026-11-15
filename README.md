@@ -57,13 +57,13 @@ An agent claims a task by assigning it to itself. The claim is checked and writt
 
 - **One store per project.** State is an append-only journal (`coordination.jsonl`). Each call takes a short file lock, reads lines written since its last call, applies the change and appends it, so any number of agent sessions, CLI calls and hooks share one board safely.
 - **Agents** register with an id and an optional parent, send heartbeats, and deregister; leaving releases their locks and re-parents their children.
-- **Locks** are exclusive or shared, for a whole file or a line range, with a TTL. A refused lock says who holds it and until when. Each heartbeat renews the caller's locks that have less than half their TTL left, so a lock lasts as long as its holder keeps heartbeating, and the TTL only frees the files of an agent that stopped. A lock that ran out anyway is reported as `expired` (with `expired_at`) by `release_lock`, `refresh_lock`, `heartbeat`, `get_notifications` (with `agent_id`), `deregister_agent` (`locks_expired`) and `admin_locks` `release_by_agent`.
-- **Quiet agents.** The reaper marks an agent stopped after 600 s without a heartbeat (`COORDINATIONHUB_AGENTS_STALE_TIMEOUT_S`); its next heartbeat makes it active again (`revived: true`). `list_agents` names the agents it hides for being quiet in `stale_hidden`.
+- **Locks** are exclusive or shared, for a whole file or a line range, with a TTL. A line range is `region_start` to `region_end`, inclusive and 1-based like an editor's line numbers: 10-20 and 20-30 overlap on line 20. Pass both or neither; a missing end, a start after the end or a line below 1 is refused with the rule. A refused lock says who holds it and until when. Each heartbeat renews the caller's locks that have less than half their TTL left, so a lock lasts as long as its holder keeps heartbeating, and the TTL only frees the files of an agent that stopped. A lock that ran out anyway is reported as `expired` (with `expired_at`) by `release_lock`, `refresh_lock`, `heartbeat`, `get_notifications` (with `agent_id`), `deregister_agent` (`locks_expired`) and `admin_locks` `release_by_agent`.
+- **Quiet agents.** The reaper marks an agent stopped after 600 s without a heartbeat (`COORDINATIONHUB_AGENTS_STALE_TIMEOUT_S`); its next heartbeat makes it active again (`revived: true`). `list_agents` names the agents it hides for being quiet in `stale_hidden`. A quiet agent keeps its locks until their TTL runs out (it may be in a long build and come back); `deregister_agent` releases them at once.
 - **Waits** (`get_notifications` with `timeout_s`, `wait_for_*`, `await_*`, `acquire_lock` with `retry`) run on their own thread and engine, so they never hold up other calls on the same server, stop when the client cancels them, and last at most 600 s (`COORDINATIONHUB_MAX_WAIT_S` sets a lower cap) before answering `timed_out`. A call waits at most 30 s for the store's file lock (`COORDINATIONHUB_LOCK_WAIT_S`) and then fails with `store busy` instead of hanging.
 - **Work**: tasks with priority, dependencies and subtasks, assignment and status, failure history and retries, work intents, and agent-to-agent dependencies.
 - **Talking**: direct messages, sibling broadcasts with acknowledgements, formal handoffs, change notifications, and wait tools that return as soon as the thing they wait for happens. MCP replies are compact JSON.
 - **Leadership**: one coordinator lease with a TTL; a refused lease names the holder and its expiry.
-- **Hooks**: `coordinationhub hook` (written by `init`) registers a session, locks a file before Write or Edit, and notifies and releases afterwards.
+- **Hooks**: `coordinationhub hook` (written by `init`) registers a session, locks a file before Write or Edit, and notifies and releases afterwards. Each subagent gets its own agent, `<session agent>.<type>.<n>`, tied to the IDE's id for it, so two subagents of one type running at once hold their own locks. A refused write names the holder, says until when, and suggests messaging the holder, waiting for the lock or working elsewhere. Subagent prompts are redacted (keys, tokens, emails, long hex strings) before they are stored. `init` keeps a differing `~/.coordinationhub/hooks.json` as `hooks.json.bak`.
 - **Dashboard**: `coordinationhub serve-sse` serves a live page at http://127.0.0.1:9898.
 
 It works alongside [Relatum](https://github.com/IronAdamant/Relatum) (handoff documents), [stele-context](https://github.com/IronAdamant/stele-context) (code map), [Trammel](https://github.com/IronAdamant/Trammel) (plans) and [Chisel](https://github.com/IronAdamant/Chisel) (test impact); it does not duplicate them.
@@ -137,6 +137,18 @@ One agent working alone:
 ```agent-tools
 coordinationhub: tools tasks
 ```
+
+## Exit codes
+
+| Code | Meaning |
+| --- | --- |
+| 0 | Done |
+| 1 | An error: the reply or message says what went wrong. Also `load-spec` that loaded nothing, `validate-spec` of an invalid or missing spec, and `doctor` with a failed check |
+| 2 | Bad command line (usage error), or a bad `COORDINATIONHUB_TOOLS` / `COORDINATIONHUB_DISABLE` for `serve-mcp` |
+| 3 | Not found: `assign-task` of a task that does not exist, `cancel-spawn` of an unknown or consumed spawn, `request-subagent-deregistration` of an agent that is not active |
+| 4 | Refused because another agent holds it: `acquire-lock` not granted, `assign-task` of a task assigned to someone else, `refresh-coordinator-lease` refused |
+
+`watch` clears the screen between refreshes only when its output is a terminal and `NO_COLOR` is unset. `--replica` and `--force-refresh` are accepted for 0.8.0 scripts and have no effect.
 
 ## Develop
 

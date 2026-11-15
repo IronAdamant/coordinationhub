@@ -123,9 +123,14 @@ fn doctor_without_hooks_exits_zero() {
     let dir = std::env::temp_dir().join(format!("chub-doc-{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&dir);
     std::fs::create_dir_all(&dir).unwrap();
+    // Since 1.3.0 a failed check exits 1, so the journal must exist for
+    // "no hooks" alone to be checked.
+    std::fs::create_dir_all(dir.join(".coordinationhub")).unwrap();
+    std::fs::write(dir.join(".coordinationhub").join("coordination.jsonl"), "").unwrap();
     let output = Command::new(bin)
         .args(["doctor", "--project-root", &dir.to_string_lossy()])
         .env("HOME", &dir)
+        .env("USERPROFILE", &dir)
         .output()
         .unwrap();
     let text = String::from_utf8_lossy(&output.stdout);

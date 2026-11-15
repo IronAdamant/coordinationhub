@@ -60,6 +60,8 @@ const ALLOWED: &[&str] = &[
     "deregister lists expired locks apart",
     "list_agents names quiet agents",
     "heartbeat revives a reaped agent",
+    "region lines are inclusive and 1-based",
+    "no-op flag help says so",
 ];
 
 /// Tools in the Rust tools/list that 0.8.0 does not have.
@@ -87,6 +89,42 @@ fn without_new_flags(text: &str) -> (String, bool) {
     }
     let changed = out != text;
     (out, changed)
+}
+
+/// Help text with the descriptions of `--replica` and `--force-refresh`
+/// left out: 0.8.0 described a SQLite replica, 1.3.0 says they have no
+/// effect (MIGRATION.md).
+fn without_no_effect_help(text: &str) -> String {
+    let mut out = String::new();
+    let mut skipping = false;
+    for line in text.split_inclusive('\n') {
+        let trimmed = line.trim_start();
+        if skipping {
+            if !trimmed.trim().is_empty() && !trimmed.starts_with('-') && line.starts_with("    ") {
+                continue;
+            }
+            skipping = false;
+        }
+        let entry = line.starts_with("  -") && !line.starts_with("   ");
+        let flag = ["--replica", "--force-refresh"]
+            .iter()
+            .find(|flag| entry && (trimmed.starts_with(&format!("{flag} ")) || trimmed.trim_end() == **flag));
+        if let Some(flag) = flag {
+            out.push_str(&format!("  {flag}\n"));
+            skipping = true;
+            continue;
+        }
+        out.push_str(line);
+    }
+    out
+}
+
+/// True when two help texts differ only in the documented no-op flag help
+/// and the Rust one says the flags have no effect.
+fn only_no_effect_help(python: &str, rust: &str) -> bool {
+    python != rust
+        && without_no_effect_help(python) == without_no_effect_help(rust)
+        && rust.contains("No effect since 1.0")
 }
 
 fn strip_new_flags(out: &(i32, String, String)) -> ((i32, String, String), bool) {
@@ -668,7 +706,9 @@ fn harness_checks(sides: &Sides, ledger: &mut Ledger) {
     let left = sides.cli(Side::Python, &help, None, &sides.tmp);
     let right = sides.cli(Side::Rust, &help, None, &sides.tmp);
     if (left.0, &left.1) != (right.0, &right.1) {
-        if sides.py_minor == 12 {
+        if left.0 == right.0 && only_no_effect_help(&left.1, &right.1) {
+            ledger.note("no-op flag help says so (cli help acquire-lock)", "--replica has no effect since 1.0");
+        } else if sides.py_minor == 12 {
             ledger.diff("cli help acquire-lock", &left.1, &right.1);
         } else {
             ledger.note("help layout of Python 3.13: acquire-lock", "argparse wraps differently outside 3.12");
@@ -983,7 +1023,7 @@ fn cli_sequence(sides: &Sides, ledger: &mut Ledger) {
         "agent-relations ocarina/reed-1", "agent-tree ocarina",
         "acquire-lock stave/clef.ts ocarina/reed-1 --ttl 73", "acquire-lock stave/clef.ts cello_4",
         "acquire-lock stave/bar.ts cello_4 --region-start 4 --region-end 18",
-        "acquire-lock stave/neg.ts cello_4 --ttl -7", "acquire-lock stave/neg2.ts cello_4 --region-start -2 --region-end 5",
+        "acquire-lock stave/neg.ts cello_4 --ttl -7",
         "lock-status stave/clef.ts", "list-locks", "list-locks --agent cello_4",
         "get-conflicts", "get-conflicts --limit -1", "get-conflicts --document-path stave/clef.ts",
         "contention-hotspots", "contention-hotspots --limit -1",
@@ -1009,6 +1049,7 @@ fn cli_sequence(sides: &Sides, ledger: &mut Ledger) {
     let documented_prose = [
         "get-conflicts", "query-tasks", "get-available-tasks", "get-leader", "leader-status", "list-pending-spawns",
         "claim-leadership", "wait-for-task", "scan-project", "task-failure-history", "report-subagent-spawned",
+        "agent-tree",
     ];
     for json_mode in [true, false] {
         let mode = if json_mode { "json" } else { "prose" };
@@ -1070,6 +1111,46 @@ fn cli_sequence(sides: &Sides, ledger: &mut Ledger) {
     }
 }
 
+/// 1.3.0: regions are inclusive, 1-based line ranges with both ends.
+/// 0.8.0 grants each of these; the Rust side refuses them as documented.
+fn region_rules(sides: &Sides, ledger: &mut Ledger) {
+    let setup = [
+        "register alto", "register bass",
+        "acquire-lock song.rs alto --region-start 10 --region-end 20",
+    ];
+    // (command, Rust exit code, text the Rust JSON reply must hold)
+    let cases = [
+        ("acquire-lock song.rs bass --region-start 20 --region-end 30", 4, "\"acquired\": false"),
+        ("acquire-lock low.rs bass --region-start -2 --region-end 5", 1, "region_start must be 1 or more (got -2)"),
+        ("acquire-lock half.rs bass --region-start 12", 1, "region_end is missing"),
+        ("acquire-lock flip.rs bass --region-start 30 --region-end 5", 1, "region_start (30) is after region_end (5)"),
+    ];
+    for (index, (line, rust_code, rust_text)) in cases.into_iter().enumerate() {
+        let mut outs = Vec::new();
+        for side in [Side::Python, Side::Rust] {
+            let label = format!("region-{index}-{}", outs.len());
+            let (store, project) = sides.fresh(&label);
+            for step in setup {
+                sides.cli(side, &words(step), Some((&store, &project)), &project);
+            }
+            let mut args = words(line);
+            args.push("--json".into());
+            outs.push(sides.cli(side, &args, Some((&store, &project)), &project));
+        }
+        let (python, rust) = (&outs[0], &outs[1]);
+        let python_granted = python.0 == 0 && python.1.contains("\"acquired\": true");
+        if python_granted && rust.0 == rust_code && rust.1.contains(rust_text) {
+            ledger.note(&format!("region lines are inclusive and 1-based (`{line}`)"), "documented in MIGRATION.md");
+        } else {
+            ledger.diff(
+                &format!("region rule `{line}`"),
+                &format!("rc {}\n{}{}", python.0, python.1, python.2),
+                &format!("rc {}\n{}{}", rust.0, rust.1, rust.2),
+            );
+        }
+    }
+}
+
 /// argparse behaviour: errors, prefixes, types, help.
 fn argparse_cases(sides: &Sides, ledger: &mut Ledger) {
     let cases = [
@@ -1114,6 +1195,10 @@ fn argparse_cases(sides: &Sides, ledger: &mut Ledger) {
             ledger.note(&format!("version flag and assign-task --force ({title})"), "help lists the 1.1.0 flags");
         }
         if left == right {
+            continue;
+        }
+        if left.0 == right.0 && only_no_effect_help(&left.1, &right.1) {
+            ledger.note(&format!("no-op flag help says so ({title})"), "--replica and --force-refresh have no effect since 1.0");
             continue;
         }
         if sides.py_minor != 12 {
@@ -1268,6 +1353,7 @@ fn main() {
     harness_checks(&sides, &mut ledger);
     mcp_scenarios(&sides, &mut ledger);
     cli_sequence(&sides, &mut ledger);
+    region_rules(&sides, &mut ledger);
     argparse_cases(&sides, &mut ledger);
     prune_counts(&sides, &mut ledger);
     let unexpected = ledger.unexpected();

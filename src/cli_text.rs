@@ -378,8 +378,13 @@ pub fn show(command: &str, value: &Value, pos: &[String], kv: &[(String, String)
                 println!("Dead letter queue is empty");
             } else {
                 println!("Dead letter queue ({}):", items.len());
+                // 0.8.0 read `failed_at`, which its rows never had.
                 for item in items {
-                    println!("  {} — failed at {}", text(&item, "task_id"), text(&item, "failed_at"));
+                    let at = match item.get("dead_letter_at").and_then(Value::as_f64) {
+                        Some(at) => crate::util::local_stamp(at),
+                        None => "unknown time".into(),
+                    };
+                    println!("  {} — failed at {at}", text(&item, "task_id"));
                 }
             }
         }
@@ -439,18 +444,19 @@ pub fn show(command: &str, value: &Value, pos: &[String], kv: &[(String, String)
             println!("  Status: {status}");
             let task = py_field(value, "current_task", "(none)");
             println!("  Task: {task}");
-            let locks = value
-                .get("locks")
-                .or_else(|| value.get("active_locks"))
-                .and_then(Value::as_array);
-            println!("  Locks: {}", locks.map(|rows| rows.len()).unwrap_or(0));
+            // 0.8.0 read `locks`, which its reply never had; `locks` now
+            // carries each lock's path, type, region and expiry.
+            let locks = value.get("locks").and_then(Value::as_array);
+            let paths = value.get("active_locks").and_then(Value::as_array);
+            let count = locks.or(paths).map(|rows| rows.len()).unwrap_or(0);
+            println!("  Locks: {count}");
             if let Some(locks) = locks {
                 for lock in locks {
-                    println!(
-                        "    {} ({})",
-                        text(lock, "document_path"),
-                        text(lock, "lock_type")
-                    );
+                    println!("    {}", lock_line(lock));
+                }
+            } else if let Some(paths) = paths {
+                for path in paths {
+                    println!("    {}", path.as_str().unwrap_or(""));
                 }
             }
         }
@@ -583,6 +589,21 @@ pub fn show(command: &str, value: &Value, pos: &[String], kv: &[(String, String)
                 }
             }
         }
+        "load-spec" if value.get("loaded").and_then(Value::as_bool) != Some(true) => {
+            // 0.8.0 printed "Loaded coordination spec" for a failed load too.
+            println!("Coordination spec NOT loaded");
+            if let Some(err) = value.get("error").and_then(Value::as_str) {
+                println!("  {err}");
+            }
+            if let Some(errors) = value.get("errors").and_then(Value::as_array) {
+                for err in errors {
+                    println!("  {}", err.as_str().unwrap_or(""));
+                }
+            }
+            if value.get("error").is_none() && value.get("errors").is_none() {
+                println!("  No coordination_spec.json in the project root; pass the spec's path");
+            }
+        }
         "load-spec" => {
             println!("Loaded coordination spec");
             let agents = value
@@ -611,12 +632,15 @@ pub fn show(command: &str, value: &Value, pos: &[String], kv: &[(String, String)
             println!("{report}");
         }
         "agent-tree" => {
-            if value.get("tree").and_then(Value::as_object).is_some() {
-                if let Some(text) = value.get("text_tree").and_then(Value::as_str) {
-                    println!("{text}");
+            // 0.8.0 looked for `tree`; the reply names the root node `root`.
+            match value.get("text_tree").and_then(Value::as_str) {
+                Some(text) if value.get("root").and_then(Value::as_object).is_some() => {
+                    println!("{text}")
                 }
-            } else {
-                println!("No agent tree available");
+                _ => match value.get("error").and_then(Value::as_str) {
+                    Some(err) => println!("No agent tree available: {err}"),
+                    None => println!("No agent tree available"),
+                },
             }
         }
         _ => println!("{}", crate::json::dumps_pretty(value)),
@@ -704,6 +728,20 @@ pub fn exit_code(command: &str, value: &Value) -> i32 {
             }
         }
         "release-coordinator-lease" => 0,
+        "load-spec" => {
+            if value.get("loaded").and_then(Value::as_bool) == Some(true) {
+                0
+            } else {
+                1
+            }
+        }
+        "validate-spec" => {
+            if value.get("valid").and_then(Value::as_bool) == Some(true) {
+                0
+            } else {
+                1
+            }
+        }
         "request-subagent-deregistration" => {
             if value.get("not_found").and_then(Value::as_bool) == Some(true) {
                 3
@@ -1073,6 +1111,23 @@ fn render_dashboard(value: &Value) {
         }
     }
     println!("{}", "═".repeat(60));
+}
+
+/// One lock for `agent-status`: path, type, lines, and when it runs out.
+fn lock_line(lock: &Value) -> String {
+    let mut line = format!("{} ({}", text(lock, "document_path"), text(lock, "lock_type"));
+    if let (Some(start), Some(end)) = (
+        lock.get("region_start").and_then(Value::as_i64),
+        lock.get("region_end").and_then(Value::as_i64),
+    ) {
+        line.push_str(&format!(", lines {start}-{end}"));
+    }
+    if let Some(at) = lock.get("expires_at").and_then(Value::as_f64) {
+        let verb = if at <= crate::util::now() { "expired" } else { "expires" };
+        line.push_str(&format!(", {verb} {}", crate::util::local_stamp(at)));
+    }
+    line.push(')');
+    line
 }
 
 fn text(value: &Value, key: &str) -> String {

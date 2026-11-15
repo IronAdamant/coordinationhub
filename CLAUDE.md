@@ -29,7 +29,7 @@ cargo run --release --example update_dispatch_floor -- --root <python tree>  # e
 - `src/act_*.rs`: tool behaviour (identity, locks, board: tasks/messages/handoffs/leases/spawns, views: status, scan, assessment).
 - `src/mcp.rs` (stdio JSON-RPC), `src/http.rs` (dashboard, `/call`, SSE), `src/hooks.rs` (`coordinationhub hook`).
 - `src/cli.rs`, `src/cli_cmds.rs`, `src/cli_text.rs`: CLI dispatch, argument mapping, readable output.
-- `src/argparse.rs` + `src/cli_catalog.rs`: a port of CPython 3.12 argparse over tables introspected from the 0.8.0 parser (prefixes, choices, int/float errors, help wrapped to `COLUMNS`). Regenerate the catalog from the 0.8.0 parser rather than hand-editing it; the only hand-written rows are the 1.1.0 additions (`-V/--version`, `assign-task --force`), marked in the file.
+- `src/argparse.rs` + `src/cli_catalog.rs`: a port of CPython 3.12 argparse over tables introspected from the 0.8.0 parser (prefixes, choices, int/float errors, help wrapped to `COLUMNS`). Regenerate the catalog from the 0.8.0 parser rather than hand-editing it; the only hand-written rows are the 1.1.0 additions (`-V/--version`, `assign-task --force`) and, since 1.3.0, the `--replica` / `--force-refresh` help (`NO_EFFECT`), marked in the file.
 - `src/validate.rs`: tool argument checks against `assets/tools.json`.
 
 ## Rules

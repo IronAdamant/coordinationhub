@@ -8,10 +8,26 @@
 //! there must be no build.rs. Prints `dependency_count 0`, or on stderr
 //! `dependency tables must be empty: {...} {...} {...}` (Python dict repr)
 //! or `build.rs is not allowed`, with exit 1.
+//!
+//! Since 1.3.0 it also refuses what the Python script let through: the
+//! underscore spellings Cargo accepts (`dev_dependencies`,
+//! `build_dependencies`), target-specific tables
+//! (`[target.'cfg(unix)'.dependencies]` and the like),
+//! `[workspace.dependencies]`, and a `package.build` script. Each one found
+//! is printed on its own stderr line as `<table> must be empty: {...}`.
 
 use std::path::PathBuf;
 
 const TABLES: [&str; 3] = ["dependencies", "dev-dependencies", "build-dependencies"];
+
+/// Every name Cargo reads as a dependency table, with its underscore aliases.
+const ALL_TABLES: [&str; 5] = [
+    "dependencies",
+    "dev-dependencies",
+    "dev_dependencies",
+    "build-dependencies",
+    "build_dependencies",
+];
 
 /// A TOML value, rendered the way Python prints what tomllib returns.
 enum Toml {
@@ -194,8 +210,73 @@ fn insert(table: &mut Vec<(String, Toml)>, key: &[String], value: Toml) {
     }
 }
 
-/// The three dependency tables of `text`, as tomllib would build them.
+/// The three top-level dependency tables of `text`, as tomllib would build
+/// them.
 fn dependency_tables(text: &str) -> [Vec<(String, Toml)>; 3] {
+    let mut root = parse(text);
+    TABLES.map(|name| match root.iter().position(|(key, _)| key == name) {
+        Some(at) => match root.remove(at).1 {
+            Toml::Table(pairs) => pairs,
+            other => vec![(String::new(), other)],
+        },
+        None => Vec::new(),
+    })
+}
+
+/// Every other place a dependency can be declared, each as
+/// `(where, what it holds)`: the underscore aliases, target-specific
+/// tables, `workspace.dependencies` and `package.build`.
+fn other_dependencies(text: &str) -> Vec<(String, String)> {
+    let root = parse(text);
+    let mut found = Vec::new();
+    let non_empty = |value: &Toml| !matches!(value, Toml::Table(pairs) if pairs.is_empty());
+    for name in ["dev_dependencies", "build_dependencies"] {
+        if let Some((_, value)) = root.iter().find(|(key, _)| key == name) {
+            if non_empty(value) {
+                found.push((name.to_string(), value.repr()));
+            }
+        }
+    }
+    if let Some((_, Toml::Table(targets))) = root.iter().find(|(key, _)| key == "target") {
+        for (cfg, body) in targets {
+            let Toml::Table(tables) = body else {
+                continue;
+            };
+            for (name, value) in tables {
+                if ALL_TABLES.contains(&name.as_str()) && non_empty(value) {
+                    found.push((format!("target.{}.{name}", quote_key(cfg)), value.repr()));
+                }
+            }
+        }
+    }
+    if let Some((_, Toml::Table(workspace))) = root.iter().find(|(key, _)| key == "workspace") {
+        if let Some((_, value)) = workspace.iter().find(|(key, _)| key == "dependencies") {
+            if non_empty(value) {
+                found.push(("workspace.dependencies".to_string(), value.repr()));
+            }
+        }
+    }
+    if let Some((_, Toml::Table(package))) = root.iter().find(|(key, _)| key == "package") {
+        if let Some((_, value)) = package.iter().find(|(key, _)| key == "build") {
+            if !matches!(value, Toml::Raw(raw) if raw == "False") {
+                found.push(("package.build".to_string(), value.repr()));
+            }
+        }
+    }
+    found
+}
+
+/// A table key as Cargo.toml would spell it in a header.
+fn quote_key(key: &str) -> String {
+    if !key.is_empty() && key.chars().all(|ch| ch.is_ascii_alphanumeric() || ch == '_' || ch == '-') {
+        key.to_string()
+    } else {
+        format!("'{key}'")
+    }
+}
+
+/// The whole document, as tomllib would build it.
+fn parse(text: &str) -> Vec<(String, Toml)> {
     let mut root: Vec<(String, Toml)> = Vec::new();
     let mut current: Vec<String> = Vec::new();
     let mut reader = Reader { text: text.as_bytes(), at: 0 };
@@ -224,13 +305,7 @@ fn dependency_tables(text: &str) -> [Vec<(String, Toml)>; 3] {
         full.extend(key);
         insert(&mut root, &full, value);
     }
-    TABLES.map(|name| match root.iter().position(|(key, _)| key == name) {
-        Some(at) => match root.remove(at).1 {
-            Toml::Table(pairs) => pairs,
-            other => vec![(String::new(), other)],
-        },
-        None => Vec::new(),
-    })
+    root
 }
 
 fn ensure(table: &mut Vec<(String, Toml)>, key: &[String]) {
@@ -245,6 +320,25 @@ fn ensure(table: &mut Vec<(String, Toml)>, key: &[String]) {
     }
 }
 
+/// The stderr lines for every dependency `text` declares; empty when it
+/// declares none.
+pub fn problems(text: &str) -> Vec<String> {
+    let mut lines = Vec::new();
+    let [deps, dev, build] = dependency_tables(text);
+    if !deps.is_empty() || !dev.is_empty() || !build.is_empty() {
+        lines.push(format!(
+            "dependency tables must be empty: {} {} {}",
+            Toml::Table(deps).repr(),
+            Toml::Table(dev).repr(),
+            Toml::Table(build).repr()
+        ));
+    }
+    for (place, held) in other_dependencies(text) {
+        lines.push(format!("{place} must be empty: {held}"));
+    }
+    lines
+}
+
 fn main() {
     let root = std::env::args().nth(1).map(PathBuf::from).unwrap_or_else(|| PathBuf::from("."));
     let text = match std::fs::read_to_string(root.join("Cargo.toml")) {
@@ -254,14 +348,11 @@ fn main() {
             std::process::exit(1);
         }
     };
-    let [deps, dev, build] = dependency_tables(&text);
-    if !deps.is_empty() || !dev.is_empty() || !build.is_empty() {
-        eprintln!(
-            "dependency tables must be empty: {} {} {}",
-            Toml::Table(deps).repr(),
-            Toml::Table(dev).repr(),
-            Toml::Table(build).repr()
-        );
+    let found = problems(&text);
+    for line in &found {
+        eprintln!("{line}");
+    }
+    if !found.is_empty() {
         std::process::exit(1);
     }
     if root.join("build.rs").exists() {

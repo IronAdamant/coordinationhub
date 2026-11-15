@@ -21,6 +21,41 @@ pub struct GraphAgent {
     pub responsibilities: Vec<String>,
 }
 
+/// The largest coordination spec `load_coordination_spec` reads.
+pub const MAX_SPEC_BYTES: u64 = 1024 * 1024;
+/// The largest suite file `run_assessment` reads.
+pub const MAX_SUITE_BYTES: u64 = 16 * 1024 * 1024;
+
+/// Reads a caller-named file of at most `limit` bytes. A larger file is
+/// refused before it is read, with its size, the limit and what to do.
+fn read_capped(path: &Path, limit: u64, what: &str) -> Result<String, ReadError> {
+    use std::io::Read;
+    let io = |err: std::io::Error| ReadError::Io(err.to_string());
+    let file = std::fs::File::open(path).map_err(io)?;
+    let size = file.metadata().map(|meta| meta.len()).unwrap_or(0);
+    let too_big = |size: u64| {
+        format!(
+            "{what} {} is {size} bytes; the limit is {limit} bytes. Point the path at the right file, or split it",
+            path.display()
+        )
+    };
+    if size > limit {
+        return Err(ReadError::TooBig(too_big(size)));
+    }
+    // The file may grow after the size check: read one byte past the limit.
+    let mut bytes = Vec::new();
+    file.take(limit + 1).read_to_end(&mut bytes).map_err(io)?;
+    if bytes.len() as u64 > limit {
+        return Err(ReadError::TooBig(too_big(bytes.len() as u64)));
+    }
+    String::from_utf8(bytes).map_err(|_| ReadError::Io("stream did not contain valid UTF-8".into()))
+}
+
+enum ReadError {
+    TooBig(String),
+    Io(String),
+}
+
 pub fn load_spec(
     state: &mut State,
     project_root: Option<&Path>,
@@ -83,14 +118,11 @@ pub fn load_spec(
             None,
         );
     }
-    let text = match std::fs::read_to_string(&target) {
+    let text = match read_capped(&target, MAX_SPEC_BYTES, "coordination spec") {
         Ok(text) => text,
-        Err(err) => {
+        Err(ReadError::TooBig(err) | ReadError::Io(err)) => {
             return (
-                json::obj(vec![
-                    ("loaded", json::b(false)),
-                    ("error", json::s(err.to_string())),
-                ]),
+                json::obj(vec![("loaded", json::b(false)), ("error", json::s(err))]),
                 None,
             )
         }
@@ -425,7 +457,9 @@ pub fn scan(
             ("error", json::s("No project root")),
         ]);
     };
-    let default_exts = [".py", ".md", ".json", ".yaml", ".yml", ".txt", ".toml"];
+    // 0.8.0's list was for a Python project; `.rs` is added so a Rust
+    // project's sources are found (callers can pass `extensions`).
+    let default_exts = [".py", ".rs", ".md", ".json", ".yaml", ".yml", ".txt", ".toml"];
     let exts: Vec<String> = extensions
         .map(|items| items.to_vec())
         .unwrap_or_else(|| default_exts.iter().map(|s| (*s).to_string()).collect());
@@ -442,6 +476,8 @@ pub fn scan(
         ".mypy_cache",
         ".tox",
         ".ruff_cache",
+        // Cargo's build output: thousands of generated files nobody owns.
+        "target",
     ];
     let fallback = state
         .agents
@@ -531,8 +567,13 @@ fn walk_files(dir: &Path, skip: &[&str], exts: &[String], depth: i64, out: &mut 
             continue;
         }
         let path = entry.path();
+        // A symlinked directory is not followed: it can lead outside the
+        // project or back into it.
+        let link = entry.file_type().map(|kind| kind.is_symlink()).unwrap_or(false);
         if path.is_dir() {
-            walk_files(&path, skip, exts, depth + 1, out);
+            if !link {
+                walk_files(&path, skip, exts, depth + 1, out);
+            }
         } else if exts.iter().any(|ext| name.ends_with(ext))
             && !path
                 .symlink_metadata()
@@ -564,11 +605,27 @@ pub fn agent_status(state: &State, agent_id: &str) -> Value {
         .iter()
         .filter(|row| row.assigned_agent_id == agent_id)
         .collect();
-    let locks: Vec<Value> = state
+    let held: Vec<&crate::db::Lock> = state
         .locks
         .iter()
         .filter(|lock| lock.locked_by == agent_id)
-        .map(|lock| json::s(&lock.document_path))
+        .collect();
+    let locks: Vec<Value> = held.iter().map(|lock| json::s(&lock.document_path)).collect();
+    // The same locks with their details; `active_locks` keeps 0.8.0's shape.
+    let details: Vec<Value> = held
+        .iter()
+        .map(|lock| {
+            let mut pairs = vec![
+                ("document_path", json::s(&lock.document_path)),
+                ("lock_type", json::s(&lock.lock_type)),
+                ("expires_at", json::f(lock.locked_at + lock.lock_ttl)),
+            ];
+            if lock.region_start.is_some() {
+                pairs.push(("region_start", json::opt_i(lock.region_start)));
+                pairs.push(("region_end", json::opt_i(lock.region_end)));
+            }
+            json::obj(pairs)
+        })
         .collect();
     let with_tasks: Vec<Value> = owned
         .iter()
@@ -610,6 +667,7 @@ pub fn agent_status(state: &State, agent_id: &str) -> Value {
         ("owned_files", json::arr(files)),
         ("owned_files_with_tasks", json::arr(with_tasks)),
         ("active_locks", json::arr(locks)),
+        ("locks", json::arr(details)),
         ("lineage", crate::act_identity::lineage(state, agent_id)),
     ])
 }
@@ -956,10 +1014,12 @@ pub fn assess(
                 json::s(format!("Suite file not found: {path}")),
             )]);
         }
-        match std::fs::read_to_string(path)
-            .ok()
-            .and_then(|text| json::parse(&text).ok())
-        {
+        let text = match read_capped(Path::new(path), MAX_SUITE_BYTES, "assessment suite") {
+            Err(ReadError::TooBig(err)) => return json::obj(vec![("error", json::s(err))]),
+            Err(ReadError::Io(_)) => None,
+            Ok(text) => Some(text),
+        };
+        match text.and_then(|text| json::parse(&text).ok()) {
             Some(value) => value,
             None => {
                 return json::obj(vec![(

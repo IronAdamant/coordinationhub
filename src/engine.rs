@@ -90,6 +90,11 @@ impl Engine {
             validate::validate_tool(&self.schema, tool, &args)
                 .map_err(|err| format!("Input validation error: {err}"))?;
         }
+        // Checked for the CLI too, which skips the schema.
+        act_lock::check_region_args(tool, &args)?;
+        if tool == "register_agent" {
+            act_identity::check_agent_ids(&args)?;
+        }
         if tool == "who" {
             self.store.begin()?;
             let value = self.who(&args);

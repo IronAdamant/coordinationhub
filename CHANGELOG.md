@@ -7,6 +7,35 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.3.0]
+
+Part B: locks, hooks, CLI output and tests. `MIGRATION.md` lists each difference from 0.8.0; `tests/locks_hooks_cli.rs` has a test for each.
+
+### Fixed
+- Region locks are inclusive and 1-based (10-20 and 20-30 conflict on line 20); a region with one end, a start after its end or a line below 1 is refused with the field and the rule, in every lock tool and the CLI
+- Two subagents of one type started by the hook get their own agents (`<session>.<type>.<n>`); a `SubagentStop` deregisters only its own, and a subagent's write never registers a root agent named by its raw id
+- The lock-denied hook message names the holder and the expiry and says what to do; it no longer suggests `release-lock` on another agent's lock
+- Subagent prompts and descriptions are redacted before they are stored; hex tokens are redacted in any case
+- `descendants_status` follows re-parented agents
+- A failed local-time conversion falls back to a UTC stamp instead of printing garbage
+- `agent-tree`, `watch`, `dashboard`, `agent-status`, `load-spec` and `dead-letter-queue` print their data; `list_dead_letter` rows carry `dead_letter_at` and the other failure fields
+- `load-spec`, `validate-spec` and `doctor` exit 1 on failure
+- `watch` writes no escape codes to a pipe or with `NO_COLOR`
+- `check_zero_deps` also refuses target-specific, workspace and underscore-spelled dependency tables and a `package.build` script
+
+### Changed
+- `register_agent` refuses IDs over 256 characters or with control characters or line breaks
+- `scan_project` tracks `.rs` by default, skips `target` and does not follow directory symlinks
+- `load_coordination_spec` reads at most 1 MiB, `run_assessment` suites at most 16 MiB
+- `init` keeps a differing hooks file as `hooks.json.bak`
+- `--replica` and `--force-refresh` help says they have no effect; tool descriptions no longer mention SQLite, WAL or Python
+- `get_agent_status` adds `locks` with each lock's type, region and expiry
+- `tests/surface.rs` checks every reply instead of discarding it
+- CI workflows run with `contents: read` and pin third-party actions to commit SHAs
+
+### Documented
+- README: CLI exit codes; a quiet (reaped) agent keeps its locks until their TTL runs out
+
 ## [1.2.0] - 2026-11-11
 
 From Specula's M5 lanes (about fifteen lane reports). `MIGRATION.md` lists each difference from 0.8.0; `tests/m5_fixes.rs` has a test for each.
