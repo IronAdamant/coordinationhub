@@ -200,26 +200,22 @@ impl Engine {
                 need_str(args, "agent_id")?,
                 opt_str(args, "mode").unwrap_or("lineage"),
             ),
-            "acquire_lock" => act_lock::acquire(
-                state,
-                need_str(args, "document_path")?,
-                need_str(args, "agent_id")?,
-                opt_str(args, "lock_type").unwrap_or("exclusive"),
-                opt_f(args, "ttl", act_lock::default_ttl()),
-                opt_bool(args, "force", false),
-                opt_i(args, "region_start"),
-                opt_i(args, "region_end"),
-                root_ref,
-                1,
-            ),
-            "release_lock" => act_lock::release(
-                state,
-                need_str(args, "document_path")?,
-                need_str(args, "agent_id")?,
-                opt_i(args, "region_start"),
-                opt_i(args, "region_end"),
-                root_ref,
-            ),
+            "acquire_lock" => acquire_from_args(state, args, root_ref, 1)?,
+            "release_lock" => match args.get("document_path") {
+                Some(Value::Array(items)) => {
+                    let region = (opt_i(args, "region_start"), opt_i(args, "region_end"));
+                    let paths = act_lock::path_list("release_lock", items, region, root_ref)?;
+                    act_lock::release_many(state, &paths, need_str(args, "agent_id")?, region, root_ref)
+                }
+                _ => act_lock::release(
+                    state,
+                    need_str(args, "document_path")?,
+                    need_str(args, "agent_id")?,
+                    opt_i(args, "region_start"),
+                    opt_i(args, "region_end"),
+                    root_ref,
+                ),
+            },
             "refresh_lock" => act_lock::refresh(
                 state,
                 need_str(args, "document_path")?,
@@ -928,19 +924,8 @@ impl Engine {
             let current = attempt + 1;
             let result = self.edit(|engine| {
                 let root = engine.project_root.clone();
-                act_lock::acquire(
-                    &mut engine.store.state,
-                    need_str(args, "document_path").unwrap_or(""),
-                    need_str(args, "agent_id").unwrap_or(""),
-                    opt_str(args, "lock_type").unwrap_or("exclusive"),
-                    opt_f(args, "ttl", act_lock::default_ttl()),
-                    opt_bool(args, "force", false),
-                    opt_i(args, "region_start"),
-                    opt_i(args, "region_end"),
-                    root.as_deref(),
-                    current,
-                )
-            })?;
+                acquire_from_args(&mut engine.store.state, args, root.as_deref(), current)
+            })??;
             if result.get("acquired").and_then(Value::as_bool) == Some(true) {
                 return Ok(result);
             }
@@ -1311,6 +1296,42 @@ fn read_only(tool: &str, args: &Value) -> bool {
 }
 
 /// True for calls that wait (poll until something happens or a timeout).
+/// `acquire_lock` from its arguments: one path as in 0.8.0, or a list of
+/// paths taken in one transaction (`act_lock::acquire_many`).
+fn acquire_from_args(
+    state: &mut db::State,
+    args: &Value,
+    root: Option<&Path>,
+    attempt: i64,
+) -> Result<Value, String> {
+    let agent_id = need_str(args, "agent_id")?;
+    let lock_type = opt_str(args, "lock_type").unwrap_or("exclusive");
+    let ttl = opt_f(args, "ttl", act_lock::default_ttl());
+    let force = opt_bool(args, "force", false);
+    let region = (opt_i(args, "region_start"), opt_i(args, "region_end"));
+    match args.get("document_path") {
+        Some(Value::Array(items)) => {
+            let paths = act_lock::path_list("acquire_lock", items, region, root)?;
+            let best_effort = opt_bool(args, "best_effort", false);
+            Ok(act_lock::acquire_many(
+                state, &paths, agent_id, lock_type, ttl, force, region, best_effort, root, attempt,
+            ))
+        }
+        _ => Ok(act_lock::acquire(
+            state,
+            need_str(args, "document_path")?,
+            agent_id,
+            lock_type,
+            ttl,
+            force,
+            region.0,
+            region.1,
+            root,
+            attempt,
+        )),
+    }
+}
+
 pub fn blocks(tool: &str, args: &Value) -> bool {
     match tool {
         "acquire_lock" => opt_bool(args, "retry", false),

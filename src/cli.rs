@@ -402,11 +402,9 @@ fn command_args(command: &str, flags: &Flags) -> Result<Option<ToolCall>, String
         "acquire-lock" => (
             "acquire_lock",
             json::obj(vec![
-                (
-                    "document_path",
-                    json::s(pos.first().ok_or("document_path required")?),
-                ),
-                ("agent_id", json::s(pos.get(1).ok_or("agent_id required")?)),
+                ("document_path", lock_paths(pos)?),
+                ("agent_id", json::s(pos.last().filter(|_| pos.len() > 1).ok_or("agent_id required")?)),
+                ("best_effort", json::b(has(flags, "best_effort"))),
                 (
                     "lock_type",
                     json::s(flag(flags, "lock_type").unwrap_or("exclusive")),
@@ -459,11 +457,8 @@ fn command_args(command: &str, flags: &Flags) -> Result<Option<ToolCall>, String
         "release-lock" => (
             "release_lock",
             json::obj(vec![
-                (
-                    "document_path",
-                    json::s(pos.first().ok_or("document_path required")?),
-                ),
-                ("agent_id", json::s(pos.get(1).ok_or("agent_id required")?)),
+                ("document_path", lock_paths(pos)?),
+                ("agent_id", json::s(pos.last().filter(|_| pos.len() > 1).ok_or("agent_id required")?)),
                 (
                     "region_start",
                     json::opt_i(flag(flags, "region_start").and_then(|v| v.parse().ok())),
@@ -618,6 +613,17 @@ fn command_args(command: &str, flags: &Flags) -> Result<Option<ToolCall>, String
         }
     };
     Ok(Some((pair.0.to_string(), pair.1, pair.2)))
+}
+
+/// `acquire-lock` and `release-lock` take one or more paths, then the
+/// agent id. One path is passed as a string (the 0.8.0 reply), several as
+/// a list.
+fn lock_paths(pos: &[String]) -> Result<Value, String> {
+    match pos.len() {
+        0 => Err("document_path required".into()),
+        1 | 2 => Ok(json::s(&pos[0])),
+        n => Ok(json::arr(pos[..n - 1].iter().map(json::s).collect())),
+    }
 }
 
 fn render_status(value: &Value) {

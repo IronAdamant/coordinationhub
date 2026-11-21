@@ -62,6 +62,7 @@ const ALLOWED: &[&str] = &[
     "heartbeat revives a reaped agent",
     "region lines are inclusive and 1-based",
     "no-op flag help says so",
+    "lock lists",
 ];
 
 /// Tools in the Rust tools/list that 0.8.0 does not have.
@@ -127,10 +128,47 @@ fn only_no_effect_help(python: &str, rust: &str) -> bool {
         && rust.contains("No effect since 1.0")
 }
 
+/// The 1.4.0 parser additions, removed from Rust CLI output: `acquire-lock`
+/// and `release-lock` take `document_path [document_path ...]`, and
+/// `acquire-lock --best-effort` (MIGRATION.md). The usage lines wrap where
+/// 0.8.0's do once the additions are gone.
+fn without_lock_lists(text: &str) -> (String, bool) {
+    if !text.contains("document_path [document_path ...] agent_id") {
+        return (text.to_string(), false);
+    }
+    let mut out = String::new();
+    let mut skipping = false;
+    for line in text.split_inclusive('\n') {
+        if skipping {
+            if line.starts_with("                        ") {
+                continue;
+            }
+            skipping = false;
+        }
+        if line.starts_with("  --best-effort ") {
+            skipping = true;
+            continue;
+        }
+        if line.starts_with("  document_path ") {
+            out.push_str("  document_path         Path to the document\n");
+            skipping = true;
+            continue;
+        }
+        out.push_str(
+            &line
+                .replacen(" [--best-effort]", "", 1)
+                .replacen("document_path [document_path ...] agent_id", "document_path agent_id", 1),
+        );
+    }
+    (out, true)
+}
+
 fn strip_new_flags(out: &(i32, String, String)) -> ((i32, String, String), bool) {
     let (stdout, a) = without_new_flags(&out.1);
     let (stderr, b) = without_new_flags(&out.2);
-    ((out.0, stdout, stderr), a || b)
+    let (stdout, c) = without_lock_lists(&stdout);
+    let (stderr, d) = without_lock_lists(&stderr);
+    ((out.0, stdout, stderr), a || b || c || d)
 }
 
 // ------------------------------------------------------------------
@@ -704,7 +742,7 @@ fn harness_checks(sides: &Sides, ledger: &mut Ledger) {
     }
     let help: Vec<String> = vec!["acquire-lock".into(), "--help".into()];
     let left = sides.cli(Side::Python, &help, None, &sides.tmp);
-    let right = sides.cli(Side::Rust, &help, None, &sides.tmp);
+    let (right, _) = strip_new_flags(&sides.cli(Side::Rust, &help, None, &sides.tmp));
     if (left.0, &left.1) != (right.0, &right.1) {
         if left.0 == right.0 && only_no_effect_help(&left.1, &right.1) {
             ledger.note("no-op flag help says so (cli help acquire-lock)", "--replica has no effect since 1.0");
@@ -1166,7 +1204,7 @@ fn argparse_cases(sides: &Sides, ledger: &mut Ledger) {
         let left = sides.cli(Side::Python, &args, None, &sides.tmp);
         let (right, stripped) = strip_new_flags(&sides.cli(Side::Rust, &args, None, &sides.tmp));
         if stripped {
-            ledger.note(&format!("version flag and assign-task --force (`{case}`)"), "usage lists the 1.1.0 flags");
+            ledger.note(&format!("version flag and assign-task --force, lock lists (`{case}`)"), "usage lists the 1.1.0 and 1.4.0 additions");
         }
         if left != right {
             if sides.py_minor != 12 && left.2.contains("invalid choice") && right.2.contains("invalid choice") {
@@ -1192,7 +1230,7 @@ fn argparse_cases(sides: &Sides, ledger: &mut Ledger) {
         let (right, stripped) = strip_new_flags(&sides.cli(Side::Rust, &args, None, &sides.tmp));
         let title = format!("help {}", command.unwrap_or("(top)"));
         if stripped {
-            ledger.note(&format!("version flag and assign-task --force ({title})"), "help lists the 1.1.0 flags");
+            ledger.note(&format!("version flag and assign-task --force, lock lists ({title})"), "help lists the 1.1.0 and 1.4.0 additions");
         }
         if left == right {
             continue;

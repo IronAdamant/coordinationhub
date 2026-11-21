@@ -5,6 +5,10 @@
 //! additions (`-V/--version`, `assign-task --force`) were captured from the
 //! same parser with them declared by argparse's own `version` and
 //! `store_true` actions (scratch wrapper around 0.8.0 `create_parser`).
+//! The 1.4.0 additions (`document_path` of `acquire-lock` and
+//! `release-lock` with `nargs="+"`, `acquire-lock --best-effort`) were
+//! captured the same way: they changed the four `acquire-lock` cases and
+//! added the four cases at the top.
 
 mod common;
 
@@ -17,6 +21,80 @@ struct Case {
 }
 
 const CASES: &[Case] = &[
+    Case {
+        args: r#"acquire-lock m/a.ts"#,
+        columns: None,
+        rc: 2,
+        stdout: r#""#,
+        stderr: r#"usage: coordinationhub acquire-lock [-h] [--storage-dir STORAGE_DIR]
+                                    [--project-root PROJECT_ROOT]
+                                    [--namespace NAMESPACE] [-j] [--replica]
+                                    [--lock-type {exclusive,shared}]
+                                    [--ttl TTL] [--force]
+                                    [--region-start REGION_START]
+                                    [--region-end REGION_END] [--retry]
+                                    [--max-retries MAX_RETRIES]
+                                    [--backoff-ms BACKOFF_MS]
+                                    [--timeout-ms TIMEOUT_MS] [--best-effort]
+                                    document_path [document_path ...] agent_id
+coordinationhub acquire-lock: error: the following arguments are required: agent_id
+"#,
+    },
+    Case {
+        args: r#"release-lock m/a.ts m/b.ts lute --region-start x"#,
+        columns: None,
+        rc: 2,
+        stdout: r#""#,
+        stderr: r#"usage: coordinationhub release-lock [-h] [--storage-dir STORAGE_DIR]
+                                    [--project-root PROJECT_ROOT]
+                                    [--namespace NAMESPACE] [-j] [--replica]
+                                    [--region-start REGION_START]
+                                    [--region-end REGION_END]
+                                    document_path [document_path ...] agent_id
+coordinationhub release-lock: error: argument --region-start: invalid int value: 'x'
+"#,
+    },
+    Case {
+        args: r#"acquire-lock m/a.ts --ttl 5 m/b.ts lute"#,
+        columns: None,
+        rc: 2,
+        stdout: r#""#,
+        stderr: r#"usage: coordinationhub [-h] [-V]
+                       {serve,serve-mcp,serve-sse,status,register,heartbeat,deregister,list-agents,agent-relations,acquire-lock,release-lock,refresh-lock,lock-status,list-locks,admin-locks,broadcast,acknowledge-broadcast,wait-for-broadcast-acks,acknowledge-handoff,complete-handoff,cancel-handoff,get-handoffs,wait-for-handoff,wait-for-locks,notify-change,get-notifications,prune-notifications,wait-for-notifications,get-conflicts,contention-hotspots,load-spec,validate-spec,scan-project,dashboard,agent-status,agent-tree,assess,doctor,init,auto-start-dashboard,watch,await-agent,send-message,get-messages,mark-messages-read,create-task,assign-task,update-task-status,query-tasks,create-subtask,retry-task,dead-letter-queue,task-failure-history,wait-for-task,get-available-tasks,declare-work-intent,get-work-intents,clear-work-intent,declare-dependency,manage-dependencies,satisfy-dependency,get-all-dependencies,acquire-coordinator-lease,refresh-coordinator-lease,release-coordinator-lease,get-leader,claim-leadership,leader-status,ha-dashboard,spawn-subagent,report-subagent-spawned,list-pending-spawns,cancel-spawn,request-subagent-deregistration,await-subagent-stopped}
+                       ...
+coordinationhub: error: unrecognized arguments: lute
+"#,
+    },
+    Case {
+        args: r#"release-lock --help"#,
+        columns: None,
+        rc: 0,
+        stdout: r#"usage: coordinationhub release-lock [-h] [--storage-dir STORAGE_DIR]
+                                    [--project-root PROJECT_ROOT]
+                                    [--namespace NAMESPACE] [-j] [--replica]
+                                    [--region-start REGION_START]
+                                    [--region-end REGION_END]
+                                    document_path [document_path ...] agent_id
+
+positional arguments:
+  document_path         Path to the document (one or more)
+  agent_id              Agent releasing the lock
+
+options:
+  -h, --help            show this help message and exit
+  --storage-dir STORAGE_DIR
+  --project-root PROJECT_ROOT
+  --namespace NAMESPACE
+  -j, --json            Emit structured JSON output instead of text
+  --replica             Use read-replica mode (direct WAL read, no writer
+                        round-trip)
+  --region-start REGION_START
+                        Start line of region lock to release
+  --region-end REGION_END
+                        End line of region lock to release
+"#,
+        stderr: r#""#,
+    },
     Case {
         args: r#"query-tasks by_agent --agent-id viola/x"#,
         columns: None,
@@ -42,8 +120,8 @@ coordinationhub: error: unrecognized arguments: --agent-id viola/x
                                     [--region-end REGION_END] [--retry]
                                     [--max-retries MAX_RETRIES]
                                     [--backoff-ms BACKOFF_MS]
-                                    [--timeout-ms TIMEOUT_MS]
-                                    document_path agent_id
+                                    [--timeout-ms TIMEOUT_MS] [--best-effort]
+                                    document_path [document_path ...] agent_id
 coordinationhub acquire-lock: error: argument --lock-type: invalid choice: 'sharded' (choose from exclusive, shared)
 "#,
     },
@@ -92,8 +170,8 @@ coordinationhub get-notifications: error: argument --limit: invalid int value: '
                                     [--region-end REGION_END] [--retry]
                                     [--max-retries MAX_RETRIES]
                                     [--backoff-ms BACKOFF_MS]
-                                    [--timeout-ms TIMEOUT_MS]
-                                    document_path agent_id
+                                    [--timeout-ms TIMEOUT_MS] [--best-effort]
+                                    document_path [document_path ...] agent_id
 coordinationhub acquire-lock: error: argument --ttl: invalid float value: 'ten'
 "#,
     },
@@ -185,8 +263,8 @@ coordinationhub: error: unrecognized arguments: extra-pos
                                     [--region-end REGION_END] [--retry]
                                     [--max-retries MAX_RETRIES]
                                     [--backoff-ms BACKOFF_MS]
-                                    [--timeout-ms TIMEOUT_MS]
-                                    document_path agent_id
+                                    [--timeout-ms TIMEOUT_MS] [--best-effort]
+                                    document_path [document_path ...] agent_id
 coordinationhub acquire-lock: error: ambiguous option: --re could match --replica, --region-start, --region-end, --retry
 "#,
     },
@@ -348,11 +426,12 @@ options:
                                     [--region-end REGION_END] [--retry]
                                     [--max-retries MAX_RETRIES]
                                     [--backoff-ms BACKOFF_MS]
-                                    [--timeout-ms TIMEOUT_MS]
-                                    document_path agent_id
+                                    [--timeout-ms TIMEOUT_MS] [--best-effort]
+                                    document_path [document_path ...] agent_id
 
 positional arguments:
-  document_path         Path to the document
+  document_path         Path to the document (several paths: all or none are
+                        locked)
   agent_id              Agent requesting the lock
 
 options:
@@ -379,6 +458,8 @@ options:
   --timeout-ms TIMEOUT_MS
                         Total retry timeout in MILLISECONDS (default: 5000ms =
                         5s). Abandons the acquire when exceeded.
+  --best-effort         With several paths, lock the free ones and report the
+                        rest
 "#,
         stderr: r#""#,
     },

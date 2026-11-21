@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+Fewer calls per agent turn. `MIGRATION.md` (Changed in 1.4.0) lists each difference from 0.8.0; `tests/lock_batches.rs` has a test for each.
+
+### Added
+- `acquire_lock` and `release_lock` take a list of paths in `document_path` (at most 500). A list is locked in one transaction, all or nothing: if any path is held, none is taken and every holder is named. `best_effort: true` takes the free paths and reports the rest. One path keeps the 0.8.0 reply
+- `acquire-lock` and `release-lock` take several paths before the agent (`acquire-lock a.rs b.rs agent`), and `acquire-lock --best-effort`
+- `register_agent` (and `register`) returns the agent's own live locks (`held_locks`) and its unread messages (`unread_messages`, and the newest 10 in `messages`), so an agent that restarts needs no further calls. The fields appear only when not empty
+
 ## [1.3.0] - 2026-11-15
 
 From a line-by-line audit of 1.2.0. `MIGRATION.md` lists each difference from 0.8.0.

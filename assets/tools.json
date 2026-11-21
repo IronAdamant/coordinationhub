@@ -2,7 +2,7 @@
   "tools_version": "1.3.0",
   "tools": {
     "register_agent": {
-      "description": "Join the hub at the start of your work, before taking locks or tasks: returns who else is active, which files are locked and recent changes. Pass worktree_root when you work in your own git worktree.",
+      "description": "Join the hub at the start of your work, before taking locks or tasks: returns who else is active, which files are locked and recent changes, plus your own live locks (held_locks) and unread messages after a restart. Pass worktree_root when you work in your own git worktree.",
       "parameters": {
         "type": "object",
         "properties": {
@@ -105,13 +105,19 @@
       }
     },
     "acquire_lock": {
-      "description": "Before editing a file other agents may also edit (shared modules, lib.rs, Cargo.toml), lock it so nobody overwrites your change; grep cannot tell you who is about to edit a file. Pass region_start and region_end (inclusive, 1-based line numbers, both or neither) to lock only those lines: 10-20 and 20-30 overlap on line 20. Shared locks allow concurrent readers. If another agent holds it the reply names them (or force=true steals it and records a conflict). The TTL (default 300 s) is renewed by your heartbeats, so pick it for a stretch without heartbeats, not for the whole task. retry=true waits with backoff (at most 600 s).",
+      "description": "Before editing a file other agents may also edit (shared modules, lib.rs, Cargo.toml), lock it so nobody overwrites your change; grep cannot tell you who is about to edit a file. Pass region_start and region_end (inclusive, 1-based line numbers, both or neither) to lock only those lines: 10-20 and 20-30 overlap on line 20. Shared locks allow concurrent readers. If another agent holds it the reply names them (or force=true steals it and records a conflict). The TTL (default 300 s) is renewed by your heartbeats, so pick it for a stretch without heartbeats, not for the whole task. A list of paths locks them in one call, all or none (every conflict named); best_effort=true takes the free ones. retry=true waits with backoff (at most 600 s).",
       "parameters": {
         "type": "object",
         "properties": {
           "document_path": {
-            "type": "string",
-            "description": "Path to the document to lock"
+            "type": [
+              "string",
+              "array"
+            ],
+            "items": {
+              "type": "string"
+            },
+            "description": "Path to lock, or a list of paths (at most 500, no region)"
           },
           "agent_id": {
             "type": "string",
@@ -130,6 +136,11 @@
           "force": {
             "type": "boolean",
             "description": "Steal the lock if held by another agent",
+            "default": false
+          },
+          "best_effort": {
+            "type": "boolean",
+            "description": "With a list: lock the free paths and report the rest instead of none",
             "default": false
           },
           "retry": {
@@ -173,8 +184,14 @@
         "type": "object",
         "properties": {
           "document_path": {
-            "type": "string",
-            "description": "Path to the document"
+            "type": [
+              "string",
+              "array"
+            ],
+            "items": {
+              "type": "string"
+            },
+            "description": "Path to the document, or a list of paths"
           },
           "agent_id": {
             "type": "string",
@@ -1585,6 +1602,7 @@
         "lock_type",
         "ttl",
         "force",
+        "best_effort",
         "region_start",
         "region_end",
         "retry",

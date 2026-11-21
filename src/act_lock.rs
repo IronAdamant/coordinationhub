@@ -157,19 +157,15 @@ pub fn acquire(
             ("attempts", json::i(attempt)),
         ]);
     }
-    let conflicts: Vec<Lock> = state
-        .locks
-        .iter()
-        .filter(|lock| {
-            lock.document_path == norm
-                && lock_alive(lock, now)
-                && lock.locked_by != agent_id
-                && worktree_ok(&lock.worktree_root, worktree.as_deref())
-                && !(lock.lock_type == "shared" && lock_type == "shared")
-                && regions_overlap(lock.region_start, lock.region_end, region_start, region_end)
-        })
-        .cloned()
-        .collect();
+    let conflicts = blocking_locks(
+        state,
+        &norm,
+        agent_id,
+        lock_type,
+        (region_start, region_end),
+        worktree.as_deref(),
+        now,
+    );
     if !conflicts.is_empty() && !force {
         for conflict in &conflicts {
             record_conflict(
@@ -265,6 +261,280 @@ pub fn acquire(
         ]),
     );
     json::obj(result)
+}
+
+/// The live locks of other agents that keep `agent_id` from taking this
+/// lock: same file and worktree, overlapping lines, not both shared.
+fn blocking_locks(
+    state: &State,
+    norm: &str,
+    agent_id: &str,
+    lock_type: &str,
+    (region_start, region_end): (Option<i64>, Option<i64>),
+    worktree: Option<&str>,
+    now: f64,
+) -> Vec<Lock> {
+    state
+        .locks
+        .iter()
+        .filter(|lock| {
+            lock.document_path == norm
+                && lock_alive(lock, now)
+                && lock.locked_by != agent_id
+                && worktree_ok(&lock.worktree_root, worktree)
+                && !(lock.lock_type == "shared" && lock_type == "shared")
+                && regions_overlap(lock.region_start, lock.region_end, region_start, region_end)
+        })
+        .cloned()
+        .collect()
+}
+
+/// True when `agent_id` already holds exactly this lock (a re-acquire
+/// renews it whatever else is on the file).
+fn holds_same(
+    state: &State,
+    norm: &str,
+    agent_id: &str,
+    (region_start, region_end): (Option<i64>, Option<i64>),
+    worktree: Option<&str>,
+) -> bool {
+    state.locks.iter().any(|lock| {
+        lock.document_path == norm
+            && lock.locked_by == agent_id
+            && lock.region_start == region_start
+            && lock.region_end == region_end
+            && worktree_ok(&lock.worktree_root, worktree)
+    })
+}
+
+/// Most paths one `acquire_lock` or `release_lock` call takes.
+pub const MAX_PATHS: usize = 500;
+
+/// The paths of a call that passed `document_path` as a list, each as
+/// given and normalised (relative paths resolve against the working
+/// directory, as for one path, so the normalised form is not passed on),
+/// duplicates dropped (first one kept), at least one and at most
+/// `MAX_PATHS`.
+pub fn path_list(
+    tool: &str,
+    items: &[Value],
+    region: (Option<i64>, Option<i64>),
+    project_root: Option<&Path>,
+) -> Result<Vec<(String, String)>, String> {
+    if items.is_empty() {
+        return Err(format!(
+            "{tool}: document_path is an empty list; pass one path, or a list of at least one"
+        ));
+    }
+    if items.len() > MAX_PATHS {
+        return Err(format!(
+            "{tool}: document_path lists {} paths; at most {MAX_PATHS} fit in one call, so split the list",
+            items.len()
+        ));
+    }
+    let mut out: Vec<(String, String)> = Vec::with_capacity(items.len());
+    for (index, item) in items.iter().enumerate() {
+        let Some(text) = item.as_str() else {
+            return Err(format!(
+                "{tool}: document_path[{index}] must be a string path (got {})",
+                item.py_type_name()
+            ));
+        };
+        let norm = normalize_path(text, project_root);
+        if !out.iter().any(|(_, seen)| *seen == norm) {
+            out.push((text.to_string(), norm));
+        }
+    }
+    if region.0.is_some() && out.len() > 1 {
+        return Err(format!(
+            "{tool}: region_start and region_end lock lines of one file, but document_path lists {} paths; lock a region with one path per call",
+            out.len()
+        ));
+    }
+    Ok(out)
+}
+
+/// Why one path of a list would not be locked.
+enum Blocked {
+    Held(Vec<Lock>),
+    Scope(Value),
+}
+
+/// `acquire_lock` with a list of paths, in one store transaction. By
+/// default all or nothing: every path is checked first, and if any is held
+/// by another agent (or outside the agent's declared scope) none is taken
+/// and every conflict is reported. `best_effort` takes the free paths and
+/// reports the rest. The paths come from `path_list`.
+#[allow(clippy::too_many_arguments)]
+pub fn acquire_many(
+    state: &mut State,
+    paths: &[(String, String)],
+    agent_id: &str,
+    lock_type: &str,
+    ttl: f64,
+    force: bool,
+    region: (Option<i64>, Option<i64>),
+    best_effort: bool,
+    project_root: Option<&Path>,
+    attempt: i64,
+) -> Value {
+    let worktree = project_root.map(util::path_str);
+    let now = util::now();
+    let mut blocked: Vec<(String, Blocked)> = Vec::new();
+    if !best_effort {
+        for (_, norm) in paths {
+            if holds_same(state, norm, agent_id, region, worktree.as_deref()) {
+                continue;
+            }
+            let held = blocking_locks(state, norm, agent_id, lock_type, region, worktree.as_deref(), now);
+            if !held.is_empty() && !force {
+                blocked.push((norm.clone(), Blocked::Held(held)));
+            } else if let Some(hit) = scope_violation(state, norm, agent_id, project_root) {
+                blocked.push((norm.clone(), Blocked::Scope(hit)));
+            }
+        }
+        for (norm, why) in &blocked {
+            if let Blocked::Held(held) = why {
+                for lock in held {
+                    record_conflict(state, norm, &lock.locked_by, agent_id, "denied", "rejected", None);
+                }
+            }
+        }
+    }
+    let mut acquired: Vec<String> = Vec::new();
+    let mut warnings: Vec<Value> = Vec::new();
+    if blocked.is_empty() {
+        let before = state.locks.iter().map(|lock| lock.id).max().unwrap_or(0);
+        for (given, norm) in paths {
+            let reply = acquire(
+                state, given, agent_id, lock_type, ttl, force, region.0, region.1, project_root, attempt,
+            );
+            if reply.get("acquired").and_then(Value::as_bool) == Some(true) {
+                acquired.push(norm.clone());
+                for key in ["ownership_warning", "proximity_warning"] {
+                    if let Some(warning) = reply.get(key) {
+                        warnings.push(json::obj(vec![
+                            ("document_path", json::s(norm)),
+                            (key, warning.clone()),
+                        ]));
+                    }
+                }
+                continue;
+            }
+            let why = match reply.get("scope_violation") {
+                Some(hit) => Blocked::Scope(hit.clone()),
+                None => Blocked::Held(blocking_locks(
+                    state, norm, agent_id, lock_type, region, worktree.as_deref(), now,
+                )),
+            };
+            blocked.push((norm.clone(), why));
+        }
+        if !best_effort && !blocked.is_empty() {
+            // The checks above make this unreachable within one
+            // transaction; if a path still failed, take back the locks this
+            // call created so the call stays all or nothing.
+            state.locks.retain(|lock| {
+                !(lock.id > before && lock.locked_by == agent_id && acquired.contains(&lock.document_path))
+            });
+            acquired.clear();
+            warnings.clear();
+        }
+    }
+    let all = blocked.is_empty();
+    let mut conflicts: Vec<Value> = Vec::new();
+    let mut scope: Vec<Value> = Vec::new();
+    for (norm, why) in &blocked {
+        match why {
+            Blocked::Held(held) => {
+                for lock in held {
+                    conflicts.push(json::obj(vec![
+                        ("document_path", json::s(norm)),
+                        ("locked_by", json::s(&lock.locked_by)),
+                        ("lock_type", json::s(&lock.lock_type)),
+                        ("region_start", json::opt_i(lock.region_start)),
+                        ("region_end", json::opt_i(lock.region_end)),
+                        ("locked_at", json::f(lock.locked_at)),
+                        ("expires_at", json::f(lock.locked_at + lock.lock_ttl)),
+                        ("worktree", json::opt_string(&lock.worktree_root)),
+                    ]));
+                }
+            }
+            Blocked::Scope(hit) => scope.push(hit.clone()),
+        }
+    }
+    let holder = if all {
+        json::s(agent_id)
+    } else {
+        conflicts
+            .first()
+            .and_then(|row| row.get("locked_by").cloned())
+            .unwrap_or(Value::Null)
+    };
+    let failed: Vec<Value> = blocked.iter().map(|(norm, _)| json::s(norm)).collect();
+    let mut reply = vec![
+        ("acquired", json::b(all)),
+        ("mode", json::s(if best_effort { "best_effort" } else { "all_or_nothing" })),
+        ("locked_by", holder),
+        ("acquired_paths", json::string_list(&acquired)),
+        ("failed_paths", json::arr(failed)),
+        ("conflicts", json::arr(conflicts)),
+    ];
+    if !acquired.is_empty() {
+        reply.push(("expires_at", json::f(now + ttl)));
+    }
+    if region.0.is_some() {
+        reply.push(("region_start", json::opt_i(region.0)));
+        reply.push(("region_end", json::opt_i(region.1)));
+    }
+    if !scope.is_empty() {
+        reply.push(("error", json::s("scope_violation")));
+        reply.push(("scope_violations", json::arr(scope)));
+    }
+    if !warnings.is_empty() {
+        reply.push(("warnings", json::arr(warnings)));
+    }
+    if !all && !best_effort {
+        reply.push((
+            "hint",
+            json::s("nothing was locked (all or nothing). Wait (wait_for_locks), drop the held paths, or pass best_effort=true to take the free ones"),
+        ));
+    }
+    reply.push(("attempts", json::i(attempt)));
+    json::obj(reply)
+}
+
+/// `release_lock` with a list of paths (from `path_list`): each is
+/// released as a single call would, and the reply lists what was released
+/// and why each other path was not.
+pub fn release_many(
+    state: &mut State,
+    paths: &[(String, String)],
+    agent_id: &str,
+    region: (Option<i64>, Option<i64>),
+    project_root: Option<&Path>,
+) -> Value {
+    let mut released: Vec<String> = Vec::new();
+    let mut failed: Vec<Value> = Vec::new();
+    let mut count = 0_i64;
+    for (given, norm) in paths {
+        let reply = release(state, given, agent_id, region.0, region.1, project_root);
+        if reply.get("released").and_then(Value::as_bool) == Some(true) {
+            count += reply.get("count").and_then(Value::as_i64).unwrap_or(0);
+            released.push(norm.clone());
+        } else {
+            let mut row = vec![("document_path".to_string(), json::s(norm))];
+            if let Value::Object(pairs) = reply {
+                row.extend(pairs.into_iter().filter(|(key, _)| key != "released"));
+            }
+            failed.push(Value::Object(row));
+        }
+    }
+    json::obj(vec![
+        ("released", json::b(failed.is_empty())),
+        ("count", json::i(count)),
+        ("released_paths", json::string_list(&released)),
+        ("failed", json::arr(failed)),
+    ])
 }
 
 fn worktree_ok(stored: &Option<String>, wanted: Option<&str>) -> bool {

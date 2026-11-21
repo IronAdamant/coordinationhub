@@ -1,5 +1,13 @@
 # LLM_Development.md — CoordinationHub
 
+## 2026-11-21: lock lists and restart fields in register (1.4.0, unreleased)
+
+- From the MiniSQL A/B run: the hooks lock each changed file with one `acquire-lock` call, and each model-side MCP call costs a full context read. `acquire_lock` / `release_lock` now take a list in `document_path` (the schema type is `["string", "array"]`, so tools/list grows by one property, `best_effort`, and two sentences). A string still gives the 0.8.0 reply.
+- All or nothing is a check before any write, not an undo: `act_lock::acquire_many` runs `blocking_locks` and `scope_violation` (the same helpers `acquire` uses) for every path first, records the denials, and takes nothing if one is blocked. The whole call is one store transaction under `coordination.lock`, so two agents racing for overlapping lists in opposite orders cannot both get part (`concurrent_lists_are_all_or_nothing`). If a path still failed in the write pass, the locks this call created are removed.
+- Relative paths resolve against the working directory, as in 0.8.0, so a normalised path cannot be passed back to `acquire`: `path_list` keeps each path as given beside its normalised form.
+- CLI: `document_path` is `nargs='+'` (`OneOrMore` was already in the argparse port), the agent is the last positional. `+` keeps every 0.8.0 parse (`a.rs --ttl 5 agent`); `*` would not (argparse would give `a.rs` to agent_id). No `--paths-from`: the first path would still be required, which reads badly. The four `acquire-lock` goldens and four new ones were captured from the 0.8.0 parser patched with the additions, on Python 3.12; `examples/parity.rs` strips the additions (`without_lock_lists`) before comparing help and usage.
+- `register_agent`: `held_locks`, `unread_messages` and `messages` (10 newest, left unread) are added only when not empty, so parity of fresh registrations is unchanged; the collision reply carries them too, since a CLI-registered agent that crashed is still `active` under its old pid.
+
 ## 2026-11-15: notes no longer name an unannounced workspace
 
 - The 1.1.1 and 1.2.0 notes named a workspace that is not public yet (changelog, migration list, this log, and two test-module comments). They now say "a large Rust workspace". The version entries stay, and the program's behaviour is unchanged.
