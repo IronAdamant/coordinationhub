@@ -13,6 +13,15 @@ pub fn show(command: &str, value: &Value, pos: &[String], kv: &[(String, String)
                 println!("  Parent: {parent}");
             }
             println!("  Worktree: {}", text(value, "worktree_root"));
+            if let Some(held) = value.get("held_locks").and_then(Value::as_array) {
+                println!("  Locks held: {}", held.len());
+                for lock in held {
+                    println!("    {}", text(lock, "document_path"));
+                }
+            }
+            if value.get("unread_messages").is_some() {
+                println!("  Unread messages: {}", num(value, "unread_messages"));
+            }
         }
         "heartbeat" => {
             let updated = value.get("updated").and_then(Value::as_bool).unwrap_or(false);
@@ -809,7 +818,54 @@ fn render_agents(value: &Value) {
     }
 }
 
+/// The reply of `acquire-lock` or `release-lock` given several paths.
+fn render_lock_list_reply(value: &Value) {
+    let list = |key: &str| -> Vec<String> {
+        value
+            .get(key)
+            .and_then(Value::as_array)
+            .map(|items| items.iter().filter_map(Value::as_str).map(str::to_string).collect())
+            .unwrap_or_default()
+    };
+    if value.get("acquired_paths").is_some() {
+        for path in list("acquired_paths") {
+            println!("LOCKED: {path}");
+        }
+        let conflicts = value.get("conflicts").and_then(Value::as_array).unwrap_or(&[]);
+        for conflict in conflicts {
+            eprintln!(
+                "FAILED: {} is locked by {}",
+                text(conflict, "document_path"),
+                text(conflict, "locked_by")
+            );
+            eprintln!("  Expires: {}", raw(conflict, "expires_at"));
+        }
+        if let Some(hits) = value.get("scope_violations").and_then(Value::as_array) {
+            for hit in hits {
+                eprintln!("FAILED: {}", text(hit, "message"));
+            }
+        }
+        if value.get("acquired").and_then(Value::as_bool) == Some(true) {
+            println!("  Agent: {}", text(value, "locked_by"));
+            println!("  Expires: {}", raw(value, "expires_at"));
+        } else if value.get("mode").and_then(Value::as_str) == Some("all_or_nothing") {
+            eprintln!("Nothing locked (all or nothing; --best-effort takes the free paths)");
+        }
+        return;
+    }
+    for path in list("released_paths") {
+        println!("RELEASED: {path}");
+    }
+    for row in value.get("failed").and_then(Value::as_array).unwrap_or(&[]) {
+        println!("FAILED: {}: {}", text(row, "document_path"), text(row, "reason"));
+    }
+}
+
 fn render_lock(command: &str, value: &Value, path: &str) {
+    if value.get("acquired_paths").is_some() || value.get("released_paths").is_some() {
+        render_lock_list_reply(value);
+        return;
+    }
     if value.get("acquired").and_then(Value::as_bool) == Some(true) {
         println!("LOCKED: {path}");
         println!("  Agent: {}", text(value, "locked_by"));

@@ -42,7 +42,7 @@ On Windows the binary is `target/release/coordinationhub.exe`; pass that path. C
 - `src/lib.rs`: the module list and `VERSION` (from `Cargo.toml`).
 - `src/cli.rs`: command dispatch (`serve-mcp`, `serve`, `serve-sse`, `init`, `doctor`, `hook`, and one command per tool). Flags follow the command, as in 0.8.0.
 - `src/argparse.rs`: a port of the CPython 3.12 argparse paths the 0.8.0 parser uses: prefixes, short clusters, `choices`, int and float errors, help wrapped to `COLUMNS`.
-- `src/cli_catalog.rs`: the 0.8.0 parser's commands, flags and help, introspected from it. Regenerate rather than hand-edit; the hand-written rows (`-V/--version`, `assign-task --force`, the `NO_EFFECT` help of `--replica` and `--force-refresh`) are marked.
+- `src/cli_catalog.rs`: the 0.8.0 parser's commands, flags and help, introspected from it. Regenerate rather than hand-edit; the hand-written rows (`-V/--version`, `assign-task --force`, the `NO_EFFECT` help of `--replica` and `--force-refresh`, the 1.4.0 lock lists and `--best-effort`) are marked.
 - `src/cli_cmds.rs`: command-line arguments to tool arguments. `src/cli_text.rs`: the readable output, matching 0.8.0's printers.
 - `src/engine.rs`: `Engine::open` finds the project root and store and loads the coordination spec; `Engine::call` (MCP, with schema checks) and `call_cli` dispatch each tool, plus the additive `who`.
 - `src/validate.rs`: argument checks against `assets/tools.json`, with 0.8.0's error text.
@@ -57,7 +57,7 @@ On Windows the binary is `target/release/coordinationhub.exe`; pass that path. C
 - `src/rand.rs`: the operating system's random bytes through FFI, for the HTTP token.
 - `src/util.rs`: clock, local and UTC time stamps, paths, size limits, and the cross-process file lock (`flock`, `LockFileEx`).
 - `src/act_identity.rs`: register, heartbeat, deregister, lineage, reaping quiet agents.
-- `src/act_lock.rs`: locks and regions, conflicts, change notifications.
+- `src/act_lock.rs`: locks and regions, lock lists (all or nothing, `best_effort`), conflicts, change notifications.
 - `src/act_board.rs`: tasks, messages, work intents, dependencies, the coordinator lease, spawns, broadcasts, handoffs.
 - `src/act_view.rs`: status, the coordination spec and graph, project scan, agent trees, assessment, `who` claims, dashboard rows.
 - `assets/tools.json`: the 53 tool schemas and descriptions plus `tools_version`. `assets/dashboard.html`: the self-contained dashboard page. `assets/monitor_skill.md`: the skill `init --monitor-skill` installs.

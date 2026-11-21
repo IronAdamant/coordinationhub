@@ -65,12 +65,18 @@ pub fn register(
     let pid = util::pid();
     if let Some(existing) = state.agent(agent_id) {
         if existing.status == "active" && existing.pid != pid {
-            return json::obj(vec![
+            let mut refused = json::obj(vec![
                 ("registered", json::b(false)),
                 ("agent_id", json::s(agent_id)),
                 ("reason", json::s("collision")),
                 ("existing_pid", json::i(existing.pid)),
             ]);
+            if let Value::Object(pairs) = &mut refused {
+                for (key, value) in restart_fields(state, agent_id, now) {
+                    pairs.push((key.to_string(), value));
+                }
+            }
+            return refused;
         }
     } else {
         let active = state
@@ -183,6 +189,50 @@ fn record_descendants(state: &mut State, agent_id: &str, parent_id: &str, now: f
     }
 }
 
+/// 1.4.0: what an agent coming back after a restart needs, so it makes no
+/// further calls: its own live locks (`held_locks`) and its unread
+/// messages (`unread_messages`, and the newest `REGISTER_MESSAGES` of them
+/// in `messages`, left unread). Each is present only when there is
+/// something to show, so a fresh registration replies as 0.8.0 did.
+fn restart_fields(state: &State, agent_id: &str, now: f64) -> Vec<(&'static str, Value)> {
+    let mut bundle = Vec::new();
+    let held: Vec<Value> = state
+        .locks
+        .iter()
+        .filter(|lock| lock.locked_by == agent_id && now < lock.locked_at + lock.lock_ttl)
+        .map(|lock| {
+            json::obj(vec![
+                ("document_path", json::s(&lock.document_path)),
+                ("lock_type", json::s(&lock.lock_type)),
+                ("region_start", json::opt_i(lock.region_start)),
+                ("region_end", json::opt_i(lock.region_end)),
+                ("expires_at", json::f(lock.locked_at + lock.lock_ttl)),
+            ])
+        })
+        .collect();
+    if !held.is_empty() {
+        bundle.push(("held_locks", json::arr(held)));
+    }
+    let unread = state
+        .messages
+        .iter()
+        .filter(|row| row.to_agent_id == agent_id && row.read_at.is_none())
+        .count() as i64;
+    if unread > 0 {
+        let shown = crate::act_board::get_messages(state, agent_id, true, REGISTER_MESSAGES, None, None);
+        bundle.push(("unread_messages", json::i(unread)));
+        bundle.push((
+            "messages",
+            shown.get("messages").cloned().unwrap_or_else(|| json::arr(vec![])),
+        ));
+    }
+    bundle
+}
+
+/// The newest unread messages a registration reply shows (they stay
+/// unread; `manage_messages` reads the rest and marks them).
+pub const REGISTER_MESSAGES: i64 = 10;
+
 pub fn context_bundle(
     state: &State,
     agent_id: &str,
@@ -285,6 +335,7 @@ pub fn context_bundle(
     if !owned.is_empty() {
         bundle.push(("owned_files", json::arr(owned)));
     }
+    bundle.extend(restart_fields(state, agent_id, now));
     bundle.push(("descendants_status", descendants_status(state, agent_id)));
     json::obj(bundle)
 }

@@ -4,7 +4,9 @@
 //! --force`) are marked where they were added by hand. Since 1.3.0 the
 //! help of `--replica` and `--force-refresh` is the hand-written
 //! `NO_EFFECT` (0.8.0 described a SQLite replica and cache this binary
-//! does not have); every such row names the constant.
+//! does not have); every such row names the constant. The 1.4.0 rows
+//! (`acquire-lock` and `release-lock` take several paths, `acquire-lock
+//! --best-effort`) are marked too.
 //! Help text, usage, and errors are formatted from these tables at run time
 //! by `crate::argparse`, so the terminal width is honoured the way argparse does.
 
@@ -162,7 +164,8 @@ pub static COMMANDS: &[Command] = &[
             Arg { flags: &["--namespace"], dest: "namespace", kind: Kind::Store, ty: Ty::Str, nargs: Nargs::One, choices: &[], help: None, required: false },
             Arg { flags: &["-j", "--json"], dest: "json_output", kind: Kind::StoreTrue, ty: Ty::Str, nargs: Nargs::Zero, choices: &[], help: Some("Emit structured JSON output instead of text"), required: false },
             Arg { flags: &["--replica"], dest: "replica", kind: Kind::StoreTrue, ty: Ty::Str, nargs: Nargs::Zero, choices: &[], help: NO_EFFECT, required: false },
-            Arg { flags: &[], dest: "document_path", kind: Kind::Store, ty: Ty::Str, nargs: Nargs::One, choices: &[], help: Some("Path to the document"), required: true },
+            // 1.4.0 hand edit: nargs '+', several paths in one call.
+            Arg { flags: &[], dest: "document_path", kind: Kind::Store, ty: Ty::Str, nargs: Nargs::OneOrMore, choices: &[], help: Some("Path to the document (several paths: all or none are locked)"), required: true },
             Arg { flags: &[], dest: "agent_id", kind: Kind::Store, ty: Ty::Str, nargs: Nargs::One, choices: &[], help: Some("Agent requesting the lock"), required: true },
             Arg { flags: &["--lock-type"], dest: "lock_type", kind: Kind::Store, ty: Ty::Str, nargs: Nargs::One, choices: &["exclusive", "shared"], help: None, required: false },
             Arg { flags: &["--ttl"], dest: "ttl", kind: Kind::Store, ty: Ty::Float, nargs: Nargs::One, choices: &[], help: None, required: false },
@@ -173,6 +176,8 @@ pub static COMMANDS: &[Command] = &[
             Arg { flags: &["--max-retries"], dest: "max_retries", kind: Kind::Store, ty: Ty::Int, nargs: Nargs::One, choices: &[], help: Some("Maximum retry attempts (default: 5)"), required: false },
             Arg { flags: &["--backoff-ms"], dest: "backoff_ms", kind: Kind::Store, ty: Ty::Float, nargs: Nargs::One, choices: &[], help: Some("Starting backoff in MILLISECONDS (default: 100ms). Exponential-backoff ladder between retries."), required: false },
             Arg { flags: &["--timeout-ms"], dest: "timeout_ms", kind: Kind::Store, ty: Ty::Float, nargs: Nargs::One, choices: &[], help: Some("Total retry timeout in MILLISECONDS (default: 5000ms = 5s). Abandons the acquire when exceeded."), required: false },
+            // 1.4.0 addition.
+            Arg { flags: &["--best-effort"], dest: "best_effort", kind: Kind::StoreTrue, ty: Ty::Str, nargs: Nargs::Zero, choices: &[], help: Some("With several paths, lock the free ones and report the rest"), required: false },
         ],
     },
     Command {
@@ -185,7 +190,8 @@ pub static COMMANDS: &[Command] = &[
             Arg { flags: &["--namespace"], dest: "namespace", kind: Kind::Store, ty: Ty::Str, nargs: Nargs::One, choices: &[], help: None, required: false },
             Arg { flags: &["-j", "--json"], dest: "json_output", kind: Kind::StoreTrue, ty: Ty::Str, nargs: Nargs::Zero, choices: &[], help: Some("Emit structured JSON output instead of text"), required: false },
             Arg { flags: &["--replica"], dest: "replica", kind: Kind::StoreTrue, ty: Ty::Str, nargs: Nargs::Zero, choices: &[], help: NO_EFFECT, required: false },
-            Arg { flags: &[], dest: "document_path", kind: Kind::Store, ty: Ty::Str, nargs: Nargs::One, choices: &[], help: Some("Path to the document"), required: true },
+            // 1.4.0 hand edit: nargs '+', several paths in one call.
+            Arg { flags: &[], dest: "document_path", kind: Kind::Store, ty: Ty::Str, nargs: Nargs::OneOrMore, choices: &[], help: Some("Path to the document (one or more)"), required: true },
             Arg { flags: &[], dest: "agent_id", kind: Kind::Store, ty: Ty::Str, nargs: Nargs::One, choices: &[], help: Some("Agent releasing the lock"), required: true },
             Arg { flags: &["--region-start"], dest: "region_start", kind: Kind::Store, ty: Ty::Int, nargs: Nargs::One, choices: &[], help: Some("Start line of region lock to release"), required: false },
             Arg { flags: &["--region-end"], dest: "region_end", kind: Kind::Store, ty: Ty::Int, nargs: Nargs::One, choices: &[], help: Some("End line of region lock to release"), required: false },
